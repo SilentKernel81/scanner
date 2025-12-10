@@ -1,0 +1,100 @@
+# ============================================================================
+# Card Scanner Configuration
+# ============================================================================
+
+# Camera Settings
+camera:
+  type: auto  # Options: 'auto', 'picamera', 'usb'
+  usb_index: 2
+  resolution: [2560, 1440]
+  preview_resolution: [640, 480]
+  fps: 20
+
+# Detection Settings
+detection:
+  confidence_threshold: 0.05  # Low threshold to detect cards (YOLO sees them as "bottle"/"cell phone")
+
+  # Card aspect ratio filtering (Magic cards are 88mm x 63mm = 1.397 ratio)
+  aspect_ratio_tolerance: 0.30  # 30% tolerance (accepts 0.98 to 1.82)
+  # Increased to 30% for borderless cards (they appear more square to YOLO)
+  # Standard bordered cards: use 0.15-0.20
+  # Borderless/full-art cards: use 0.25-0.35
+
+  # Card size filtering (improves accuracy for foil cards)
+  card_size_filter:
+    enabled: false  # Disabled - aspect ratio check is more reliable
+    min_width: 200
+    max_width: 2500  # Increased to allow cards filling frame
+    min_height: 280
+    max_height: 1680
+    min_area: 56000
+    max_area: 4000000  # Increased for close-up cards
+
+# Anti-glare Settings (for foil/reflective cards)
+anti_glare:
+  enabled: false
+  method: adaptive  # Options: 'adaptive', 'clahe', 'inpaint'
+
+# Focus Settings
+focus:
+  autofocus_enabled: true
+  focus_value: 500  # Manual focus value (300=far, 650=close)
+  lock_on_stable: true
+  lock_delay: 1.0  # Seconds before locking
+  min_lock_duration: 2.0  # Keep locked for at least this long
+  max_frames_lost_before_unlock: 30
+
+# Auto-capture Settings (now controlled via UI button)
+auto_capture:
+  delay: 4.0  # Seconds to wait before capturing (used for both normal and fast scan mode)
+  stability_frames: 5  # Consecutive frames required for normal mode
+  wait_for_focus: false  # Wait for focus lock
+
+# Fast Scan Mode Settings
+fast_scan:
+  stability_frames: 2  # Consecutive frames required in fast scan mode (lower for speed)
+
+# Vision AI Settings
+vision_ai:
+  enabled: true
+  provider: gemini  # Options: 'gemini', 'openai', 'anthropic', 'local'
+
+  # API Keys (can be overridden by environment variables)
+  # Set these here OR use environment variables (env vars take precedence)
+  api_keys:
+    gemini: ${GEMINI_API_KEY}  # Will use env var if set
+    openai: ${OPENAI_API_KEY}
+    anthropic: ${ANTHROPIC_API_KEY}
+
+  # Local AI Settings (self-hosted models)
+  local:
+    endpoint: http://192.168.1.60:11434/v1/chat/completions
+    model: llava:13b
+    # Note: Local models have ~40-50% accuracy on collector numbers
+    # Consider using Gemini Flash for better accuracy (~95%)
+
+# Flask Settings
+flask:
+  host: 0.0.0.0
+  port: 5000
+  debug: false
+  secret_key: card_scanner_secret_key_change_in_production
+
+# API URLs
+api:
+  scryfall_bulk: https://api.scryfall.com/bulk-data/default-cards
+  pokemon: https://api.pokemontcg.io/v2/cards
+
+# Database
+database:
+  file: cards_database.db
+
+# OCR Settings (legacy - mostly replaced by Vision AI)
+ocr:
+  language: eng
+  config: "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',.()& --oem 3 --psm 6"
+
+# Cleanup Settings
+cleanup:
+  enabled: true
+  days: 7  # Delete scanned images older than this many days

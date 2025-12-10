@@ -1,0 +1,41 @@
+# Card Scanner Dependencies - NumPy 1.x Compatible
+
+# Core Web Framework
+flask==3.0.0
+flask-socketio==5.3.5
+python-socketio[client]==5.10.0
+
+# WSGI Server
+eventlet==0.33.3
+gevent==23.9.1
+gevent-websocket==0.10.1
+
+# NumPy (must be 1.x for OpenCV compatibility)
+numpy==1.26.4
+
+# Computer Vision
+opencv-python==4.8.1.78
+
+# Raspberry Pi Camera (optional - only needed for Pi Camera)
+# picamera2==0.3.16
+
+# AI Object Detection
+ultralytics
+torch
+
+# Image Processing
+Pillow==10.1.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Additional dependencies
+bidict==0.22.1
+
+# Configuration
+pyyaml>=6.0
+
+# Vision AI for card identification
+google-generativeai>=0.3.0
+
+python-dotenv
