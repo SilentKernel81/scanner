@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=5">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -54,6 +54,36 @@
     <main class="container">
         <div class="main-content">
             <div class="column">
+                <section class="panel search-panel">
+                    <div class="search-row">
+                        <div class="input-group search-name">
+                            <label for="card-name">Card name</label>
+                            <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
+                        </div>
+                        <div class="input-group">
+                            <label for="collector-number">Collector number</label>
+                            <input type="text" id="collector-number" placeholder="Optional, e.g. 123">
+                        </div>
+                        <div class="input-group search-treatment">
+                            <label for="card-treatment">Treatment</label>
+                            <select id="card-treatment">
+                                <option value="">Any</option>
+                                <option value="regular">Regular frame</option>
+                                <option value="borderless">Borderless</option>
+                                <option value="showcase">Showcase</option>
+                                <option value="extendedart">Extended Art</option>
+                                <option value="fullart">Full Art</option>
+                                <option value="retro">Retro Frame</option>
+                                <option value="etched">Etched</option>
+                                <option value="surgefoil">Surge Foil</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="searchCard()" id="search-btn" disabled>
+                            <svg class="icon"><use href="#i-search"/></svg> Search
+                        </button>
+                    </div>
+                </section>
+
                 <section class="panel video-section">
                     <div class="panel-header">
                         <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> Camera</h2>
@@ -80,41 +110,6 @@
                         </button>
                     </div>
                     <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
-                </section>
-
-                <section class="panel">
-                    <div class="panel-header">
-                        <h2 class="section-title"><svg class="icon"><use href="#i-search"/></svg> Search</h2>
-                    </div>
-                    <div class="input-group">
-                        <label for="card-name">Card name</label>
-                        <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
-                    </div>
-                    <div class="form-row">
-                        <div class="input-group">
-                            <label for="collector-number">Collector number</label>
-                            <input type="text" id="collector-number" placeholder="Optional, e.g. 123">
-                        </div>
-                        <div class="input-group">
-                            <label for="card-treatment">Treatment</label>
-                            <select id="card-treatment">
-                                <option value="">Any</option>
-                                <option value="regular">Regular frame</option>
-                                <option value="borderless">Borderless</option>
-                                <option value="showcase">Showcase</option>
-                                <option value="extendedart">Extended Art</option>
-                                <option value="fullart">Full Art</option>
-                                <option value="retro">Retro Frame</option>
-                                <option value="etched">Etched</option>
-                                <option value="surgefoil">Surge Foil</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="search-actions">
-                        <button class="btn btn-primary btn-block" onclick="searchCard()" id="search-btn" disabled>
-                            <svg class="icon"><use href="#i-search"/></svg> Search database
-                        </button>
-                    </div>
                 </section>
             </div>
 
@@ -322,7 +317,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=4"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=5"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=5"></script>
 </body>
 </html>

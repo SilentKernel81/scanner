@@ -478,8 +478,26 @@ body {
     margin-top: 0;
 }
 
-.search-actions {
-    margin-top: 16px;
+/* Compact search bar above the camera: one row on wide screens */
+.search-panel {
+    padding: 14px 16px;
+}
+
+.search-row {
+    display: grid;
+    grid-template-columns: minmax(200px, 2fr) minmax(120px, 1fr) minmax(140px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.search-row .input-group + .input-group {
+    margin-top: 0;
+}
+
+.search-row input,
+.search-row select,
+.search-row .btn {
+    height: 42px;
 }
 
 /* Toggle switch rows */
@@ -1234,6 +1252,27 @@ input[type="radio"] {
    Responsive
    ============================================================================ */
 
+@media (max-width: 1280px) {
+    /* Name and button on the first row, number and treatment below */
+    .search-row {
+        grid-template-columns: 1fr 1fr auto;
+    }
+
+    .search-row .search-name {
+        grid-column: 1 / 3;
+        grid-row: 1;
+    }
+
+    .search-row .btn {
+        grid-column: 3;
+        grid-row: 1;
+    }
+
+    .search-row .search-treatment {
+        grid-column: 2 / -1;
+    }
+}
+
 @media (max-width: 1024px) {
     .main-content {
         grid-template-columns: 1fr;
@@ -1266,6 +1305,20 @@ input[type="radio"] {
 
     .form-row {
         grid-template-columns: 1fr;
+    }
+
+    .search-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .search-row .search-name,
+    .search-row .btn {
+        grid-column: 1 / -1;
+        grid-row: auto;
+    }
+
+    .search-row .search-treatment {
+        grid-column: auto;
     }
 
     .inventory-card {
