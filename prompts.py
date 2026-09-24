@@ -37,10 +37,12 @@ BUILT_IN = {
 - NUMBER: the collector number at the bottom-left corner, first line: a letter and a number - give only the number, with its leading zeros. It is not the mana cost at the top-right.
 - SET: the set code (3-4 letters or digits) at the start of the bottom-left second line, before the language code.
 Copy exactly what is printed. If a value is blurry or unreadable, write Unknown - do not guess.""",
-            'answer_format': """Answer with exactly three lines:
+            # With "Answer with exactly three lines" qwen3.5:9b often dropped the labels, and
+            # sometimes the number line ("Mirkwood / HOB") - asking for the labels fixed both
+            'answer_format': """Always answer with all three lines, each with its label:
 NAME: <card name>
-NUMBER: <collector number>
-SET: <set code>""",
+NUMBER: <collector number, or Unknown>
+SET: <set code, or Unknown>""",
         },
         # Modern cards print a star instead of a dot between set code and language on
         # foil copies; asked about a zoomed crop of the bottom-left corner

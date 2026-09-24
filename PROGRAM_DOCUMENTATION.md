@@ -189,8 +189,12 @@ NUMBER: <collector number>   bottom-left, line 1 ("U 0014")
 SET: <set code>              bottom-left, line 2 ("HOB • EN")
 ```
 
-The parser also accepts the values without labels, or with only the first label missing
-(`Card Name / NUMBER: … / SET: …` - qwen3.5:9b answers like that for about 1 card in 10). Ollama
+The answer format asks for all three lines with their labels ("…, or Unknown"): with a plain
+"exactly three lines" qwen3.5:9b often dropped the labels and sometimes the number line
+("Mirkwood / HOB"), which lost 4 of 25 cards in one session; with the labels it answered 25/25.
+The parser still accepts answers without labels, or with only some of them, and places bare
+lines by their shape (number or set code). Letters read for digits in a mostly-digit number are
+corrected (`018B` → `0188`: O/D→0, B→8, I/l→1, S→5, Z→2). Ollama
 answers are capped (`num_predict`), so a model that starts reasoning aloud can't take seconds.
 
 ### Prompts

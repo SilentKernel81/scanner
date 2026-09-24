@@ -1218,6 +1218,9 @@ class CardScanner:
                 self._move_focus(start)
                 if not self.disturbed_during_focus:
                     self.focus_probe_direction = -direction
+                # Log file only - every few cards would clutter the activity log
+                logger.info(f"Focus probe: {start} kept ({probe}: {there / max(here, 1e-6):.2f}x"
+                            + (", card dropped meanwhile)" if self.disturbed_during_focus else ")"))
         except Exception as e:
             self.log(f"Focus probe failed: {e}", level="warning")
         finally:

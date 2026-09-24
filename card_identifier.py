@@ -221,20 +221,21 @@ class CardIdentifier:
         set_match = re.search(r'SET:\s*([A-Za-z0-9]{2,5})\s*(?:\n|$)', response_text, re.IGNORECASE)
         set_code = set_match.group(1).upper() if set_match else ""
 
-        # Some models drop the labels and answer with bare lines: name / number / set,
-        # or drop only the first one: name / NUMBER: ... / SET: ...
+        # Some models drop the labels (all of them, or only the first one), and sometimes a
+        # line: "Mirkwood / 0188 / HOB", "Mirkwood / NUMBER: 0188 / SET: HOB", "Mirkwood / HOB"
         if not name_match:
             lines = [line.strip() for line in response_text.splitlines() if line.strip()]
-            if number_match and lines and not re.match(r'(NUMBER|SET)\s*:', lines[0], re.IGNORECASE):
-                name_match = re.match(r'(.+)', lines[0])
-            elif 2 <= len(lines) <= 3 and re.fullmatch(r'[A-Za-z]?\s*\d{1,4}[a-z]?', lines[1]):
-                name_match = re.match(r'(.+)', lines[0])
-                number_match = re.match(r'(.+)', lines[1])
-                if len(lines) == 3 and re.fullmatch(r'[A-Za-z0-9]{2,5}', lines[2]):
-                    set_code = lines[2].upper()
+            bare = [line for line in lines if not re.match(r'(NAME|NUMBER|SET)\s*:', line, re.IGNORECASE)]
+            if bare and len(lines) <= 3:
+                name_match = re.match(r'(.+)', bare[0])
+                for line in bare[1:]:
+                    if not number_match and self._looks_like_number(line):
+                        number_match = re.match(r'(.+)', line)
+                    elif not set_code and re.fullmatch(r'[A-Za-z0-9]{2,5}', line):
+                        set_code = line.upper()
 
         card_name = name_match.group(1).strip() if name_match else ""
-        collector_number = number_match.group(1).strip() if number_match else ""
+        collector_number = self._clean_number(number_match.group(1).strip()) if number_match else ""
 
         # Clean up "Unknown" responses
         if card_name.lower() == "unknown":
@@ -252,6 +253,25 @@ class CardIdentifier:
             }
         self.log(f"{source} could not identify card name", level="warning")
         return None
+
+    # Letters a model reads for digits in small print: "018B" is 0188
+    DIGIT_LOOKALIKES = str.maketrans('OoDBIlSZ', '00081152')
+
+    @classmethod
+    def _looks_like_number(cls, text):
+        """A collector number, maybe with its rarity letter and misread digits ("L 018B", "0186")"""
+        match = re.fullmatch(r'(?:[A-Za-z]\s+)?([0-9OoDBIlSZ]{1,4})[a-z]?', text.strip())
+        if not match:
+            return False
+        core = match.group(1)
+        return core.isdigit() or (len(core) >= 3 and sum(c.isdigit() for c in core) >= 2)
+
+    @classmethod
+    def _clean_number(cls, text):
+        """Fix letters read for digits in a mostly-digit collector number ("018B" -> "0188")"""
+        return re.sub(r'\b[0-9OoDBIlSZ]{3,4}\b',
+                      lambda m: m.group().translate(cls.DIGIT_LOOKALIKES) if sum(c.isdigit() for c in m.group()) >= 2 else m.group(),
+                      text)
 
     # ------------------------------------------------------------------------
     # Provider requests: send one image + prompt, return the response text
