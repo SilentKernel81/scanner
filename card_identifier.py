@@ -15,6 +15,7 @@ import cv2
 from PIL import Image
 import requests
 
+import games
 import prompts
 from config import Config
 
@@ -127,9 +128,9 @@ class CardIdentifier:
 
         try:
             if instructions is None:
-                prompt = prompts.prompt('identify', self.provider, self.model)
+                prompt = prompts.prompt('identify', self.provider, self.model, games.active_id())
             else:
-                prompt = prompts.build('identify', instructions)
+                prompt = prompts.build('identify', instructions, games.active_id())
             self.log(f"Sending image to {self.provider} ({self.model}) for identification...")
             image = self._image_array_to_base64(image_array, max_dimension=Config.VISION_AI_IMAGE_SIZE)
             response_text = self._ask(image, prompt, max_tokens=100)
@@ -170,9 +171,9 @@ class CardIdentifier:
         corner = card_image[int(height * 0.91):, :int(width * 0.55)]
         corner = cv2.resize(corner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
         if instructions is None:
-            prompt = prompts.prompt('foil', self.provider, self.model)
+            prompt = prompts.prompt('foil', self.provider, self.model, games.active_id())
         else:
-            prompt = prompts.build('foil', instructions)
+            prompt = prompts.build('foil', instructions, games.active_id())
 
         try:
             answer = (self._ask(self._image_array_to_base64(corner), prompt, max_tokens=10) or '').lower()

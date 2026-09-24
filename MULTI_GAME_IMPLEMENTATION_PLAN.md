@@ -1,6 +1,6 @@
 # Multi-Game Support - Implementation Plan
 
-**Status:** phase 1 done, phases 2-5 planned (2026-09-24). Replaces the 2025-11 plan, which predated the current
+**Status:** phases 1-2 done, phases 3-5 planned (2026-09-24). Replaces the 2025-11 plan, which predated the current
 architecture (online API lookup per scan, YOLO-first detection).
 
 ## Goals
@@ -32,23 +32,11 @@ sent to the AI) - not with physical cards. The docs must say so.
 One module per game behind a small common interface; `games/__init__.py` holds the registry and
 the active game (saved in `data/settings.json` as `game`, default `mtg`).
 
-```python
-class Game:
-    id = 'pokemon'                 # used in DB tables, settings, inventory rows
-    label = 'Pokémon'
-    card_ratio = 88 / 63           # outline detection (YGO 86/59 is within the ±18% tolerance)
-    finishes = ['normal', 'holo', 'reverse']
-    answer_fields = ['NAME', 'NUMBER', 'SET']   # what the parser expects
-
-    def default_prompt(self): ...           # instructions part of the identification prompt
-    def download(self, db, progress): ...   # bulk import into the game's table
-    def search_exact(self, db, name, number, set_code): ...  # tagged results (see Matching)
-    def search(self, db, name, set_code=None, treatment=None): ...  # manual search
-    def printings(self, db, name, ...): ...
-    def card_details(self, db, card_id): ...  # lazy extras (Pokémon variants/prices)
-    def suggested_finish(self, card, foil_hint): ...
-    def export_formats(self): ...           # {'label': writer}
-```
+The interface is `games/base.py:Game` (implemented in phase 2): `id`, `label`, `finishes`,
+`confirmed_matches`, `card_count`, `download`, `identify`, `find_printings`, `similar`,
+`get_card`, `card_payload`, `inventory_fields`, `export_formats`. A new game adds a module with
+a `Game` subclass, registers it in `games/__init__.py:init`, and adds its prompts to
+`prompts.py:BUILT_IN` (the foil marker prompt is optional - `prompts.has('foil', game)`).
 
 `games/mtg.py` wraps today's code (`database.py` search functions, prompts, foil check) without
 changing behaviour; the Scryfall `cards` table keeps its name. Other games get their own tables
@@ -136,7 +124,8 @@ documented (PROGRAM_DOCUMENTATION.md, README.md, CLAUDE.md), and is committed se
    "Test on last capture". **Done** - `prompts.py` already keys prompts by game (`mtg`).
 2. **Game abstraction, Magic only**: `games/` package, `games/mtg.py` wrapping current code,
    inventory `game` + `finish` columns (rebuild + backup), per-game `CONFIRMED_MATCHES`. No
-   visible change except a game selector with only Magic.
+   visible change (the game selector only shows with two or more games). **Done** - inventory
+   rows are now addressed by id; `/api/games` drives the finishes and export buttons.
 3. **Pokémon**: TCGdex import, lazy details/prices, prompt, matching, finishes, export.
 4. **Lorcana**: Lorcast import, prompt, matching, foil, export.
 5. **Yu-Gi-Oh**: YGOPRODeck bulk import into printings, set-code matching, rarity picker, export.

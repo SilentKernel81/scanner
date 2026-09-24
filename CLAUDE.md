@@ -44,7 +44,8 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_check_focus_drift`, `set_continuous_autofocus` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
 | Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `app.py` (`save_prompt`, `test_prompt`) |
-| Card search / printing match / confidence | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
+| Card games (the active one drives search, finishes, exports) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `MULTI_GAME_IMPLEMENTATION_PLAN.md` |
+| Card search / printing match / confidence (Magic) | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
 | Inventory add/merge/undo/split/export | `inventory.py` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
@@ -55,8 +56,13 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **Schema**: cards columns are defined once in `database.py:CARD_COLUMNS`; missing columns are
   added on startup (`initialize_database`). Rows are `sqlite3.Row` - access by column name.
   New search-relevant columns may need filling in the migration (see `name_search`).
-- **Match confidence**: `search_card_exact` tags results (`card['match']`); only
-  `CONFIRMED_MATCHES` may be added without review. Keep new search paths tagged.
+- **Match confidence**: `search_card_exact` tags results (`card['match']`); only the game's
+  `confirmed_matches` (Magic: `CONFIRMED_MATCHES`) may be added without review - check with
+  `game.is_confirmed(card)`. Keep new search paths tagged.
+- **Games**: app code goes through `games.active()` (identify, find_printings, card_payload,
+  inventory_fields, export_formats), never straight to `database`/`CardSearcher`. Inventory rows
+  carry `game` and `finish` (a key of `game.finishes`) and are addressed by `id`; the inventory
+  schema lives in `inventory.py`, not `database.py`.
 - **Auto-capture thresholds** in `scanner.py` come from measured camera noise and a live drop
   test (documented in PROGRAM_DOCUMENTATION.md). Re-measure before changing them.
 - **JSON from NumPy**: values sent through `jsonify`/Socket.IO must be plain Python types

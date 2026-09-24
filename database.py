@@ -175,58 +175,7 @@ class CardDatabase:
 
         self._create_card_indexes(cursor)
 
-        # Inventory table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                card_name TEXT NOT NULL,
-                set_name TEXT NOT NULL,
-                card_number TEXT,
-                rarity TEXT,
-                type_line TEXT,
-                mana_cost TEXT,
-                colors TEXT,
-                color_identity TEXT,
-                price_usd REAL,
-                quantity INTEGER NOT NULL DEFAULT 1,
-                condition TEXT DEFAULT 'Near Mint',
-                foil INTEGER DEFAULT 0,
-                surge INTEGER DEFAULT 0,
-                timestamp TEXT NOT NULL,
-                UNIQUE(card_name, set_name, card_number, condition, foil, surge)
-            )
-        ''')
-
-        # Migration: Add surge column if it doesn't exist (for existing databases)
-        try:
-            cursor.execute("SELECT surge FROM inventory LIMIT 1")
-        except sqlite3.OperationalError:
-            logger.info("Adding surge column to existing inventory table")
-            cursor.execute("ALTER TABLE inventory ADD COLUMN surge INTEGER DEFAULT 0")
-            logger.info("Surge column added successfully")
-
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_inventory_card_name
-            ON inventory(card_name COLLATE NOCASE)
-        ''')
-
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_inventory_set
-            ON inventory(set_name)
-        ''')
-
-        # Composite index for faster lookups by card_name + card_number
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_inventory_card_lookup
-            ON inventory(card_name COLLATE NOCASE, card_number)
-        ''')
-
-        # Index on timestamp for faster ORDER BY timestamp queries
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_inventory_timestamp
-            ON inventory(timestamp DESC)
-        ''')
-
+        # The inventory table (same file) is created and migrated by inventory.InventoryManager
         self.conn.commit()
         logger.info("Database tables and indexes initialized successfully")
 
@@ -706,7 +655,6 @@ class CardDatabase:
                     progress_callback("Rebuilding indexes...")
                 self._create_card_indexes(cursor)
 
-                inventory_count = cursor.execute("SELECT COUNT(*) FROM inventory").fetchone()[0]
                 self.conn.commit()
 
                 if progress_callback:
@@ -716,7 +664,6 @@ class CardDatabase:
                 return {
                     'success': True,
                     'cards_imported': imported,
-                    'inventory_imported': inventory_count,
                     'schema_type': 'current'
                 }
 

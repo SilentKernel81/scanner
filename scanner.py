@@ -15,6 +15,8 @@ from datetime import datetime
 from config import Config
 from object_detector import ObjectDetector, warp_card
 from card_identifier import CardIdentifier
+import games
+import prompts
 from settings import Settings
 
 # Create scanner logger
@@ -1007,7 +1009,7 @@ class CardScanner:
             # Ollama, more with cloud providers that serve requests in parallel)
             foil_result = {}
             foil_thread = None
-            if detect_foil and Config.VISION_AI_DETECT_FOIL:
+            if detect_foil and Config.VISION_AI_DETECT_FOIL and prompts.has('foil', games.active_id()):
                 foil_thread = threading.Thread(
                     target=lambda: foil_result.update(foil=self.card_identifier.read_foil_symbol(card_image_rgb)),
                     daemon=True)

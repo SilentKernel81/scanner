@@ -1282,6 +1282,21 @@ input[type="radio"] {
     flex: 1;
 }
 
+/* Game selector (top bar) and generated export buttons */
+.game-select {
+    width: auto;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+.game-select[hidden] {
+    display: none;
+}
+
+.export-buttons {
+    display: contents;
+}
+
 /* Prompt editor */
 .prompt-modal {
     max-width: 860px;

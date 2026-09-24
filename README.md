@@ -314,7 +314,8 @@ object_detector.py   Card outline detection + perspective correction (YOLO fallb
 card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings
-card_search.py       Search helpers used by the web app
+games/               Card games: base.py (interface), mtg.py (Magic)
+card_search.py       Magic search helpers
 inventory.py         Inventory storage, stats, import/export
 anti_glare.py        Glare reduction for reflective cards
 cleanup.py           Scanned image cleanup (also a CLI)
@@ -340,13 +341,13 @@ The web interface uses these endpoints, which you can also call directly:
 | `GET /video_feed` | MJPEG stream of the annotated camera view |
 | `GET /api/stats` | Database and inventory statistics |
 | `GET /api/detection_status` | Whether a card is detected and how stable it is |
-| `GET /api/inventory` | Full inventory |
-| `POST /api/inventory/update/<index>` | Update quantity, condition or finish (JSON body) |
-| `POST /api/inventory/delete/<index>` | Delete an inventory entry |
-| `POST /api/import_inventory` | Import a CSV (multipart `file`) |
-| `POST /api/clear_inventory` | Delete all inventory entries |
-| `GET /api/export_inventory` | Download the inventory as CSV |
-| `GET /api/export_inventory_moxfield` | Download a Moxfield import CSV |
+| `GET /api/games` | Supported card games (finishes, export formats) and the active one |
+| `GET /api/inventory` | The active game's inventory (each entry has an `id`) |
+| `POST /api/inventory/update/<id>` | Update quantity, condition or finish (JSON: `quantity`, `condition`, `finish`, `split_quantity`) |
+| `POST /api/inventory/delete/<id>` | Delete an inventory entry |
+| `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
+| `POST /api/clear_inventory` | Delete the active game's inventory entries |
+| `GET /api/export_inventory/<format>` | Download the inventory: `csv`, `moxfield` |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |
 | `GET /api/local_ai_models` | Models installed on the local AI server |

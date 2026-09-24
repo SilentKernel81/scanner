@@ -174,9 +174,9 @@ logger = setup_logging()
 scanned_cards_logger = logging.getLogger('scanned_cards')
 
 from config import Config
-from database import CardDatabase, CONFIRMED_MATCHES
-from card_search import CardSearcher
+from database import CardDatabase
 from inventory import InventoryManager
+import games
 from cleanup import cleanup_old_images, get_images_stats
 
 # Import scanner
@@ -200,7 +200,6 @@ socketio = SocketIO(
 # Global instances
 scanner = None
 database = None
-searcher = None
 inventory = None
 current_card_info = None
 auto_capture_counter = 1
@@ -263,40 +262,6 @@ def log_scanned_card(card_name, collector_number, ai_model, db_found, added_to_i
     scanned_cards_logger.info(log_entry)
 
 
-def card_payload(card):
-    """Card fields sent to the web client"""
-    return {
-        'id': card['id'],
-        'name': card['name'],
-        'set': card['set'],
-        'set_code': card['set_code'],
-        'number': card['number'],
-        'rarity': card['rarity'],
-        'type': card['type_line'],
-        'price': card['price'],
-        'price_foil': card['price_foil'],
-        'image_uri': card['image_uri'],
-        'treatments': card['treatments'],
-        'finishes': card['finishes'],
-        # How an AI-identified card was matched (None for manual picks); see CONFIRMED_MATCHES
-        'confirmed': card.get('match') in CONFIRMED_MATCHES if card.get('match') else None
-    }
-
-
-def similar_cards_payload(similar):
-    """Similar-card rows (name, set_name, price) sent to the web client"""
-    return {
-        'cards': [
-            {
-                'name': card[0],
-                'set': card[1],
-                'price': f"${card[2]:.2f}" if card[2] else "N/A"
-            }
-            for card in similar
-        ]
-    }
-
-
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None):
     """
     Search for card in database and emit results to client
@@ -320,11 +285,12 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         log_to_client(f"Auto-searching database for: {card_name}")
 
     # Search database
-    db_card_info = searcher.search_by_name(card_name, collector_number, ai_model=get_ai_model_info(), set_code=set_code)
+    game = games.active()
+    db_card_info = game.identify(card_name, collector_number, set_code, ai_model=get_ai_model_info())
 
-    # Fast Scan only adds cards whose exact printing was confirmed (set + number or
-    # name + number); anything less certain pauses auto scanning for a review
-    confirmed = db_card_info is not None and db_card_info.get('match') in CONFIRMED_MATCHES
+    # Fast Scan only adds cards whose exact printing was confirmed (Game.confirmed_matches,
+    # e.g. set + number); anything less certain pauses auto scanning for a review
+    confirmed = game.is_confirmed(db_card_info)
     auto_add = was_fast_scan_mode and confirmed
     if was_fast_scan_mode and not confirmed and scanner:
         scanner.card_under_review = True
@@ -344,14 +310,14 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     if db_card_info:
         current_card_info = db_card_info
         socketio.emit('card_found', {
-            'card': card_payload(db_card_info),
+            'card': game.card_payload(db_card_info),
             'auto_add': auto_add
         }, namespace='/')
     else:
         # Try to find similar cards
-        similar = searcher.find_similar_cards(card_name, limit=5)
+        similar = game.similar(card_name, limit=5)
         if similar:
-            socketio.emit('similar_cards', similar_cards_payload(similar), namespace='/')
+            socketio.emit('similar_cards', {'cards': similar}, namespace='/')
         else:
             socketio.emit('card_not_found', {'card_name': card_name}, namespace='/')
 
@@ -363,7 +329,7 @@ def ai_processing_worker():
     Background worker thread that processes cards from the AI queue.
     This allows Fast Scan Mode to capture cards rapidly while AI processes them asynchronously.
     """
-    global ai_worker_running, processing_queue_count, current_card_info, searcher, scanner
+    global ai_worker_running, processing_queue_count, current_card_info, scanner
 
     logger.info("AI processing worker thread started")
 
@@ -443,7 +409,7 @@ def ai_processing_worker():
 
 def initialize_components():
     """Initialize all components"""
-    global scanner, database, searcher, inventory
+    global scanner, database, inventory
 
     logger.info("Initializing components...")
 
@@ -460,9 +426,8 @@ def initialize_components():
     set_auto_add(scanner.settings.get('auto_add', True))  # remembered in data/settings.json
     log_to_client("Scanner initialized with YOLOv8 detection", level="info")
 
-    # Initialize searcher
-    logger.info("Initializing searcher...")
-    searcher = CardSearcher(database, log_callback=log_to_client)
+    # Card games (Magic, ...) - each wraps its card data; the saved one is scanned
+    games.init(database, scanner.settings, log_callback=log_to_client)
 
     # Note: get_ai_model_info() and log_scanned_card() are defined at module level
     # so they can be accessed by both Flask routes and the AI worker thread
@@ -647,15 +612,11 @@ def video_feed():
 @app.route('/api/stats')
 def get_stats():
     """Get database and inventory statistics"""
-    global database, inventory
-
     if database and inventory:
-        db_stats = database.get_database_stats()
-        inv_stats = inventory.get_detailed_stats()
-
+        game = games.active()
         return jsonify({
-            'database': db_stats,
-            'inventory': inv_stats
+            'database': {'total_cards': game.card_count()},
+            'inventory': inventory.get_stats(game.id)
         })
 
     return jsonify({'error': 'Components not initialized'}), 500
@@ -668,8 +629,7 @@ def get_inventory():
 
     if inventory:
         try:
-            # Use database method instead of CSV
-            cards = inventory.get_all_cards()
+            cards = inventory.get_all_cards(games.active().id)
 
             return jsonify({
                 'success': True,
@@ -682,13 +642,11 @@ def get_inventory():
     return jsonify({'error': 'Inventory not initialized'}), 500
 
 
-@app.route('/api/inventory/delete/<int:index>', methods=['DELETE', 'POST'])
-def delete_inventory_card(index):
-    """Delete a card from inventory by index"""
-    global inventory
-
+@app.route('/api/inventory/delete/<int:row_id>', methods=['DELETE', 'POST'])
+def delete_inventory_card(row_id):
+    """Delete an inventory entry by its id"""
     if inventory:
-        success = inventory.delete_card(index)
+        success = inventory.delete_card(row_id)
 
         if success:
             return jsonify({
@@ -701,30 +659,23 @@ def delete_inventory_card(index):
     return jsonify({'error': 'Inventory not initialized'}), 500
 
 
-@app.route('/api/inventory/update/<int:index>', methods=['PUT', 'POST'])
-def update_inventory_card(index):
-    """Update a card in inventory by index (quantity, condition, foil status)"""
-    global inventory
-
+@app.route('/api/inventory/update/<int:row_id>', methods=['PUT', 'POST'])
+def update_inventory_card(row_id):
+    """Update an inventory entry by its id (quantity, condition, finish)"""
     if inventory:
         try:
             # Get data from request
             data = request.get_json() if request.is_json else {}
             quantity = data.get('quantity')
             condition = data.get('condition')
-            is_foil = data.get('is_foil')
-            is_surge = data.get('is_surge')
+            finish = data.get('finish')
             split_quantity = data.get('split_quantity')
+            if finish is not None and finish not in games.active().finishes:
+                return jsonify({'success': False, 'split': False, 'error': f'Unknown finish: {finish}'}), 400
 
-            # Call the update_card method (handles splitting if needed)
-            result = inventory.update_card(
-                index=index,
-                quantity=quantity,
-                condition=condition,
-                is_foil=is_foil,
-                is_surge=is_surge,
-                split_quantity=split_quantity
-            )
+            # Changing the finish of several copies splits the entry
+            result = inventory.update_card(row_id, quantity=quantity, condition=condition,
+                                           finish=finish, split_quantity=split_quantity)
 
             if result['success']:
                 return jsonify(result)
@@ -738,59 +689,22 @@ def update_inventory_card(index):
     return jsonify({'success': False, 'split': False, 'error': 'Inventory not initialized'}), 500
 
 
-@app.route('/api/export_inventory')
-def export_inventory():
-    """Export inventory to CSV file and send as download (without image path)"""
-    global inventory
-
+@app.route('/api/export_inventory/<fmt>')
+def export_inventory(fmt):
+    """Download the active game's inventory in one of its export formats (Game.export_formats)"""
     if not inventory:
         return jsonify({'error': 'Inventory not initialized'}), 500
-
+    game = games.active()
+    formats = game.export_formats()
+    if fmt not in formats:
+        return jsonify({'error': f'Unknown export format: {fmt}'}), 404
     try:
-        # Use inventory export method
-        export_path = inventory.export_csv()
-
-        if not export_path or not export_path.exists():
-            return jsonify({'error': 'Export failed'}), 500
-
-        # Send the exported file
-        return send_file(
-            str(export_path),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=export_path.name
-        )
-
+        _label, prefix, writer = formats[fmt]
+        export_path = inventory.export(game.id, writer, prefix)
+        return send_file(str(export_path), mimetype='text/csv', as_attachment=True,
+                         download_name=export_path.name)
     except Exception as e:
         logger.exception(f"Export failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/export_inventory_moxfield')
-def export_inventory_moxfield():
-    """Export inventory in Moxfield-compatible CSV format"""
-    global inventory
-
-    if not inventory:
-        return jsonify({'error': 'Inventory not initialized'}), 500
-
-    try:
-        # Use inventory Moxfield export method
-        export_path = inventory.export_moxfield_csv()
-
-        if not export_path or not export_path.exists():
-            return jsonify({'error': 'Export failed'}), 500
-
-        # Send the exported file
-        return send_file(
-            str(export_path),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=export_path.name
-        )
-
-    except Exception as e:
-        logger.exception(f"Moxfield export failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -831,14 +745,15 @@ def import_inventory():
         logger.info(f"CSV file uploaded: {temp_file_path}")
 
         # Import the CSV
-        stats = inventory.import_csv(temp_file_path, replace_existing=replace_existing)
+        game = games.active()
+        stats = inventory.import_csv(temp_file_path, game.id, list(game.finishes),
+                                     replace_existing=replace_existing)
 
         # Clean up temporary file
         temp_file_path.unlink()
 
         if stats['success']:
-            # Get updated inventory stats
-            inv_stats = inventory.get_detailed_stats()
+            inv_stats = inventory.get_stats(game.id)
 
             return jsonify({
                 'success': True,
@@ -866,7 +781,7 @@ def clear_inventory():
         return jsonify({'error': 'Inventory not initialized'}), 500
 
     try:
-        result = inventory.clear_inventory()
+        result = inventory.clear_inventory(games.active().id)
 
         if result['success']:
             return jsonify({
@@ -1028,7 +943,7 @@ def handle_connect():
 @socketio.on('capture_card')
 def handle_capture(data):
     """Handle card capture request"""
-    global scanner, searcher, current_card_info
+    global scanner, current_card_info
 
     if not scanner:
         emit('error', {'message': 'Scanner not initialized'})
@@ -1082,14 +997,14 @@ def handle_capture(data):
 @socketio.on('search_card')
 def handle_search(data):
     """Handle manual card search - lists printings so the user can pick the exact one"""
-    global searcher, current_card_info
+    global current_card_info
 
     logger.info(f"Search card request received: {data}")
 
-    if not searcher:
-        logger.error("Searcher not initialized")
-        emit('error', {'message': 'Searcher not initialized'})
+    if not database:
+        emit('error', {'message': 'Card database not initialized'})
         return
+    game = games.active()
 
     card_name = (data.get('card_name') or '').strip()
     collector_number = (data.get('collector_number') or '').strip() or None
@@ -1102,18 +1017,18 @@ def handle_search(data):
         return
 
     try:
-        resolved_name, printings = searcher.find_printings(card_name, collector_number, treatment, set_code)
+        resolved_name, printings = game.find_printings(card_name, collector_number, treatment, set_code)
 
         if len(printings) == 1:
             current_card_info = printings[0]
-            emit('card_found', {'card': card_payload(current_card_info)})
+            emit('card_found', {'card': game.card_payload(current_card_info)})
         elif printings:
             # Several printings - let the user pick the one in hand
             current_card_info = None
             emit('card_printings', {
                 'name': resolved_name,
                 'treatment': treatment,
-                'cards': [card_payload(card) for card in printings]
+                'cards': [game.card_payload(card) for card in printings]
             })
         elif resolved_name:
             # Card exists, but no printing has the requested treatment
@@ -1123,9 +1038,9 @@ def handle_search(data):
             })
         else:
             logger.info(f"No match for '{card_name}', searching for similar cards...")
-            similar = searcher.find_similar_cards(card_name, limit=5)
+            similar = game.similar(card_name, limit=5)
             if similar:
-                emit('similar_cards', similar_cards_payload(similar))
+                emit('similar_cards', {'cards': similar})
             else:
                 emit('card_not_found', {'card_name': card_name})
 
@@ -1140,14 +1055,15 @@ def handle_select_printing(data):
     """User picked a specific printing from the printing list"""
     global current_card_info
 
-    card = database.get_card_by_id(data.get('id')) if database else None
+    game = games.active()
+    card = game.get_card(data.get('id')) if database else None
     if not card:
         emit('error', {'message': 'Printing not found'})
         return
 
     current_card_info = card
     logger.info(f"Printing selected: {card['name']} ({card['set']} #{card['number']})")
-    emit('card_found', {'card': card_payload(card)})
+    emit('card_found', {'card': game.card_payload(card)})
 
 
 @socketio.on('add_to_inventory')
@@ -1161,14 +1077,13 @@ def handle_add_inventory(data):
         return
 
     try:
+        game = games.active()
         condition = data.get('condition', 'Near Mint')
-        is_foil = data.get('is_foil', False)
-        is_surge = data.get('is_surge', False)
+        finish = data.get('finish') or game.default_finish
         quantity = data.get('quantity', 1)
-
-        # Handle image path (may be None for manual searches)
-        raw_image_path = data.get('image_path')
-        image_path = Path(raw_image_path) if raw_image_path else None
+        if finish not in game.finishes:
+            emit('error', {'message': f'Unknown finish: {finish}'})
+            return
 
         # Ensure quantity is a positive integer
         try:
@@ -1176,27 +1091,18 @@ def handle_add_inventory(data):
         except (ValueError, TypeError):
             quantity = 1
 
-        logger.info(f"Adding card to inventory: {quantity}x {current_card_info['name']} (Condition: {condition}, Foil: {is_foil}, Surge: {is_surge})")
-
-        # Add to inventory
-        inventory.add_card(
-            current_card_info,
-            image_path,
-            condition,
-            is_foil,
-            is_surge,
-            quantity
-        )
+        logger.info(f"Adding card to inventory: {quantity}x {current_card_info['name']} ({condition}, {finish})")
+        inventory.add_card(game.inventory_fields(current_card_info, finish), game.id, finish, condition, quantity)
 
         # Send updated stats and what was added (the page offers an Undo)
-        inv_stats = inventory.get_summary()
+        inv_stats = inventory.get_stats(game.id)
         emit('inventory_updated', {
             'stats': inv_stats,
             'added': {
                 'name': current_card_info['name'],
                 'set': current_card_info['set'],
                 'number': current_card_info['number'],
-                'finish': 'Surge foil' if is_surge else 'Foil' if is_foil else 'Regular',
+                'finish': game.finishes[finish],
                 'quantity': quantity
             }
         })
@@ -1227,7 +1133,7 @@ def handle_undo_last_add():
 
     undone = inventory.undo_last_add()
     if undone:
-        emit('inventory_undone', {'name': undone, 'stats': inventory.get_summary()})
+        emit('inventory_undone', {'name': undone, 'stats': inventory.get_stats(games.active().id)})
     else:
         emit('error', {'message': 'Nothing to undo'})
 
@@ -1263,6 +1169,42 @@ def handle_toggle_detection(data):
     emit('detection_toggled', {'enabled': enabled})
     logger.info(f"Detection toggled: {enabled}")
     log_to_client(f"Card detection {('enabled' if enabled else 'disabled')}", level="info")
+
+
+def game_info(game):
+    """What the page needs to know about a game (lists keep their order; jsonify sorts dicts)"""
+    return {
+        'id': game.id,
+        'label': game.label,
+        'finishes': [[key, label] for key, label in game.finishes.items()],
+        'exports': [[key, label] for key, (label, _prefix, _writer) in game.export_formats().items()],
+    }
+
+
+@app.route('/api/games')
+def get_games():
+    """Supported card games and the one being scanned"""
+    return jsonify({'active': games.active_id(), 'games': [game_info(game) for game in games.all_games()]})
+
+
+@socketio.on('set_game')
+def handle_set_game(data):
+    """Switch the game being scanned (stops auto scanning; the current card is dropped)"""
+    global current_card_info
+    game_id = data.get('game')
+    try:
+        games.set_active(game_id)
+    except ValueError as e:
+        emit('error', {'message': str(e)})
+        return
+    current_card_info = None
+    if scanner and scanner.auto_capture_enabled:
+        scanner.auto_capture_enabled = False
+        scanner.card_under_review = False
+        socketio.emit('auto_capture_toggled', {'enabled': False})
+    game = games.active()
+    logger.info(f"Game switched to {game.label}")
+    socketio.emit('game_changed', {**game_info(game), 'card_count': game.card_count()})
 
 
 @socketio.on('toggle_auto_capture')
@@ -1449,7 +1391,7 @@ def active_ai():
 
 def prompts_payload():
     provider, model = active_ai()
-    status = prompts.status(provider, model)
+    status = prompts.status(provider, model, games.active_id())
     # 'order' keeps the editor's tabs in order (jsonify sorts the keys)
     return {'provider': provider, 'model': model, 'prompts': status, 'order': list(status)}
 
@@ -1470,7 +1412,8 @@ def handle_save_prompt(data):
         emit('error', {'message': 'No AI model is active - save the prompt for all models'})
         return
     try:
-        prompts.save(kind, data.get('text'), provider if for_model else None, model if for_model else None)
+        prompts.save(kind, data.get('text'), provider if for_model else None, model if for_model else None,
+                     games.active_id())
     except ValueError as e:
         emit('error', {'message': str(e)})
         return
@@ -1483,7 +1426,7 @@ def handle_reset_prompt(data):
     """Remove the saved prompt in effect (this model's, else the all-models one)"""
     provider, model = active_ai()
     try:
-        removed = prompts.reset(data.get('kind'), provider, model)
+        removed = prompts.reset(data.get('kind'), provider, model, games.active_id())
     except ValueError as e:
         emit('error', {'message': str(e)})
         return
@@ -1531,11 +1474,12 @@ def handle_test_prompt(data):
             seconds = round(time.time() - start, 2)
             match = None
             if card:
-                found = database.search_card_exact(card['name'], card.get('collector_number'), card.get('set_code'))
+                game = games.active()
+                found = game.identify(card['name'], card.get('collector_number'), card.get('set_code'))
                 if found:
                     match = {'name': found['name'], 'set': (found.get('set_code') or '').upper(),
                              'set_name': found.get('set'), 'number': found.get('number'), 'match': found.get('match'),
-                             'confirmed': found.get('match') in CONFIRMED_MATCHES}
+                             'confirmed': game.is_confirmed(found)}
                 card = {k: card.get(k, '') for k in ('name', 'collector_number', 'set_code')}
             reply(raw=raw, result=card, match=match, seconds=seconds)
         except Exception as e:
@@ -1562,27 +1506,17 @@ def handle_update_database():
         socketio.emit('database_update_progress', {'message': message})
         logger.info(f"Database update: {message}")
 
+    game = games.active()
+
     def update_task():
         """Run database update in background thread"""
         try:
             logger.info("Starting database update in background thread")
 
-            # Download latest data from Scryfall
-            cards_data = database.download_scryfall_data(progress_callback)
-
-            # Populate the database
-            inserted = database.populate_database(cards_data, progress_callback)
-
-            # Get final stats
-            stats = database.get_database_stats()
-
-            # Send completion event
-            socketio.emit('database_update_complete', {
-                'total_cards': stats['total_cards'],
-                'cards_with_prices': stats['cards_with_prices']
-            })
-
-            logger.info(f"Database update complete: {stats['total_cards']} cards")
+            game.download(progress_callback)
+            total = game.card_count()
+            socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
+            logger.info(f"{game.label} card data updated: {total} cards")
 
         except Exception as e:
             logger.exception(f"Database update failed: {e}")
@@ -1626,7 +1560,6 @@ def handle_rebuild_database():
                 # Send completion event
                 socketio.emit('database_rebuild_complete', {
                     'cards_imported': result['cards_imported'],
-                    'inventory_imported': result['inventory_imported'],
                     'schema_type': result['schema_type']
                 })
 
@@ -1714,10 +1647,9 @@ def main():
     # Start background cleanup
     run_cleanup_background()
 
-    # Get database stats
-    db_stats = database.get_database_stats()
-    logger.info(f"Database loaded with {db_stats['total_cards']:,} cards")
-    print(f"✓ Database loaded: {db_stats['total_cards']:,} cards")
+    game = games.active()
+    logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")
+    print(f"✓ {game.label}: {game.card_count():,} cards")
 
     # Check Vision AI status
     if scanner.card_identifier:

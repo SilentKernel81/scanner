@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=18">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=19">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -29,6 +29,8 @@
             <span class="brand-mark"><svg class="icon"><use href="#i-card"/></svg></span>
             Card Scanner
         </div>
+        <!-- Shown only when more than one game is supported -->
+        <select id="game-select" class="select game-select" title="Card game being scanned" hidden></select>
         <div class="stats">
             <div class="stat-box">
                 <span class="stat-label">Database</span>
@@ -262,8 +264,7 @@
                 <div class="inventory-controls">
                     <input type="text" id="inventory-search" placeholder="Filter by name, set, or rarity..." oninput="filterInventory()">
                     <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
-                    <button class="btn btn-small" onclick="exportInventory()">Export CSV</button>
-                    <button class="btn btn-small" onclick="exportInventoryMoxfield()">Export to Moxfield</button>
+                    <span id="export-buttons" class="export-buttons"></span>
                     <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
                     <input type="file" id="import-file-input" accept=".csv" style="display: none;" onchange="importInventory()">
                     <button class="btn btn-small btn-danger" onclick="clearInventory()">Clear all</button>
@@ -305,32 +306,21 @@
 
                 <div class="input-group">
                     <span class="field-label">Finish</span>
-                    <div class="radio-group">
-                        <label class="radio-pill">
-                            <input type="radio" name="edit-foil-type" value="non-foil" checked onchange="updateSplitQuantityVisibility()">
-                            <span>Regular</span>
-                        </label>
-                        <label class="radio-pill">
-                            <input type="radio" name="edit-foil-type" value="foil" onchange="updateSplitQuantityVisibility()">
-                            <span>Foil</span>
-                        </label>
-                        <label class="radio-pill">
-                            <input type="radio" name="edit-foil-type" value="surge" onchange="updateSplitQuantityVisibility()">
-                            <span>Surge foil</span>
-                        </label>
+                    <div class="radio-group" id="edit-finishes">
+                        <!-- The game's finishes (renderEditFinishes) -->
                     </div>
                 </div>
 
                 <div id="split-quantity-section" class="callout" style="display: none;">
-                    <label for="edit-split-quantity">How many cards should have the new finish?</label>
+                    <label for="edit-split-quantity">How many cards have the new finish?</label>
                     <input type="number" id="edit-split-quantity" class="text-input" min="1" value="1">
                     <div id="split-preview">
-                        This will create: <strong>1</strong> with new foil type + <strong>0</strong> remaining with original foil type
+                        
                     </div>
                 </div>
 
                 <div class="callout warning">
-                    Changing the finish splits this entry - choose how many cards get the new finish.
+                    Changing the finish of several copies splits this entry - choose how many get the new finish.
                 </div>
 
                 <div class="modal-actions">
@@ -389,7 +379,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=18"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=19"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=19"></script>
 </body>
 </html>

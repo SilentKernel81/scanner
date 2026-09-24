@@ -141,6 +141,11 @@ def reset(kind, provider, model, game=DEFAULT_GAME):
     return None
 
 
+def has(kind, game=DEFAULT_GAME):
+    """Whether a game uses this kind of prompt (the foil marker check is Magic-only)"""
+    return kind in BUILT_IN.get(game, {})
+
+
 def status(provider, model, game=DEFAULT_GAME):
     """What the prompt editor shows for the current provider/model"""
     result = {}

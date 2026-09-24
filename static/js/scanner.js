@@ -2,7 +2,6 @@
 
 const socket = io();
 let cardNumber = 1;
-let currentImagePath = '';
 let currentCard = null;
 let cardDetected = false;
 let lastDetectionStatus = {detected: false, stable_frames: 0, required_frames: 0, is_stable: false};  // from /api/detection_status
@@ -73,7 +72,6 @@ socket.on('card_captured', function(data) {
     document.getElementById('card-name').value = data.card_name;
     document.getElementById('collector-number').value = data.collector_number || '';
     document.getElementById('set-code').value = data.set_code || '';
-    currentImagePath = data.image_path;
     document.getElementById('search-btn').disabled = false;
 
     // Show processing time if available
@@ -189,7 +187,6 @@ socket.on('inventory_updated', function(data) {
     document.getElementById('card-treatment').value = '';
     detectedFoilStatus = 'unknown';
     currentCard = null;
-    currentImagePath = '';
     document.getElementById('search-btn').disabled = true;
 });
 
@@ -286,7 +283,6 @@ socket.on('database_update_complete', function(data) {
     console.log('DATABASE UPDATE COMPLETE');
     console.log(logSeparator());
     console.log('Total cards:', data.total_cards);
-    console.log('Cards with prices:', data.cards_with_prices);
 
     // Play queue alert sound (triple beep for major operation)
     audioManager.playQueueAlert();
@@ -296,7 +292,7 @@ socket.on('database_update_complete', function(data) {
     updateBtn.textContent = 'Update card database';
 
     addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
-    addLog(timeNow(), 'success', `${data.cards_with_prices.toLocaleString()} cards have pricing data.`);
+    loadStats();
 });
 
 socket.on('database_update_error', function(data) {
@@ -325,7 +321,6 @@ socket.on('database_rebuild_complete', function(data) {
     console.log('DATABASE REBUILD COMPLETE');
     console.log(logSeparator());
     console.log('Cards imported:', data.cards_imported);
-    console.log('Inventory imported:', data.inventory_imported);
     console.log('Schema type:', data.schema_type);
 
     // Play queue alert sound (triple beep for major operation)
@@ -592,6 +587,7 @@ function suggestedFinish(card) {
     // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
     // Printings that only exist in one finish are certain; otherwise use the ★/• marker
     // the AI read next to the set code on the last capture.
+    if (!gameInfo || gameInfo.id !== 'mtg') return {finish: defaultFinish(), reason: null};
     const finishes = card.finishes || [];
     const hasFoil = finishes.includes('foil') || finishes.includes('etched');
     const hasNonfoil = finishes.includes('nonfoil');
@@ -619,7 +615,6 @@ function quantityCell(id, label, kind, value = 0) {
 
 function displayCard(card) {
     const suggestion = suggestedFinish(card);
-    const finishLabels = {regular: 'Regular', foil: 'Foil', surge: 'Surge foil'};
     // Only show prices that exist (e.g. foil-only printings have no regular price)
     const prices = [];
     if (card.price > 0) {
@@ -660,11 +655,9 @@ function displayCard(card) {
         <div class="input-group">
             <span class="field-label">Quantity</span>
             <div class="qty-grid">
-                ${quantityCell('regular-qty', 'Regular', 'regular', suggestion.finish === 'regular' ? 1 : 0)}
-                ${quantityCell('foil-qty', 'Foil', 'foil', suggestion.finish === 'foil' ? 1 : 0)}
-                ${quantityCell('surge-qty', 'Surge foil', 'surge', suggestion.finish === 'surge' ? 1 : 0)}
+                ${gameInfo.finishes.map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
             </div>
-            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabels[suggestion.finish]}: ${suggestion.reason}</div>` : ''}
+            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
         </div>
 
         <div class="card-actions">
@@ -742,48 +735,17 @@ function addToInventoryBoth() {
         return;
     }
 
-    const regularQty = parseInt(document.getElementById('regular-qty').value) || 0;
-    const foilQty = parseInt(document.getElementById('foil-qty').value) || 0;
-    const surgeQty = parseInt(document.getElementById('surge-qty').value) || 0;
     const condition = document.getElementById('condition').value;
-
-    if (regularQty === 0 && foilQty === 0 && surgeQty === 0) {
+    const quantities = gameInfo.finishes.map(([key]) => [key, parseInt(document.getElementById(`qty-${key}`).value) || 0]);
+    if (quantities.every(([, quantity]) => quantity === 0)) {
         addLog(timeNow(), 'warning', 'Please set at least one quantity');
         return;
     }
 
-    // Add regular cards if quantity > 0
-    if (regularQty > 0) {
-        socket.emit('add_to_inventory', {
-            quantity: regularQty,
-            condition: condition,
-            is_foil: false,
-            is_surge: false,
-            image_path: currentImagePath
-        });
-    }
-
-    // Add foil cards if quantity > 0
-    if (foilQty > 0) {
-        socket.emit('add_to_inventory', {
-            quantity: foilQty,
-            condition: condition,
-            is_foil: true,
-            is_surge: false,
-            image_path: currentImagePath
-        });
-    }
-
-    // Add surge foil cards if quantity > 0
-    if (surgeQty > 0) {
-        socket.emit('add_to_inventory', {
-            quantity: surgeQty,
-            condition: condition,
-            is_foil: false,
-            is_surge: true,
-            image_path: currentImagePath
-        });
-    }
+    // One entry per finish with a quantity
+    quantities.filter(([, quantity]) => quantity > 0).forEach(([finish, quantity]) => {
+        socket.emit('add_to_inventory', {quantity: quantity, condition: condition, finish: finish});
+    });
 }
 
 function addToInventory(autoMode = false) {
@@ -796,13 +758,10 @@ function addToInventory(autoMode = false) {
         return;
     }
 
-    const finish = suggestedFinish(currentCard).finish;
     const data = {
         quantity: 1,
         condition: 'Near Mint',
-        is_foil: finish === 'foil',
-        is_surge: finish === 'surge',
-        image_path: currentImagePath
+        finish: suggestedFinish(currentCard).finish
     };
     console.log('Emitting add_to_inventory event with:', data);
     socket.emit('add_to_inventory', data);
@@ -811,7 +770,6 @@ function addToInventory(autoMode = false) {
 function dismissCard() {
     console.log('Card dismissed by user');
     currentCard = null;
-    currentImagePath = null;
     detectedFoilStatus = 'unknown';
 
     // Emit dismiss event to server to re-enable auto-capture
@@ -1306,6 +1264,50 @@ socket.on('prompt_test_result', function(data) {
         ${parsed}`;
 });
 
+// ============================================================================
+// Card game being scanned (one at a time; the selector shows when there are several)
+// ============================================================================
+
+let gameInfo = null;  // {id, label, finishes: [[key, label]], exports: [[key, label]]}
+
+function defaultFinish() {
+    return gameInfo.finishes[0][0];
+}
+
+function finishLabel(key) {
+    const finish = gameInfo.finishes.find(([k]) => k === key);
+    return finish ? finish[1] : key;
+}
+
+function loadGames() {
+    return fetch('/api/games')
+        .then(response => response.json())
+        .then(data => {
+            gameInfo = data.games.find(game => game.id === data.active);
+            const select = document.getElementById('game-select');
+            select.innerHTML = data.games.map(game =>
+                `<option value="${escapeHtml(game.id)}">${escapeHtml(game.label)}</option>`).join('');
+            select.value = data.active;
+            select.hidden = data.games.length < 2;
+            renderExportButtons();
+        })
+        .catch(error => console.error('Error loading games:', error));
+}
+
+socket.on('game_changed', function(data) {
+    gameInfo = data;
+    document.getElementById('game-select').value = data.id;
+    renderExportButtons();
+    currentCard = null;
+    document.getElementById('card-display').innerHTML =
+        `<div class="empty-state">Scanning ${escapeHtml(data.label)}.</div>`;
+    loadStats();
+    loadPrompts();
+    notify(data.card_count
+        ? `Scanning ${data.label}`
+        : `Scanning ${data.label} - download its card database in Settings first`, data.card_count ? 'success' : 'warning');
+});
+
 function escapeHtml(text) {
     const map = {
         '&': '&amp;',
@@ -1446,6 +1448,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('prompt-text').addEventListener('input', onPromptInput);
 
+    loadGames();
+    document.getElementById('game-select').addEventListener('change', function(e) {
+        socket.emit('set_game', {game: e.target.value});
+    });
+
     // Enter in the key field saves it
     document.getElementById('ai-credential').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') saveCredential();
@@ -1516,38 +1523,17 @@ function renderInventory() {
 
     if (filteredInventory.length === 0) {
         statsDiv.innerHTML = '';
-        listDiv.innerHTML = '<div class="empty-state">No cards in inventory yet.<br>Start scanning cards to build your collection!</div>';
+        listDiv.innerHTML = currentInventory.length
+            ? '<div class="empty-state">No cards match the filter.</div>'
+            : '<div class="empty-state">No cards in inventory yet.<br>Start scanning cards to build your collection!</div>';
         return;
     }
 
-    // Calculate stats
-    const totalCards = filteredInventory.reduce((sum, card) => {
-        const quantity = parseInt(card.Quantity || 1);
-        return sum + quantity;
-    }, 0);
+    const totalCards = filteredInventory.reduce((sum, card) => sum + card.quantity, 0);
+    const totalValue = filteredInventory.reduce((sum, card) => sum + card.price * card.quantity, 0);
+    // Copies in any finish other than the default one (foil, surge foil, holo, ...)
+    const specialCount = filteredInventory.reduce((sum, card) => sum + (card.finish !== defaultFinish() ? card.quantity : 0), 0);
 
-    const totalValue = filteredInventory.reduce((sum, card) => {
-        const price = parseFloat(card['Price (USD)'].replace('$', '')) || 0;
-        const quantity = parseInt(card.Quantity || 1);
-        return sum + (price * quantity);
-    }, 0);
-
-    const foilCount = filteredInventory.reduce((sum, card) => {
-        if (card.Foil === 'Yes') {
-            const quantity = parseInt(card.Quantity || 1);
-            return sum + quantity;
-        }
-        return sum;
-    }, 0);
-
-    const rarityBreakdown = {};
-    filteredInventory.forEach(card => {
-        const rarity = card.Rarity || 'Unknown';
-        const quantity = parseInt(card.Quantity || 1);
-        rarityBreakdown[rarity] = (rarityBreakdown[rarity] || 0) + quantity;
-    });
-
-    // Render stats
     statsDiv.innerHTML = `
         <div class="inventory-stat">
             <div class="inventory-stat-value">${totalCards}</div>
@@ -1558,7 +1544,7 @@ function renderInventory() {
             <div class="inventory-stat-label">Total Value</div>
         </div>
         <div class="inventory-stat">
-            <div class="inventory-stat-value">${foilCount}</div>
+            <div class="inventory-stat-value">${specialCount}</div>
             <div class="inventory-stat-label">Foil Cards</div>
         </div>
         <div class="inventory-stat">
@@ -1567,54 +1553,37 @@ function renderInventory() {
         </div>
     `;
 
-    // Render card list
     listDiv.innerHTML = filteredInventory.map((card, index) => {
-        const price = parseFloat(card['Price (USD)'].replace('$', '')) || 0;
-        const quantity = parseInt(card.Quantity || 1);
-        const totalValue = price * quantity;
-        const rarity = (card.Rarity || '').toLowerCase();
-        const foil = card.Foil === 'Yes';
-        const surge = card.Surge === 'Yes';
-        const colorIdentity = card['Color Identity'] || '';
-
-        // Find actual index in currentInventory
-        const actualIndex = currentInventory.indexOf(card);
-
+        const rarity = (card.rarity || '').toLowerCase();
+        const special = card.finish !== defaultFinish();
         return `
             <div class="inventory-card">
                 <div class="inventory-card-number">#${index + 1}</div>
                 <div class="inventory-card-info">
                     <div class="inventory-card-name">
-                        ${quantity > 1 ? `<span class="inventory-qty">${quantity}×</span> ` : ''}${escapeHtml(card['Card Name'])}
+                        ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
                     </div>
                     <div class="inventory-card-details">
-                        ${escapeHtml(card.Set)} ${card['Card Number'] ? '#' + card['Card Number'] : ''}
-                        ${card.Type ? '· ' + escapeHtml(card.Type) : ''}
+                        ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
+                        ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
                     </div>
                     <div class="inventory-card-meta">
-                        ${rarity ? `<span class="inventory-badge ${rarity}">${rarity.toUpperCase()}</span>` : ''}
-                        ${surge ? '<span class="inventory-badge surge">SURGE</span>' : (foil ? '<span class="inventory-badge foil">FOIL</span>' : '')}
-                        ${colorIdentity ? `<span class="inventory-badge">${escapeHtml(colorIdentity)}</span>` : ''}
-                        <span>${escapeHtml(card.Condition || 'Near Mint')}</span>
+                        ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
+                        ${special ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
+                        ${card.color_identity ? `<span class="inventory-badge">${escapeHtml(card.color_identity)}</span>` : ''}
+                        <span>${escapeHtml(card.condition)}</span>
                     </div>
                 </div>
                 <div class="inventory-card-price">
-                    <div class="inventory-price-value">$${totalValue.toFixed(2)}</div>
-                    ${quantity > 1 ? `<div class="inventory-price-each">$${price.toFixed(2)} each</div>` : ''}
-                    <div class="inventory-timestamp">${card.Timestamp}</div>
+                    <div class="inventory-price-value">$${(card.price * card.quantity).toFixed(2)}</div>
+                    ${card.quantity > 1 ? `<div class="inventory-price-each">$${card.price.toFixed(2)} each</div>` : ''}
+                    <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
                 </div>
                 <div class="inventory-card-actions">
-                    <button class="btn-edit"
-                        data-index="${actualIndex}"
-                        data-quantity="${quantity}"
-                        data-card-name="${escapeHtml(card['Card Name'])}"
-                        data-condition="${escapeHtml(card.Condition || 'Near Mint')}"
-                        data-foil="${foil ? 'Yes' : 'No'}"
-                        data-surge="${surge ? 'Yes' : 'No'}"
-                        title="Edit">
+                    <button class="btn-edit" data-id="${card.id}" title="Edit">
                         <svg class="icon"><use href="#i-edit"/></svg>
                     </button>
-                    <button class="btn-delete" data-index="${actualIndex}" data-card-name="${escapeHtml(card['Card Name'])}" title="Delete">
+                    <button class="btn-delete" data-id="${card.id}" title="Delete">
                         <svg class="icon"><use href="#i-trash"/></svg>
                     </button>
                 </div>
@@ -1625,19 +1594,9 @@ function renderInventory() {
 
 function filterInventory() {
     const searchTerm = document.getElementById('inventory-search').value.toLowerCase();
-
-    if (!searchTerm) {
-        filteredInventory = currentInventory;
-    } else {
-        filteredInventory = currentInventory.filter(card => {
-            return card['Card Name'].toLowerCase().includes(searchTerm) ||
-                   (card.Set || '').toLowerCase().includes(searchTerm) ||
-                   (card.Rarity || '').toLowerCase().includes(searchTerm) ||
-                   (card['Color Identity'] || '').toLowerCase().includes(searchTerm) ||
-                   (card.Type || '').toLowerCase().includes(searchTerm);
-        });
-    }
-
+    filteredInventory = !searchTerm ? currentInventory : currentInventory.filter(card =>
+        [card.name, card.set_name, card.rarity, card.color_identity, card.type_line]
+            .some(value => (value || '').toLowerCase().includes(searchTerm)));
     renderInventory();
 }
 
@@ -1646,44 +1605,24 @@ function refreshInventory() {
     addLog(timeNow(), 'info', 'Inventory refreshed');
 }
 
-function exportInventory() {
-    // Create a temporary link element to trigger the download
+function exportInventory(format, label) {
+    // The server sends the file as a download
     const downloadLink = document.createElement('a');
-    downloadLink.href = '/api/export_inventory';
-    downloadLink.download = ''; // Let the server set the filename
-
-    // Append to body, click, and remove
+    downloadLink.href = `/api/export_inventory/${encodeURIComponent(format)}`;
+    downloadLink.download = '';
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
-
-    // Log the action
-    addLog(timeNow(), 'success', 'Inventory export started...');
-
-    // Optional: Show a brief success message
-    setTimeout(() => {
-        addLog(timeNow(), 'success', 'Check your downloads folder for the CSV file');
-    }, 500);
+    addLog(timeNow(), 'success', `${label} export started - check your downloads folder`);
+    if (format === 'moxfield') {
+        addLog(timeNow(), 'info', 'Import it at moxfield.com/account/collection');
+    }
 }
 
-function exportInventoryMoxfield() {
-    // Create a temporary link element to trigger the download
-    const downloadLink = document.createElement('a');
-    downloadLink.href = '/api/export_inventory_moxfield';
-    downloadLink.download = ''; // Let the server set the filename
-
-    // Append to body, click, and remove
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-
-    // Log the action
-    addLog(timeNow(), 'success', 'Moxfield export started...');
-
-    // Show success message with import link
-    setTimeout(() => {
-        addLog(timeNow(), 'success', 'Moxfield CSV ready! Import at: moxfield.com/account/collection');
-    }, 500);
+function renderExportButtons() {
+    document.getElementById('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
+        `<button class="btn btn-small" onclick="exportInventory('${escapeHtml(format)}', '${escapeHtml(label)}')">Export ${escapeHtml(label)}</button>`
+    ).join('');
 }
 
 function updateDatabase() {
@@ -1826,74 +1765,52 @@ async function clearInventory() {
     });
 }
 
-let currentEditIndex = null;
+let currentEditId = null;
 
-// Store original foil type and quantity for split detection
-let originalFoilType = null;
+// Original finish and quantity, to detect a split
+let originalFinish = null;
 let originalQuantity = 0;
 
-function editCard(index, quantity, cardName, condition, isFoil, isSurge) {
-    // Store the index we're editing
-    currentEditIndex = index;
+function renderEditFinishes(selected) {
+    document.getElementById('edit-finishes').innerHTML = gameInfo.finishes.map(([key, label]) => `
+        <label class="radio-pill">
+            <input type="radio" name="edit-finish" value="${escapeHtml(key)}" ${key === selected ? 'checked' : ''} onchange="updateSplitQuantityVisibility()">
+            <span>${escapeHtml(label)}</span>
+        </label>`).join('');
+}
 
-    // Store original quantity
-    originalQuantity = parseInt(quantity);
+function editCard(card) {
+    currentEditId = card.id;
+    originalQuantity = card.quantity;
+    originalFinish = card.finish;
 
-    // Set card name in modal
-    document.getElementById('edit-card-name').textContent = cardName;
+    document.getElementById('edit-card-name').textContent = card.name;
+    document.getElementById('edit-quantity').value = card.quantity;
+    document.getElementById('edit-condition').value = card.condition;
+    renderEditFinishes(card.finish);
 
-    // Set current values
-    document.getElementById('edit-quantity').value = quantity;
-    document.getElementById('edit-condition').value = condition;
-
-    // Set foil type radio button
-    let foilType = 'non-foil';
-    if (isSurge === 'Yes') {
-        foilType = 'surge';
-    } else if (isFoil === 'Yes') {
-        foilType = 'foil';
-    }
-
-    // Store original foil type
-    originalFoilType = foilType;
-
-    const radioButtons = document.getElementsByName('edit-foil-type');
-    radioButtons.forEach(radio => {
-        radio.checked = (radio.value === foilType);
-    });
-
-    // Initialize split quantity input
     const splitInput = document.getElementById('edit-split-quantity');
-    if (splitInput) {
-        splitInput.value = 1;
-        splitInput.max = originalQuantity;
-        // Add input event listener for preview updates
-        splitInput.oninput = updateSplitPreview;
-    }
+    splitInput.value = 1;
+    splitInput.max = originalQuantity;
+    splitInput.oninput = updateSplitPreview;
+    document.getElementById('split-quantity-section').style.display = 'none';
 
-    // Hide split quantity section initially
-    const splitSection = document.getElementById('split-quantity-section');
-    if (splitSection) {
-        splitSection.style.display = 'none';
-    }
-
-    // Show modal
     document.getElementById('edit-card-modal').classList.add('show');
 }
 
 function closeEditCard() {
     document.getElementById('edit-card-modal').classList.remove('show');
-    currentEditIndex = null;
-    originalFoilType = null;
+    currentEditId = null;
+    originalFinish = null;
     originalQuantity = 0;
 }
 
 function updateSplitQuantityVisibility() {
-    const currentFoilType = document.querySelector('input[name="edit-foil-type"]:checked').value;
+    const finish = document.querySelector('input[name="edit-finish"]:checked').value;
     const splitSection = document.getElementById('split-quantity-section');
 
-    // Show split section only if foil type changed AND original quantity > 1
-    if (currentFoilType !== originalFoilType && originalQuantity > 1) {
+    // Several copies and a new finish: ask how many get it
+    if (finish !== originalFinish && originalQuantity > 1) {
         splitSection.style.display = 'block';
         updateSplitPreview();
     } else {
@@ -1907,7 +1824,7 @@ function updateSplitPreview() {
     const preview = document.getElementById('split-preview');
 
     if (preview) {
-        preview.innerHTML = `This will create: <strong>${splitQuantity}</strong> with new foil type + <strong>${remaining}</strong> remaining with original foil type`;
+        preview.innerHTML = `<strong>${splitQuantity}</strong> ${escapeHtml(finishLabel(document.querySelector('input[name="edit-finish"]:checked').value))} + <strong>${remaining}</strong> stay ${escapeHtml(finishLabel(originalFinish))}`;
     }
 }
 
@@ -1930,107 +1847,54 @@ function updateSplitMaxQuantity() {
 }
 
 function saveEditCard() {
-    console.log('saveEditCard called, currentEditIndex:', currentEditIndex);
-
-    if (currentEditIndex === null) {
-        console.error('currentEditIndex is null!');
+    if (currentEditId === null) {
         notify('No card selected for editing', 'error');
         return;
     }
 
-    // Get values from form
     const quantity = parseInt(document.getElementById('edit-quantity').value);
     const condition = document.getElementById('edit-condition').value;
-    const foilType = document.querySelector('input[name="edit-foil-type"]:checked').value;
+    const finish = document.querySelector('input[name="edit-finish"]:checked').value;
 
-    // Get split quantity if foil type changed
-    let splitQuantity = null;
-    if (foilType !== originalFoilType && originalQuantity > 1) {
-        splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
-
-        // Validate split quantity
-        if (splitQuantity < 1 || splitQuantity > originalQuantity) {
-            notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
-            return;
-        }
-    }
-
-    console.log('Edit values:', {index: currentEditIndex, quantity, condition, foilType, splitQuantity});
-
-    // Validate quantity
     if (isNaN(quantity) || quantity < 1 || quantity > 999) {
         notify('Please enter a quantity between 1 and 999', 'warning');
         return;
     }
 
-    // Convert foil type to boolean flags
-    const isFoil = (foilType === 'foil');
-    const isSurge = (foilType === 'surge');
-
-    // Show loading state
-    const cardName = document.getElementById('edit-card-name').textContent;
-    addLog(timeNow(), 'info', `Updating ${cardName}...`);
-
-    // Save the index before closing modal (closeEditCard sets it to null)
-    const indexToUpdate = currentEditIndex;
-
-    // Close modal
-    closeEditCard();
-
-    const url = `/api/inventory/update/${indexToUpdate}`;
-    console.log('Fetching URL:', url);
-
-    // Update via API
-    const requestBody = {
-        quantity: quantity,
-        condition: condition,
-        is_foil: isFoil,
-        is_surge: isSurge
-    };
-
-    // Add split_quantity if splitting
-    if (splitQuantity !== null) {
+    const requestBody = {quantity: quantity, condition: condition, finish: finish};
+    if (finish !== originalFinish && originalQuantity > 1) {
+        const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
+        if (splitQuantity < 1 || splitQuantity > originalQuantity) {
+            notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
+            return;
+        }
         requestBody.split_quantity = splitQuantity;
     }
 
-    fetch(url, {
+    const cardName = document.getElementById('edit-card-name').textContent;
+    const rowId = currentEditId;
+    closeEditCard();
+    addLog(timeNow(), 'info', `Updating ${cardName}...`);
+
+    fetch(`/api/inventory/update/${rowId}`, {
         method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(requestBody)
     })
-    .then(response => {
-        // Check if response is OK before parsing JSON
-        if (!response.ok) {
-            return response.text().then(text => {
-                console.error('Server error response:', text);
-                throw new Error(`Server error: ${response.status} ${response.statusText}`);
-            });
-        }
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
         if (data.success) {
-            addLog(timeNow(), 'success', `${cardName} updated successfully`);
-            if (data.split) {
-                addLog(timeNow(), 'info', 'Entry was split due to foil type change');
-            }
-            // Reload inventory
+            addLog(timeNow(), 'success', `${cardName} updated` + (data.split ? ' (entry split by finish)' : ''));
             loadInventory();
-            // Update main stats
             loadStats();
         } else {
             notify('Failed to update card: ' + (data.error || data.message || 'Unknown error'), 'error');
         }
     })
-    .catch(error => {
-        console.error('Update error:', error);
-        notify('Failed to update card: ' + error.message, 'error');
-    });
+    .catch(error => notify('Failed to update card: ' + error.message, 'error'));
 }
 
-async function deleteCard(index, cardName) {
+async function deleteCard(rowId, cardName) {
     const ok = await confirmDialog({
         title: 'Delete card?',
         message: `Delete "${cardName}" from your inventory? This can't be undone.`,
@@ -2043,7 +1907,7 @@ async function deleteCard(index, cardName) {
     addLog(timeNow(), 'info', `Deleting ${cardName}...`);
 
     // Delete via API
-    fetch(`/api/inventory/delete/${index}`, {
+    fetch(`/api/inventory/delete/${rowId}`, {
         method: 'DELETE'
     })
     .then(response => response.json())
@@ -2173,30 +2037,14 @@ document.addEventListener('DOMContentLoaded', function() {
         inventoryList.addEventListener('click', function(event) {
             const target = event.target;
 
-            // Handle delete button clicks
-            if (target.classList.contains('btn-delete') || target.closest('.btn-delete')) {
-                const button = target.classList.contains('btn-delete') ? target : target.closest('.btn-delete');
-                const index = parseInt(button.dataset.index);
-                const cardName = button.dataset.cardName;
-
-                if (!isNaN(index)) {
-                    deleteCard(index, cardName);
-                }
-            }
-
-            // Handle edit button clicks
-            if (target.classList.contains('btn-edit') || target.closest('.btn-edit')) {
-                const button = target.classList.contains('btn-edit') ? target : target.closest('.btn-edit');
-                const index = parseInt(button.dataset.index);
-                const quantity = parseInt(button.dataset.quantity);
-                const cardName = button.dataset.cardName;
-                const condition = button.dataset.condition;
-                const foil = button.dataset.foil;
-                const surge = button.dataset.surge;
-
-                if (!isNaN(index) && !isNaN(quantity)) {
-                    editCard(index, quantity, cardName, condition, foil, surge);
-                }
+            const button = target.closest('.btn-edit, .btn-delete');
+            if (!button) return;
+            const card = currentInventory.find(entry => entry.id === parseInt(button.dataset.id));
+            if (!card) return;
+            if (button.classList.contains('btn-delete')) {
+                deleteCard(card.id, card.name);
+            } else {
+                editCard(card);
             }
         });
     }

@@ -2,994 +2,408 @@
 # FILE: inventory.py
 # Inventory management using SQLite database
 # ============================================================================
-import sqlite3
 import csv
 import logging
+import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
-from config import Config
-from utils import normalize_text
 
-# Create database logger
+from config import Config
+
 logger = logging.getLogger('database')
+
+# One row per card + set + number + condition + finish, per game. Rows are addressed by id.
+INVENTORY_TABLE = '''
+    CREATE TABLE {table} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game TEXT NOT NULL DEFAULT 'mtg',
+        card_id TEXT,
+        card_name TEXT NOT NULL,
+        set_name TEXT NOT NULL,
+        set_code TEXT,
+        card_number TEXT NOT NULL DEFAULT '',
+        rarity TEXT,
+        type_line TEXT,
+        mana_cost TEXT,
+        colors TEXT,
+        color_identity TEXT,
+        price_usd REAL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        condition TEXT NOT NULL DEFAULT 'Near Mint',
+        finish TEXT NOT NULL DEFAULT 'regular',
+        timestamp TEXT NOT NULL,
+        UNIQUE(game, card_name, set_name, card_number, condition, finish)
+    )
+'''
+KEY_COLUMNS = ('game', 'card_name', 'set_name', 'card_number', 'condition', 'finish')
+UPSERT = '''
+    INSERT INTO inventory (game, card_id, card_name, set_name, set_code, card_number, rarity,
+                           type_line, mana_cost, colors, color_identity, price_usd, quantity,
+                           condition, finish, timestamp)
+    VALUES (:game, :card_id, :card_name, :set_name, :set_code, :card_number, :rarity,
+            :type_line, :mana_cost, :colors, :color_identity, :price_usd, :quantity,
+            :condition, :finish, :timestamp)
+    ON CONFLICT(game, card_name, set_name, card_number, condition, finish) DO UPDATE SET
+        quantity = quantity + excluded.quantity,
+        timestamp = excluded.timestamp,
+        price_usd = excluded.price_usd,
+        card_id = COALESCE(excluded.card_id, card_id),
+        set_code = COALESCE(excluded.set_code, set_code)
+'''
+
+
+def now():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _row_dict(row):
+    """Inventory row as sent to the web page and the exporters"""
+    return {
+        'id': row['id'],
+        'game': row['game'],
+        'card_id': row['card_id'],
+        'name': row['card_name'],
+        'set_name': row['set_name'],
+        'set_code': row['set_code'] or '',
+        'number': row['card_number'],
+        'rarity': row['rarity'] or '',
+        'type_line': row['type_line'] or '',
+        'mana_cost': row['mana_cost'] or '',
+        'colors': row['colors'] or '',
+        'color_identity': row['color_identity'] or '',
+        'price': row['price_usd'] or 0.0,
+        'quantity': row['quantity'],
+        'condition': row['condition'],
+        'finish': row['finish'],
+        'timestamp': row['timestamp'],
+    }
 
 
 class InventoryManager:
-    """Manages card inventory using SQLite database"""
+    """Card inventory (table `inventory` in the card database file), for every game"""
 
     def __init__(self, db_file=None, log_callback=None):
         self.db_file = db_file or Config.DATABASE_FILE
         self.log_callback = log_callback
-        self.conn = None
-        self._lock = threading.RLock()  # Thread-safe inventory access
-        self.last_added = None  # (row key, quantity) of the most recent add_card, for undo
-        self.initialize_connection()
+        self._lock = threading.RLock()
+        self.last_added = None  # (row id, quantity) of the most recent add_card, for undo
+        self.conn = sqlite3.connect(str(self.db_file), check_same_thread=False, timeout=10.0)
+        self.conn.execute('PRAGMA journal_mode=WAL')
+        self.conn.execute('PRAGMA synchronous=NORMAL')
+        self.conn.row_factory = sqlite3.Row
+        self._initialize_table()
 
     def log(self, message, level="info"):
-        """Send log message to both file logger and UI callback"""
-        # Log to file
-        log_method = getattr(logger, level, logger.info)
-        log_method(message)
-
-        # Send to UI callback if provided
+        getattr(logger, level, logger.info)(message)
         if self.log_callback:
             self.log_callback(message, level)
 
-    def initialize_connection(self):
-        """Initialize database connection"""
-        self.conn = sqlite3.connect(
-            str(self.db_file),
-            check_same_thread=False,
-            isolation_level='DEFERRED',  # Consistent with database.py
-            timeout=10.0  # Add timeout for lock waits
-        )
-        # Enable WAL mode for better concurrency
-        self.conn.execute('PRAGMA journal_mode=WAL')
-        self.conn.execute('PRAGMA synchronous=NORMAL')
-        self.conn.row_factory = sqlite3.Row  # Enable dict-like access
+    # ------------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------------
 
-    def add_card(self, card_info, image_path=None, condition='Near Mint', is_foil=False, is_surge=False, quantity=1):
-        """
-        Add a card to the inventory with quantity.
-        If card already exists (same name, set, number, condition, foil, surge), increment quantity.
-
-        Args:
-            card_info: Dict with card details (name, set, number, etc.)
-            image_path: Path to the scanned image (not stored in inventory, kept for compatibility)
-            condition: Card condition (default: 'Near Mint')
-            is_foil: Whether the card is foil (default: False)
-            is_surge: Whether the card is surge foil (default: False)
-            quantity: Number of cards to add (default: 1)
-        """
-        # Validate and normalize card_info fields to prevent None values
-        card_name = str(card_info.get('name', '')) if card_info.get('name') is not None else ''
-        set_name = str(card_info.get('set', '')) if card_info.get('set') is not None else ''
-        card_number = str(card_info.get('number', '')) if card_info.get('number') is not None else ''
-        rarity = str(card_info.get('rarity', '')) if card_info.get('rarity') is not None else ''
-        type_line = str(card_info.get('type_line', '')) if card_info.get('type_line') is not None else ''
-        mana_cost = str(card_info.get('mana_cost', '')) if card_info.get('mana_cost') is not None else ''
-
-        # Validate price fields
-        price_foil = card_info.get('price_foil', 0)
-        price_normal = card_info.get('price', 0)
-        price = float(price_foil if is_foil else price_normal) if (price_foil if is_foil else price_normal) is not None else 0.0
-
-        # Get colors and format them
-        colors = card_info.get('colors', [])
-        if colors is None:
-            colors = []
-        color_identity = self._get_color_identity(colors)
-        colors_str = ', '.join(colors) if colors else 'Colorless'
-
-        # Validate quantity
-        quantity = int(quantity) if quantity is not None else 1
-
-        # Use atomic INSERT ... ON CONFLICT to prevent race conditions
-        # This eliminates the need for check-then-update pattern
+    def _initialize_table(self):
         with self._lock:
-            cursor = self.conn.cursor()
-
-            # Atomic insert-or-update operation
-            cursor.execute('''
-                INSERT INTO inventory (
-                    card_name, set_name, card_number, rarity, type_line,
-                    mana_cost, colors, color_identity, price_usd, quantity,
-                    condition, foil, surge, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(card_name, set_name, card_number, condition, foil, surge)
-                DO UPDATE SET
-                    quantity = quantity + excluded.quantity,
-                    timestamp = excluded.timestamp,
-                    price_usd = excluded.price_usd
-            ''', (
-                card_name,
-                set_name,
-                card_number,
-                rarity,
-                type_line,
-                mana_cost,
-                colors_str,
-                color_identity,
-                price,
-                quantity,
-                condition,
-                1 if is_foil else 0,
-                1 if is_surge else 0,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            ))
-
+            columns = {row['name'] for row in self.conn.execute("PRAGMA table_info(inventory)")}
+            if not columns:
+                self.conn.execute(INVENTORY_TABLE.format(table='inventory'))
+            elif 'finish' not in columns:
+                self._migrate_to_multi_game(columns)
+            self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_game_name ON inventory(game, card_name COLLATE NOCASE)')
+            self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_timestamp ON inventory(timestamp DESC)')
             self.conn.commit()
 
-            # Get the final quantity to display
-            cursor.execute('''
-                SELECT quantity FROM inventory
-                WHERE card_name = ? AND set_name = ? AND card_number = ?
-                  AND condition = ? AND foil = ? AND surge = ?
-            ''', (card_name, set_name, card_number, condition, 1 if is_foil else 0, 1 if is_surge else 0))
+    def _migrate_to_multi_game(self, columns):
+        """
+        Inventories from before multi-game support had foil/surge flags and no game column.
+        The UNIQUE constraint changes, so the table is rebuilt (SQLite can't alter it) -
+        after copying the old table to data/backups/.
+        """
+        backup_dir = Config.DATA_DIR / 'backups'
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_file = backup_dir / f"inventory_before_multigame_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        self.conn.execute('ATTACH DATABASE ? AS backup', (str(backup_file),))
+        self.conn.execute('CREATE TABLE backup.inventory AS SELECT * FROM main.inventory')
+        self.conn.commit()
+        self.conn.execute('DETACH DATABASE backup')
+        before = self.conn.execute('SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM inventory').fetchone()
+        logger.info(f"Inventory backed up to {backup_file} ({before[0]} rows)")
 
-            row = cursor.fetchone()
-            final_quantity = row[0] if row else quantity
-            total_value = price * final_quantity
-            self.last_added = ((card_name, set_name, card_number, condition, 1 if is_foil else 0, 1 if is_surge else 0), quantity)
-            self.log(f"Added to inventory: {quantity}x {card_name} ({color_identity}) - ${total_value:.2f}", level="success")
+        surge = 'surge' if 'surge' in columns else '0'
+        finish = f"CASE WHEN {surge} = 1 THEN 'surge' WHEN foil = 1 THEN 'foil' ELSE 'regular' END"
+        conn = sqlite3.connect(str(self.db_file), isolation_level=None, timeout=10.0)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute('DROP TABLE IF EXISTS inventory_new')
+            conn.execute(INVENTORY_TABLE.format(table='inventory_new'))
+            # Rows that only differed by a NULL number/condition become duplicates: add them up
+            conn.execute(f'''
+                INSERT INTO inventory_new (game, card_name, set_name, card_number, rarity, type_line,
+                                           mana_cost, colors, color_identity, price_usd, quantity,
+                                           condition, finish, timestamp)
+                SELECT 'mtg', card_name, set_name, COALESCE(card_number, ''), rarity, type_line,
+                       mana_cost, colors, color_identity, price_usd, quantity,
+                       COALESCE(condition, 'Near Mint'), {finish}, timestamp
+                FROM inventory WHERE true ORDER BY id
+                ON CONFLICT(game, card_name, set_name, card_number, condition, finish)
+                DO UPDATE SET quantity = quantity + excluded.quantity
+            ''')
+            after = conn.execute('SELECT COALESCE(SUM(quantity), 0) FROM inventory_new').fetchone()[0]
+            if after != before[1]:
+                raise RuntimeError(f"card count changed ({before[1]} -> {after})")
+            conn.execute('DROP TABLE inventory')
+            conn.execute('ALTER TABLE inventory_new RENAME TO inventory')
+            conn.execute('COMMIT')
+        except Exception:
+            conn.execute('ROLLBACK')
+            logger.exception("Inventory migration failed - the old table is unchanged")
+            raise
+        finally:
+            conn.close()
+        self.log(f"Inventory upgraded for multiple games ({before[0]} entries, {before[1]} cards; "
+                 f"backup: data/backups/{backup_file.name})", level="success")
+
+    # ------------------------------------------------------------------------
+    # Adding and undo
+    # ------------------------------------------------------------------------
+
+    def add_card(self, fields, game, finish, condition='Near Mint', quantity=1):
+        """
+        Add copies of a printing (fields from Game.inventory_fields) - merged with an existing
+        entry for the same card, set, number, condition and finish.
+        """
+        quantity = max(1, int(quantity or 1))
+        values = {
+            'game': game, 'card_id': fields.get('card_id'), 'card_name': fields['name'],
+            'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
+            'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
+            'type_line': fields.get('type_line'), 'mana_cost': fields.get('mana_cost'),
+            'colors': fields.get('colors'), 'color_identity': fields.get('color_identity'),
+            'price_usd': float(fields.get('price') or 0), 'quantity': quantity,
+            'condition': condition or 'Near Mint', 'finish': finish, 'timestamp': now(),
+        }
+        with self._lock:
+            self.conn.execute(UPSERT, values)
+            self.conn.commit()
+            row = self.conn.execute(
+                f"SELECT id, quantity FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+                [values[c] for c in KEY_COLUMNS]).fetchone()
+            self.last_added = (row['id'], quantity)
+        self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
+                 f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
 
     def undo_last_add(self):
         """
         Take back the most recent add_card: lower that entry's quantity by the amount
-        added, deleting it if nothing is left.
-
-        Returns:
-            str: the card name, or None if there is nothing to undo
+        added, deleting it if nothing is left. Returns the card name, or None.
         """
         with self._lock:
             if not self.last_added:
                 return None
-            key, quantity = self.last_added
+            row_id, quantity = self.last_added
             self.last_added = None
-            where = 'card_name = ? AND set_name = ? AND card_number = ? AND condition = ? AND foil = ? AND surge = ?'
-            cursor = self.conn.cursor()
-            cursor.execute(f'UPDATE inventory SET quantity = quantity - ? WHERE {where}', (quantity, *key))
-            cursor.execute(f'DELETE FROM inventory WHERE quantity <= 0 AND {where}', key)
+            row = self.conn.execute('SELECT card_name FROM inventory WHERE id = ?', (row_id,)).fetchone()
+            if not row:
+                return None
+            self.conn.execute('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', (quantity, row_id))
+            self.conn.execute('DELETE FROM inventory WHERE id = ? AND quantity <= 0', (row_id,))
             self.conn.commit()
-            self.log(f"Undid add: {quantity}x {key[0]}", level="info")
-            return key[0]
+        self.log(f"Undid add: {quantity}x {row['card_name']}")
+        return row['card_name']
 
-    def _find_existing_card(self, card_name, set_name, card_number, condition, is_foil, is_surge=False):
-        """
-        Find existing card in inventory using accent-insensitive matching
+    # ------------------------------------------------------------------------
+    # Reading
+    # ------------------------------------------------------------------------
 
-        Strategy:
-        1. Find all cards matching the name (accent-insensitive)
-        2. Filter by collector number, condition, foil status, and surge status
-        3. Return best match
-
-        Returns:
-            Dict with card data if found, None otherwise
-        """
-        cursor = self.conn.cursor()
-
-        # Step 1: Find all cards with matching name (accent-insensitive)
-        # Optimization: Use SQL WHERE to reduce result set first, then normalize accents
-        normalized_search_name = normalize_text(card_name).lower()
-
-        # Use case-insensitive SQL filter first (catches 99% of cases)
-        cursor.execute('''
-            SELECT * FROM inventory
-            WHERE LOWER(card_name) = LOWER(?)
-        ''', (card_name,))
-
-        # Then do accent normalization on the smaller result set
-        matching_cards = []
-        for row in cursor.fetchall():
-            db_name = row['card_name']
-            if normalize_text(db_name).lower() == normalized_search_name:
-                matching_cards.append(row)
-
-        if not matching_cards:
-            return None
-
-        # Step 2: Filter by collector number, condition, foil, and surge
-        for row in matching_cards:
-            # Get surge value (default to 0 for backwards compatibility)
-            try:
-                row_surge = row['surge']
-            except (KeyError, IndexError):
-                row_surge = 0
-
-            # Check if all criteria match
-            if (row['set_name'] == set_name and
-                row['card_number'] == card_number and
-                row['condition'] == condition and
-                row['foil'] == (1 if is_foil else 0) and
-                row_surge == (1 if is_surge else 0)):
-                logger.info(f"Found existing inventory entry: {row['card_name']} #{row['card_number']} (qty: {row['quantity']})")
-                return dict(row)
-
-        # No exact match found
-        return None
-
-    def _get_color_identity(self, colors):
-        """
-        Get color identity string
-
-        Args:
-            colors: List of color codes (e.g., ['W', 'U', 'B', 'R', 'G'])
-
-        Returns:
-            String representing color identity
-        """
-        if not colors or len(colors) == 0:
-            return 'Colorless'
-        elif len(colors) == 1:
-            color_names = {
-                'W': 'White',
-                'U': 'Blue',
-                'B': 'Black',
-                'R': 'Red',
-                'G': 'Green'
-            }
-            return color_names.get(colors[0], colors[0])
-        else:
-            return 'Multicolor'
-
-    def get_all_cards(self):
-        """
-        Get all cards from inventory
-
-        Returns:
-            List of dicts with card data (CSV-compatible format)
-        """
+    def get_all_cards(self, game=None):
+        """Inventory rows (newest first), optionally only one game's"""
+        where, params = ('WHERE game = ?', (game,)) if game else ('', ())
         with self._lock:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                SELECT * FROM inventory
-                ORDER BY timestamp DESC, id DESC
-            ''')
-
-            cards = []
-            for row in cursor.fetchall():
-                # Get surge value (default to 0 for backwards compatibility)
-                try:
-                    surge = row['surge']
-                except (KeyError, IndexError):
-                    surge = 0
-
-                cards.append({
-                    'Card Name': row['card_name'],
-                    'Set': row['set_name'],
-                    'Card Number': row['card_number'],
-                    'Rarity': row['rarity'],
-                    'Type': row['type_line'],
-                    'Mana Cost': row['mana_cost'],
-                    'Colors': row['colors'],
-                    'Color Identity': row['color_identity'],
-                    'Price (USD)': f"${row['price_usd']:.2f}",
-                    'Quantity': row['quantity'],
-                    'Condition': row['condition'],
-                    'Foil': 'Yes' if row['foil'] else 'No',
-                    'Surge': 'Yes' if surge else 'No',
-                    'Timestamp': row['timestamp']
-                })
-
-            return cards
-
-    def get_summary(self):
-        """Get inventory statistics"""
-        try:
-            cursor = self.conn.cursor()
-
-            # Get totals
-            cursor.execute('''
-                SELECT
-                    SUM(quantity) as total_cards,
-                    COUNT(*) as unique_cards,
-                    SUM(price_usd * quantity) as total_value
-                FROM inventory
-            ''')
-
-            row = cursor.fetchone()
-            total_cards = row['total_cards'] or 0
-            unique_cards = row['unique_cards'] or 0
-            total_value = row['total_value'] or 0.0
-
-            # Get recent cards
-            cursor.execute('''
-                SELECT * FROM inventory
-                ORDER BY timestamp DESC, id DESC
-                LIMIT 5
-            ''')
-
-            recent_cards = []
-            for row in cursor.fetchall():
-                # Get surge value (default to 0 for backwards compatibility)
-                try:
-                    surge = row['surge']
-                except (KeyError, IndexError):
-                    surge = 0
-
-                recent_cards.append({
-                    'Card Name': row['card_name'],
-                    'Set': row['set_name'],
-                    'Card Number': row['card_number'],
-                    'Rarity': row['rarity'],
-                    'Type': row['type_line'],
-                    'Mana Cost': row['mana_cost'],
-                    'Colors': row['colors'],
-                    'Color Identity': row['color_identity'],
-                    'Price (USD)': f"${row['price_usd']:.2f}",
-                    'Quantity': row['quantity'],
-                    'Condition': row['condition'],
-                    'Foil': 'Yes' if row['foil'] else 'No',
-                    'Surge': 'Yes' if surge else 'No',
-                    'Timestamp': row['timestamp']
-                })
-
-            return {
-                'total_cards': total_cards,
-                'unique_cards': unique_cards,
-                'total_value': total_value,
-                'recent_cards': recent_cards
-            }
-        except Exception as e:
-            self.log(f"Error reading inventory: {e}", level="error")
-            return {
-                'total_cards': 0,
-                'unique_cards': 0,
-                'total_value': 0.0,
-                'recent_cards': []
-            }
-
-    def export_csv(self, output_path=None):
-        """
-        Export inventory to CSV file
-
-        Args:
-            output_path: Optional custom output path. If None, uses default location.
-
-        Returns:
-            Path to exported file
-        """
-        if output_path is None:
-            # Use default: data/card_inventory_export_TIMESTAMP.csv
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_path = Config.DATA_DIR / f'card_inventory_export_{timestamp}.csv'
-        else:
-            output_path = Path(output_path)
-
-        try:
-            cards = self.get_all_cards()
-
-            with open(output_path, 'w', newline='') as f:
-                if cards:
-                    writer = csv.DictWriter(f, fieldnames=cards[0].keys())
-                    writer.writeheader()
-                    writer.writerows(cards)
-                else:
-                    # Write empty file with headers
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        'Card Name', 'Set', 'Card Number', 'Rarity', 'Type',
-                        'Mana Cost', 'Colors', 'Color Identity',
-                        'Price (USD)', 'Quantity', 'Condition', 'Foil', 'Surge', 'Timestamp'
-                    ])
-
-            self.log(f"Inventory exported to: {output_path}", level="success")
-            return output_path
-
-        except Exception as e:
-            self.log(f"Export failed: {e}", level="error")
-            return None
-
-    def export_moxfield_csv(self, output_path=None):
-        """
-        Export inventory to Moxfield-compatible CSV format
-
-        Moxfield format:
-        Count,Name,Edition,Condition,Language,Foil,Collector Number,Purchase Price,Tag
-
-        Args:
-            output_path: Optional custom output path. If None, uses default location.
-
-        Returns:
-            Path to exported file
-        """
-        if output_path is None:
-            # Use default: data/moxfield_export_TIMESTAMP.csv
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_path = Config.DATA_DIR / f'moxfield_export_{timestamp}.csv'
-        else:
-            output_path = Path(output_path)
-
-        try:
-            cards = self.get_all_cards()
-
-            # Write Moxfield format
-            with open(output_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-
-                # Moxfield header
-                writer.writerow([
-                    'Count', 'Name', 'Edition', 'Condition', 'Language',
-                    'Foil', 'Collector Number', 'Purchase Price', 'Tag'
-                ])
-
-                # Convert each card to Moxfield format
-                for card in cards:
-                    count = card.get('Quantity', '1')
-                    name = card.get('Card Name', '')
-                    edition = card.get('Set', '')
-                    condition = card.get('Condition', 'Near Mint')
-                    language = 'English'  # Default to English
-
-                    # Determine foil type: surge takes precedence over regular foil
-                    if card.get('Surge', 'No') == 'Yes':
-                        foil = 'surge'
-                    elif card.get('Foil', 'No') == 'Yes':
-                        foil = 'foil'
-                    else:
-                        foil = ''
-
-                    collector_number = card.get('Card Number', '')
-                    purchase_price = '0'  # Set to 0 as requested
-                    tag = ''  # Empty tag by default
-
-                    writer.writerow([
-                        count, name, edition, condition, language,
-                        foil, collector_number, purchase_price, tag
-                    ])
-
-            self.log(f"Moxfield inventory exported to: {output_path}", level="success")
-            return output_path
-
-        except Exception as e:
-            self.log(f"Moxfield export failed: {e}", level="error")
-            return None
-
-    def import_csv(self, csv_file_path, replace_existing=False):
-        """
-        Import inventory from CSV file
-
-        Args:
-            csv_file_path: Path to CSV file to import
-            replace_existing: If True, clear existing inventory before import (default: False)
-
-        Returns:
-            Dict with import statistics (added, updated, skipped, errors)
-        """
-        csv_file_path = Path(csv_file_path)
-
-        if not csv_file_path.exists():
-            self.log(f"Import failed: File not found: {csv_file_path}", level="error")
-            return {
-                'success': False,
-                'error': 'File not found',
-                'added': 0,
-                'updated': 0,
-                'skipped': 0,
-                'errors': 0
-            }
-
-        stats = {
-            'success': True,
-            'added': 0,
-            'updated': 0,
-            'skipped': 0,
-            'errors': 0
-        }
-
-        try:
-            # Clear existing inventory if requested
-            if replace_existing:
-                cursor = self.conn.cursor()
-                cursor.execute('DELETE FROM inventory')
-                self.conn.commit()
-                self.log("Cleared existing inventory for replacement", level="info")
-
-            # Read CSV file
-            with open(csv_file_path, 'r', newline='') as f:
-                reader = csv.DictReader(f)
-
-                for row_num, row in enumerate(reader, start=2):  # Start at 2 (1 is header)
-                    try:
-                        # Parse CSV row
-                        card_name = row.get('Card Name', '').strip()
-                        set_name = row.get('Set', '').strip()
-                        card_number = row.get('Card Number', '').strip()
-
-                        if not card_name or not set_name:
-                            self.log(f"Row {row_num}: Skipping - missing name or set", level="warning")
-                            stats['skipped'] += 1
-                            continue
-
-                        # Parse other fields
-                        rarity = row.get('Rarity', '').strip()
-                        type_line = row.get('Type', '').strip()
-                        mana_cost = row.get('Mana Cost', '').strip()
-                        colors = row.get('Colors', '').strip()
-                        color_identity = row.get('Color Identity', 'Colorless').strip()
-
-                        # Parse price (remove $ sign if present)
-                        price_str = row.get('Price (USD)', '0').strip()
-                        price_str = price_str.replace('$', '').replace(',', '')
-                        try:
-                            price = float(price_str)
-                        except ValueError:
-                            price = 0.0
-
-                        # Parse quantity
-                        try:
-                            quantity = int(row.get('Quantity', '1'))
-                            if quantity < 1:
-                                quantity = 1
-                        except ValueError:
-                            quantity = 1
-
-                        # Parse condition
-                        condition = row.get('Condition', 'Near Mint').strip()
-
-                        # Parse foil status
-                        foil_str = row.get('Foil', 'No').strip().lower()
-                        is_foil = foil_str in ['yes', 'true', '1']
-
-                        # Parse surge status (optional field for backwards compatibility)
-                        surge_str = row.get('Surge', 'No').strip().lower()
-                        is_surge = surge_str in ['yes', 'true', '1']
-
-                        # Check if card already exists
-                        existing = self._find_existing_card(
-                            card_name, set_name, card_number,
-                            condition, is_foil, is_surge
-                        )
-
-                        cursor = self.conn.cursor()
-
-                        if existing and not replace_existing:
-                            # Update existing entry - add quantities together
-                            new_quantity = existing['quantity'] + quantity
-                            cursor.execute('''
-                                UPDATE inventory
-                                SET quantity = ?,
-                                    timestamp = ?
-                                WHERE id = ?
-                            ''', (new_quantity, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), existing['id']))
-                            self.conn.commit()
-                            stats['updated'] += 1
-
-                        else:
-                            # Insert new entry
-                            cursor.execute('''
-                                INSERT INTO inventory (
-                                    card_name, set_name, card_number, rarity, type_line,
-                                    mana_cost, colors, color_identity, price_usd, quantity,
-                                    condition, foil, surge, timestamp
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (
-                                card_name, set_name, card_number, rarity, type_line,
-                                mana_cost, colors, color_identity, price, quantity,
-                                condition, 1 if is_foil else 0, 1 if is_surge else 0,
-                                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            ))
-                            self.conn.commit()
-                            stats['added'] += 1
-
-                    except Exception as e:
-                        self.log(f"Row {row_num}: Error importing card - {e}", level="error")
-                        stats['errors'] += 1
-                        continue
-
-            # Log summary
-            total_processed = stats['added'] + stats['updated']
-            self.log(
-                f"Import complete: {total_processed} cards imported "
-                f"({stats['added']} added, {stats['updated']} updated, "
-                f"{stats['skipped']} skipped, {stats['errors']} errors)",
-                level="success"
-            )
-
-            return stats
-
-        except Exception as e:
-            self.log(f"Import failed: {e}", level="error")
-            return {
-                'success': False,
-                'error': str(e),
-                'added': 0,
-                'updated': 0,
-                'skipped': 0,
-                'errors': 0
-            }
-
-    def get_detailed_stats(self):
-        """Get detailed inventory statistics including color breakdown"""
-        try:
-            cursor = self.conn.cursor()
-
-            # Get totals
-            cursor.execute('''
-                SELECT
-                    SUM(quantity) as total_cards,
-                    COUNT(*) as unique_cards,
-                    SUM(price_usd * quantity) as total_value
-                FROM inventory
-            ''')
-
-            row = cursor.fetchone()
-            total_cards = row['total_cards'] or 0
-            unique_cards = row['unique_cards'] or 0
-            total_value = row['total_value'] or 0.0
-
-            # Color breakdown
-            cursor.execute('''
-                SELECT color_identity, SUM(quantity) as count
-                FROM inventory
-                GROUP BY color_identity
-            ''')
-            color_breakdown = {}
-            for row in cursor.fetchall():
-                color_breakdown[row['color_identity']] = row['count']
-
-            # Rarity breakdown
-            cursor.execute('''
-                SELECT rarity, SUM(quantity) as count
-                FROM inventory
-                GROUP BY rarity
-            ''')
-            rarity_breakdown = {}
-            for row in cursor.fetchall():
-                rarity_breakdown[row['rarity'] or 'Unknown'] = row['count']
-
-            # Foil count
-            cursor.execute('''
-                SELECT SUM(quantity) as count
-                FROM inventory
-                WHERE foil = 1
-            ''')
-            foil_count = cursor.fetchone()['count'] or 0
-
-            non_foil_count = total_cards - foil_count
-
-            return {
-                'total_cards': total_cards,
-                'unique_cards': unique_cards,
-                'total_value': total_value,
-                'color_breakdown': color_breakdown,
-                'rarity_breakdown': rarity_breakdown,
-                'foil_count': foil_count,
-                'non_foil_count': non_foil_count
-            }
-
-        except Exception as e:
-            self.log(f"Error generating stats: {e}", level="error")
-            return {
-                'total_cards': 0,
-                'unique_cards': 0,
-                'total_value': 0.0,
-                'color_breakdown': {},
-                'rarity_breakdown': {},
-                'foil_count': 0,
-                'non_foil_count': 0
-            }
-
-    def delete_card(self, index):
-        """
-        Delete a card from inventory by index
-
-        Args:
-            index: Row index (0-based, from get_all_cards())
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            cards = self.get_all_cards()
-
-            if index < 0 or index >= len(cards):
-                self.log(f"Invalid index: {index}", level="error")
+            rows = self.conn.execute(f'SELECT * FROM inventory {where} ORDER BY timestamp DESC, id DESC', params)
+            return [_row_dict(row) for row in rows]
+
+    def get_stats(self, game=None):
+        """Totals for the top bar and the inventory window"""
+        where, params = ('WHERE game = ?', (game,)) if game else ('', ())
+        with self._lock:
+            row = self.conn.execute(f'''
+                SELECT COALESCE(SUM(quantity), 0) AS total_cards, COUNT(*) AS unique_cards,
+                       COALESCE(SUM(price_usd * quantity), 0) AS total_value
+                FROM inventory {where}''', params).fetchone()
+            finishes = {r['finish']: r['count'] for r in self.conn.execute(
+                f'SELECT finish, SUM(quantity) AS count FROM inventory {where} GROUP BY finish', params)}
+        return {'total_cards': row['total_cards'], 'unique_cards': row['unique_cards'],
+                'total_value': row['total_value'], 'finishes': finishes}
+
+    def _get_row(self, row_id):
+        return self.conn.execute('SELECT * FROM inventory WHERE id = ?', (row_id,)).fetchone()
+
+    # ------------------------------------------------------------------------
+    # Editing
+    # ------------------------------------------------------------------------
+
+    def delete_card(self, row_id):
+        with self._lock:
+            row = self._get_row(row_id)
+            if not row:
                 return False
-
-            # Get the card at this index
-            card = cards[index]
-            card_name = card['Card Name']
-
-            # Find and delete in database
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                DELETE FROM inventory
-                WHERE card_name = ?
-                  AND set_name = ?
-                  AND card_number = ?
-                  AND condition = ?
-                  AND foil = ?
-                  AND surge = ?
-            ''', (
-                card['Card Name'],
-                card['Set'],
-                card['Card Number'],
-                card['Condition'],
-                1 if card['Foil'] == 'Yes' else 0,
-                1 if card.get('Surge', 'No') == 'Yes' else 0
-            ))
-
+            self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
             self.conn.commit()
+        self.log(f"Deleted from inventory: {row['card_name']}", level="success")
+        return True
 
-            self.log(f"Deleted from inventory: {card_name}", level="success")
-            return True
+    def _copy_with(self, row, quantity, condition, finish):
+        """Add `quantity` copies of an entry under another condition/finish (merging)"""
+        values = dict(row)
+        values.update(quantity=quantity, condition=condition, finish=finish)
+        values.pop('id')
+        self.conn.execute(UPSERT, values)
 
-        except Exception as e:
-            self.log(f"Error deleting card: {e}", level="error")
-            return False
-
-    def update_card(self, index, quantity=None, condition=None, is_foil=None, is_surge=None, split_quantity=None):
+    def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None):
         """
-        Update a card in inventory, with automatic splitting if foil type changes and quantity > 1
-
-        Args:
-            index: Row index (0-based, from get_all_cards())
-            quantity: New quantity (optional)
-            condition: New condition (optional)
-            is_foil: New foil status (optional)
-            is_surge: New surge status (optional)
-            split_quantity: Number of cards to split with new foil type (optional, defaults to 1 if foil changed)
+        Change an entry's quantity, condition or finish. Changing the finish of an entry with
+        several copies moves split_quantity of them (default 1) to the new finish. An entry
+        that ends up identical to another one is merged into it.
 
         Returns:
             dict: {'success': bool, 'split': bool, 'message': str}
         """
         with self._lock:
-            try:
-                cards = self.get_all_cards()
+            row = self._get_row(row_id)
+            if not row:
+                return {'success': False, 'split': False, 'message': 'Card not found'}
+            new_quantity = int(quantity) if quantity is not None else row['quantity']
+            new_condition = condition or row['condition']
+            new_finish = finish or row['finish']
+            if new_quantity < 1:
+                return {'success': False, 'split': False, 'message': 'Quantity must be at least 1'}
 
-                if index < 0 or index >= len(cards):
-                    self.log(f"Invalid index: {index}", level="error")
-                    return {'success': False, 'split': False, 'message': 'Invalid index'}
-
-                # Get the card at this index
-                card = cards[index]
-                card_name = card['Card Name']
-                old_quantity = int(card['Quantity'])
-                old_foil = (card['Foil'] == 'Yes')
-                old_surge = (card.get('Surge', 'No') == 'Yes')
-
-                # Use old values if new ones not provided
-                new_quantity = int(quantity) if quantity is not None else old_quantity
-                new_condition = condition if condition is not None else card['Condition']
-                new_foil = is_foil if is_foil is not None else old_foil
-                new_surge = is_surge if is_surge is not None else old_surge
-
-                # Check if foil type changed
-                foil_type_changed = (new_foil != old_foil) or (new_surge != old_surge)
-
-                # If foil type changed and quantity > 1, split the entry
-                if foil_type_changed and old_quantity > 1:
-                    # Use provided split_quantity or default to 1
-                    qty_to_split = split_quantity if split_quantity is not None else 1
-
-                    # Validate split quantity
-                    if qty_to_split < 1 or qty_to_split > old_quantity:
-                        self.log(f"Invalid split quantity: {qty_to_split} (must be 1-{old_quantity})", level="error")
-                        return {'success': False, 'split': False, 'message': f'Invalid split quantity (must be 1-{old_quantity})'}
-
-                    cursor = self.conn.cursor()
-
-                    # Reduce original entry quantity by split_quantity
-                    remaining_quantity = old_quantity - qty_to_split
-
-                    if remaining_quantity > 0:
-                        # Update original entry with reduced quantity
-                        cursor.execute('''
-                            UPDATE inventory
-                            SET quantity = ?
-                            WHERE card_name = ?
-                              AND set_name = ?
-                              AND card_number = ?
-                              AND condition = ?
-                              AND foil = ?
-                              AND surge = ?
-                        ''', (
-                            remaining_quantity,
-                            card['Card Name'],
-                            card['Set'],
-                            card['Card Number'],
-                            card['Condition'],
-                            1 if old_foil else 0,
-                            1 if old_surge else 0
-                        ))
-                    else:
-                        # Delete original entry if all cards moved to new foil type
-                        cursor.execute('''
-                            DELETE FROM inventory
-                            WHERE card_name = ?
-                              AND set_name = ?
-                              AND card_number = ?
-                              AND condition = ?
-                              AND foil = ?
-                              AND surge = ?
-                        ''', (
-                            card['Card Name'],
-                            card['Set'],
-                            card['Card Number'],
-                            card['Condition'],
-                            1 if old_foil else 0,
-                            1 if old_surge else 0
-                        ))
-
-                    # Create new entry with new foil type and split_quantity
-                    # (Use add_card logic with duplicate detection)
-                    cursor.execute('''
-                        INSERT INTO inventory (
-                            card_name, set_name, card_number, rarity, type_line,
-                            mana_cost, colors, color_identity, price_usd,
-                            quantity, condition, foil, surge, timestamp
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(card_name, set_name, card_number, condition, foil, surge)
-                        DO UPDATE SET quantity = quantity + ?
-                    ''', (
-                        card['Card Name'],
-                        card['Set'],
-                        card['Card Number'],
-                        card['Rarity'],
-                        card['Type'],
-                        card.get('Mana Cost', ''),
-                        card.get('Colors', ''),
-                        card.get('Color Identity', ''),
-                        float(card['Price (USD)'].replace('$', '')) if card.get('Price (USD)') else 0.0,
-                        qty_to_split,  # quantity from split
-                        new_condition,
-                        1 if new_foil else 0,
-                        1 if new_surge else 0,
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        qty_to_split  # For ON CONFLICT DO UPDATE
-                    ))
-
-                    self.conn.commit()
-
-                    if remaining_quantity > 0:
-                        self.log(f"Split {card_name}: {remaining_quantity} ({'surge foil' if old_surge else 'foil' if old_foil else 'non-foil'}) + {qty_to_split} ({'surge foil' if new_surge else 'foil' if new_foil else 'non-foil'})", level="success")
-                    else:
-                        self.log(f"Converted all {qty_to_split} {card_name} to {'surge foil' if new_surge else 'foil' if new_foil else 'non-foil'}", level="success")
-
-                    return {'success': True, 'split': True, 'message': 'Card updated and split'}
-
+            if new_finish != row['finish'] and row['quantity'] > 1:
+                moved = int(split_quantity) if split_quantity is not None else 1
+                if not 1 <= moved <= row['quantity']:
+                    return {'success': False, 'split': False,
+                            'message': f"Split quantity must be 1-{row['quantity']}"}
+                remaining = row['quantity'] - moved
+                if remaining:
+                    self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (remaining, row_id))
                 else:
-                    # No foil type change, or quantity is 1
-                    cursor = self.conn.cursor()
+                    self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
+                self._copy_with(row, moved, new_condition, new_finish)
+                self.conn.commit()
+                self.log(f"{row['card_name']}: {moved} moved to {new_finish}"
+                         + (f", {remaining} stay {row['finish']}" if remaining else ''), level="success")
+                return {'success': True, 'split': True, 'message': 'Card updated and split'}
 
-                    # If foil type changed (but quantity is 1), check for duplicates
-                    if foil_type_changed:
-                        # Check if target combination already exists
-                        cursor.execute('''
-                            SELECT quantity FROM inventory
-                            WHERE card_name = ?
-                              AND set_name = ?
-                              AND card_number = ?
-                              AND condition = ?
-                              AND foil = ?
-                              AND surge = ?
-                        ''', (
-                            card['Card Name'],
-                            card['Set'],
-                            card['Card Number'],
-                            new_condition,
-                            1 if new_foil else 0,
-                            1 if new_surge else 0
-                        ))
-
-                        existing = cursor.fetchone()
-
-                        if existing:
-                            # Target already exists - merge quantities and delete old entry
-                            existing_quantity = existing[0]
-
-                            # Update the existing entry with merged quantity
-                            cursor.execute('''
-                                UPDATE inventory
-                                SET quantity = ?
-                                WHERE card_name = ?
-                                  AND set_name = ?
-                                  AND card_number = ?
-                                  AND condition = ?
-                                  AND foil = ?
-                                  AND surge = ?
-                            ''', (
-                                existing_quantity + new_quantity,
-                                card['Card Name'],
-                                card['Set'],
-                                card['Card Number'],
-                                new_condition,
-                                1 if new_foil else 0,
-                                1 if new_surge else 0
-                            ))
-
-                            # Delete the old entry
-                            cursor.execute('''
-                                DELETE FROM inventory
-                                WHERE card_name = ?
-                                  AND set_name = ?
-                                  AND card_number = ?
-                                  AND condition = ?
-                                  AND foil = ?
-                                  AND surge = ?
-                            ''', (
-                                card['Card Name'],
-                                card['Set'],
-                                card['Card Number'],
-                                card['Condition'],
-                                1 if old_foil else 0,
-                                1 if old_surge else 0
-                            ))
-
-                            self.conn.commit()
-
-                            self.log(f"Merged {card_name}: changed foil status and merged with existing entry (total: {existing_quantity + new_quantity})", level="success")
-                            return {'success': True, 'split': False, 'message': 'Card merged with existing entry'}
-                        # else: Target doesn't exist, fall through to UPDATE
-
-                    # No duplicate issue - just update the entry
-                    cursor.execute('''
-                        UPDATE inventory
-                        SET quantity = ?, condition = ?, foil = ?, surge = ?
-                        WHERE card_name = ?
-                          AND set_name = ?
-                          AND card_number = ?
-                          AND condition = ?
-                          AND foil = ?
-                          AND surge = ?
-                    ''', (
-                        new_quantity,
-                        new_condition,
-                        1 if new_foil else 0,
-                        1 if new_surge else 0,
-                        card['Card Name'],
-                        card['Set'],
-                        card['Card Number'],
-                        card['Condition'],
-                        1 if old_foil else 0,
-                        1 if old_surge else 0
-                    ))
-
-                    self.conn.commit()
-
-                    self.log(f"Updated {card_name}: quantity={new_quantity}, condition={new_condition}", level="success")
-                    return {'success': True, 'split': False, 'message': 'Card updated'}
-
-            except Exception as e:
-                self.log(f"Error updating card: {e}", level="error")
-                return {'success': False, 'split': False, 'message': str(e)}
-
-    def clear_inventory(self):
-        """
-        Clear all cards from inventory
-
-        Returns:
-            Dict with success status and count of deleted cards
-        """
-        try:
-            cursor = self.conn.cursor()
-
-            # Get count before deletion
-            cursor.execute('SELECT COUNT(*) as count FROM inventory')
-            count_before = cursor.fetchone()['count']
-
-            # Delete all records
-            cursor.execute('DELETE FROM inventory')
+            # An entry that becomes identical to another one is merged into it
+            twin = self.conn.execute(f'''
+                SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)} AND id != ?''',
+                (row['game'], row['card_name'], row['set_name'], row['card_number'], new_condition, new_finish,
+                 row_id)).fetchone()
+            if twin:
+                self.conn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', (new_quantity, twin['id']))
+                self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
+            else:
+                self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ? WHERE id = ?',
+                                  (new_quantity, new_condition, new_finish, row_id))
             self.conn.commit()
+        self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}", level="success")
+        return {'success': True, 'split': False, 'message': 'Card updated'}
 
-            self.log(f"Inventory cleared: {count_before} entries removed", level="success")
-
-            return {
-                'success': True,
-                'deleted': count_before
-            }
-
+    def clear_inventory(self, game=None):
+        """Delete every entry (of one game, if given)"""
+        where, params = ('WHERE game = ?', (game,)) if game else ('', ())
+        try:
+            with self._lock:
+                deleted = self.conn.execute(f'DELETE FROM inventory {where}', params).rowcount
+                self.conn.commit()
+                self.last_added = None
+            self.log(f"Inventory cleared: {deleted} entries removed", level="success")
+            return {'success': True, 'deleted': deleted}
         except Exception as e:
             self.log(f"Failed to clear inventory: {e}", level="error")
-            return {
-                'success': False,
-                'error': str(e),
-                'deleted': 0
-            }
+            return {'success': False, 'error': str(e), 'deleted': 0}
+
+    # ------------------------------------------------------------------------
+    # Export / import
+    # ------------------------------------------------------------------------
+
+    def export(self, game, writer, prefix):
+        """Write one game's inventory with an export writer (Game.export_formats); returns the path"""
+        path = Config.DATA_DIR / f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(path, 'w', newline='') as f:
+            writer(self.get_all_cards(game), f)
+        self.log(f"Inventory exported to: {path}", level="success")
+        return path
+
+    def import_csv(self, csv_file_path, game, finishes, replace_existing=False):
+        """
+        Import a CSV written by the CSV export (Card Name, Set, Card Number, ..., Quantity,
+        Condition, and Finish or the older Foil / Surge columns) into one game's inventory.
+
+        Args:
+            finishes: the game's finish keys - the first is used when a row has none
+
+        Returns:
+            dict: success, added, updated, skipped, errors
+        """
+        csv_file_path = Path(csv_file_path)
+        stats = {'success': True, 'added': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
+        if not csv_file_path.exists():
+            return {**stats, 'success': False, 'error': 'File not found'}
+
+        with self._lock:
+            if replace_existing:
+                self.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
+                self.last_added = None
+            with open(csv_file_path, newline='') as f:
+                for row_number, row in enumerate(csv.DictReader(f), start=2):
+                    try:
+                        name = (row.get('Card Name') or '').strip()
+                        set_name = (row.get('Set') or '').strip()
+                        if not name or not set_name:
+                            self.log(f"Row {row_number}: skipped - missing name or set", level="warning")
+                            stats['skipped'] += 1
+                            continue
+                        finish = (row.get('Finish') or '').strip().lower()
+                        if not finish:
+                            yes = lambda column: (row.get(column) or '').strip().lower() in ('yes', 'true', '1')
+                            finish = 'surge' if yes('Surge') else 'foil' if yes('Foil') else finishes[0]
+                        if finish not in finishes:
+                            self.log(f"Row {row_number}: unknown finish '{finish}'", level="warning")
+                            stats['errors'] += 1
+                            continue
+                        try:
+                            quantity = max(1, int(row.get('Quantity') or 1))
+                        except ValueError:
+                            quantity = 1
+                        try:
+                            price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
+                        except ValueError:
+                            price = 0.0
+                        values = {
+                            'game': game, 'card_id': None, 'card_name': name, 'set_name': set_name,
+                            'set_code': None, 'card_number': (row.get('Card Number') or '').strip(),
+                            'rarity': (row.get('Rarity') or '').strip(), 'type_line': (row.get('Type') or '').strip(),
+                            'mana_cost': (row.get('Mana Cost') or '').strip(), 'colors': (row.get('Colors') or '').strip(),
+                            'color_identity': (row.get('Color Identity') or '').strip(), 'price_usd': price,
+                            'quantity': quantity, 'condition': (row.get('Condition') or '').strip() or 'Near Mint',
+                            'finish': finish, 'timestamp': now(),
+                        }
+                        exists = self.conn.execute(
+                            f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+                            [values[c] for c in KEY_COLUMNS]).fetchone()
+                        self.conn.execute(UPSERT, values)
+                        stats['updated' if exists else 'added'] += 1
+                    except Exception as e:
+                        self.log(f"Row {row_number}: error importing card - {e}", level="error")
+                        stats['errors'] += 1
+            self.conn.commit()
+
+        self.log(f"Import complete: {stats['added']} added, {stats['updated']} updated, "
+                 f"{stats['skipped']} skipped, {stats['errors']} errors", level="success")
+        return stats
 
     def close(self):
-        """Close database connection"""
         if self.conn:
             self.conn.close()

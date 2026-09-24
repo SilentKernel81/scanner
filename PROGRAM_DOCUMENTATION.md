@@ -49,8 +49,9 @@ Design choices:
 | `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
-| `card_search.py` | Search helpers combining name, number, set and treatment for the web app |
-| `inventory.py` | Inventory table: add (merging duplicates), undo, edit/split, delete, stats, CSV import/export |
+| `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports); `games.active()` is the game being scanned |
+| `card_search.py` | Magic search helpers combining name, number, set and treatment |
+| `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, delete, stats, CSV import/export |
 | `anti_glare.py` | Optional glare reduction applied to captures (CLAHE, bilateral filter, inpainting) |
 | `settings.py` | UI preferences persisted in `data/settings.json` |
 | `config.py`, `config_loader.py` | Settings from `config.yaml` (+ environment variables) |
@@ -295,10 +296,19 @@ Missing columns are added on startup (search names are filled in automatically; 
 arrives with the next card database update). "Rebuild database schema" copies the table into the
 canonical column order by column name.
 
-**`inventory`** - one row per card name + set + number + condition + foil + surge (`UNIQUE`);
-adding an existing combination increases `quantity`. Also stores rarity, type, mana cost, colors,
-color identity, price and timestamp. Editing the finish of part of a stack splits the row.
-Exports: full CSV and Moxfield CSV; CSV import merges duplicates.
+**`inventory`** (created and migrated by `inventory.py`) - one row per game + card name + set +
+number + condition + finish (`UNIQUE`); adding an existing combination increases `quantity`.
+Rows are addressed by `id` (edit, delete, undo). Also stores the printing id (`card_id`), set
+code, rarity, type, mana cost, colors, color identity, price and timestamp. `finish` is one of
+the game's finish keys (Magic: `regular`, `foil`, `surge`). Editing the finish of part of a stack
+splits the row; an edit that makes a row identical to another merges them.
+
+Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt once on startup:
+the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the
+migration checks that the card count is unchanged, and it runs in one transaction.
+
+Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV);
+CSV import reads the `Finish` column or the older `Foil`/`Surge` columns and merges duplicates.
 
 ## Focus
 
@@ -343,8 +353,13 @@ Socket.IO events:
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
 | `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
+| `set_game` | `game_changed` (to every client; stops auto scanning) |
 
 HTTP endpoints are listed in the README.
+
+**Card games.** The page loads `/api/games` (games, their finishes and export formats) and
+builds the quantity grid, the edit dialog's finish choices and the export buttons from the
+active game. The game selector in the top bar only appears when more than one game exists.
 
 ## Configuration and files
 
