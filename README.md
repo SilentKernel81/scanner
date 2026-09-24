@@ -1,667 +1,309 @@
-# Magic: The Gathering Card Scanner
+# MTG Card Scanner
 
-A real-time card scanner for Magic: The Gathering cards using computer vision and AI. Built for Raspberry Pi with support for both PiCamera2 and USB webcams.
+A camera-based scanner for Magic: The Gathering cards. Put a card under the camera, and the
+scanner finds it in the video feed, identifies the exact printing with a vision AI, tells you
+whether it's foil, and adds it to a local inventory you can export to CSV or Moxfield.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.11-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+It runs as a small web app (Flask + Socket.IO) on a Raspberry Pi or any Linux machine with a
+USB webcam or Raspberry Pi camera, and is used from a browser on the same network.
 
-## Table of Contents
+## How it works
 
-- [Overview](#overview)
-- [Features](#features)
-- [System Requirements](#system-requirements)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [API Reference](#api-reference)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Overview
-
-This project provides an automated solution for scanning and cataloging Magic: The Gathering cards. It uses YOLOv8 for real-time card detection, Vision AI (Gemini/GPT-4/Claude) for card identification, and Scryfall's database for card information lookup.
-
-### Key Capabilities
-
-- **Real-time Detection**: Continuously detects cards in camera feed using YOLOv8
-- **AI Identification**: Identifies specific cards using Vision AI (reads card name and collector number)
-- **Database Integration**: Pulls card data from Scryfall's comprehensive database
-- **Inventory Management**: Track your collection with CSV exports (standard and Moxfield formats)
-- **Web Interface**: User-friendly interface with real-time video feed and controls
-- **Smart Focus**: Automatic focus adjustment with stability detection
+1. **Find the card** - each camera frame is searched for the card's outline: the largest
+   four-sided shape with a card's 88×63 mm proportions. This takes a few milliseconds and
+   isn't fooled by foil glare inside the card.
+2. **Capture** - the card is cut out and perspective-corrected into a flat, upright image.
+3. **Identify** - a vision AI reads the card name and collector number from that image.
+4. **Foil check** - modern cards print a star (`HOB★EN`) instead of a dot (`HOB•EN`) next to
+   the set code on foil copies. The AI is shown a zoomed crop of that corner and asked which
+   one it is.
+5. **Match the printing** - name + collector number are looked up in a local copy of
+   [Scryfall](https://scryfall.com)'s card data, which also provides prices, images and
+   which finishes each printing exists in.
+6. **Add to inventory** - you confirm (or Fast Scan adds it automatically) and the card is
+   stored with quantity, condition and finish.
 
 ## Features
 
-### Core Features
+- **Live camera view** with the detected card outlined; the status turns from
+  *Stabilizing* to *Ready* when the card is still.
+- **Manual or automatic capture** - capture on demand, or start auto scanning. **Fast Scan**
+  captures quickly, identifies cards in the background and adds them automatically.
+- **Vision AI providers** - Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model
+  via Ollama (or another OpenAI-compatible server). Switch provider and model from the UI.
+- **Exact printing identification** using the collector number, with fuzzy name matching,
+  accent-insensitive search, flavor names ("Bucklebury Ferry") and shortened legendary
+  names ("Thanos" → "Thanos, the Mad Titan").
+- **Foil detection** from the ★/• marker, combined with printing data: printings that only
+  exist in foil (or only non-foil) are known for certain. The card panel pre-selects the
+  finish and shows why.
+- **Manual search with treatment filter** - borderless, showcase, extended art, full art,
+  retro frame, etched, surge foil. When several printings match, pick the one you have from
+  a grid of thumbnails.
+- **Inventory** with automatic duplicate merging, condition, regular / foil / surge foil,
+  prices, filtering, editing, CSV import, and export to CSV or
+  [Moxfield](https://moxfield.com).
+- **Anti-glare** preprocessing option for reflective cards, sound effects, and a
+  dark/light interface that follows your system theme.
+- **Housekeeping** - scanned images older than 7 days are cleaned up automatically, and the
+  card database can be updated from the UI.
 
-- ✅ **Real-time card detection** with YOLOv8 object detection
-- ✅ **Vision AI identification** supporting multiple providers:
-  - Google Gemini (default)
-  - OpenAI GPT-4 Vision
-  - Anthropic Claude Vision
-- ✅ **Scryfall database integration** (~150MB, 90,000+ cards)
-- ✅ **Automatic focus adjustment** with smart lock mechanism
-- ✅ **Frame stabilization** (5-frame buffer for stability)
-- ✅ **Database inventory tracking** with automatic duplicate detection and quantity management
-- ✅ **Multiple export formats**:
-  - Standard CSV with full card details
-  - Moxfield-compatible CSV for easy import
-- ✅ **Web interface** with live video feed
-- ✅ **Dual camera support** (USB webcam or Raspberry Pi Camera)
+## Requirements
 
-### Advanced Features
-
-- 📊 **Inventory statistics** (color breakdown, rarity analysis, total value)
-- 🔍 **Fuzzy search** for card lookups
-- 🎯 **Collector number matching** for exact version identification
-- 📸 **Image capture** and storage
-- 🎨 **Color identity** classification
-- 💰 **Price tracking** (USD, foil/non-foil)
-- 🏷️ **Condition tracking** (Near Mint, Lightly Played, etc.)
-- ✨ **Foil variant support** (Regular foil and surge foil tracking)
-
-## System Requirements
-
-### Hardware
-
-- **Raspberry Pi 4** (recommended) or Raspberry Pi 5
-- **Camera**: USB Webcam or Raspberry Pi Camera Module v2/v3
-- **RAM**: 4GB minimum (8GB recommended)
-- **Storage**: 8GB+ SD card (16GB recommended)
-- **Optional**: Hailo AI accelerator (experimental support)
-
-### Software
-
-- **OS**: Raspberry Pi OS (Bullseye or later)
-- **Python**: 3.11+
-- **Internet**: Required for initial setup and Vision AI calls
+- **Computer**: Raspberry Pi 4 or 5, or any Linux machine (developed on x86-64 Linux)
+- **Camera**: USB webcam (autofocus strongly recommended) or Raspberry Pi Camera Module
+- **Python**: 3.11 or 3.12 (tested with 3.12; very new Python releases may not have
+  wheels for the computer vision packages yet)
+- **Disk**: ~1.5 GB for dependencies (with CPU-only PyTorch), ~70 MB for the card database
+- **AI**: an API key for Gemini, OpenAI or Anthropic, **or** a local Ollama server with a
+  vision model
+- **Internet**: to download the card database, show card images, and reach cloud AI providers
 
 ## Installation
 
 ```bash
-# Create a Python 3.12 virtual environment (uv: `uv venv --python 3.12 venv`)
+git clone https://github.com/SilentKernel81/scanner.git
+cd scanner
+
+# Create a virtual environment (with uv: uv venv --python 3.12 venv)
 python3 -m venv venv
 source venv/bin/activate
 
-# Optional: CPU-only PyTorch (much smaller than the default CUDA build)
+# Optional but recommended on machines without an NVIDIA GPU: install the CPU-only
+# PyTorch first - it is much smaller than the default build
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Install dependencies
 pip install -r requirements.txt
 
-# Download Scryfall database (~80MB download, a few minutes)
+# Download the card database from Scryfall (a few minutes)
 python3 setup_database.py
 
 # Add your API key(s)
-cp .env.example .env   # then edit .env
+cp .env.example .env    # then edit .env
 ```
 
-### Vision AI Setup
+PyTorch and Ultralytics are only used by the optional YOLO fallback detector
+(`detection.method: auto` or `yolo`). With the default outline detection they are never loaded.
 
-You'll need an API key from one of these providers:
+### Raspberry Pi camera
 
-**Option 1: Google Gemini (Free Tier Available)**
-```bash
-export GEMINI_API_KEY="your_api_key_here"
-```
-Get your key at: https://makersuite.google.com/app/apikey
-
-**Option 2: OpenAI GPT-4**
-```bash
-export OPENAI_API_KEY="your_api_key_here"
-```
-Get your key at: https://platform.openai.com/api-keys
-
-**Option 3: Anthropic Claude**
-```bash
-export ANTHROPIC_API_KEY="your_api_key_here"
-```
-Get your key at: https://console.anthropic.com/
-
-Configure provider in `config.py`:
-```python
-VISION_AI_PROVIDER = 'gemini'  # or 'openai' or 'anthropic'
-```
-
-## Quick Start
-
-### 1. Start the Scanner
+The Pi camera library is installed through the system package manager, so the virtual
+environment must be able to see system packages:
 
 ```bash
-# Activate virtual environment
+sudo apt install python3-picamera2
+python3 -m venv --system-site-packages venv
+```
+
+USB cameras need no extra setup. `v4l2-ctl` (package `v4l-utils`) is used to reset
+autofocus, sharpness and zoom on startup.
+
+### Pick your camera
+
+Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number:
+
+```bash
+v4l2-ctl --list-devices
+```
+
+## Choosing a vision AI provider
+
+API keys are read from environment variables; `app.py` loads them from `.env` automatically.
+
+| Provider | Setting | Key / endpoint |
+|---|---|---|
+| Google Gemini | `gemini` | `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/app/apikey)) |
+| OpenAI | `openai` | `OPENAI_API_KEY` |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` |
+| Local (Ollama, vLLM, LM Studio) | `local` | `vision_ai.local.endpoint` in `config.yaml`, or `LOCAL_AI_ENDPOINT` |
+
+The default provider is set by `vision_ai.provider` in `config.yaml` (or `VISION_AI_PROVIDER`),
+but you can switch provider and model at any time in **Settings → Vision AI**; the choice is
+remembered in `data/settings.json`.
+
+**Local models**: pick a vision-capable model in **Settings → Vision AI** - the list is loaded
+from your server (or check with `curl http://<server>:11434/api/tags`). Thinking is switched off for Ollama
+requests, so "thinking" models such as `qwen3.5` answer in about a second instead of
+reasoning for tens of seconds.
+
+The foil check sends one extra small request per card. It is free with a local model; for
+cloud providers you can turn it off with `vision_ai.detect_foil: false`.
+
+## Running
+
+```bash
 source venv/bin/activate
-
-# Start the web server
 python3 app.py
 ```
 
-The server starts at `http://0.0.0.0:5000`
+Then open `http://localhost:5000` (or `http://<device-ip>:5000` from another device).
 
-### 2. Access the Web Interface
+`scripts/start.sh` does the same but also loads `.env`, activates the virtual environment and
+checks your API key and database first. To run the scanner as a service on a Raspberry Pi,
+see `mtg-scanner.service` (it assumes the project lives in `/home/pi/scanner`).
 
-Open your browser and navigate to:
-- Local: `http://localhost:5000`
-- Network: `http://<raspberry-pi-ip>:5000`
+## Using the scanner
 
-### 3. Scan a Card
+### Scanning cards
 
-1. Place a card in front of the camera
-2. Wait for the frame to turn **green** with "Ready" status
-3. Click **"Capture Card"** or wait for auto-capture
-4. Review the identified card
-5. Confirm to add to inventory
+1. Put a card in front of the camera. It gets an outline in the video and the status pill
+   shows **Stabilizing**, then **Ready**.
+2. Click **Capture card**, or **Start auto scanning** to capture every time a new card is
+   ready.
+3. The card panel shows the identified printing, its price and treatment. The finish
+   (Regular / Foil / Surge foil) is pre-selected with the reason, e.g.
+   *"Foil: ★ next to the set code"* or *"only printed in foil"*.
+4. Adjust quantity or condition if needed and click **Add to inventory**, or **Skip**.
 
-### 4. Export Your Inventory
+In auto scanning, the next capture waits until you've added or skipped the current card.
+With **Fast Scan mode** (Settings) cards are identified in the background and added
+automatically, so you can keep feeding cards; the *Processing* counter in the top bar shows
+how many are still being identified.
 
-**Web Interface:**
-- Click the inventory icon (📦)
-- Choose export format:
-  - **Export CSV** - Full format with all fields
-  - **Export to Moxfield** - Import-ready for Moxfield
+### Searching manually
 
-## Architecture
+Type a name in **Search**, optionally with a collector number and a **Treatment** (e.g.
+Borderless). If more than one printing matches, choose yours from the thumbnail grid. Press
+Enter in the name field to search.
 
-### System Overview
+### Inventory
 
-```
-┌─────────────────┐
-│  Web Browser    │
-│  (User)         │
-└────────┬────────┘
-         │ HTTP/WebSocket
-         ▼
-┌─────────────────┐
-│  Flask + SocketIO│
-│  (app.py)       │
-└────────┬────────┘
-         │
-    ┌────┴────┬──────────┬────────────┬──────────┐
-    ▼         ▼          ▼            ▼          ▼
-┌─────────┐ ┌──────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
-│Scanner  │ │Object│ │Card ID  │ │Database │ │Inventory │
-│         │ │Detect│ │(AI)     │ │(Scryfall│ │(SQLite)  │
-└─────────┘ └──────┘ └─────────┘ └─────────┘ └──────────┘
-    │           │         │            │            │
-    ▼           ▼         ▼            ▼            ▼
-┌─────────┐ ┌──────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
-│Camera   │ │YOLO  │ │Gemini/  │ │SQLite   │ │SQLite    │
-│(USB/Pi) │ │v8    │ │GPT-4/   │ │(Cards)  │ │(Inventory│
-│         │ │      │ │Claude   │ │         │ │ Table)   │
-└─────────┘ └──────┘ └─────────┘ └─────────┘ └──────────┘
-```
+Open it from the inventory count in the top bar. You can filter, edit quantity / condition /
+finish (changing the finish of part of a stack splits it), delete, clear, import a CSV, and
+export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
+condition and finish increases its quantity instead of creating a duplicate.
 
-### Component Details
+### Tips for reliable scans
 
-#### 1. **scanner.py** - Frame Capture & Detection
-- Background thread for continuous frame capture
-- Thread-safe frame access with locks
-- YOLOv8 integration for card detection
-- Frame stabilization logic (5-frame buffer)
-- Smart autofocus with lock mechanism
-
-#### 2. **object_detector.py** - YOLO Wrapper
-- YOLOv8 model initialization
-- Rectangular object detection
-- Bounding box extraction
-- Pre-trained COCO model (class names ignored)
-
-#### 3. **card_identifier.py** - Vision AI Integration
-- Multi-provider support (Gemini/GPT-4/Claude)
-- Card name extraction
-- Collector number extraction
-- Image preprocessing and enhancement
-
-#### 4. **database.py** - Scryfall Database
-- SQLite database wrapper
-- Card information storage
-- Indexed searches
-- Fuzzy matching support
-
-#### 5. **card_search.py** - Search Engine
-- Exact name matching
-- Fuzzy name matching (0.6 threshold)
-- Collector number filtering
-- Partial name matching
-
-#### 6. **inventory.py** - Inventory Management
-- SQLite database storage with `inventory` table
-- Automatic duplicate detection (increments quantity for existing cards)
-- Card addition with enriched data
-- Statistics calculation (color breakdown, rarity analysis)
-- Multiple export formats (standard CSV, Moxfield CSV)
-- Quantity tracking with auto-increment
-- Condition tracking and foil variant support (regular foil and surge foil)
-- UNIQUE constraint on (card_name, set_name, card_number, condition, foil, surge)
-
-#### 7. **app.py** - Web Application
-- Flask web server
-- SocketIO real-time communication
-- REST API endpoints
-- Event handlers
-- MJPEG video streaming
-
-### Data Flow
-
-**Card Detection Flow:**
-```
-Camera → Frame Capture → YOLO Detection → Bounding Box → Crop → Store
-   ↓                                                               ↓
-   └──────────────────→ Annotated Frame Display ←─────────────────┘
-```
-
-**Card Identification Flow:**
-```
-User Capture → Wait 0.3s → Enhance Image → Vision AI → Extract Name+Number
-                                               ↓
-                                          Database Search
-                                               ↓
-                                          Exact Match? → Return Card
-                                               ↓ No
-                                          Fuzzy Match? → Return Best Match
-                                               ↓ No
-                                          Partial Match → Return Suggestions
-```
-
-**Inventory Flow:**
-```
-Confirmed Card → Enrich with Database Data → Check for Duplicate
-                                                    ↓
-                                            Exists? → Increment Quantity
-                                                    ↓ No
-                                            Insert New → Update Stats
-       ↓
-   Save Image → Store in scanned_cards/
-```
+- **Contrast**: a light, plain background (e.g. a white box) makes the card's dark border
+  easy to find. White-bordered cards on a white background have no visible outline - use
+  `detection.method: auto` (YOLO fallback) or capture them with auto-detection turned off.
+- **Keep the whole card in view** with a small margin. If an edge is cut off, the card isn't
+  detected - and the foil marker in the bottom-left corner can't be read.
+- **Light** evenly from above; the **Anti-glare** option helps with reflective foils.
+- Cards printed before the ★/• convention (roughly before 2020) have no foil marker; for
+  those, set the finish yourself when both versions exist.
 
 ## Configuration
 
-All configuration is centralized in `config.py`:
+Settings live in `config.yaml`. The most useful ones:
 
-### Camera Settings
+| Setting | Default | Description |
+|---|---|---|
+| `camera.type` | `auto` | `auto`, `usb` or `picamera` |
+| `camera.usb_index` | | `/dev/videoN` number of the USB camera |
+| `camera.resolution` / `fps` | `[2560, 1440]` / `20` | Capture resolution and frame rate |
+| `detection.method` | `contour` | `contour` (outline only), `auto` (outline, then YOLO), `yolo` |
+| `detection.allow_landscape` | `false` | Accept cards lying sideways (a card's art box can look like a sideways card) |
+| `auto_capture.delay` | `4.0` | Minimum seconds between automatic captures |
+| `auto_capture.stability_frames` | `5` | Still frames required before capturing |
+| `fast_scan.stability_frames` | `2` | Same, in Fast Scan mode |
+| `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
+| `vision_ai.provider` | `gemini` | Default AI provider (see above) |
+| `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |
+| `vision_ai.local.endpoint` | | Local AI server (the model is chosen in Settings) |
+| `flask.host` / `port` | `0.0.0.0` / `5000` | Web server address |
+| `cleanup.enabled` / `days` | `true` / `7` | Delete scanned images older than N days on startup |
 
-```python
-CAMERA_TYPE = 'auto'  # 'auto', 'usb', or 'picamera'
-CAMERA_RESOLUTION = (2560, 1440)
-CAMERA_FPS = 30
-CAMERA_AUTOFOCUS = True
-CAMERA_FOCUS_LOCK_ENABLED = True
-CAMERA_FOCUS_LOCK_DELAY = 1.0  # seconds
-```
+Environment variables `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override the matching
+settings.
 
-### Detection Settings
+## Maintenance
 
-```python
-DETECTION_ENABLED = True
-DETECTION_METHOD = 'yolo'
-YOLO_MODEL = 'yolov8n.pt'
-YOLO_CONFIDENCE = 0.5
-YOLO_IMG_SIZE = 640
-```
+| Task | How |
+|---|---|
+| Update card data and prices | **Settings → Update card database**, or `python3 setup_database.py` |
+| Scanned image statistics | `python3 cleanup.py --stats` |
+| Delete old scanned images | `python3 cleanup.py --days 30` (add `--dry-run` to preview, `--all` for everything) |
+| Back up database, inventory, settings, images and `.env` | `scripts/backup.sh` (set `SCANNER_DIR` at the top first) |
 
-### Stability Settings
+Your inventory lives in the same SQLite file as the card data (`data/cards_database.db`,
+table `inventory`); updating the card database does not touch it.
 
-```python
-STABLE_FRAMES_REQUIRED = 5  # Frames needed for "Ready" state
-```
+Logs are written to `data/logs/`:
 
-### Vision AI Settings
-
-```python
-VISION_AI_ENABLED = True
-VISION_AI_PROVIDER = 'gemini'  # 'gemini', 'openai', or 'anthropic'
-GEMINI_MODEL = 'gemini-1.5-flash'
-```
-
-### Auto-Capture Settings
-
-**Note:** Auto-capture is now controlled via the "Start Auto Scanning" button in the UI, not via config.
-
-```python
-AUTO_CAPTURE_DELAY = 2.0  # seconds after stability
-AUTO_CAPTURE_WAIT_FOR_FOCUS = True  # Wait for focus lock before capturing
-```
-
-### File Paths
-
-```python
-DATA_DIR = Path('data')
-DATABASE_FILE = DATA_DIR / 'cards_database.db'  # Scryfall card data + inventory
-CARD_IMAGES_DIR = Path('scanned_cards')
-```
-
-## Usage
-
-### Command-Line Tools
-
-#### Setup Database
-```bash
-python3 setup_database.py
-```
-Downloads and processes Scryfall's card database.
-
-#### Clean Up Scanned Images
-```bash
-python3 cleanup.py --stats      # show image statistics
-python3 cleanup.py --days 30    # delete images older than 30 days
-python3 cleanup.py --dry-run    # preview what would be deleted
-```
-
-### Web Interface
-
-#### Main Controls
-
-- **🎬 Toggle Detection** - Enable/disable card detection
-- **📸 Capture Card** - Manually capture current frame
-- **📦 Inventory** - View and manage your collection
-- **🔍 Search Cards** - Search Scryfall database
-
-#### Inventory Management
-
-- **🔄 Refresh** - Reload inventory data
-- **📥 Export CSV** - Export full inventory
-- **📥 Export to Moxfield** - Export Moxfield-compatible format
-- **🔍 Filter** - Search by name, set, or rarity
-- **✏️ Edit Quantity** - Click quantity to edit
-- **🗑️ Delete** - Remove cards from inventory
-
-#### Visual Indicators
-
-- **Orange Box + "Stabilizing X/5"** - Card detected, not yet stable
-- **Green Box + "Ready"** - Card stable, ready to capture
-- **Bright Green Box + "LOCKED"** - Focus locked, optimal capture time
-
-### REST API
-
-#### GET Endpoints
-
-```
-GET /video_feed
-    Returns: MJPEG video stream
-
-GET /api/detection_status
-    Returns: {enabled: boolean, method: string}
-
-GET /api/inventory
-    Returns: {cards: [...], stats: {...}}
-
-GET /api/export_inventory
-    Returns: CSV file (standard format)
-
-GET /api/export_inventory_moxfield
-    Returns: CSV file (Moxfield format)
-```
-
-#### SocketIO Events
-
-**Client → Server:**
-```javascript
-// Capture card
-socket.emit('capture_card');
-
-// Toggle detection
-socket.emit('toggle_detection');
-
-// Search card
-socket.emit('search_card', {query: 'Lightning Bolt'});
-
-// Add to inventory
-socket.emit('add_to_inventory', {
-    card: {...},
-    condition: 'Near Mint',
-    is_foil: false,
-    is_surge: false,  // Surge foil variant
-    quantity: 1
-});
-```
-
-**Server → Client:**
-```javascript
-// Log messages
-socket.on('log', (data) => {
-    // data: {timestamp, level, message}
-});
-
-// Card detected
-socket.on('card_detected', (data) => {
-    // data: {card_info}
-});
-
-// Card added
-socket.on('card_added', (data) => {
-    // data: {card_info, stats}
-});
-
-// Inventory updated
-socket.on('inventory_updated', (data) => {
-    // data: {cards, stats}
-});
-
-// Search results
-socket.on('search_results', (data) => {
-    // data: {query, results}
-});
-```
+| File | Contents |
+|---|---|
+| `app.log` | Web app, searches, inventory actions |
+| `ai.log` | AI requests and responses |
+| `scanner.log` | Camera, detection, captures |
+| `database.log` | Database queries |
+| `scanned_cards.log` | One CSV line per identified card |
 
 ## Troubleshooting
 
-### Common Issues
+**No camera found / black video** - check the device number with `v4l2-ctl --list-devices`
+and set `camera.usb_index`. Only one program can use the camera at a time.
 
-#### Camera Not Detected
+**Card not detected** - make sure the whole card is visible with some margin and the
+background contrasts with the border (see *Tips*). For cards without a clear outline, set
+`detection.method: auto` to fall back to YOLO.
 
-```bash
-# Check USB camera
-ls /dev/video*
+**"Vision AI disabled"** - no API key was found for the selected provider. Check `.env`, or
+switch provider in Settings.
 
-# Check PiCamera
-libcamera-hello
+**Local AI returns 404** - Ollama answers 404 when the requested model isn't installed. Pick
+one of the models listed in Settings (they come from your server) or `ollama pull` it.
 
-# Run camera diagnostics
-python3 camera_diagnostics.py
-```
+**Wrong printing** - make sure the collector number was read (it's shown in the Search panel
+after a capture); correct it there and search again, or pick the printing from the grid.
 
-#### Database Errors
+**Installation fails on a very new Python** - create the virtual environment with Python
+3.12 (e.g. `uv venv --python 3.12 venv`).
 
-```bash
-# Re-download database
-python3 setup_database.py
-```
-
-#### Vision AI Errors
-
-```bash
-# Check the key is in .env (loaded automatically on startup)
-grep GEMINI_API_KEY .env
-
-# Check data/logs/ai.log for the API error; switch provider/model in the web UI
-```
-
-#### Focus Issues
-
-```bash
-# List camera controls (autofocus control names vary by camera)
-v4l2-ctl -d /dev/video0 --list-ctrls
-```
-
-### Log Files
-
-```bash
-# View application logs
-tail -f data/logs/card_scanner.log
-
-# Check recent errors
-grep ERROR data/logs/card_scanner.log
-```
-
-## Development
-
-### Project Structure
+## Project structure
 
 ```
-scanner/
-├── app.py                      # Main Flask application
-├── scanner.py                  # Frame capture & detection
-├── object_detector.py          # YOLOv8 wrapper
-├── card_identifier.py          # Vision AI integration
-├── database.py                 # Scryfall database
-├── card_search.py              # Search engine
-├── inventory.py                # Inventory management
-├── anti_glare.py               # Glare reduction for foil cards
-├── cleanup.py                  # Scanned image cleanup
-├── config.py / config.yaml     # Configuration
-├── config_loader.py            # YAML loader
-├── settings.py                 # Persisted UI preferences
-├── utils.py                    # Shared helpers
-├── setup_database.py           # Database setup
-├── requirements.txt            # Dependencies
-│
-├── templates/
-│   └── scanner.html           # Web interface
-│
-├── static/
-│   ├── css/
-│   │   └── scanner.css        # Styles
-│   └── js/
-│       └── scanner.js         # Client-side logic
-│
-├── data/
-│   ├── cards_database.db      # SQLite DB (Scryfall + Inventory)
-│   └── logs/                  # Application logs
-│
-├── scanned_cards/             # Captured card images
-└── yolov8n.pt                 # YOLOv8 model
+app.py               Flask + Socket.IO web app, routes and event handlers
+scanner.py           Camera capture thread, detection, stability, auto-capture
+object_detector.py   Card outline detection + perspective correction (YOLO fallback)
+card_identifier.py   Vision AI providers, card identification, foil marker check
+database.py          Scryfall card database: download, schema, search, printings
+card_search.py       Search helpers used by the web app
+inventory.py         Inventory storage, stats, import/export
+anti_glare.py        Glare reduction for reflective cards
+cleanup.py           Scanned image cleanup (also a CLI)
+setup_database.py    Downloads and builds the card database
+config.yaml          Settings (loaded by config.py / config_loader.py)
+settings.py          UI preferences saved in data/settings.json
+templates/, static/  Web interface
+scripts/             start.sh, backup.sh
+data/                Card database, settings, logs (created at runtime)
+scanned_cards/       Captured card images (created at runtime)
 ```
 
-### Adding a New Vision AI Provider
+`CLAUDE.md` has more detailed notes on the architecture, database schema and search logic.
 
-1. Edit `card_identifier.py`:
+## HTTP API
 
-```python
-def identify_card(self, image):
-    if self.provider == 'your_provider':
-        return self._identify_with_your_provider(image)
+The web interface uses these endpoints, which you can also call directly:
 
-def _identify_with_your_provider(self, image):
-    # Implementation here
-    pass
-```
+| Endpoint | Description |
+|---|---|
+| `GET /video_feed` | MJPEG stream of the annotated camera view |
+| `GET /api/stats` | Database and inventory statistics |
+| `GET /api/detection_status` | Whether a card is detected and how stable it is |
+| `GET /api/inventory` | Full inventory |
+| `POST /api/inventory/update/<index>` | Update quantity, condition or finish (JSON body) |
+| `POST /api/inventory/delete/<index>` | Delete an inventory entry |
+| `POST /api/import_inventory` | Import a CSV (multipart `file`) |
+| `POST /api/clear_inventory` | Delete all inventory entries |
+| `GET /api/export_inventory` | Download the inventory as CSV |
+| `GET /api/export_inventory_moxfield` | Download a Moxfield import CSV |
+| `GET /api/ai_provider` | Current AI provider and model |
+| `GET /api/ai_models` | Built-in model lists for each provider |
+| `GET /api/local_ai_models` | Models installed on the local AI server |
 
-2. Update `config.py`:
-
-```python
-VISION_AI_PROVIDER = 'your_provider'
-YOUR_PROVIDER_API_KEY = os.getenv('YOUR_PROVIDER_API_KEY')
-```
-
-3. Add to `requirements.txt`:
-
-```
-your-provider-sdk>=1.0.0
-```
-
-### Extending the Database
-
-The database schema (`database.py`) has two main tables:
-
-**Cards Table (Scryfall data):**
-```sql
-CREATE TABLE cards (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    set_code TEXT,
-    set_name TEXT,
-    collector_number TEXT,
-    rarity TEXT,
-    price_usd REAL,
-    price_usd_foil REAL,
-    image_uri TEXT,
-    oracle_text TEXT,
-    type_line TEXT,
-    colors TEXT,
-    mana_cost TEXT
-)
-```
-
-**Inventory Table (Your collection):**
-```sql
-CREATE TABLE inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    card_name TEXT NOT NULL,
-    set_name TEXT NOT NULL,
-    card_number TEXT,
-    rarity TEXT,
-    type_line TEXT,
-    mana_cost TEXT,
-    colors TEXT,
-    color_identity TEXT,
-    price_usd REAL,
-    quantity INTEGER NOT NULL DEFAULT 1,
-    condition TEXT DEFAULT 'Near Mint',
-    foil INTEGER DEFAULT 0,
-    surge INTEGER DEFAULT 0,
-    timestamp TEXT NOT NULL,
-    UNIQUE(card_name, set_name, card_number, condition, foil, surge)
-)
-```
-
-To add fields:
-
-1. Update schema in `database.py`
-2. Modify `setup_database.py` to populate new fields (for cards table)
-3. Update `inventory.py` to use new fields (for inventory table)
-4. Re-run `python3 setup_database.py` (for cards) or update migration script (for inventory)
-
-### Testing
-
-There is no automated test suite yet. To verify a setup, run `python3 setup_database.py`
-and then `python3 app.py`; startup logs report camera, database and Vision AI status.
-
-## Contributing
-
-Contributions are welcome! Areas for improvement:
-
-- [ ] Multi-card detection (scan multiple cards simultaneously)
-- [ ] Offline card identification (no Vision AI required)
-- [ ] Mobile app integration
-- [ ] Additional export formats (Archidekt, DeckBox, etc.)
-- [ ] Barcode scanning support
-- [ ] Price tracking over time
-- [ ] Collection statistics dashboard
-- [ ] Card condition grading assistance
-
-### Development Workflow
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-MIT License - See LICENSE file for details
+Scanning, searching and settings go through Socket.IO events (`capture_card`, `search_card`,
+`select_printing`, `add_to_inventory`, `toggle_auto_capture`, ...); see `app.py`.
 
 ## Acknowledgments
 
-- **Scryfall** - Card database API
-- **Ultralytics** - YOLOv8 object detection
-- **OpenCV** - Computer vision library
-- **Flask** - Web framework
-- **SocketIO** - Real-time communication
+- Card data, prices and images: [Scryfall](https://scryfall.com)
+- Computer vision: [OpenCV](https://opencv.org); optional detection fallback:
+  [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
+- Web: [Flask](https://flask.palletsprojects.com) and
+  [Flask-SocketIO](https://flask-socketio.readthedocs.io)
 
-## Support
-
-For issues, questions, or contributions:
-- Open an issue on GitHub
-- Check existing documentation
-- Review troubleshooting section
-
----
-
-**Version**: 1.0.0
-**Last Updated**: November 2025
-**Platform**: Raspberry Pi (Linux ARM)
+This is an unofficial fan project, not affiliated with or endorsed by Wizards of the Coast.
+Magic: The Gathering is a trademark of Wizards of the Coast LLC.
