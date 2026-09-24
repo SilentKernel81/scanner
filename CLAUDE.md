@@ -10,26 +10,22 @@ A Python-based real-time card scanner for Magic: The Gathering cards. Uses Flask
 
 ### Setup and Installation
 ```bash
-# Install dependencies (in virtual environment)
-pip install -r requirements.txt
+# Create venv (Python 3.12 - torch/opencv wheels may lag the newest Python)
+uv venv --python 3.12 venv
+uv pip install --python venv/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python venv/bin/python -r requirements.txt
 
-# Download card database from Scryfall (~150MB, 5-10 minutes)
-python3 setup_database.py
+# Download card database from Scryfall (gzipped JSONL, a few minutes)
+venv/bin/python setup_database.py
 
-# Test all system components
-python3 test_system.py
+# API keys go in .env (loaded by app.py via python-dotenv)
+cp .env.example .env
 ```
 
 ### Running the Application
 ```bash
 # Start the web server (default: http://0.0.0.0:5000)
 python3 app.py
-```
-
-### Testing
-```bash
-# Run system tests (database, camera, directories)
-python3 test_system.py
 ```
 
 ### Cleanup
@@ -60,7 +56,6 @@ python3 cleanup.py --all
 5. **Search (card_search.py)** - Card lookup and similarity matching
 6. **Inventory (inventory.py)** - SQLite database-based inventory tracking with automatic duplicate detection
 7. **Web App (app.py)** - Flask + SocketIO orchestration
-8. **OCR (ocr_processor.py)** - Legacy Tesseract-based text extraction (not currently used)
 
 ### Threading Model
 - Main thread: Flask/SocketIO event loop
@@ -74,7 +69,7 @@ The scanner auto-detects camera type:
 - Detection order: USB first, then PiCamera (configurable via `Config.CAMERA_TYPE`)
 
 ### Database Schema
-**Cards Table:** id, name, flavor_name, set_code, set_name, collector_number, rarity, price_usd, price_usd_foil, image_uri, oracle_text, type_line, colors, mana_cost.
+**Cards Table:** id, name, flavor_name, set_code, set_name, collector_number, rarity, price_usd, price_usd_foil, image_uri, oracle_text, type_line, colors, mana_cost, plus printing-treatment fields from Scryfall: border_color, frame, frame_effects (JSON), full_art, promo_types (JSON), finishes (JSON), released_at. Columns are defined once in `database.py:CARD_COLUMNS`; missing columns are added automatically on startup (run "Update Card Database" to fill them). Rows are read by column name (`sqlite3.Row`).
 
 **Performance Indexes:**
 - `idx_card_name`: Single-column index on name (case-insensitive)
@@ -85,7 +80,7 @@ The scanner auto-detects camera type:
 
 **Flavor Names:** Special printings (like Universes Beyond) may have alternate names. For example, "Bucklebury Ferry" (Lord of the Rings) is stored with Oracle name "Oboro, Palace in the Clouds" but includes flavor_name "Bucklebury Ferry" for searchability. All search functions check both name and flavor_name fields.
 
-**Database Optimization:** Use the "Rebuild Database Schema" button in the web UI to reorganize the database with optimal column ordering and rebuild all indexes. This eliminates schema detection overhead and improves query performance by 2-5x for exact version lookups.
+**Database Optimization:** The "Rebuild Database Schema" button copies the cards table (by column name) into the canonical column order and rebuilds its indexes. The inventory table is not touched.
 
 **Inventory Table:** id, card_name, set_name, card_number, rarity, type_line, mana_cost, colors, color_identity, price_usd, quantity, condition, foil, surge, timestamp. UNIQUE constraint on (card_name, set_name, card_number, condition, foil, surge) for duplicate detection. Indexed on `card_name COLLATE NOCASE` and `set_name`.
 
@@ -151,7 +146,8 @@ Disable AI: `VISION_AI_ENABLED = False`
 ### SocketIO Events
 - `connect`: Initial client connection
 - `capture_card`: Manual card capture trigger
-- `search_card`: Database search by card name
+- `search_card`: Manual search by name + optional collector number + optional treatment (`database.py:TREATMENT_FILTERS`). One match → `card_found`; several → `card_printings` (client shows a printing picker)
+- `select_printing`: User picked a printing (by Scryfall id) from the picker → `card_found`
 - `add_to_inventory`: Add card to database inventory (supports surge foil, auto-increments quantity for duplicates)
 - `dismiss_card`: Cancel current card review and clear selection
 - `toggle_detection`: Enable/disable YOLOv8 detection
@@ -161,8 +157,6 @@ Disable AI: `VISION_AI_ENABLED = False`
 - `set_ai_provider`: Change Vision AI provider (gemini/openai/anthropic)
 - `update_database`: Update card database from Scryfall (runs in background thread, ~5-10 minutes)
 - `rebuild_database`: Rebuild database schema with optimized structure and indexes (runs in background, ~30 seconds)
-- `export_inventory`: Export inventory to standard CSV
-- `export_inventory_moxfield`: Export inventory to Moxfield-compatible CSV
 
 ### Search Strategy
 All search methods check both `name` and `flavor_name` fields:
@@ -171,7 +165,7 @@ All search methods check both `name` and `flavor_name` fields:
 3. Partial match: SQL LIKE query for similar cards
 
 ### Important Notes
-- **NumPy version**: Must use NumPy 1.x (1.24.3) for OpenCV compatibility
+- **Python version**: Use Python 3.12 venv (system Python may be too new for torch wheels)
 - **Virtual environment**: Project uses Python venv (see `pyvenv.cfg`)
 - **Camera initialization**: 2-second warm-up after camera setup
 - **Autofocus**: Enabled for USB cameras via `cv2.CAP_PROP_AUTOFOCUS`
@@ -208,9 +202,6 @@ When adding a card that already exists (same name + set + card number + conditio
 - Multiple colors → "Multicolor"
 - No colors → "Colorless"
 
-**Migration from CSV:**
-If you have existing CSV inventory data, use `python3 migrate_inventory.py` to migrate to the database. The script handles duplicate merging and creates a backup of the CSV file.
-
 **Export:**
 - Standard CSV: `/api/export_inventory` - Full inventory with all fields
 - Moxfield CSV: `/api/export_inventory_moxfield` - Moxfield-compatible format for importing to Moxfield.com
@@ -224,7 +215,7 @@ When adding features:
 2. Scanner modifications require understanding thread safety (use `frame_lock`)
 3. Database changes should update both schema in `database.py` and `setup_database.py`
 4. New SocketIO events need handlers in both `app.py` (server) and client JS
-5. Test with `test_system.py` before running full app
+5. No automated tests - verify by running `app.py` and checking startup logs
 
 When debugging:
 - Check console output - extensive logging to stdout

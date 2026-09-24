@@ -4,7 +4,7 @@ Card Scanner Web Application
 Main Flask application with SocketIO - COMPLETE VERSION
 """
 
-from flask import Flask, render_template, Response, jsonify, request
+from flask import Flask, render_template, Response, jsonify, request, send_file
 from flask_socketio import SocketIO, emit
 import cv2
 from datetime import datetime
@@ -16,8 +16,13 @@ import threading
 import queue
 from logging.handlers import RotatingFileHandler
 
+from dotenv import load_dotenv
+
 # Add current directory to path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Load API keys etc. from .env before config is imported (config reads env vars)
+load_dotenv(Path(__file__).parent / '.env')
 
 # ============================================================================
 # Logging Configuration
@@ -253,6 +258,38 @@ def log_scanned_card(card_name, collector_number, ai_model, db_found, added_to_i
     scanned_cards_logger.info(log_entry)
 
 
+def card_payload(card):
+    """Card fields sent to the web client"""
+    return {
+        'id': card['id'],
+        'name': card['name'],
+        'set': card['set'],
+        'set_code': card['set_code'],
+        'number': card['number'],
+        'rarity': card['rarity'],
+        'type': card['type_line'],
+        'price': card['price'],
+        'price_foil': card['price_foil'],
+        'image_uri': card['image_uri'],
+        'treatments': card['treatments'],
+        'finishes': card['finishes']
+    }
+
+
+def similar_cards_payload(similar):
+    """Similar-card rows (name, set_name, price) sent to the web client"""
+    return {
+        'cards': [
+            {
+                'name': card[0],
+                'set': card[1],
+                'price': f"${card[2]:.2f}" if card[2] else "N/A"
+            }
+            for card in similar
+        ]
+    }
+
+
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False):
     """
     Search for card in database and emit results to client
@@ -290,32 +327,14 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     if db_card_info:
         current_card_info = db_card_info
         socketio.emit('card_found', {
-            'card': {
-                'name': db_card_info['name'],
-                'set': db_card_info['set'],
-                'number': db_card_info['number'],
-                'rarity': db_card_info['rarity'],
-                'type': db_card_info['type_line'],
-                'price': db_card_info['price'],
-                'price_foil': db_card_info['price_foil'],
-                'image_uri': db_card_info['image_uri']
-            },
+            'card': card_payload(db_card_info),
             'auto_add': was_fast_scan_mode
         }, namespace='/')
     else:
         # Try to find similar cards
         similar = searcher.find_similar_cards(card_name, limit=5)
         if similar:
-            socketio.emit('similar_cards', {
-                'cards': [
-                    {
-                        'name': card[0],
-                        'set': card[1],
-                        'price': f"${card[2]:.2f}" if card[2] else "N/A"
-                    }
-                    for card in similar
-                ]
-            }, namespace='/')
+            socketio.emit('similar_cards', similar_cards_payload(similar), namespace='/')
         else:
             socketio.emit('card_not_found', {'card_name': card_name}, namespace='/')
 
@@ -728,8 +747,6 @@ def export_inventory():
         return jsonify({'error': 'Inventory not initialized'}), 500
 
     try:
-        from flask import send_file
-
         # Use inventory export method
         export_path = inventory.export_csv()
 
@@ -758,8 +775,6 @@ def export_inventory_moxfield():
         return jsonify({'error': 'Inventory not initialized'}), 500
 
     try:
-        from flask import send_file
-
         # Use inventory Moxfield export method
         export_path = inventory.export_moxfield_csv()
 
@@ -936,13 +951,10 @@ def get_provider_models(provider):
 @app.route('/api/local_ai_models')
 def get_local_ai_models():
     """Fetch live models from local Ollama server"""
-    import os
     import requests
 
+    ollama_base = Config.LOCAL_AI_ENDPOINT.replace('/v1/chat/completions', '')
     try:
-        # Get Ollama endpoint from environment or use default
-        local_endpoint = os.getenv('LOCAL_AI_ENDPOINT', 'http://localhost:11434/v1/chat/completions')
-        ollama_base = local_endpoint.replace('/v1/chat/completions', '')
         ollama_api = f"{ollama_base}/api/tags"
 
         logger.info(f"Fetching models from Ollama: {ollama_api}")
@@ -1060,7 +1072,7 @@ def handle_capture(data):
 
 @socketio.on('search_card')
 def handle_search(data):
-    """Handle card search request"""
+    """Handle manual card search - lists printings so the user can pick the exact one"""
     global searcher, current_card_info
 
     logger.info(f"Search card request received: {data}")
@@ -1070,9 +1082,9 @@ def handle_search(data):
         emit('error', {'message': 'Searcher not initialized'})
         return
 
-    card_name = data.get('card_name', '').strip()
-    collector_number = data.get('collector_number', '').strip() or None
-    logger.info(f"Searching for: '{card_name}'" + (f" #{collector_number}" if collector_number else ""))
+    card_name = (data.get('card_name') or '').strip()
+    collector_number = (data.get('collector_number') or '').strip() or None
+    treatment = (data.get('treatment') or '').strip() or None
 
     if not card_name:
         logger.warning("No card name provided in search request")
@@ -1080,49 +1092,52 @@ def handle_search(data):
         return
 
     try:
-        # Search for card (with collector number if provided)
-        result = searcher.search_by_name(card_name, collector_number, ai_model=get_ai_model_info())
+        resolved_name, printings = searcher.find_printings(card_name, collector_number, treatment)
 
-        if result:
-            current_card_info = result
-            logger.info(f"Card found: {result['name']} ({result['set']})")
-            emit('card_found', {
-                'card': {
-                    'name': result['name'],
-                    'set': result['set'],
-                    'number': result['number'],
-                    'rarity': result['rarity'],
-                    'type': result['type_line'],
-                    'price': result['price'],
-                    'price_foil': result['price_foil'],
-                    'image_uri': result['image_uri']
-                }
+        if len(printings) == 1:
+            current_card_info = printings[0]
+            emit('card_found', {'card': card_payload(current_card_info)})
+        elif printings:
+            # Several printings - let the user pick the one in hand
+            current_card_info = None
+            emit('card_printings', {
+                'name': resolved_name,
+                'treatment': treatment,
+                'cards': [card_payload(card) for card in printings]
+            })
+        elif resolved_name:
+            # Card exists, but no printing has the requested treatment
+            emit('card_not_found', {
+                'card_name': resolved_name,
+                'message': f'No printings of "{resolved_name}" match the selected treatment.'
             })
         else:
-            # Try to find similar cards
-            logger.info(f"Exact match not found for '{card_name}', searching for similar cards...")
+            logger.info(f"No match for '{card_name}', searching for similar cards...")
             similar = searcher.find_similar_cards(card_name, limit=5)
-
             if similar:
-                logger.info(f"Found {len(similar)} similar cards")
-                emit('similar_cards', {
-                    'cards': [
-                        {
-                            'name': card[0],
-                            'set': card[1],
-                            'price': f"${card[2]:.2f}" if card[2] else "N/A"
-                        }
-                        for card in similar
-                    ]
-                })
+                emit('similar_cards', similar_cards_payload(similar))
             else:
-                logger.info(f"No cards found matching '{card_name}'")
                 emit('card_not_found', {'card_name': card_name})
 
     except Exception as e:
         logger.exception(f"Exception in handle_search: {e}")
         log_to_client(f"Search error: {e}", level="error")
         emit('error', {'message': str(e)})
+
+
+@socketio.on('select_printing')
+def handle_select_printing(data):
+    """User picked a specific printing from the printing list"""
+    global current_card_info
+
+    card = database.get_card_by_id(data.get('id')) if database else None
+    if not card:
+        emit('error', {'message': 'Printing not found'})
+        return
+
+    current_card_info = card
+    logger.info(f"Printing selected: {card['name']} ({card['set']} #{card['number']})")
+    emit('card_found', {'card': card_payload(card)})
 
 
 @socketio.on('add_to_inventory')
@@ -1351,79 +1366,6 @@ def handle_set_ai_provider(data):
         logger.error(f"Failed to set AI provider: {result['message']}")
 
 
-@socketio.on('export_inventory')
-def handle_export_inventory():
-    """Handle inventory export request"""
-    global inventory
-
-    logger.info("Export inventory request received")
-
-    if not inventory:
-        logger.error("Inventory export requested but inventory not initialized")
-        emit('error', {'message': 'Inventory not initialized'})
-        return
-
-    try:
-        export_path = inventory.export_csv()
-
-        if export_path:
-            # Get detailed stats for the export
-            stats = inventory.get_detailed_stats()
-
-            emit('inventory_exported', {
-                'file': str(export_path),
-                'filename': export_path.name,
-                'stats': stats
-            })
-
-            log_to_client(f"Inventory exported: {export_path.name}", level="success")
-        else:
-            logger.error("Inventory export failed")
-            emit('error', {'message': 'Export failed'})
-
-    except Exception as e:
-        logger.exception(f"Exception in handle_export_inventory: {e}")
-        log_to_client(f"Export error: {e}", level="error")
-        emit('error', {'message': str(e)})
-
-
-@socketio.on('export_inventory_moxfield')
-def handle_export_inventory_moxfield():
-    """Handle Moxfield inventory export request"""
-    global inventory
-
-    logger.info("Moxfield export inventory request received")
-
-    if not inventory:
-        logger.error("Moxfield export requested but inventory not initialized")
-        emit('error', {'message': 'Inventory not initialized'})
-        return
-
-    try:
-        export_path = inventory.export_moxfield_csv()
-
-        if export_path:
-            # Get detailed stats for the export
-            stats = inventory.get_detailed_stats()
-
-            emit('inventory_exported', {
-                'file': str(export_path),
-                'filename': export_path.name,
-                'stats': stats,
-                'format': 'moxfield'
-            })
-
-            log_to_client(f"Moxfield inventory exported: {export_path.name}", level="success")
-        else:
-            logger.error("Moxfield export failed")
-            emit('error', {'message': 'Export failed'})
-
-    except Exception as e:
-        logger.exception(f"Exception in handle_export_inventory_moxfield: {e}")
-        log_to_client(f"Moxfield export error: {e}", level="error")
-        emit('error', {'message': str(e)})
-
-
 @socketio.on('update_database')
 def handle_update_database():
     """Handle database update request"""
@@ -1613,7 +1555,7 @@ def main():
     print(f"\n✓ Access the scanner at:")
     print(f"  • Local:   http://localhost:{Config.PORT}")
     print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
-    print(f"\n✓ Logs are being written to: data/logs/card_scanner.log")
+    print(f"\n✓ Logs are being written to: data/logs/app.log")
     print("\nPress Ctrl+C to stop")
     print("="*60 + "\n")
 

@@ -2,7 +2,7 @@
 # FILE: card_search.py
 # Card search and identification logic
 # ============================================================================
-from database import CardDatabase
+from database import CardDatabase, collector_number_variants
 
 
 class CardSearcher:
@@ -40,12 +40,9 @@ class CardSearcher:
             # Check if we got an exact match or fallback
             if card_info and card_info.get('number') != collector_number.lstrip('0'):
                 # We got a different number - log it
-                import re
-                num_match = re.search(r'(\d+)', collector_number)
-                if num_match:
-                    wanted_num = str(int(num_match.group(1)))
-                    if card_info.get('number') != wanted_num:
-                        self.log(f"⚠ Exact match not found for #{collector_number}, using fallback{ai_suffix}", level="warning")
+                variants = collector_number_variants(collector_number)
+                if variants and card_info.get('number') not in variants:
+                    self.log(f"⚠ Exact match not found for #{collector_number}, using fallback{ai_suffix}", level="warning")
         else:
             self.log(f"Searching database for: '{card_name}'{ai_suffix}")
             card_info = self.db.search_card(card_name, fuzzy=fuzzy)
@@ -58,6 +55,34 @@ class CardSearcher:
             self.log(f"Card not found: {card_name}{ai_suffix}", level="warning")
             return None
     
+    def find_printings(self, card_name, collector_number=None, treatment=None):
+        """
+        Find the printings of a card matching an optional collector number and treatment
+
+        Returns:
+            tuple: (resolved_name, printings) - resolved_name is None if the card
+            name matched nothing at all
+        """
+        filter_info = f" [{treatment}]" if treatment else ""
+        number_info = f" #{collector_number}" if collector_number else ""
+        self.log(f"Searching printings for: '{card_name}'{number_info}{filter_info}")
+
+        resolved_name, printings = self.db.find_printings(card_name, treatment=treatment)
+
+        if collector_number and printings:
+            variants = collector_number_variants(collector_number)
+            matching = [card for card in printings if card['number'] in variants]
+            if matching:
+                printings = matching
+            else:
+                self.log(f"No printing numbered #{collector_number} - showing all {len(printings)} printings", level="warning")
+
+        if resolved_name and printings:
+            self.log(f"Found {len(printings)} printing(s) of {resolved_name}{filter_info}")
+        elif resolved_name:
+            self.log(f"No{filter_info} printings of {resolved_name}", level="warning")
+        return resolved_name, printings
+
     def find_similar_cards(self, card_name, limit=5):
         """Find cards with similar names"""
         similar = self.db.search_cards_by_partial_name(card_name, limit=limit)

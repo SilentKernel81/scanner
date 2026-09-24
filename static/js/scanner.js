@@ -120,17 +120,24 @@ socket.on('card_not_found', function(data) {
     // Play error sound
     audioManager.playError();
 
-    addLog(new Date().toLocaleTimeString(), 'warning', `Card "${data.card_name}" not found in database.`);
+    const message = data.message || `Card "${data.card_name}" not found in database.`;
+    addLog(new Date().toLocaleTimeString(), 'warning', message);
     document.getElementById('card-display').innerHTML = `
         <p style="text-align: center; color: #e74c3c; padding: 20px;">
-            Card not found in database.<br>
-            Try a different name or check spelling.
+            ${escapeHtml(message)}<br>
+            ${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}
         </p>
     `;
     // Auto-dismiss after card not found to allow next auto-capture
     setTimeout(function() {
         socket.emit('dismiss_card');
     }, 2000);
+});
+
+socket.on('card_printings', function(data) {
+    console.log(`Printings received for ${data.name}:`, data.cards.length);
+    currentCard = null;
+    displayPrintings(data.name, data.cards);
 });
 
 socket.on('similar_cards', function(data) {
@@ -160,6 +167,7 @@ socket.on('inventory_updated', function(data) {
     `;
     document.getElementById('card-name').value = '';
     document.getElementById('collector-number').value = '';
+    document.getElementById('card-treatment').value = '';
     currentCard = null;
     currentImagePath = '';
     document.getElementById('search-btn').disabled = true;
@@ -450,21 +458,22 @@ function searchCard() {
 
     const cardName = document.getElementById('card-name').value.trim();
     const collectorNumber = document.getElementById('collector-number').value.trim();
+    const treatmentSelect = document.getElementById('card-treatment');
+    const treatment = treatmentSelect.value;
     console.log("Card name from input:", cardName);
     console.log("Collector number from input:", collectorNumber);
 
     if (cardName) {
         const data = {
             card_name: cardName,
-            collector_number: collectorNumber || null
+            collector_number: collectorNumber || null,
+            treatment: treatment || null
         };
         console.log("Emitting search_card event with data:", data);
 
-        if (collectorNumber) {
-            addLog(new Date().toLocaleTimeString(), 'info', `Searching for: ${cardName} #${collectorNumber}`);
-        } else {
-            addLog(new Date().toLocaleTimeString(), 'info', `Searching for: ${cardName}`);
-        }
+        const numberInfo = collectorNumber ? ` #${collectorNumber}` : '';
+        const treatmentInfo = treatment ? ` (${treatmentSelect.options[treatmentSelect.selectedIndex].text})` : '';
+        addLog(new Date().toLocaleTimeString(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
 
         socket.emit('search_card', data);
     } else {
@@ -547,6 +556,11 @@ function displayCard(card) {
                 <span class="detail-label">Number:</span>
                 <span class="detail-value">${card.number}</span>
             </div>
+            ${card.treatments && card.treatments.length ? `
+            <div class="detail-row">
+                <span class="detail-label">Treatment:</span>
+                <span class="detail-value">${treatmentTagsHtml(card.treatments)}</span>
+            </div>` : ''}
             <div class="detail-row">
                 <span class="detail-label">Rarity:</span>
                 <span class="detail-value">${card.rarity}</span>
@@ -627,6 +641,39 @@ function displayCard(card) {
     `;
     
     document.getElementById('card-display').innerHTML = html;
+}
+
+function treatmentTagsHtml(treatments) {
+    return '<span class="treatment-tags">' +
+        treatments.map(t => `<span class="treatment-tag">${escapeHtml(t)}</span>`).join('') +
+        '</span>';
+}
+
+function displayPrintings(cardName, cards) {
+    let html = `<div class="similar-cards"><h3 style="margin-bottom: 10px;">${escapeHtml(cardName)} - ${cards.length} printings</h3>`;
+    html += '<p style="color: #7f8c8d; margin-bottom: 10px;">Pick the printing you have:</p><div class="printing-grid">';
+
+    cards.forEach(card => {
+        // Scryfall's "small" image size keeps the grid light
+        const thumb = card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '';
+        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
+        html += `
+            <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
+                ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
+                <strong>${escapeHtml(card.set)}</strong><br>
+                #${escapeHtml(card.number)} &middot; ${price}
+                ${card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
+            </div>
+        `;
+    });
+
+    html += '</div></div>';
+    document.getElementById('card-display').innerHTML = html;
+}
+
+function selectPrinting(cardId) {
+    console.log("Printing selected:", cardId);
+    socket.emit('select_printing', {id: cardId});
 }
 
 function displaySimilarCards(cards) {
