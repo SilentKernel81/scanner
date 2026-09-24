@@ -244,3 +244,6 @@ gunicorn.pid
 
 # YOLO training outputs (if doing custom training)
 runs/
+
+# Optional YOLO detector settings (set by the systemd service)
+data/.ultralytics/

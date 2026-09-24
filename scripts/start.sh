@@ -157,7 +157,7 @@ if [ -d "$PROJECT_DIR/venv" ]; then
     source "$PROJECT_DIR/venv/bin/activate"
 else
     echo -e "${YELLOW}⚠ Virtual environment not found${NC}"
-    echo -e "  Run: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+    echo -e "  Run: ./scripts/deploy.sh"
 fi
 
 # Check database

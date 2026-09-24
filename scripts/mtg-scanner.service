@@ -1,0 +1,38 @@
+# MTG Card Scanner - systemd service template
+# Installed by scripts/deploy.sh --service, which fills in @USER@, @GROUP@ and @DIR@.
+# Logs: journalctl -u mtg-scanner -f   (the app also writes data/logs/)
+
+[Unit]
+Description=MTG Card Scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+# Camera access (/dev/video*)
+SupplementaryGroups=video
+WorkingDirectory=@DIR@
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=@DIR@/venv/bin:/usr/local/bin:/usr/bin:/bin
+# Only used by the optional YOLO detector (needs a writable settings folder)
+Environment=YOLO_CONFIG_DIR=@DIR@/data/.ultralytics
+# API keys (the app also loads .env itself)
+EnvironmentFile=-@DIR@/.env
+ExecStart=@DIR@/venv/bin/python @DIR@/app.py
+
+# Restart after crashes, but not after a normal exit (e.g. card database missing)
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Hardening: read-only system and home, except the app's data folders
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DIR@/data @DIR@/scanned_cards
+
+[Install]
+WantedBy=multi-user.target

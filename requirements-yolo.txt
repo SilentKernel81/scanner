@@ -1,0 +1,7 @@
+# Optional: YOLO fallback detector (detection.method: auto or yolo in config.yaml).
+# Not needed with the default outline detection. Pulls in PyTorch (~1 GB); on machines
+# without an NVIDIA GPU install the CPU-only build first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# PyTorch wheels can lag the newest Python release - Python 3.12 is a safe choice.
+-r requirements.txt
+ultralytics>=8.3

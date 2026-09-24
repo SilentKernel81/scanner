@@ -1604,8 +1604,9 @@ def main():
 
     # Check Vision AI status
     if scanner.card_identifier:
-        logger.info(f"Vision AI enabled using {Config.VISION_AI_PROVIDER}")
-        print(f"✓ Vision AI enabled ({Config.VISION_AI_PROVIDER})")
+        ai = f"{scanner.card_identifier.provider} / {scanner.card_identifier.model}"
+        logger.info(f"Vision AI enabled using {ai}")
+        print(f"✓ Vision AI enabled ({ai})")
     else:
         logger.warning("Vision AI disabled - no API key configured")
         print(f"⚠ Vision AI disabled")

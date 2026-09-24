@@ -54,59 +54,56 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
 
 - **Computer**: Raspberry Pi 4 or 5, or any Linux machine (developed on x86-64 Linux)
 - **Camera**: USB webcam (autofocus strongly recommended) or Raspberry Pi Camera Module
-- **Python**: 3.11 or 3.12 (tested with 3.12; very new Python releases may not have
-  wheels for the computer vision packages yet)
-- **Disk**: ~1.5 GB for dependencies (with CPU-only PyTorch), ~70 MB for the card database
+- **Python**: 3.10 or newer (tested with 3.12 and 3.14)
+- **Disk**: ~300 MB for dependencies, ~75 MB for the card database
 - **AI**: an API key for Gemini, OpenAI or Anthropic, **or** a local Ollama server with a
   vision model
 - **Internet**: to download the card database, show card images, and reach cloud AI providers
 
 ## Installation
 
+The deployment script installs everything and can set the scanner up as a service. Run it on
+the machine that will run the scanner (a Raspberry Pi or any Linux PC):
+
 ```bash
 git clone https://github.com/SilentKernel81/scanner.git
 cd scanner
+./scripts/deploy.sh             # install: packages, venv, .env, camera check, card database
+./scripts/deploy.sh --service   # optional: run as a service that starts on boot
+```
 
-# Create a virtual environment (with uv: uv venv --python 3.12 venv)
+Then add your AI key to `.env` (see below) and open `http://<device-ip>:5000`. Useful options:
+
+| Option | What it does |
+|---|---|
+| `--camera N` | Use USB camera `/dev/videoN` (the script lists the cameras it finds) |
+| `--picamera` | Raspberry Pi camera module |
+| `--service` / `--remove-service` | Install / remove the systemd service |
+| `--update` | Pull the latest code, update packages, restart the service |
+| `--refresh-cards` | Re-download the card database (new cards and prices) |
+| `--with-yolo` | Also install the optional YOLO fallback detector (~1 GB) |
+
+The script is safe to run again at any time - it only does what is missing, and uses `sudo`
+only to install missing system packages or the service. [INSTALL.md](INSTALL.md) has the
+details: Raspberry Pi setup, remote deployment over SSH, updating and uninstalling.
+
+### Manual installation
+
+```bash
 python3 -m venv venv
-source venv/bin/activate
-
-# Optional but recommended on machines without an NVIDIA GPU: install the CPU-only
-# PyTorch first - it is much smaller than the default build
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-pip install -r requirements.txt
-
-# Download the card database from Scryfall (a few minutes)
-python3 setup_database.py
-
-# Add your API key(s)
-cp .env.example .env    # then edit .env
+venv/bin/pip install -r requirements.txt
+venv/bin/python setup_database.py     # download the card database (a few minutes)
+cp .env.example .env                  # then add your API key(s)
 ```
 
-PyTorch and Ultralytics are only used by the optional YOLO fallback detector
-(`detection.method: auto` or `yolo`). With the default outline detection they are never loaded.
+Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number
+(`v4l2-ctl --list-devices`, package `v4l-utils`). For the Raspberry Pi camera module, install
+`python3-picamera2` with apt and create the venv with `--system-site-packages`.
 
-### Raspberry Pi camera
-
-The Pi camera library is installed through the system package manager, so the virtual
-environment must be able to see system packages:
-
-```bash
-sudo apt install python3-picamera2
-python3 -m venv --system-site-packages venv
-```
-
-USB cameras need no extra setup. `v4l2-ctl` (package `v4l-utils`) is used to reset
-autofocus, sharpness and zoom on startup.
-
-### Pick your camera
-
-Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number:
-
-```bash
-v4l2-ctl --list-devices
-```
+The optional YOLO fallback detector (`detection.method: auto` or `yolo`) needs
+`requirements-yolo.txt`, which pulls in PyTorch. With the default outline detection it is not
+needed; if it's configured but not installed, the scanner logs a warning and uses outline
+detection.
 
 ## Choosing a vision AI provider
 
@@ -134,16 +131,22 @@ cloud providers you can turn it off with `vision_ai.detect_foil: false`.
 
 ## Running
 
+If you installed the service, it's already running:
+
 ```bash
-source venv/bin/activate
-python3 app.py
+sudo systemctl status mtg-scanner      # or: restart, stop
+journalctl -u mtg-scanner -f           # live logs
+```
+
+Otherwise start it by hand:
+
+```bash
+venv/bin/python app.py
 ```
 
 Then open `http://localhost:5000` (or `http://<device-ip>:5000` from another device).
-
-`scripts/start.sh` does the same but also loads `.env`, activates the virtual environment and
-checks your API key and database first. To run the scanner as a service on a Raspberry Pi,
-see `mtg-scanner.service` (it assumes the project lives in `/home/pi/scanner`).
+`scripts/start.sh` does the same but also loads `.env` and checks your API key and database
+first.
 
 ## Using the scanner
 
@@ -271,8 +274,12 @@ one of the models listed in Settings (they come from your server) or `ollama pul
 **Wrong printing** - check the set code and number the AI read (shown in the Search bar after
 a capture); correct them there and search again, or pick the printing from the grid.
 
-**Installation fails on a very new Python** - create the virtual environment with Python
-3.12 (e.g. `uv venv --python 3.12 venv`).
+**The YOLO extras fail to install** - PyTorch wheels can lag the newest Python. With
+[uv](https://docs.astral.sh/uv/) installed, `deploy.sh --with-yolo` creates a Python 3.12
+environment automatically; otherwise create one yourself (`uv venv --python 3.12 venv`).
+
+**The service doesn't start** - `journalctl -u mtg-scanner -n 50` shows why (most often the
+card database is missing or another program has the camera).
 
 ## Project structure
 
@@ -290,12 +297,14 @@ setup_database.py    Downloads and builds the card database
 config.yaml          Settings (loaded by config.py / config_loader.py)
 settings.py          UI preferences saved in data/settings.json
 templates/, static/  Web interface
-scripts/             start.sh, backup.sh
+scripts/             deploy.sh (install/update), mtg-scanner.service (template), start.sh, backup.sh
+requirements*.txt    Python dependencies (requirements-yolo.txt: optional YOLO detector)
 data/                Card database, settings, logs (created at runtime)
 scanned_cards/       Captured card images (created at runtime)
 ```
 
-`CLAUDE.md` has more detailed notes on the architecture, database schema and search logic.
+[PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md) explains how everything works inside (detection,
+auto-capture, identification, matching, database); [INSTALL.md](INSTALL.md) covers deployment.
 
 ## HTTP API
 

@@ -1,432 +1,156 @@
-# Card Scanner - Installation Guide
+# Deployment Guide
 
-Complete installation guide for deploying the Card Scanner on Raspberry Pi OS (Raspbian) and Ubuntu.
+The scanner is deployed with `scripts/deploy.sh`, run **on the machine that runs the scanner**
+(a Raspberry Pi or any Linux PC). The same script installs, repairs and updates it, and can set
+it up as a service that starts on boot.
 
-## Table of Contents
+## Raspberry Pi, from scratch
 
-- [Quick Start](#quick-start)
-- [System Requirements](#system-requirements)
-- [Manual Installation](#manual-installation)
-- [Automated Installation](#automated-installation)
-- [Post-Installation Setup](#post-installation-setup)
-- [Running the Scanner](#running-the-scanner)
-- [Setting Up as a Service](#setting-up-as-a-service)
-- [Troubleshooting](#troubleshooting)
-- [Uninstalling](#uninstalling)
+1. **Flash the SD card** with [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
+   *Raspberry Pi OS Lite (64-bit)*. In the imager's settings, set a hostname (e.g. `scanner`),
+   your user and Wi-Fi, and enable SSH.
+2. **Connect the camera** (USB webcam, or the camera module to the CSI port) and boot the Pi.
+3. **Log in and install:**
 
----
-
-## Quick Start
-
-For those who want to get started quickly:
-
-```bash
-# Clone or copy the project to your system
-cd card_scanner_hailo
-
-# Make install script executable
-chmod +x install.sh
-
-# Run the installer
-./install.sh
-
-# Follow the prompts
-```
-
----
-
-## System Requirements
-
-### Hardware
-
-**Minimum:**
-- Raspberry Pi 4 (2GB RAM) or equivalent x86_64 system
-- USB webcam or Raspberry Pi Camera Module
-- 2GB free disk space (more for card images)
-- Internet connection for initial setup
-
-**Recommended:**
-- Raspberry Pi 5 (4GB+ RAM) or modern x86_64 system
-- USB webcam with autofocus
-- 10GB+ free disk space
-- Hailo-8L AI Accelerator (optional, for accelerated detection)
-
-### Software
-
-**Operating Systems:**
-- Raspberry Pi OS (Raspbian) Bullseye or later
-- Ubuntu 20.04 LTS or later
-- Debian 11 or later
-
-**Required:**
-- Python 3.8 or higher
-- Internet connection (for downloading card database and models)
-
----
-
-## Manual Installation
-
-### 1. Install System Dependencies
-
-**On Raspberry Pi OS / Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-    python3 python3-pip python3-venv python3-dev \
-    python3-opencv libopencv-dev \
-    tesseract-ocr libtesseract-dev \
-    v4l-utils git \
-    python3-picamera2 libcamera-tools
-```
-
-**On Ubuntu:**
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-    python3 python3-pip python3-venv python3-dev \
-    python3-opencv libopencv-dev \
-    tesseract-ocr libtesseract-dev \
-    v4l-utils git
-```
-
-### 2. Create Virtual Environment
-
-```bash
-cd card_scanner_hailo
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Install Python Dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Link System Python Packages (for GStreamer)
-
-```bash
-SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
-echo "/usr/lib/python3/dist-packages" > "$SITE_PACKAGES/system-gi.pth"
-```
-
-### 5. Download YOLOv8 Model
-
-```bash
-pip install ultralytics
-python3 -c "from ultralytics import YOLO; model = YOLO('yolov8n.pt')"
-```
-
-### 6. Download Card Database
-
-```bash
-python3 setup_database.py
-```
-
-This downloads ~150MB of card data from Scryfall and takes 5-10 minutes.
-
----
-
-## Automated Installation
-
-### Using install.sh Script
-
-The automated installer handles all setup steps:
-
-```bash
-# Make executable
-chmod +x install.sh
-
-# Run installer
-./install.sh
-```
-
-The script will:
-1. Detect your operating system
-2. Install system dependencies
-3. Create Python virtual environment
-4. Install Python packages
-5. Download YOLOv8 model
-6. Offer to download card database
-7. Offer to set up systemd service
-
----
-
-## Post-Installation Setup
-
-### 1. Set Up Vision AI API Key
-
-The scanner uses Vision AI to automatically identify cards. Choose ONE provider:
-
-#### Google Gemini (Recommended - Free Tier Available)
-
-1. Get API key: https://makersuite.google.com/app/apikey
-2. Set environment variable:
    ```bash
-   export GEMINI_API_KEY='your-api-key-here'
-   ```
-3. Make it permanent:
-   ```bash
-   echo 'export GEMINI_API_KEY="your-api-key-here"' >> ~/.bashrc
-   source ~/.bashrc
-   ```
-
-#### OpenAI GPT-4
-
-1. Get API key: https://platform.openai.com/api-keys
-2. Set environment variable:
-   ```bash
-   export OPENAI_API_KEY='your-api-key-here'
-   ```
-3. Update config.py:
-   ```python
-   VISION_AI_PROVIDER = 'openai'
+   ssh <user>@scanner.local
+   sudo apt install -y git
+   git clone https://github.com/SilentKernel81/scanner.git
+   cd scanner
+   ./scripts/deploy.sh                 # lists the cameras it finds
+   ./scripts/deploy.sh --camera 0 --service      # USB camera /dev/video0, as a service
+   # or: ./scripts/deploy.sh --picamera --service   # Raspberry Pi camera module
    ```
 
-#### Anthropic Claude
+4. **Set up the vision AI** (see below), then restart: `sudo systemctl restart mtg-scanner`.
+5. **Open** `http://scanner.local:5000` from any device on your network.
 
-1. Get API key: https://console.anthropic.com/settings/keys
-2. Set environment variable:
-   ```bash
-   export ANTHROPIC_API_KEY='your-api-key-here'
-   ```
-3. Update config.py:
-   ```python
-   VISION_AI_PROVIDER = 'anthropic'
-   ```
+A Raspberry Pi 4 or 5 handles the camera, card detection and web interface easily. The card
+identification runs on a cloud AI (Gemini, OpenAI or Anthropic) or on a local model server on a
+more powerful computer (e.g. Ollama with a vision model on your desktop) - a Pi is too slow to
+run a vision model itself.
 
-### 2. Configure Camera (Optional)
-
-Edit `config.py` to adjust camera settings:
-
-```python
-# Camera configuration
-CAMERA_RESOLUTION = (2560, 1440)
-CAMERA_FPS = 30
-CAMERA_TYPE = 'auto'  # 'auto', 'usb', or 'picamera'
-```
-
----
-
-## Running the Scanner
-
-### Method 1: Manual Start
+## Any Linux PC
 
 ```bash
-# Navigate to installation directory
-cd card_scanner_hailo
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Start the scanner
-python3 app.py
+git clone https://github.com/SilentKernel81/scanner.git
+cd scanner
+./scripts/deploy.sh                # add --service to start it on boot
+venv/bin/python app.py             # if you didn't install the service
 ```
 
-### Method 2: System Service
+The script supports apt (Debian, Ubuntu, Raspberry Pi OS), pacman (Arch), dnf (Fedora) and
+zypper (openSUSE) for the few system packages it needs.
 
-If you installed the systemd service:
+## What the script does
+
+Each step is skipped when it's already done, so it's safe to run again at any time:
+
+1. **Update** (with `--update`): `git pull`, keeping your local changes (e.g. the camera
+   number in `config.yaml`).
+2. **System packages**: installs what's missing - Python venv support, `v4l-utils` (camera
+   focus/zoom controls) and, with `--picamera`, `python3-picamera2`. Uses `sudo` only here and
+   for the service.
+3. **Python environment**: creates `venv/` with Python 3.10+ and installs `requirements.txt`
+   (about 300 MB; `--with-yolo` adds the optional YOLO detector and PyTorch, about 1 GB more).
+4. **Configuration**: creates `.env` from `.env.example` (readable only by you), sets the camera
+   with `--camera N`, and checks that an API key is set for your AI provider.
+5. **Camera**: checks the configured camera and lists all cameras found.
+6. **Card database**: downloads it from Scryfall if missing (`--refresh-cards` downloads the
+   latest cards and prices). Your inventory is kept.
+7. **Service** (with `--service`): installs `/etc/systemd/system/mtg-scanner.service` for your
+   user and folder, enables it and (re)starts it. If the service is already installed, each run
+   restarts it so new code and packages are used - except a plain `--refresh-cards`, since the
+   running scanner reads new card data directly.
+
+### Options
+
+| Option | What it does |
+|---|---|
+| `--service` | Install and start the systemd service (starts on boot) |
+| `--remove-service` | Stop and remove the service (your data is kept) |
+| `--update` | Pull the latest code first, then update packages and restart the service |
+| `--camera N` | Use USB camera `/dev/videoN` (sets `camera.usb_index` in `config.yaml`) |
+| `--picamera` | Raspberry Pi camera module |
+| `--with-yolo` | Also install the optional YOLO fallback detector (~1 GB) |
+| `--skip-database` | Don't download the card database |
+| `--refresh-cards` | Re-download the card database (latest cards and prices) |
+
+## Vision AI
+
+Pick the provider in the web interface (**Settings → Vision AI**); the choice is remembered.
+
+- **Cloud**: put the key in `.env` - `GEMINI_API_KEY=...`, `OPENAI_API_KEY=...` or
+  `ANTHROPIC_API_KEY=...` - and restart the scanner.
+- **Local (Ollama)**: set `vision_ai.local.endpoint` in `config.yaml` to your server, e.g.
+  `http://192.168.1.20:11434/v1/chat/completions`, and pick a vision model in Settings. On the
+  Ollama machine, make it listen on the network (`OLLAMA_HOST=0.0.0.0`).
+
+## Deploying from your computer
+
+Everything can be driven over SSH (`-t` lets `sudo` ask for your password):
 
 ```bash
-# Start service
-sudo systemctl start card-scanner
-
-# Check status
-sudo systemctl status card-scanner
-
-# View logs
-sudo journalctl -u card-scanner -f
-
-# Enable on boot
-sudo systemctl enable card-scanner
+ssh -t <user>@scanner.local 'cd scanner && ./scripts/deploy.sh --update'
 ```
 
-### Accessing the Web Interface
-
-Once started, access the scanner at:
-
-- **Local:** http://localhost:5000
-- **Network:** http://YOUR_PI_IP:5000
-
-To find your Pi's IP address:
-```bash
-hostname -I
-```
-
----
-
-## Setting Up as a Service
-
-### Automatic Setup
-
-Run the installer and choose "Yes" when asked about systemd service.
-
-### Manual Setup
-
-1. Create service file:
-   ```bash
-   sudo nano /etc/systemd/system/card-scanner.service
-   ```
-
-2. Add configuration (replace paths):
-   ```ini
-   [Unit]
-   Description=Card Scanner Web Service
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=YOUR_USERNAME
-   WorkingDirectory=/path/to/card_scanner_hailo
-   Environment="PATH=/path/to/card_scanner_hailo/venv/bin"
-   Environment="GEMINI_API_KEY=your-api-key-here"
-   ExecStart=/path/to/card_scanner_hailo/venv/bin/python3 /path/to/card_scanner_hailo/app.py
-   Restart=on-failure
-   RestartSec=10
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-3. Enable and start:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable card-scanner
-   sudo systemctl start card-scanner
-   ```
-
----
-
-## Troubleshooting
-
-### Camera Not Detected
-
-**USB Camera:**
-```bash
-# List available cameras
-v4l2-ctl --list-devices
-
-# Test camera
-ffplay /dev/video0
-```
-
-**Pi Camera:**
-```bash
-# Test Pi camera
-libcamera-hello
-
-# Check camera status
-vcgencmd get_camera
-```
-
-### Port Already in Use
-
-If port 5000 is already in use, edit `config.py`:
-```python
-PORT = 8080  # Change to available port
-```
-
-### Database Not Loading
+## Updating
 
 ```bash
-# Check database exists
-ls -lh data/cards_database.db
-
-# Re-download if needed
-rm data/cards_database.db
-python3 setup_database.py
+./scripts/deploy.sh --update            # new code + packages, restarts the service
+./scripts/deploy.sh --refresh-cards     # new cards and prices from Scryfall
 ```
 
-### Vision AI Not Working
+The card database can also be refreshed from the web interface (**Settings → Update card
+database**). To refresh it automatically every Monday at 4:00, add this with `crontab -e`:
+
+```
+0 4 * * 1 cd $HOME/scanner && ./scripts/deploy.sh --refresh-cards >> data/logs/refresh.log 2>&1
+```
+
+## Running the service
 
 ```bash
-# Verify API key is set
-echo $GEMINI_API_KEY
-
-# Test connectivity
-curl -H "x-goog-api-key: $GEMINI_API_KEY" \
-  https://generativelanguage.googleapis.com/v1/models
+sudo systemctl status mtg-scanner       # is it running?
+sudo systemctl restart mtg-scanner      # after changing config.yaml or .env
+journalctl -u mtg-scanner -f            # live logs (the app also writes data/logs/)
 ```
 
-### Check Logs
+The service runs as your user with a read-only view of the system and your home folder, except
+`data/` and `scanned_cards/` in the project, and gets camera access through the `video` group.
+It restarts after a crash, but not after a normal exit (for example when the card database is
+missing - see the logs).
 
-```bash
-# Application logs
-tail -f data/logs/card_scanner.log
+## Backups
 
-# System service logs
-sudo journalctl -u card-scanner -f
-```
-
-### Python Package Issues
-
-```bash
-# Clean install
-rm -rf venv
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
----
+`scripts/backup.sh` archives `data/` (card database, inventory, settings), the scanned images
+and `.env` to `~/scanner-backups/`, keeping the last 10. Your inventory lives in
+`data/cards_database.db`.
 
 ## Uninstalling
 
-### Automated Uninstall
-
 ```bash
-chmod +x uninstall.sh
-./uninstall.sh
+./scripts/deploy.sh --remove-service    # if you installed the service
+rm -rf ~/scanner                         # removes everything, including your inventory
 ```
 
-### Manual Uninstall
+## Troubleshooting
 
-1. Stop and remove service:
-   ```bash
-   sudo systemctl stop card-scanner
-   sudo systemctl disable card-scanner
-   sudo rm /etc/systemd/system/card-scanner.service
-   sudo systemctl daemon-reload
-   ```
+**The camera isn't found** - `v4l2-ctl --list-devices` lists the cameras; pick one with
+`./scripts/deploy.sh --camera N`. Only one program can use the camera at a time, so stop other
+instances (a manual `python app.py` and the service can't run together).
 
-2. Remove virtual environment:
-   ```bash
-   rm -rf venv
-   ```
+**Permission denied on /dev/video0 (manual runs)** - add your user to the `video` group:
+`sudo usermod -aG video $USER`, then log out and in. The service has access either way.
 
-3. Remove data (optional):
-   ```bash
-   rm -rf data scanned_cards
-   ```
+**Port 5000 is in use** - another instance is running (`sudo systemctl stop mtg-scanner`), or
+change `flask.port` in `config.yaml`.
 
-4. Remove system packages (optional):
-   ```bash
-   sudo apt-get remove python3-opencv tesseract-ocr
-   sudo apt-get autoremove
-   ```
+**The service doesn't start** - `journalctl -u mtg-scanner -n 50` shows the error.
 
----
+**"Vision AI disabled"** - no API key for the selected provider: check `.env`, or switch to a
+local model in Settings.
 
-## Additional Resources
-
-- **User Guide:** See `README.md`
-- **Project Instructions:** See `CLAUDE.md`
-- **Vision AI Setup:** See `SETUP_VISION_AI.md`
-- **Hailo Support:** See `HAILO_STATUS.md` and `NEXT_STEPS.md`
-
----
-
-## Support
-
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review application logs: `data/logs/card_scanner.log`
-3. Check GitHub issues (if project is on GitHub)
-
----
-
-## License
-
-See LICENSE file for details.
+**Package installation fails** - run the script again (it resumes). For `--with-yolo` on a
+very new Python, install [uv](https://docs.astral.sh/uv/): the script then uses Python 3.12 for
+PyTorch.

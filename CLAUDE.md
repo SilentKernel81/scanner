@@ -4,231 +4,70 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Python-based real-time card scanner for Magic: The Gathering cards. Uses Flask + SocketIO for web interface, YOLOv8 for object detection, and Scryfall API for card database. Runs on Raspberry Pi with either PiCamera2 or USB webcam.
+Camera-based scanner for Magic: The Gathering cards (Flask + Socket.IO web app). Cards are
+dropped onto a pile in a box; each new card is found by its outline (OpenCV), captured once,
+identified by a vision AI (Gemini / OpenAI / Anthropic / local Ollama: name, collector number,
+set code, ★/• foil marker), matched to the exact printing in a local Scryfall SQLite database,
+and added to an inventory. Runs on a Raspberry Pi or any Linux PC (USB webcam or Pi camera).
+
+**How everything works is documented in [PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md)**
+(detection, auto-capture rules, matching, foil logic, schema, events, measured thresholds) -
+read the relevant section before changing behavior, and keep it up to date.
+User docs: [README.md](README.md); deployment: [INSTALL.md](INSTALL.md).
 
 ## Common Commands
 
-### Setup and Installation
 ```bash
-# Create venv (Python 3.12 - torch/opencv wheels may lag the newest Python)
-uv venv --python 3.12 venv
-uv pip install --python venv/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python venv/bin/python -r requirements.txt
-
-# Download card database from Scryfall (gzipped JSONL, a few minutes)
-venv/bin/python setup_database.py
-
-# API keys go in .env (loaded by app.py via python-dotenv)
-cp .env.example .env
+./scripts/deploy.sh                       # install/repair: packages, venv, .env, camera check, card DB
+./scripts/deploy.sh --service             # + systemd service (template: scripts/mtg-scanner.service)
+./scripts/deploy.sh --update              # git pull + update + restart service
+venv/bin/python app.py                    # run (http://localhost:5000)
+venv/bin/python setup_database.py         # (re)download the Scryfall card database
+venv/bin/python cleanup.py --stats        # scanned images; --days N / --dry-run / --all
 ```
 
-### Running the Application
-```bash
-# Start the web server (default: http://0.0.0.0:5000)
-python3 app.py
-```
+Dependencies: `requirements.txt` (core, ~300 MB, Python 3.10+); `requirements-yolo.txt` adds
+the optional YOLO fallback detector + PyTorch (~1 GB; PyTorch may lag the newest Python). The
+dev venv on this machine is Python 3.12 with YOLO installed.
 
-### Cleanup
-```bash
-# View scanned images statistics
-python3 cleanup.py --stats
+There is no automated test suite. Verify changes by running the app (or a copy of it on another
+port with a copy of the database - never test adds against the real `data/cards_database.db`
+inventory), and for scanner logic by feeding recorded/synthetic frames through `CardScanner`
+with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 
-# Manually clean up images older than 7 days (default)
-python3 cleanup.py
+## Where Things Live
 
-# Clean up images older than 30 days
-python3 cleanup.py --days 30
+| Area | Code |
+|---|---|
+| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline`, `warp_card`, `ObjectDetector.detect` |
+| Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured` |
+| AI providers, prompts, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `CARD_IDENTIFICATION_PROMPT`, `read_foil_symbol`, `warm_up` |
+| Card search / printing match / confidence | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
+| Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
+| Inventory add/merge/undo/split/export | `inventory.py` |
+| UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
+| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/settings.json` (UI choices: AI provider/model, `auto_add`) |
 
-# Preview what would be deleted without actually deleting
-python3 cleanup.py --dry-run
+## Conventions and Pitfalls
 
-# Delete all scanned images
-python3 cleanup.py --all
-```
-
-## Architecture
-
-### Component Flow
-1. **Scanner (scanner.py)** - Captures video frames in background thread, runs YOLOv8 detection, crops detected cards
-2. **Object Detection (object_detector.py)** - Finds the card by its outline (`find_card_outline`: largest portrait 4-sided contour with card aspect ratio) and falls back to YOLO (`detection.method: auto|contour|yolo`). Outline detections give corners, so captures are perspective-corrected (`warp_card`)
-3. **Card Identification (card_identifier.py)** - Vision AI (Gemini/GPT-4/Claude) identifies specific Magic card from cropped image
-4. **Database (database.py)** - SQLite wrapper for Scryfall card data with fuzzy matching
-5. **Search (card_search.py)** - Card lookup and similarity matching
-6. **Inventory (inventory.py)** - SQLite database-based inventory tracking with automatic duplicate detection
-7. **Web App (app.py)** - Flask + SocketIO orchestration
-
-### Threading Model
-- Main thread: Flask/SocketIO event loop
-- Background thread: Continuous frame capture in `scanner.py` (`_capture_frames()`)
-- Frame access protected by `threading.Lock` (`frame_lock`)
-
-### Camera Abstraction
-The scanner auto-detects camera type:
-- **USB Camera**: Uses OpenCV VideoCapture with index 0
-- **PiCamera**: Uses PiCamera2 library
-- Detection order: USB first, then PiCamera (configurable via `Config.CAMERA_TYPE`)
-
-### Database Schema
-**Cards Table:** id, name, flavor_name, set_code, set_name, collector_number, rarity, price_usd, price_usd_foil, image_uri, oracle_text, type_line, colors, mana_cost, plus printing-treatment fields from Scryfall: border_color, frame, frame_effects (JSON), full_art, promo_types (JSON), finishes (JSON), released_at. Columns are defined once in `database.py:CARD_COLUMNS`; missing columns are added automatically on startup (run "Update Card Database" to fill them). Rows are read by column name (`sqlite3.Row`).
-
-**Performance Indexes:**
-- `idx_card_name`: Single-column index on name (case-insensitive)
-- `idx_card_flavor_name`: Single-column index on flavor_name (case-insensitive)
-- `idx_card_set_number`: Composite index on (set_code, collector_number) for exact version lookups
-- `idx_card_rarity`: Single-column index on rarity for filtering
-- `idx_card_type`: Single-column index on type_line for type-based searches
-
-**Flavor Names:** Special printings (like Universes Beyond) may have alternate names. For example, "Bucklebury Ferry" (Lord of the Rings) is stored with Oracle name "Oboro, Palace in the Clouds" but includes flavor_name "Bucklebury Ferry" for searchability. All search functions check both name and flavor_name fields.
-
-**Database Optimization:** The "Rebuild Database Schema" button copies the cards table (by column name) into the canonical column order and rebuilds its indexes. The inventory table is not touched.
-
-**Inventory Table:** id, card_name, set_name, card_number, rarity, type_line, mana_cost, colors, color_identity, price_usd, quantity, condition, foil, surge, timestamp. UNIQUE constraint on (card_name, set_name, card_number, condition, foil, surge) for duplicate detection. Indexed on `card_name COLLATE NOCASE` and `set_name`.
-
-### Configuration
-All settings centralized in `config.py`:
-- Camera resolution: 2560x1440 (configurable)
-- Camera FPS: 30
-- **Autofocus: Enabled** (continuous autofocus always active)
-- **Frame stabilization: 5 frames required** before "Ready" state
-- **Auto-capture: Controlled via "Start Auto Scanning" button** (disabled by default)
-- Database location: `data/cards_database.db`
-- **Automatic cleanup: Enabled** (runs on app startup, deletes images older than 7 days)
-
-## Key Implementation Details
-
-### Card Detection & Identification Workflow
-**Detection (Real-time):**
-1. Outline detection finds the card's 4 corners (~3 ms/frame); if none is found, YOLOv8 (`yolov8n.pt`, COCO - it has no card class, so it is only a rough fallback) runs instead
-2. Outline (or YOLO box) drawn on the annotated frame
-3. `scanner.detected_card` stores (frame, bbox, corners); `get_detected_card()` crops on demand - perspective warp when corners are known, plain bbox crop otherwise
-
-**Identification (On Capture):**
-1. User triggers capture (or auto-capture)
-2. Cropped card image sent to Vision AI (Gemini/GPT-4/Claude)
-3. AI identifies:
-   - Card name (from top of card)
-   - Collector number and set code (bottom-left corner, e.g. "U 0014" / "HOB • EN")
-4. Foil check (`vision_ai.detect_foil`, outline-detected captures only): a second small AI request on a zoomed crop of the bottom-left corner asks whether the set/language separator is a star (★ = foil) or a dot (•). The web UI (`suggestedFinish()` in scanner.js) combines this with the printing's `finishes` (foil-only / nonfoil-only printings are certain) to pre-fill the Regular/Foil/Surge quantity; automatic adds use the same suggestion
-5. Database search: set code + collector number first (unique per printing; accepted only if the name roughly matches, `names_match()`), then name + number, then name only (preferring the same set)
-6. Falls back to name-only search if exact match not found
-7. User confirms and adds to inventory
-
-**Why Collector Number Matters:**
-Cards with same name can have different printings (sets, art, rarities, prices). Using collector number ensures we identify the EXACT version of the card being scanned.
-
-### Auto-Capture Rules (scanner.py)
-- A frame counts toward `stable_frames` only if the card is settled (`_is_card_settled`): corners moved < 1% of card size, sharpness changed < 20% (autofocus) and sharpness >= `auto_capture.min_sharpness`
-- Cards are dropped onto a pile, so the view never empties. After any capture `awaiting_new_card` is set; `_new_card_arrived()` re-arms on a drop: a jump > 3% of card size or card-image change > 0.3 (tiny normalized thumbnails), the card reappearing > 0.8% away after a detection gap, a card gone for >= 6 frames, or a different-looking card than the captured one. Measured noise of a card lying still: movement <= 0.4%, image change <= 0.07, detection gaps <= 2 frames
-- "Add cards automatically" (internally `fast_scan_mode`, default on, saved as `auto_add` in data/settings.json): auto-captured cards go through the AI queue and are added without review - but only `CONFIRMED_MATCHES` (database.py: set+number or name+number); other results pause auto scanning (`card_under_review`) for review. `undo_last_add` takes back the most recent add
-- Local Ollama models are preloaded (`CardIdentifier.warm_up`) when auto scanning starts and kept loaded 30 min (`keep_alive`)
-
-### Frame Processing Pipeline
-1. Capture frame (RGB)
-2. Run YOLO detection (if enabled)
-3. **Track frame stability** (increment counter if card detected, reset if not)
-4. Draw bounding box (orange if stabilizing, green if ready)
-5. Crop detected card region
-6. Store both annotated and raw frames with lock protection
-7. On capture: Wait 0.3s for settling, apply enhanced preprocessing, send to Vision AI
-
-**Enhanced Preprocessing (`_enhance_for_ai`):**
-1. Sharpen image (edge enhancement)
-2. CLAHE contrast adjustment (better text visibility)
-3. Noise reduction (cleaner image for AI)
-
-**Stability Indicator:**
-- Orange box + "Stabilizing X/5" = Card detected, autofocus active, not yet stable
-- Green box + "Ready" = Stable, ready for capture
-
-### Vision AI Configuration
-Set environment variables for your chosen provider:
-- **Gemini**: `export GEMINI_API_KEY=your_key_here` (default)
-- **OpenAI**: `export OPENAI_API_KEY=your_key_here`
-- **Anthropic**: `export ANTHROPIC_API_KEY=your_key_here`
-
-Change provider in `config.py`: `VISION_AI_PROVIDER = 'gemini'|'openai'|'anthropic'`
-Disable AI: `VISION_AI_ENABLED = False`
-
-### SocketIO Events
-- `connect`: Initial client connection
-- `capture_card`: Manual card capture trigger
-- `search_card`: Manual search by name + optional collector number + optional treatment (`database.py:TREATMENT_FILTERS`). One match → `card_found`; several → `card_printings` (client shows a printing picker)
-- `select_printing`: User picked a printing (by Scryfall id) from the picker → `card_found`
-- `add_to_inventory`: Add card to database inventory (supports surge foil, auto-increments quantity for duplicates)
-- `dismiss_card`: Cancel current card review and clear selection
-- `toggle_detection`: Enable/disable YOLOv8 detection
-- `toggle_auto_capture`: Enable/disable automatic card capture
-- `toggle_anti_glare`: Enable/disable anti-glare filter
-- `reset_focus`: Reset camera autofocus
-- `set_ai_provider`: Change Vision AI provider (gemini/openai/anthropic)
-- `update_database`: Update card database from Scryfall (runs in background thread, ~5-10 minutes)
-- `rebuild_database`: Rebuild database schema with optimized structure and indexes (runs in background, ~30 seconds)
-
-### Search Strategy
-All search methods check both `name` and `flavor_name` fields:
-1. Exact match on `name_search` / `flavor_search` - lowercase, accent-free copies of the names (`search_key()`: "Fíli" -> "fili"), filled automatically on startup for older databases (e.g., "Bucklebury Ferry" finds "Oboro, Palace in the Clouds")
-   - Shortened legendary names match by prefix ("Thanos" → "Thanos, the Mad Titan"), before fuzzy matching
-2. Fuzzy match: Python `difflib.get_close_matches()` with 0.6 cutoff
-3. Partial match: SQL LIKE query for similar cards
-
-### Important Notes
-- **Python version**: Use Python 3.12 venv (system Python may be too new for torch wheels)
-- **Virtual environment**: Project uses Python venv (see `pyvenv.cfg`)
-- **Camera initialization**: 2-second warm-up after camera setup
-- **Autofocus**: Enabled for USB cameras via `cv2.CAP_PROP_AUTOFOCUS`
-- **Local AI (Ollama)**: requests send `think: false` - thinking models (e.g. qwen3.5) otherwise use the whole token budget reasoning and return an empty answer
-- **Model file**: YOLOv8 model (`yolov8n.pt`) must be present in project root
-- **Database requirement**: App checks for database existence before starting
-- **Code refactoring**: AI prompts consolidated in `card_identifier.py:CARD_IDENTIFICATION_PROMPT`, duplicate search logic extracted to `app.py:search_and_emit_card()`, shared utilities in `utils.py`
-
-### Web Interface
-- Single-page app: `templates/scanner.html`
-- Video stream: MJPEG via `/video_feed` route
-- Real-time updates: SocketIO for logs, card detection, search results
-- Static assets: CSS/JS in `static/` directory
-- **Layout**: top bar (stats, inventory, settings), camera + search panels on the left, card panel on the right, activity log below. Scanning/sound/AI/database options live in the settings drawer (`#settings-drawer`, `openSettings()`)
-- **Styling**: all colors are CSS variables in `static/css/style.css` (dark by default, light via `prefers-color-scheme`); JS-rendered markup uses classes, not inline styles
-- **Database Management Buttons** (Settings panel):
-  - **Update Card Database**: Downloads latest card data from Scryfall (~150MB, 5-10 min)
-  - **Rebuild Database Schema**: Optimizes database structure with proper column ordering and performance indexes (~30 sec)
-
-### Inventory Management
-Cards stored in SQLite database (`inventory` table) with automatic duplicate detection:
-- Card details: Name, Set, Collector Number, Rarity, Type
-- **Mana information**: Mana Cost, Colors (W/U/B/R/G), Color Identity (White/Blue/Black/Red/Green/Multicolor/Colorless)
-- Pricing: USD price (foil/non-foil)
-- **Condition & metadata**: Condition, Foil status, **Surge Foil status**, Quantity, Timestamp
-
-**Foil Support:**
-- **Regular Foil**: Standard foil treatment
-- **Surge Foil**: Special surge foil variant (introduced in recent Magic sets)
-- Surge and regular foil are tracked separately for accurate pricing and collection management
-
-**Duplicate Detection:**
-When adding a card that already exists (same name + set + card number + condition + foil + surge), the system automatically increments the quantity instead of creating a duplicate entry. This ensures clean inventory management and accurate counts.
-
-**Color Identity Logic:**
-- Single color → "White", "Blue", "Black", "Red", "Green"
-- Multiple colors → "Multicolor"
-- No colors → "Colorless"
-
-**Export:**
-- Standard CSV: `/api/export_inventory` - Full inventory with all fields
-- Moxfield CSV: `/api/export_inventory_moxfield` - Moxfield-compatible format for importing to Moxfield.com
-- Both exports available via web interface buttons
-- Files saved to: `data/card_inventory_export_YYYYMMDD_HHMMSS.csv` and `data/moxfield_export_YYYYMMDD_HHMMSS.csv`
-
-## Development Workflow
-
-When adding features:
-1. Check `config.py` for relevant configuration options
-2. Scanner modifications require understanding thread safety (use `frame_lock`)
-3. Database changes should update both schema in `database.py` and `setup_database.py`
-4. New SocketIO events need handlers in both `app.py` (server) and client JS
-5. No automated tests - verify by running `app.py` and checking startup logs
-
-When debugging:
-- Check console output - extensive logging to stdout
-- SocketIO events logged with `print()` statements
-- Camera issues: Verify camera type detection in logs
-- Database issues: Run `setup_database.py` to verify
+- **Schema**: cards columns are defined once in `database.py:CARD_COLUMNS`; missing columns are
+  added on startup (`initialize_database`). Rows are `sqlite3.Row` - access by column name.
+  New search-relevant columns may need filling in the migration (see `name_search`).
+- **Match confidence**: `search_card_exact` tags results (`card['match']`); only
+  `CONFIRMED_MATCHES` may be added without review. Keep new search paths tagged.
+- **Auto-capture thresholds** in `scanner.py` come from measured camera noise and a live drop
+  test (documented in PROGRAM_DOCUMENTATION.md). Re-measure before changing them.
+- **JSON from NumPy**: values sent through `jsonify`/Socket.IO must be plain Python types
+  (`bool(...)`, `float(...)`) - a `numpy.bool_` broke `/api/detection_status` once.
+- **Restart after template changes**: Flask caches `templates/scanner.html`; a running app keeps
+  serving the old page. Static files are served fresh - bump the `?v=N` query in the template
+  when changing CSS/JS so browsers don't use cached copies.
+- **The camera is exclusive**: only one process can open it; stop the running app before
+  testing with the real camera.
+- **Ollama**: requests must send `think: false` (thinking models otherwise return empty answers)
+  and `keep_alive`; the parser accepts answers with or without `NAME:/NUMBER:/SET:` labels.
+- **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use
+  their own `RLock`. Auto-capture callbacks and the AI worker run in their own threads.
+- **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
+  in PROGRAM_DOCUMENTATION.md.
+- **Logs**: `data/logs/app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log`.

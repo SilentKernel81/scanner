@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configuration
-SCANNER_DIR="/home/pi/scanner"
+SCANNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # the project this script belongs to
 BACKUP_DIR="$HOME/scanner-backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="scanner-backup-$TIMESTAMP.tar.gz"
@@ -84,5 +84,5 @@ echo ""
 print_info "Backup complete!"
 echo ""
 echo "To restore this backup on another system:"
-echo "  tar -xzf $BACKUP_DIR/$BACKUP_FILE -C /home/pi/scanner/"
+echo "  tar -xzf $BACKUP_DIR/$BACKUP_FILE -C $SCANNER_DIR/"
 echo ""

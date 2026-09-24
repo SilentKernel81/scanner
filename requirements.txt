@@ -1,6 +1,5 @@
-# Card Scanner Dependencies
-# Tested with Python 3.12. For a CPU-only PyTorch (much smaller download), install it first:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Card Scanner dependencies (Python 3.10+)
+# Optional YOLO fallback detector: see requirements-yolo.txt
 
 # Web server (SocketIO runs in threading mode - no eventlet/gevent needed)
 flask>=3.0
@@ -8,8 +7,7 @@ flask-socketio>=5.3
 
 # Computer vision
 numpy
-opencv-python>=4.10
-ultralytics>=8.3
+opencv-python-headless>=4.10  # no GUI libraries needed (works on headless Pi OS Lite)
 
 # Image processing / HTTP / config
 Pillow

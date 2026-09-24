@@ -1,8 +1,12 @@
 # object_detector.py
 # Card detection: outline (contour) detection first, YOLO as a fallback
 
+import logging
+
 import cv2
 import numpy as np
+
+logger = logging.getLogger('scanner')
 
 # Magic card aspect ratio: 88mm / 63mm
 CARD_ASPECT_RATIO = 88.0 / 63.0
@@ -131,7 +135,14 @@ class ObjectDetector:
         self.allow_landscape = allow_landscape
         self.model = None
         if method in ('auto', 'yolo'):
-            from ultralytics import YOLO
+            try:
+                from ultralytics import YOLO
+            except ImportError:
+                # YOLO is optional (requirements-yolo.txt); outline detection still works
+                logger.warning("detection.method is '%s' but ultralytics is not installed "
+                               "(pip install -r requirements-yolo.txt) - using outline detection only", method)
+                self.method = 'contour'
+                return
             self.model = YOLO(model_path)
             self.names = self.model.names
 
