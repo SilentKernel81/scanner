@@ -46,7 +46,8 @@ Design choices:
 | `app.py` | Flask + Socket.IO server: routes, events, capture orchestration, AI worker queue |
 | `scanner.py` | Camera (USB via OpenCV/V4L2 or Pi camera), capture thread, detection state, stability, auto-capture |
 | `object_detector.py` | Outline detection (`find_card_outline`), perspective warp (`warp_card`), optional YOLO fallback |
-| `card_identifier.py` | Vision AI providers (`_ask`), card identification prompt and parsing, foil marker check, model warm-up |
+| `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
+| `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
 | `card_search.py` | Search helpers combining name, number, set and treatment for the web app |
 | `inventory.py` | Inventory table: add (merging duplicates), undo, edit/split, delete, stats, CSV import/export |
@@ -188,6 +189,30 @@ SET: <set code>              bottom-left, line 2 ("HOB • EN")
 
 The parser also accepts the three values without labels (some local models drop them).
 
+### Prompts
+
+Prompts live in `prompts.py` and are editable in Settings → Vision AI → **Edit prompts**. Each
+prompt (card identification, foil marker) has two parts:
+
+- **instructions** - what the card looks like and where each value is; this is what the editor
+  changes;
+- **answer format** - fixed (`NAME: / NUMBER: / SET:`, or "one word: star, dot, or unclear")
+  and appended by the code, so an edit can never break the parser.
+
+Edited instructions are saved in `data/prompts.json`, keyed by game (`mtg`; ready for other
+games), prompt kind, and either `default` (all models) or `provider:model`. The prompt used is
+this model's, else the all-models one, else the built-in one. **Restore default** removes the
+saved prompt in effect (the model's first).
+
+**Test on last capture** runs the AI on the last captured card (`scanner.last_capture`) with the
+text in the editor, without saving, and shows the raw answer, how it was read, and the database
+match it would get (confirmed → added automatically, or review). The foil test needs a capture
+with a detected outline.
+
+Moving the answer format after the rules (the old prompt had the rules after it) made no
+difference: on 60 recorded cards qwen3.5:4b gave the same result with both versions (58/60 the
+same printing as qwen3.5:9b).
+
 Providers share one request function per API (`_ask_gemini`, `_ask_openai`, `_ask_anthropic`,
 `_ask_local`). For Ollama, requests set `think: false` (thinking models otherwise spend the
 whole token budget reasoning and return nothing), `temperature: 0`, and `keep_alive: 30m`; the
@@ -302,6 +327,7 @@ Socket.IO events:
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
 | `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
+| `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 
 HTTP endpoints are listed in the README.
 
@@ -313,6 +339,7 @@ HTTP endpoints are listed in the README.
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
+| `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/cards_database.db` | Card data and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |

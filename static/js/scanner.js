@@ -202,7 +202,11 @@ socket.on('error', function(data) {
     // Play error sound
     audioManager.playError();
 
-    addLog(timeNow(), 'error', data.message);
+    if (document.getElementById('prompt-modal').classList.contains('show')) {
+        notify(data.message, 'error');
+    } else {
+        addLog(timeNow(), 'error', data.message);
+    }
 });
 
 socket.on('auto_capture_triggered', function(data) {
@@ -260,6 +264,7 @@ socket.on('ai_provider_set', function(data) {
     activeProvider = data.provider;
     activeModel = data.model;
     addLog(timeNow(), 'success', data.message);
+    loadPrompts();
 });
 
 socket.on('focus_reset', function(data) {
@@ -1107,6 +1112,200 @@ function loadAIProvider() {
         });
 }
 
+// ============================================================================
+// Prompt editor (Settings -> Vision AI -> Edit prompts)
+// ============================================================================
+
+let promptData = null;      // {provider, model, prompts: {kind: {label, instructions, source, ...}}}
+let promptKind = 'identify';
+let promptDrafts = {};      // kind -> edited text not saved yet
+
+const PROMPT_SOURCES = {
+    'built-in': 'Built-in prompt',
+    'all': 'Saved for all models',
+    'model': 'Saved for this model'
+};
+
+function loadPrompts() {
+    return fetch('/api/prompts')
+        .then(response => response.json())
+        .then(data => {
+            promptData = data;
+            updatePromptSummary();
+            if (document.getElementById('prompt-modal').classList.contains('show')) renderPromptEditor();
+        })
+        .catch(error => console.error('Error loading prompts:', error));
+}
+
+function updatePromptSummary() {
+    const custom = promptData.order.map(kind => promptData.prompts[kind]).filter(p => p.source !== 'built-in');
+    document.getElementById('prompt-summary').textContent = custom.length
+        ? custom.map(p => `${p.label}: ${PROMPT_SOURCES[p.source].toLowerCase()}`).join(' · ')
+        : 'What the AI is asked to read on each card - adjustable per model';
+}
+
+function promptText(kind) {
+    return kind in promptDrafts ? promptDrafts[kind] : promptData.prompts[kind].instructions;
+}
+
+function openPromptEditor() {
+    loadPrompts().then(() => {
+        if (!promptData) return;
+        document.getElementById('prompt-test').hidden = true;
+        document.getElementById('prompt-modal').classList.add('show');
+        renderPromptEditor();
+    });
+}
+
+async function closePromptEditor() {
+    const edited = Object.keys(promptDrafts).length > 0;
+    if (edited && !await confirmDialog({
+        title: 'Discard changes?',
+        message: 'The edited prompt has not been saved.',
+        confirmText: 'Discard',
+        danger: true
+    })) return;
+    promptDrafts = {};
+    document.getElementById('prompt-modal').classList.remove('show');
+}
+
+function renderPromptEditor() {
+    const kinds = promptData.prompts;
+    if (!(promptKind in kinds)) promptKind = promptData.order[0];
+    const prompt = kinds[promptKind];
+
+    document.getElementById('prompt-model').textContent = promptData.model
+        ? `In use with ${promptData.provider} / ${promptData.model}`
+        : 'No AI model active - prompts can only be saved for all models';
+
+    document.getElementById('prompt-kinds').innerHTML = promptData.order.map(kind => [kind, kinds[kind]]).map(([kind, p]) => `
+        <label class="radio-pill">
+            <input type="radio" name="prompt-kind" value="${kind}" ${kind === promptKind ? 'checked' : ''} onchange="selectPromptKind('${kind}')">
+            <span>${escapeHtml(p.label)}${kind in promptDrafts ? ' *' : ''}</span>
+        </label>`).join('');
+
+    const textarea = document.getElementById('prompt-text');
+    if (textarea.value !== promptText(promptKind)) textarea.value = promptText(promptKind);
+    document.getElementById('prompt-format').textContent = prompt.answer_format;
+    document.getElementById('prompt-save-model-btn').disabled = !promptData.model;
+    renderPromptSource();
+}
+
+function renderPromptSource() {
+    const prompt = promptData.prompts[promptKind];
+    const edited = promptKind in promptDrafts;
+    const tag = `<span class="source-tag ${prompt.source === 'built-in' ? '' : 'is-custom'}">${PROMPT_SOURCES[prompt.source]}</span>`;
+    const note = edited ? '<span class="source-tag is-edited">Edited - not saved</span>'
+        : prompt.source === 'model' && prompt.has_all_models ? 'overrides the prompt saved for all models' : '';
+    document.getElementById('prompt-source').innerHTML = tag + note;
+    document.getElementById('prompt-reset-btn').disabled = prompt.source === 'built-in' && !edited;
+}
+
+function selectPromptKind(kind) {
+    promptKind = kind;
+    document.getElementById('prompt-test').hidden = true;
+    renderPromptEditor();
+}
+
+function onPromptInput() {
+    const text = document.getElementById('prompt-text').value;
+    const wasEdited = promptKind in promptDrafts;
+    if (text === promptData.prompts[promptKind].instructions) {
+        delete promptDrafts[promptKind];
+    } else {
+        promptDrafts[promptKind] = text;
+    }
+    // Redraw the tabs only when the unsaved-changes marker appears or disappears
+    if (wasEdited !== (promptKind in promptDrafts)) renderPromptEditor();
+    else renderPromptSource();
+}
+
+function savePrompt(scope) {
+    const text = document.getElementById('prompt-text').value.trim();
+    if (!text) {
+        notify('The prompt is empty', 'warning');
+        return;
+    }
+    socket.emit('save_prompt', {kind: promptKind, text: text, scope: scope});
+}
+
+async function resetPrompt() {
+    const prompt = promptData.prompts[promptKind];
+    if (prompt.source === 'built-in') {
+        // Nothing saved - just discard the edits
+        delete promptDrafts[promptKind];
+        renderPromptEditor();
+        return;
+    }
+    const fallback = prompt.source === 'model' && prompt.has_all_models ? 'the prompt saved for all models' : 'the built-in prompt';
+    const message = prompt.source === 'model'
+        ? `Removes the prompt saved for ${promptData.provider} / ${promptData.model}. It will use ${fallback}.`
+        : 'Removes the prompt saved for all models. Models without their own prompt will use the built-in prompt.';
+    if (!await confirmDialog({title: 'Restore default?', message: message, confirmText: 'Remove saved prompt', danger: true})) return;
+    delete promptDrafts[promptKind];
+    socket.emit('reset_prompt', {kind: promptKind});
+}
+
+socket.on('prompts_updated', function(data) {
+    delete promptDrafts[promptKind];
+    promptData = data;
+    updatePromptSummary();
+    if (document.getElementById('prompt-modal').classList.contains('show')) {
+        document.getElementById('prompt-text').value = '';  // force a refresh with the saved text
+        renderPromptEditor();
+    }
+    notify(data.message, 'success');
+});
+
+function testPrompt() {
+    const text = document.getElementById('prompt-text').value.trim();
+    if (!text) {
+        notify('The prompt is empty', 'warning');
+        return;
+    }
+    const button = document.getElementById('prompt-test-btn');
+    button.disabled = true;
+    button.textContent = 'Testing...';
+    const panel = document.getElementById('prompt-test');
+    panel.hidden = false;
+    panel.innerHTML = `Asking ${escapeHtml(promptData.model || 'the AI')} about the last captured card...`;
+    socket.emit('test_prompt', {kind: promptKind, text: text});
+}
+
+socket.on('prompt_test_result', function(data) {
+    const button = document.getElementById('prompt-test-btn');
+    button.disabled = false;
+    button.textContent = 'Test on last capture';
+    const panel = document.getElementById('prompt-test');
+    panel.hidden = false;
+
+    if (data.error) {
+        panel.innerHTML = `<span class="is-error">${escapeHtml(data.error)}</span>`;
+        return;
+    }
+
+    let parsed;
+    if (data.kind === 'foil') {
+        const labels = {'foil': 'Foil (star)', 'non-foil': 'Not foil (dot)', 'unknown': 'Not recognized - answer must contain "star" or "dot"'};
+        parsed = `<div>${escapeHtml(labels[data.result.foil] || data.result.foil)}</div>`;
+    } else if (!data.result) {
+        parsed = '<div class="is-error">No card name found in the answer</div>';
+    } else {
+        const r = data.result;
+        parsed = `<div>${escapeHtml(r.name)} · #${escapeHtml(r.collector_number || '?')} · ${escapeHtml(r.set_code || '?')}</div>`;
+        const m = data.match;
+        parsed += '<div class="test-title">Database match</div>' + (!m
+            ? '<div class="is-error">No card found in the database</div>'
+            : `<div class="${m.confirmed ? 'is-confirmed' : 'is-review'}">${escapeHtml(m.name)} · ${escapeHtml(m.set_name || m.set)} (${escapeHtml(m.set)}) #${escapeHtml(m.number || '?')}
+               - ${m.confirmed ? 'confirmed, would be added automatically' : `needs review (matched by ${escapeHtml(m.match || '?')})`}</div>`);
+    }
+    panel.innerHTML = `
+        <div class="test-title">Answer (${data.seconds} s)</div>
+        <pre>${escapeHtml(data.raw || '(empty)')}</pre>
+        <div class="test-title">Read as</div>
+        ${parsed}`;
+});
+
 function escapeHtml(text) {
     const map = {
         '&': '&amp;',
@@ -1245,6 +1444,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    document.getElementById('prompt-text').addEventListener('input', onPromptInput);
+
     // Enter in the key field saves it
     document.getElementById('ai-credential').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') saveCredential();
@@ -1269,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load available models first, then load current provider/model
     loadAIModels();
     // Small delay to ensure models are loaded first; the key field needs the current provider
-    setTimeout(() => loadAIProvider().then(loadCredentials), 100);
+    setTimeout(() => loadAIProvider().then(loadCredentials).then(loadPrompts), 100);
 
 });
 
@@ -1933,6 +2134,8 @@ document.addEventListener('keydown', function(event) {
         closeDialog(null);
     } else if (document.getElementById('edit-card-modal').classList.contains('show')) {
         closeEditCard();
+    } else if (document.getElementById('prompt-modal').classList.contains('show')) {
+        closePromptEditor();
     } else if (document.getElementById('inventory-modal').classList.contains('show')) {
         closeInventory();
     } else {
@@ -1953,6 +2156,9 @@ window.onclick = function(event) {
     }
     if (event.target === inventoryModal) {
         closeInventory();
+    }
+    if (event.target === document.getElementById('prompt-modal')) {
+        closePromptEditor();
     }
     if (event.target === editModal) {
         closeEditCard();

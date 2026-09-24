@@ -42,12 +42,13 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline`, `warp_card`, `ObjectDetector.detect` |
 | Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured` |
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_check_focus_drift`, `set_continuous_autofocus` |
-| AI providers, prompts, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `CARD_IDENTIFICATION_PROMPT`, `read_foil_symbol`, `warm_up` |
+| AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
+| Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `app.py` (`save_prompt`, `test_prompt`) |
 | Card search / printing match / confidence | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
 | Inventory add/merge/undo/split/export | `inventory.py` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`) |
+| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
 
@@ -76,6 +77,10 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   and `keep_alive`; the parser accepts answers with or without `NAME:/NUMBER:/SET:` labels.
 - **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use
   their own `RLock`. Auto-capture callbacks and the AI worker run in their own threads.
+- **Prompts**: change the built-in text in `prompts.py:BUILT_IN` (instructions + fixed
+  `answer_format`); the parser relies on the answer format, which the editor cannot change.
+  A user's saved prompt in `data/prompts.json` overrides built-in edits - check it when a prompt
+  change seems to have no effect.
 - **Never send full API keys to the browser** (no login on the web UI): `api_keys.credential_status()`
   masks them; the UI can only replace or remove a key.
 - **No native `confirm()` / `alert()`** in the web UI: browsers can silently block them ("prevent

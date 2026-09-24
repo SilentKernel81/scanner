@@ -14,6 +14,8 @@ import time
 import cv2
 from PIL import Image
 import requests
+
+import prompts
 from config import Config
 
 # Create AI logger
@@ -93,51 +95,6 @@ class CardIdentifier:
                 raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
             self.log(f"Card identifier initialized with {provider} ({self.model})")
 
-    # Card identification prompt (shared across all AI providers)
-    CARD_IDENTIFICATION_PROMPT = """This is a Magic: The Gathering card. Please identify THREE pieces of information:
-
-1. The card name (located at the top-left of the card)
-2. The collector number (located at the BOTTOM-LEFT corner of the card)
-3. The set code (the 3-4 character code at the start of LINE 2 in the BOTTOM-LEFT corner)
-
-IMPORTANT INSTRUCTIONS FOR COLLECTOR NUMBER:
-- The collector number is at the BOTTOM-LEFT corner in a TWO-LINE format:
-  * LINE 1: A letter followed by 4-digit number (e.g., "E 0367", "D 0045", "B 0123")
-  * LINE 2: Set code · Language (e.g., "LTR · EN", "M21 · EN")
-- Look for this two-line pattern to identify the correct location
-- Return ONLY the 4-digit number from Line 1 (e.g., "0367" not "E 0367")
-- The letter is just a visual marker to help you find it - don't include it
-- DO NOT confuse it with the mana cost symbols in the TOP-RIGHT corner
-- The mana cost has symbols like {1}, {W}, {U}, {B}, {R}, {G} - IGNORE these completely
-
-IMPORTANT INSTRUCTIONS FOR SET CODE:
-- It is the first thing on LINE 2, before the separator and language (e.g. "LTR" in "LTR · EN")
-- Return only the code, e.g. "LTR", "M21", "HOB" - if you cannot read it, return "Unknown"
-
-Return your answer in EXACTLY this format:
-NAME: [card name]
-NUMBER: [4-digit number only]
-SET: [set code]
-
-Rules:
-- If you see a double-faced card, return the front face name
-- Return ONLY the 4-digit number (e.g., "0367", "0045", "0123")
-- If you cannot find the collector number, return "Unknown"
-- NEVER use the top-right corner mana cost as the collector number
-
-Example response:
-NAME: Lightning Bolt
-NUMBER: 0367
-SET: M21
-
-Your response:"""
-
-    # Foil check: modern cards print a star instead of a dot between set code and
-    # language on foil copies. Asked about a zoomed crop of the bottom-left corner.
-    FOIL_SYMBOL_PROMPT = ("This is the bottom-left corner of a Magic: The Gathering card. The last line shows a set code, "
-                          "a small separator symbol, and a language code - for example 'HOB • EN' or 'HOB ★ EN'. "
-                          "Is the separator a five-pointed STAR or a round DOT? Answer with one word: star, dot, or unclear.")
-
     # How long Ollama keeps the model loaded after a request (its default is 5 minutes)
     OLLAMA_KEEP_ALIVE = "30m"
 
@@ -151,21 +108,30 @@ Your response:"""
         if self.log_callback:
             self.log_callback(message, level)
 
-    def identify_card(self, image_array):
+    def identify_card(self, image_array, instructions=None):
         """
         Identify a Magic card from an image array
 
         Args:
             image_array: NumPy array (RGB) of the card image
+            instructions: prompt instructions to use instead of the saved ones (prompt editor test)
 
         Returns:
-            dict: {'name': str, 'collector_number': str} or None if identification fails
+            dict: {'name': str, 'collector_number': str, 'set_code': str} or None if identification fails
         """
+        return self.identify_card_verbose(image_array, instructions)[1]
+
+    def identify_card_verbose(self, image_array, instructions=None):
+        """identify_card that also returns the AI's raw answer: (raw_text, result)"""
         start_time = time.time()
 
         try:
+            if instructions is None:
+                prompt = prompts.prompt('identify', self.provider, self.model)
+            else:
+                prompt = prompts.build('identify', instructions)
             self.log(f"Sending image to {self.provider} ({self.model}) for identification...")
-            response_text = self._ask(self._image_array_to_base64(image_array), self.CARD_IDENTIFICATION_PROMPT, max_tokens=100)
+            response_text = self._ask(self._image_array_to_base64(image_array), prompt, max_tokens=100)
             result = self._parse_response(response_text, f"{self.provider} ({self.model})") if response_text else None
 
             # Log processing time
@@ -177,36 +143,45 @@ Your response:"""
             else:
                 self.log(f"✗ AI processing completed in {elapsed_time:.2f}s (no result)", level="warning")
 
-            return result
+            return response_text, result
         except Exception as e:
             elapsed_time = time.time() - start_time
             self.log(f"Card identification error after {elapsed_time:.2f}s: {e}", level="error")
-            return None
+            return None, None
 
-    def read_foil_symbol(self, card_image):
+    def read_foil_symbol(self, card_image, instructions=None):
         """
         Check the star/dot foil marker in the bottom-left corner of a card.
 
         Args:
             card_image: Perspective-corrected (flat, portrait, tightly cropped) RGB card
                 image, so the corner is at a known position
+            instructions: prompt instructions to use instead of the saved ones (prompt editor test)
 
         Returns:
             str: 'foil', 'non-foil' or 'unknown'
         """
+        return self.read_foil_symbol_verbose(card_image, instructions)[1]
+
+    def read_foil_symbol_verbose(self, card_image, instructions=None):
+        """read_foil_symbol that also returns the AI's raw answer: (raw_text, result)"""
         height, width = card_image.shape[:2]
         corner = card_image[int(height * 0.91):, :int(width * 0.55)]
         corner = cv2.resize(corner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        if instructions is None:
+            prompt = prompts.prompt('foil', self.provider, self.model)
+        else:
+            prompt = prompts.build('foil', instructions)
 
         try:
-            answer = (self._ask(self._image_array_to_base64(corner), self.FOIL_SYMBOL_PROMPT, max_tokens=10) or '').lower()
+            answer = (self._ask(self._image_array_to_base64(corner), prompt, max_tokens=10) or '').lower()
         except Exception as e:
             self.log(f"Foil check failed: {e}", level="warning")
-            return 'unknown'
+            return None, 'unknown'
 
         foil = 'foil' if 'star' in answer else 'non-foil' if 'dot' in answer else 'unknown'
         self.log(f"Foil marker: {answer.strip()!r} -> {foil}")
-        return foil
+        return answer.strip(), foil
 
     def _image_array_to_base64(self, image_array, quality=95, max_dimension=2048):
         """Convert NumPy image array to base64 string (optimized for text readability)"""

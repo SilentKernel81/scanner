@@ -1282,6 +1282,112 @@ input[type="radio"] {
     flex: 1;
 }
 
+/* Prompt editor */
+.prompt-modal {
+    max-width: 860px;
+}
+
+.modal-subtitle {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.prompt-source {
+    margin: 14px 0 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.prompt-source .source-tag {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 600;
+}
+
+.prompt-source .source-tag.is-custom {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.prompt-source .source-tag.is-edited {
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.prompt-text {
+    resize: vertical;
+    min-height: 180px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.prompt-format {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.prompt-format summary {
+    cursor: pointer;
+}
+
+.prompt-format pre,
+.prompt-test pre {
+    margin-top: 6px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.prompt-actions .spacer {
+    flex: 1;
+}
+
+.prompt-test {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+
+.prompt-test[hidden] {
+    display: none;
+}
+
+.prompt-test .test-title {
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.prompt-test .test-title + * {
+    margin-bottom: 10px;
+}
+
+.prompt-test .is-confirmed { color: var(--success); }
+.prompt-test .is-review { color: var(--warning); }
+.prompt-test .is-error { color: var(--danger); }
+
 /* In-page confirmation dialog */
 .dialog-message {
     white-space: pre-line;

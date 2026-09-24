@@ -192,6 +192,7 @@ class CardScanner:
         self.last_auto_capture_time = 0
         self.auto_capture_callback = None
         self.card_under_review = False  # Prevent auto-capture while card is being reviewed
+        self.last_capture = None  # (card image RGB, is_warped) of the last capture - prompt editor tests
 
         self.initialize_camera()
     
@@ -987,6 +988,7 @@ class CardScanner:
         card_bgr = cv2.cvtColor(card_image_final, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(image_path), card_bgr)
 
+        self.last_capture = (card_image_final, is_warped)
         self.log(f"Card captured: {image_path.name}")
         return image_path, card_image_final, is_warped
 

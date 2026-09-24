@@ -73,6 +73,7 @@ data/moxfield_export_*.csv
 
 # User settings (preferences - don't commit)
 data/settings.json
+data/prompts.json
 
 # Logs
 data/logs/

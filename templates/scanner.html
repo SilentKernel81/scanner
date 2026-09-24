@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=17">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=18">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -233,6 +233,11 @@
                             </button>
                         </div>
                     </div>
+                    <div class="input-group">
+                        <span class="field-label">Prompts</span>
+                        <button class="btn btn-block" onclick="openPromptEditor()">Edit prompts</button>
+                        <div class="hint" id="prompt-summary">What the AI is asked to read on each card - adjustable per model</div>
+                    </div>
                 </div>
 
                 <div class="settings-section">
@@ -336,6 +341,39 @@
         </div>
     </div>
 
+    <!-- Prompt editor -->
+    <div id="prompt-modal" class="modal">
+        <div class="modal-content prompt-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>AI prompts</h2>
+                    <div class="modal-subtitle" id="prompt-model"></div>
+                </div>
+                <span class="close" onclick="closePromptEditor()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="radio-group" id="prompt-kinds"></div>
+
+                <div class="prompt-source" id="prompt-source"></div>
+                <textarea id="prompt-text" class="text-input prompt-text" spellcheck="false" rows="16"></textarea>
+                <details class="prompt-format">
+                    <summary>Added automatically after your text (answer format)</summary>
+                    <pre id="prompt-format"></pre>
+                </details>
+
+                <div class="prompt-actions">
+                    <button class="btn" id="prompt-test-btn" onclick="testPrompt()" title="Runs the AI on the last captured card with the text above, without saving">Test on last capture</button>
+                    <span class="spacer"></span>
+                    <button class="btn btn-ghost" id="prompt-reset-btn" onclick="resetPrompt()">Restore default</button>
+                    <button class="btn" onclick="savePrompt('all')">Save for all models</button>
+                    <button class="btn btn-primary" id="prompt-save-model-btn" onclick="savePrompt('model')">Save for this model</button>
+                </div>
+
+                <div class="prompt-test" id="prompt-test" hidden></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Confirmation dialog: in-page, because browsers can silently block native confirm() -->
     <div id="dialog-modal" class="modal">
         <div class="modal-content narrow">
@@ -351,7 +389,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=17"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=17"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=18"></script>
 </body>
 </html>

@@ -134,6 +134,14 @@ loaded for 30 minutes, so the first card doesn't wait ~10 s for it to load.
 than 6 GB of GPU memory; on smaller GPUs `qwen3.5:4b` works, but it is slower on weak GPUs and
 more often mistakes regular cards for foil - see PROGRAM_DOCUMENTATION.md for the comparison.
 
+**Prompts**: **Settings → Vision AI → Edit prompts** shows what the AI is asked (card
+identification and the foil marker check) and lets you change it - for all models or just the
+one in use, since smaller local models sometimes need different wording. **Test on last
+capture** runs the edited text on the last captured card before you save it, and shows the
+answer and the printing it would match. **Restore default** goes back to the built-in prompt.
+Only the instructions are editable; the answer format is added automatically. Edited prompts
+are saved in `data/prompts.json`.
+
 The foil check sends one extra small request per card. It is free with a local model; for
 cloud providers you can turn it off with `vision_ai.detect_foil: false`.
 
@@ -285,7 +293,9 @@ switch provider in Settings.
 one of the models listed in Settings (they come from your server) or `ollama pull` it.
 
 **Wrong printing** - check the set code and number the AI read (shown in the Search bar after
-a capture); correct them there and search again, or pick the printing from the grid.
+a capture); correct them there and search again, or pick the printing from the grid. If a model
+keeps misreading the same thing, adjust its prompt in **Settings → Vision AI → Edit prompts**
+and check it with **Test on last capture**.
 
 **The YOLO extras fail to install** - PyTorch wheels can lag the newest Python. With
 [uv](https://docs.astral.sh/uv/) installed, `deploy.sh --with-yolo` creates a Python 3.12
@@ -301,6 +311,7 @@ app.py               Flask + Socket.IO web app, routes and event handlers
 scanner.py           Camera capture thread, detection, stability, auto-capture
 object_detector.py   Card outline detection + perspective correction (YOLO fallback)
 card_identifier.py   Vision AI providers, card identification, foil marker check
+prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings
 card_search.py       Search helpers used by the web app
 inventory.py         Inventory storage, stats, import/export
