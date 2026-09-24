@@ -3,195 +3,255 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=3">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🃏 Trading Card Scanner</h1>
-            <div class="stats">
-                <div class="stat-box">
-                    <div class="stat-label">Database</div>
-                    <div class="stat-value" id="db-cards">0</div>
-                </div>
-                <div class="stat-box clickable" onclick="showInventory()" title="Click to view inventory">
-                    <div class="stat-label">Inventory 📋</div>
-                    <div class="stat-value" id="inv-cards">0</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Total Value</div>
-                    <div class="stat-value" id="total-value">$0.00</div>
-                </div>
-                <div class="stat-box" id="processing-queue-box" style="display: none;">
-                    <div class="stat-label">Processing ⏳</div>
-                    <div class="stat-value" id="processing-queue">0</div>
-                </div>
+    <!-- Icon sprite -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+        <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+        <symbol id="i-focus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+        <symbol id="i-card" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6M9 17h6"/></symbol>
+        <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    </svg>
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark"><svg class="icon"><use href="#i-card"/></svg></span>
+            Card Scanner
+        </div>
+        <div class="stats">
+            <div class="stat-box">
+                <span class="stat-label">Database</span>
+                <span class="stat-value" id="db-cards">0</span>
+            </div>
+            <div class="stat-box clickable" onclick="showInventory()" title="View inventory">
+                <span class="stat-label">Inventory</span>
+                <span class="stat-value" id="inv-cards">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Value</span>
+                <span class="stat-value" id="total-value">$0.00</span>
+            </div>
+            <div class="stat-box" id="processing-queue-box" style="display: none;">
+                <span class="stat-label">Processing</span>
+                <span class="stat-value" id="processing-queue">0</span>
             </div>
         </div>
-        
+        <button class="icon-btn" onclick="showInventory()" title="Inventory"><svg class="icon"><use href="#i-box"/></svg></button>
+        <button class="icon-btn" onclick="openSettings()" title="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
+    </header>
+
+    <main class="container">
         <div class="main-content">
-            <div class="video-section">
-                <h2 class="section-title">📹 Live Camera Feed</h2>
-                <div class="video-container">
-                    <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
-                </div>
-
-                <div class="controls">
-                    <button class="btn btn-primary" onclick="captureCard()" id="capture-btn">📸 Capture Card</button>
-                    <button class="btn btn-success" onclick="searchCard()" id="search-btn" disabled>🔍 Search Database</button>
-                    <button class="btn" onclick="resetFocus()" id="reset-focus-btn" style="background: #9b59b6; color: white;">🎯 Reset Focus</button>
-                </div>
-
-                <div class="detection-status" id="detection-status">
-                    <div class="status-indicator" id="status-indicator">
-                        <span class="status-icon">⚪</span>
-                        <span class="status-text">Waiting for card...</span>
-                    </div>
-                </div>
-
-                <div class="input-group" style="margin-top: 20px;">
-                    <label for="card-name">Card Name (Manual Entry or AI Detected)</label>
-                    <input type="text" id="card-name" placeholder="Enter card name...">
-                </div>
-
-                <div class="input-group" style="margin-top: 10px;">
-                    <label for="collector-number">Collector Number (Optional)</label>
-                    <input type="text" id="collector-number" placeholder="e.g., 123, LTR 0195, M21 234...">
-                </div>
-
-                <div class="input-group" style="margin-top: 10px;">
-                    <label for="card-treatment">Treatment (Optional)</label>
-                    <select id="card-treatment">
-                        <option value="">Any</option>
-                        <option value="regular">Regular frame</option>
-                        <option value="borderless">Borderless</option>
-                        <option value="showcase">Showcase</option>
-                        <option value="extendedart">Extended Art</option>
-                        <option value="fullart">Full Art</option>
-                        <option value="retro">Retro Frame</option>
-                        <option value="etched">Etched</option>
-                        <option value="surgefoil">Surge Foil</option>
-                    </select>
-                </div>
-
-                <div class="detection-controls" style="margin-top: 15px;">
-                    <label style="display: flex; align-items: center; gap: 10px;">
-                        <input type="checkbox" id="toggle-detection" checked>
-                        <span>Enable Auto-Detection</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="toggle-fast-scan">
-                        <span>⚡ Fast Scan Mode (quick scanning + auto-add to inventory)</span>
-                    </label>
-                    <div style="margin-top: 10px;">
-                        <button class="btn" id="toggle-auto-scanning-btn" onclick="toggleAutoScanning()" style="width: 100%; padding: 10px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                            🎬 Start Auto Scanning
+            <div class="column">
+                <section class="panel video-section">
+                    <div class="panel-header">
+                        <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> Camera</h2>
+                        <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Re-enable autofocus">
+                            <svg class="icon"><use href="#i-focus"/></svg> Reset focus
                         </button>
-                        <div style="margin-top: 5px; font-size: 11px; color: #7f8c8d; font-style: italic;" id="auto-scan-hint">
-                            💡 Click to start automatic card scanning
+                    </div>
+                    <div class="video-container">
+                        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+                        <div class="detection-status" id="detection-status">
+                            <div class="status-indicator" id="status-indicator">
+                                <span class="status-icon">⚪</span>
+                                <span class="status-text">Waiting for card...</span>
+                            </div>
                         </div>
                     </div>
-                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="toggle-anti-glare">
-                        <span>Enable Anti-Glare (for foil/reflective cards)</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="toggle-debug-trace">
-                        <span>Enable Debug Trace (show detection logs)</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="toggle-audio" checked>
-                        <span>🔊 Enable Sound Effects</span>
-                    </label>
-                    <div style="margin-left: 30px; margin-top: 5px; display: flex; align-items: center; gap: 10px;">
-                        <label style="font-size: 12px; color: #7f8c8d;">Volume:</label>
-                        <input type="range" id="audio-volume" min="0" max="100" value="30" style="flex: 1;">
-                        <span id="volume-value" style="font-size: 12px; color: #7f8c8d; min-width: 35px;">30%</span>
+
+                    <div class="controls">
+                        <button class="btn btn-primary" onclick="captureCard()" id="capture-btn">
+                            <svg class="icon"><use href="#i-camera"/></svg> Capture card
+                        </button>
+                        <button class="btn btn-autoscan" id="toggle-auto-scanning-btn" onclick="toggleAutoScanning()">
+                            <svg class="icon"><use href="#i-play"/></svg> Start auto scanning
+                        </button>
                     </div>
-                    <div style="margin-left: 30px; margin-top: 10px;">
-                        <button onclick="testAudio()" class="btn btn-small" style="padding: 6px 12px; background: #3498db; color: white; font-size: 12px;">🔊 Test Sound</button>
+                    <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-header">
+                        <h2 class="section-title"><svg class="icon"><use href="#i-search"/></svg> Search</h2>
                     </div>
-                    <div style="margin-left: 30px; margin-top: 5px; font-size: 11px; color: #7f8c8d; font-style: italic;">
-                        💡 Tip: Enable Fast Scan Mode for quicker scanning with auto-add to inventory
+                    <div class="input-group">
+                        <label for="card-name">Card name</label>
+                        <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
                     </div>
-                    <div style="margin-top: 15px;">
-                        <label for="ai-provider" style="display: block; margin-bottom: 5px; font-weight: 500;">AI Provider:</label>
-                        <select id="ai-provider" style="padding: 8px; width: 100%; margin-bottom: 10px;">
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label for="collector-number">Collector number</label>
+                            <input type="text" id="collector-number" placeholder="Optional, e.g. 123">
+                        </div>
+                        <div class="input-group">
+                            <label for="card-treatment">Treatment</label>
+                            <select id="card-treatment">
+                                <option value="">Any</option>
+                                <option value="regular">Regular frame</option>
+                                <option value="borderless">Borderless</option>
+                                <option value="showcase">Showcase</option>
+                                <option value="extendedart">Extended Art</option>
+                                <option value="fullart">Full Art</option>
+                                <option value="retro">Retro Frame</option>
+                                <option value="etched">Etched</option>
+                                <option value="surgefoil">Surge Foil</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button class="btn btn-primary btn-block" onclick="searchCard()" id="search-btn" disabled>
+                            <svg class="icon"><use href="#i-search"/></svg> Search database
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel card-info">
+                <div class="panel-header">
+                    <h2 class="section-title"><svg class="icon"><use href="#i-card"/></svg> Card</h2>
+                </div>
+                <div id="card-display">
+                    <div class="empty-state">
+                        <svg class="icon"><use href="#i-card"/></svg>
+                        No card scanned yet.<br>
+                        Capture or search for a card to begin.
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel log-section-bottom">
+            <div class="panel-header">
+                <h2 class="section-title"><svg class="icon"><use href="#i-list"/></svg> Activity</h2>
+                <button class="btn btn-small btn-ghost" onclick="document.getElementById('log-container').innerHTML = ''">Clear</button>
+            </div>
+            <div class="log-container" id="log-container"></div>
+        </section>
+    </main>
+
+    <!-- Settings Drawer -->
+    <div id="settings-drawer" class="drawer">
+        <aside class="drawer-panel">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="close" onclick="closeSettings()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Scanning</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Auto-detection</span>
+                            <span class="switch-desc">Find cards in the camera feed with YOLO</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-detection" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Fast scan mode</span>
+                            <span class="switch-desc">Quicker captures, identified cards are added automatically</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-fast-scan">
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Anti-glare</span>
+                            <span class="switch-desc">Reduce reflections on foil cards</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-anti-glare">
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Debug trace</span>
+                            <span class="switch-desc">Log why detections are filtered out</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-debug-trace">
+                    </label>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Sound</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Sound effects</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-audio" checked>
+                    </label>
+                    <div class="volume-row">
+                        <label for="audio-volume">Volume</label>
+                        <input type="range" id="audio-volume" min="0" max="100" value="30">
+                        <span id="volume-value">30%</span>
+                        <button onclick="testAudio()" class="btn btn-small">Test</button>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Vision AI</h3>
+                    <div class="input-group">
+                        <label for="ai-provider">Provider</label>
+                        <select id="ai-provider">
                             <option value="gemini">Google Gemini</option>
                             <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic Claude</option>
-                            <option value="local">Local (Self-Hosted)</option>
+                            <option value="local">Local (self-hosted)</option>
                         </select>
-
-                        <label for="ai-model" style="display: block; margin-bottom: 5px; font-weight: 500;">Model:</label>
-                        <div style="display: flex; gap: 5px; align-items: center;">
-                            <select id="ai-model" style="padding: 8px; flex: 1;">
+                    </div>
+                    <div class="input-group">
+                        <label for="ai-model">Model</label>
+                        <div class="model-row">
+                            <select id="ai-model" class="select">
                                 <option value="">Loading models...</option>
                             </select>
-                            <button id="refresh-models-btn" onclick="refreshAIModels()" class="btn btn-small" style="padding: 8px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;" title="Refresh available models">
-                                🔄
+                            <button id="refresh-models-btn" onclick="refreshAIModels()" class="icon-btn" title="Refresh available models">
+                                <svg class="icon"><use href="#i-refresh"/></svg>
                             </button>
                         </div>
                     </div>
+                </div>
 
-                    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ecf0f1;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: 500;">Database:</label>
-                        <button id="update-database-btn" onclick="updateDatabase()" class="btn" style="width: 100%; padding: 10px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 5px;">
-                            🔄 Update Card Database
-                        </button>
-                        <div style="margin-top: 5px; font-size: 11px; color: #7f8c8d; font-style: italic;">
-                            💡 Downloads latest card data from Scryfall (~150MB, 5-10 min)
-                        </div>
-
-                        <button id="rebuild-database-btn" onclick="rebuildDatabase()" class="btn" style="width: 100%; padding: 10px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 10px;">
-                            🔧 Rebuild Database Schema
-                        </button>
-                        <div style="margin-top: 5px; font-size: 11px; color: #7f8c8d; font-style: italic;">
-                            ⚡ Optimize database structure for better performance (~30 sec)
-                        </div>
-                    </div>
+                <div class="settings-section">
+                    <h3>Card database</h3>
+                    <button id="update-database-btn" onclick="updateDatabase()" class="btn btn-block">Update card database</button>
+                    <div class="hint">Downloads the latest card data and prices from Scryfall (a few minutes)</div>
+                    <button id="rebuild-database-btn" onclick="rebuildDatabase()" class="btn btn-block">Rebuild database schema</button>
+                    <div class="hint">Reorders columns and rebuilds indexes (~30 sec)</div>
                 </div>
             </div>
-
-            <div class="card-info">
-                <h2 class="section-title">🎴 Card Information</h2>
-                <div id="card-display">
-                    <p style="text-align: center; color: #999; padding: 40px 0;">
-                        No card scanned yet.<br>
-                        Capture a card to begin.
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <div class="log-section-bottom">
-            <h2 class="section-title">📋 Activity Log</h2>
-            <div class="log-container" id="log-container"></div>
-        </div>
+        </aside>
     </div>
 
     <!-- Inventory Modal -->
     <div id="inventory-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>📦 Card Inventory</h2>
+                <h2>Inventory</h2>
                 <span class="close" onclick="closeInventory()">&times;</span>
             </div>
             <div class="modal-body">
                 <div class="inventory-controls">
-                    <button class="btn btn-small" onclick="refreshInventory()">🔄 Refresh</button>
-                    <button class="btn btn-small btn-success" onclick="exportInventory()">📥 Export CSV</button>
-                    <button class="btn btn-small btn-success" onclick="exportInventoryMoxfield()">📥 Export to Moxfield</button>
-                    <button class="btn btn-small btn-primary" onclick="document.getElementById('import-file-input').click()">📤 Import CSV</button>
+                    <input type="text" id="inventory-search" placeholder="Filter by name, set, or rarity..." oninput="filterInventory()">
+                    <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
+                    <button class="btn btn-small" onclick="exportInventory()">Export CSV</button>
+                    <button class="btn btn-small" onclick="exportInventoryMoxfield()">Export to Moxfield</button>
+                    <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
                     <input type="file" id="import-file-input" accept=".csv" style="display: none;" onchange="importInventory()">
-                    <button class="btn btn-small" onclick="clearInventory()" style="background: #e74c3c; color: white;">🗑️ Clear All</button>
-                    <input type="text" id="inventory-search" placeholder="🔍 Filter by name, set, or rarity..." oninput="filterInventory()">
+                    <button class="btn btn-small btn-danger" onclick="clearInventory()">Clear all</button>
                 </div>
                 <div id="inventory-stats" class="inventory-stats"></div>
                 <div id="inventory-list" class="inventory-list">
-                    <p style="text-align: center; padding: 20px;">Loading inventory...</p>
+                    <div class="empty-state">Loading inventory...</div>
                 </div>
             </div>
         </div>
@@ -199,22 +259,22 @@
 
     <!-- Edit Card Modal -->
     <div id="edit-card-modal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content narrow">
             <div class="modal-header">
-                <h2>✏️ Edit Card</h2>
+                <h2>Edit card</h2>
                 <span class="close" onclick="closeEditCard()">&times;</span>
             </div>
             <div class="modal-body">
-                <div id="edit-card-name" style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #2c3e50;"></div>
+                <div id="edit-card-name" class="edit-card-name"></div>
 
-                <div class="input-group" style="margin-bottom: 15px;">
-                    <label for="edit-quantity">Quantity:</label>
-                    <input type="number" id="edit-quantity" min="1" max="999" value="1" style="width: 100%; padding: 8px;" oninput="updateSplitMaxQuantity()">
+                <div class="input-group">
+                    <label for="edit-quantity">Quantity</label>
+                    <input type="number" id="edit-quantity" min="1" max="999" value="1" oninput="updateSplitMaxQuantity()">
                 </div>
 
-                <div class="input-group" style="margin-bottom: 15px;">
-                    <label for="edit-condition">Condition:</label>
-                    <select id="edit-condition" style="width: 100%; padding: 8px;">
+                <div class="input-group">
+                    <label for="edit-condition">Condition</label>
+                    <select id="edit-condition">
                         <option value="Mint">Mint (M)</option>
                         <option value="Near Mint">Near Mint (NM)</option>
                         <option value="Excellent">Excellent (EX)</option>
@@ -224,53 +284,45 @@
                     </select>
                 </div>
 
-                <div class="input-group" style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px;">Foil Type:</label>
-                    <div style="display: flex; gap: 10px;">
-                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <div class="input-group">
+                    <span class="field-label">Finish</span>
+                    <div class="radio-group">
+                        <label class="radio-pill">
                             <input type="radio" name="edit-foil-type" value="non-foil" checked onchange="updateSplitQuantityVisibility()">
                             <span>Regular</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <label class="radio-pill">
                             <input type="radio" name="edit-foil-type" value="foil" onchange="updateSplitQuantityVisibility()">
-                            <span>✨ Foil</span>
+                            <span>Foil</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <label class="radio-pill">
                             <input type="radio" name="edit-foil-type" value="surge" onchange="updateSplitQuantityVisibility()">
-                            <span>⚡ Surge Foil</span>
+                            <span>Surge foil</span>
                         </label>
                     </div>
                 </div>
 
-                <div id="split-quantity-section" style="margin-bottom: 15px; display: none;">
-                    <div style="padding: 10px; background: #e3f2fd; border-radius: 4px; border-left: 4px solid #2196f3;">
-                        <label for="edit-split-quantity" style="display: block; margin-bottom: 8px; font-weight: bold; color: #1976d2;">
-                            📦 How many cards should have the new foil type?
-                        </label>
-                        <input type="number" id="edit-split-quantity" min="1" value="1" style="width: 100%; padding: 8px; margin-bottom: 8px;">
-                        <div style="font-size: 12px; color: #1565c0;" id="split-preview">
-                            This will create: <strong>1</strong> with new foil type + <strong>0</strong> remaining with original foil type
-                        </div>
+                <div id="split-quantity-section" class="callout" style="display: none;">
+                    <label for="edit-split-quantity">How many cards should have the new finish?</label>
+                    <input type="number" id="edit-split-quantity" class="text-input" min="1" value="1">
+                    <div id="split-preview">
+                        This will create: <strong>1</strong> with new foil type + <strong>0</strong> remaining with original foil type
                     </div>
                 </div>
 
-                <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 4px; font-size: 12px; color: #856404;">
-                    💡 <strong>Note:</strong> Changing the foil type will split this entry - specify how many cards should be marked with the new foil type.
+                <div class="callout warning">
+                    Changing the finish splits this entry - choose how many cards get the new finish.
                 </div>
 
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button class="btn btn-success" onclick="saveEditCard()" style="flex: 1;">
-                        ✓ Save Changes
-                    </button>
-                    <button class="btn" onclick="closeEditCard()" style="flex: 0 0 auto; background: #95a5a6; color: white;">
-                        Cancel
-                    </button>
+                <div class="modal-actions">
+                    <button class="btn btn-success" onclick="saveEditCard()">Save changes</button>
+                    <button class="btn" onclick="closeEditCard()">Cancel</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=1764101600"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=1764101600"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=3"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=3"></script>
 </body>
 </html>

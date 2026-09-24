@@ -178,6 +178,8 @@ All search methods check both `name` and `flavor_name` fields:
 - Video stream: MJPEG via `/video_feed` route
 - Real-time updates: SocketIO for logs, card detection, search results
 - Static assets: CSS/JS in `static/` directory
+- **Layout**: top bar (stats, inventory, settings), camera + search panels on the left, card panel on the right, activity log below. Scanning/sound/AI/database options live in the settings drawer (`#settings-drawer`, `openSettings()`)
+- **Styling**: all colors are CSS variables in `static/css/style.css` (dark by default, light via `prefers-color-scheme`); JS-rendered markup uses classes, not inline styles
 - **Database Management Buttons** (Settings panel):
   - **Update Card Database**: Downloads latest card data from Scryfall (~150MB, 5-10 min)
   - **Rebuild Database Schema**: Optimizes database structure with proper column ordering and performance indexes (~30 sec)

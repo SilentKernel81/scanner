@@ -14,6 +14,11 @@ let currentProvider = 'gemini';
 let currentModel = null;
 
 // Helper function for console logging
+function timeNow() {
+    // 24-hour HH:MM:SS, matching timestamps sent by the server
+    return new Date().toLocaleTimeString('en-GB', {hour12: false});
+}
+
 function logSeparator() {
     return "=".repeat(60);
 }
@@ -98,12 +103,12 @@ socket.on('card_found', function(data) {
     console.log('🔍 Checking if auto_add is true...');
     if (data.auto_add) {
         console.log('⚡ Fast Scan: Scheduling auto-add in 500ms...');
-        addLog(new Date().toLocaleTimeString(), 'info', '⚡ Fast Scan: Auto-adding in 0.5s...');
+        addLog(timeNow(), 'info', '⚡ Fast Scan: Auto-adding in 0.5s...');
         setTimeout(function() {
             console.log('⚡ Fast Scan: Timeout fired, currentCard:', currentCard);
             if (currentCard) {  // Verify card still loaded
                 console.log('⚡ Fast Scan: Calling addToInventory(true)...');
-                addLog(new Date().toLocaleTimeString(), 'success', '⚡ Fast Scan: Adding to inventory NOW!');
+                addLog(timeNow(), 'success', '⚡ Fast Scan: Adding to inventory NOW!');
                 addToInventory(true);  // Pass true for autoMode
             } else {
                 console.warn('⚡ Fast Scan: currentCard is null, skipping auto-add');
@@ -121,12 +126,12 @@ socket.on('card_not_found', function(data) {
     audioManager.playError();
 
     const message = data.message || `Card "${data.card_name}" not found in database.`;
-    addLog(new Date().toLocaleTimeString(), 'warning', message);
+    addLog(timeNow(), 'warning', message);
     document.getElementById('card-display').innerHTML = `
-        <p style="text-align: center; color: #e74c3c; padding: 20px;">
+        <div class="empty-state is-error">
             ${escapeHtml(message)}<br>
-            ${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}
-        </p>
+            <span class="hint">${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}</span>
+        </div>
     `;
     // Auto-dismiss after card not found to allow next auto-capture
     setTimeout(function() {
@@ -153,17 +158,17 @@ socket.on('inventory_updated', function(data) {
         console.log('✅ Card added - playing NEXT READY sound');
         audioManager.playNextReady();
         // Show clear message
-        addLog(new Date().toLocaleTimeString(), 'success', '✓ Added! DROP NEXT CARD NOW');
+        addLog(timeNow(), 'success', '✓ Added! DROP NEXT CARD NOW');
     } else {
         audioManager.playSuccess();
     }
 
     loadStats();
     document.getElementById('card-display').innerHTML = `
-        <p style="text-align: center; color: #11998e; padding: 40px 0;">
-            ✓ Card added to inventory!<br>
-            Ready to scan next card.
-        </p>
+        <div class="empty-state is-success">
+            ✓ Card added to inventory<br>
+            <span class="hint">Ready to scan the next card.</span>
+        </div>
     `;
     document.getElementById('card-name').value = '';
     document.getElementById('collector-number').value = '';
@@ -182,7 +187,7 @@ socket.on('error', function(data) {
     // Play error sound
     audioManager.playError();
 
-    addLog(new Date().toLocaleTimeString(), 'error', data.message);
+    addLog(timeNow(), 'error', data.message);
 });
 
 socket.on('auto_capture_triggered', function(data) {
@@ -204,10 +209,10 @@ socket.on('auto_capture_triggered', function(data) {
 
     // In fast scan mode, show clear instruction in log
     if (fastScanMode) {
-        addLog(new Date().toLocaleTimeString(), 'info', '📸 CAPTURED! Remove card...');
+        addLog(timeNow(), 'info', '📸 CAPTURED! Remove card...');
     }
 
-    addLog(new Date().toLocaleTimeString(), 'info', `Auto-capture triggered for card #${data.card_number}`);
+    addLog(timeNow(), 'info', `Auto-capture triggered for card #${data.card_number}`);
 });
 
 socket.on('processing_queue_update', function(data) {
@@ -222,11 +227,7 @@ socket.on('processing_queue_update', function(data) {
     if (queueCount > 0) {
         queueBox.style.display = '';
         // Add visual emphasis for queue building up
-        if (queueCount >= 3) {
-            queueBox.style.background = 'linear-gradient(135deg, #f39c12 0%, #e67e22 100%)';
-        } else {
-            queueBox.style.background = '';
-        }
+        queueBox.classList.toggle('is-busy', queueCount >= 3);
     } else {
         queueBox.style.display = 'none';
     }
@@ -241,19 +242,19 @@ socket.on('ai_provider_set', function(data) {
     console.log('Message:', data.message);
     currentProvider = data.provider;
     currentModel = data.model;
-    addLog(new Date().toLocaleTimeString(), 'success', data.message);
+    addLog(timeNow(), 'success', data.message);
 });
 
 socket.on('focus_reset', function(data) {
     console.log(logSeparator());
     console.log('FOCUS RESET SUCCESS');
     console.log(logSeparator());
-    addLog(new Date().toLocaleTimeString(), 'success', 'Focus reset - camera will refocus');
+    addLog(timeNow(), 'success', 'Focus reset - camera will refocus');
 });
 
 socket.on('database_update_progress', function(data) {
     console.log('DATABASE UPDATE PROGRESS:', data.message);
-    addLog(new Date().toLocaleTimeString(), 'info', data.message);
+    addLog(timeNow(), 'info', data.message);
 });
 
 socket.on('database_update_complete', function(data) {
@@ -268,11 +269,10 @@ socket.on('database_update_complete', function(data) {
 
     const updateBtn = document.getElementById('update-database-btn');
     updateBtn.disabled = false;
-    updateBtn.innerHTML = '🔄 Update Card Database';
-    updateBtn.style.background = '#9b59b6';
+    updateBtn.textContent = 'Update card database';
 
-    addLog(new Date().toLocaleTimeString(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
-    addLog(new Date().toLocaleTimeString(), 'success', `${data.cards_with_prices.toLocaleString()} cards have pricing data.`);
+    addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
+    addLog(timeNow(), 'success', `${data.cards_with_prices.toLocaleString()} cards have pricing data.`);
 });
 
 socket.on('database_update_error', function(data) {
@@ -286,15 +286,14 @@ socket.on('database_update_error', function(data) {
 
     const updateBtn = document.getElementById('update-database-btn');
     updateBtn.disabled = false;
-    updateBtn.innerHTML = '🔄 Update Card Database';
-    updateBtn.style.background = '#9b59b6';
+    updateBtn.textContent = 'Update card database';
 
-    addLog(new Date().toLocaleTimeString(), 'error', `Database update failed: ${data.message}`);
+    addLog(timeNow(), 'error', `Database update failed: ${data.message}`);
 });
 
 socket.on('database_rebuild_progress', function(data) {
     console.log('DATABASE REBUILD PROGRESS:', data.message);
-    addLog(new Date().toLocaleTimeString(), 'info', data.message);
+    addLog(timeNow(), 'info', data.message);
 });
 
 socket.on('database_rebuild_complete', function(data) {
@@ -310,12 +309,11 @@ socket.on('database_rebuild_complete', function(data) {
 
     const rebuildBtn = document.getElementById('rebuild-database-btn');
     rebuildBtn.disabled = false;
-    rebuildBtn.innerHTML = '🔧 Rebuild Database Schema';
-    rebuildBtn.style.background = '#e67e22';
+    rebuildBtn.textContent = 'Rebuild database schema';
 
-    addLog(new Date().toLocaleTimeString(), 'success', `Database rebuilt! ${data.cards_imported.toLocaleString()} cards migrated.`);
-    addLog(new Date().toLocaleTimeString(), 'success', `Schema optimized: ${data.schema_type} (with performance indexes)`);
-    addLog(new Date().toLocaleTimeString(), 'success', 'Database queries will now be faster!');
+    addLog(timeNow(), 'success', `Database rebuilt! ${data.cards_imported.toLocaleString()} cards migrated.`);
+    addLog(timeNow(), 'success', `Schema optimized: ${data.schema_type} (with performance indexes)`);
+    addLog(timeNow(), 'success', 'Database queries will now be faster!');
 });
 
 socket.on('database_rebuild_error', function(data) {
@@ -329,10 +327,9 @@ socket.on('database_rebuild_error', function(data) {
 
     const rebuildBtn = document.getElementById('rebuild-database-btn');
     rebuildBtn.disabled = false;
-    rebuildBtn.innerHTML = '🔧 Rebuild Database Schema';
-    rebuildBtn.style.background = '#e67e22';
+    rebuildBtn.textContent = 'Rebuild database schema';
 
-    addLog(new Date().toLocaleTimeString(), 'error', `Database rebuild failed: ${data.message}`);
+    addLog(timeNow(), 'error', `Database rebuild failed: ${data.message}`);
 });
 
 // ============================================================================
@@ -426,7 +423,7 @@ function captureCard() {
     // If detection is disabled, allow capture regardless of detection status (captures full frame)
     if (detectionEnabled && !cardDetected) {
         console.warn("Detection enabled but card not detected, showing warning");
-        addLog(new Date().toLocaleTimeString(), 'warning', 'No card detected. Please position card in frame.');
+        addLog(timeNow(), 'warning', 'No card detected. Please position card in frame.');
         return;
     }
 
@@ -473,12 +470,12 @@ function searchCard() {
 
         const numberInfo = collectorNumber ? ` #${collectorNumber}` : '';
         const treatmentInfo = treatment ? ` (${treatmentSelect.options[treatmentSelect.selectedIndex].text})` : '';
-        addLog(new Date().toLocaleTimeString(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
+        addLog(timeNow(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
 
         socket.emit('search_card', data);
     } else {
         console.warn("No card name entered");
-        addLog(new Date().toLocaleTimeString(), 'warning', 'Please enter a card name');
+        addLog(timeNow(), 'warning', 'Please enter a card name');
     }
     console.log(logSeparator());
 }
@@ -488,7 +485,7 @@ function resetFocus() {
     console.log("RESET FOCUS BUTTON CLICKED");
     console.log(logSeparator());
 
-    addLog(new Date().toLocaleTimeString(), 'info', 'Resetting camera focus...');
+    addLog(timeNow(), 'info', 'Resetting camera focus...');
     socket.emit('reset_focus');
 }
 
@@ -506,26 +503,22 @@ function toggleAutoScanning() {
     console.log(`New state: autoScanningEnabled = ${autoScanningEnabled}`);
 
     // Update button appearance and text
+    btn.classList.toggle('is-active', autoScanningEnabled);
+    hint.classList.toggle('is-active', autoScanningEnabled);
     if (autoScanningEnabled) {
-        btn.style.background = '#e74c3c'; // Red for stop
-        btn.innerHTML = '⏹️ Stop Auto Scanning';
-        hint.innerHTML = '💡 Auto scanning active' + (fastScanMode ? ' (Fast Mode)' : '');
-        hint.style.color = '#27ae60';
-        hint.style.fontWeight = '500';
+        btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Stop auto scanning';
+        hint.textContent = 'Auto scanning active' + (fastScanMode ? ' (fast mode)' : '');
 
         console.log('Sending toggle_auto_capture with enabled=true');
         socket.emit('toggle_auto_capture', {enabled: true});
-        addLog(new Date().toLocaleTimeString(), 'success', `Auto scanning started${fastScanMode ? ' (Fast Mode)' : ''}`);
+        addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' (Fast Mode)' : ''}`);
     } else {
-        btn.style.background = '#27ae60'; // Green for start
-        btn.innerHTML = '🎬 Start Auto Scanning';
-        hint.innerHTML = '💡 Click to start automatic card scanning';
-        hint.style.color = '#7f8c8d';
-        hint.style.fontWeight = 'normal';
+        btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Start auto scanning';
+        hint.textContent = 'Click to start automatic card scanning';
 
         console.log('Sending toggle_auto_capture with enabled=false');
         socket.emit('toggle_auto_capture', {enabled: false});
-        addLog(new Date().toLocaleTimeString(), 'info', 'Auto scanning stopped - captures in progress will complete');
+        addLog(timeNow(), 'info', 'Auto scanning stopped - captures in progress will complete');
     }
 }
 
@@ -535,61 +528,66 @@ function selectSimilarCard(cardName) {
     searchCard();
 }
 
+function quantityRow(id, label, kind) {
+    return `
+        <div class="qty-row ${kind}">
+            <span class="qty-label"><span class="qty-dot"></span>${label}</span>
+            <div class="qty-stepper">
+                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease">−</button>
+                <input type="number" id="${id}" value="0" min="0" max="999">
+                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase">+</button>
+            </div>
+        </div>
+    `;
+}
+
 function displayCard(card) {
     let html = '';
-    
+
     if (card.image_uri) {
-        html += `<img src="${card.image_uri}" alt="${card.name}" class="card-image">`;
+        html += `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">`;
     }
-    
+
     html += `
         <div class="card-details">
             <div class="detail-row">
-                <span class="detail-label">Name:</span>
-                <span class="detail-value"><strong>${card.name}</strong></span>
+                <span class="detail-label">Name</span>
+                <span class="detail-value"><strong>${escapeHtml(card.name)}</strong></span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Set:</span>
-                <span class="detail-value">${card.set}</span>
+                <span class="detail-label">Set</span>
+                <span class="detail-value">${escapeHtml(card.set)}</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Number:</span>
-                <span class="detail-value">${card.number}</span>
+                <span class="detail-label">Number</span>
+                <span class="detail-value">${escapeHtml(card.number)}</span>
             </div>
             ${card.treatments && card.treatments.length ? `
             <div class="detail-row">
-                <span class="detail-label">Treatment:</span>
+                <span class="detail-label">Treatment</span>
                 <span class="detail-value">${treatmentTagsHtml(card.treatments)}</span>
             </div>` : ''}
             <div class="detail-row">
-                <span class="detail-label">Rarity:</span>
-                <span class="detail-value">${card.rarity}</span>
+                <span class="detail-label">Rarity</span>
+                <span class="detail-value">${escapeHtml(card.rarity)}</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Type:</span>
-                <span class="detail-value">${card.type}</span>
+                <span class="detail-label">Type</span>
+                <span class="detail-value">${escapeHtml(card.type)}</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Price:</span>
+                <span class="detail-label">Price</span>
                 <span class="price">$${card.price.toFixed(2)}</span>
             </div>
-    `;
-    
-    if (card.price_foil > 0) {
-        html += `
+            ${card.price_foil > 0 ? `
             <div class="detail-row">
-                <span class="detail-label">Price (Foil):</span>
+                <span class="detail-label">Price (foil)</span>
                 <span class="price">$${card.price_foil.toFixed(2)}</span>
-            </div>
-        `;
-    }
-    
-    html += `</div>`;
+            </div>` : ''}
+        </div>
 
-    // Add to inventory form with separate regular/foil quantities
-    html += `
         <div class="input-group">
-            <label for="condition">Condition:</label>
+            <label for="condition">Condition</label>
             <select id="condition">
                 <option value="Mint">Mint (M)</option>
                 <option value="Near Mint" selected>Near Mint (NM)</option>
@@ -600,46 +598,21 @@ function displayCard(card) {
             </select>
         </div>
 
-        <div class="input-group" style="margin-top: 12px;">
-            <label style="display: block; margin-bottom: 8px;">Quantity:</label>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;">
-                    <span style="font-weight: 500;">Regular:</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <button onclick="adjustQtyInput('regular-qty', -1)" style="width: 32px; height: 32px; border: 1px solid #11998e; background: white; color: #11998e; border-radius: 4px; cursor: pointer; font-size: 18px;">−</button>
-                        <input type="number" id="regular-qty" value="0" min="0" max="999" style="width: 60px; padding: 6px; text-align: center; border: 1px solid #ddd; border-radius: 4px;">
-                        <button onclick="adjustQtyInput('regular-qty', 1)" style="width: 32px; height: 32px; border: 1px solid #11998e; background: white; color: #11998e; border-radius: 4px; cursor: pointer; font-size: 18px;">+</button>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;">
-                    <span style="font-weight: 500;">✨ Foil:</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <button onclick="adjustQtyInput('foil-qty', -1)" style="width: 32px; height: 32px; border: 1px solid #f39c12; background: white; color: #f39c12; border-radius: 4px; cursor: pointer; font-size: 18px;">−</button>
-                        <input type="number" id="foil-qty" value="0" min="0" max="999" style="width: 60px; padding: 6px; text-align: center; border: 1px solid #ddd; border-radius: 4px;">
-                        <button onclick="adjustQtyInput('foil-qty', 1)" style="width: 32px; height: 32px; border: 1px solid #f39c12; background: white; color: #f39c12; border-radius: 4px; cursor: pointer; font-size: 18px;">+</button>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;">
-                    <span style="font-weight: 500;">⚡ Surge Foil:</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <button onclick="adjustQtyInput('surge-qty', -1)" style="width: 32px; height: 32px; border: 1px solid #9b59b6; background: white; color: #9b59b6; border-radius: 4px; cursor: pointer; font-size: 18px;">−</button>
-                        <input type="number" id="surge-qty" value="0" min="0" max="999" style="width: 60px; padding: 6px; text-align: center; border: 1px solid #ddd; border-radius: 4px;">
-                        <button onclick="adjustQtyInput('surge-qty', 1)" style="width: 32px; height: 32px; border: 1px solid #9b59b6; background: white; color: #9b59b6; border-radius: 4px; cursor: pointer; font-size: 18px;">+</button>
-                    </div>
-                </div>
+        <div class="input-group">
+            <span class="field-label">Quantity</span>
+            <div class="qty-list">
+                ${quantityRow('regular-qty', 'Regular', 'regular')}
+                ${quantityRow('foil-qty', 'Foil', 'foil')}
+                ${quantityRow('surge-qty', 'Surge foil', 'surge')}
             </div>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 16px;">
-            <button class="btn btn-success" onclick="addToInventoryBoth()" style="flex: 1;">
-                ✓ Add to Inventory
-            </button>
-            <button class="btn" onclick="dismissCard()" style="flex: 0 0 auto; background: #95a5a6; color: white;">
-                Skip
-            </button>
+        <div class="card-actions">
+            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
+            <button class="btn" onclick="dismissCard()">Skip</button>
         </div>
     `;
-    
+
     document.getElementById('card-display').innerHTML = html;
 }
 
@@ -650,8 +623,8 @@ function treatmentTagsHtml(treatments) {
 }
 
 function displayPrintings(cardName, cards) {
-    let html = `<div class="similar-cards"><h3 style="margin-bottom: 10px;">${escapeHtml(cardName)} - ${cards.length} printings</h3>`;
-    html += '<p style="color: #7f8c8d; margin-bottom: 10px;">Pick the printing you have:</p><div class="printing-grid">';
+    let html = `<div class="similar-cards"><div class="list-heading">${escapeHtml(cardName)}</div>`;
+    html += `<div class="list-subheading">${cards.length} printings - pick the one you have</div><div class="printing-grid">`;
 
     cards.forEach(card => {
         // Scryfall's "small" image size keeps the grid light
@@ -661,7 +634,7 @@ function displayPrintings(cardName, cards) {
             <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
                 ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
                 <strong>${escapeHtml(card.set)}</strong><br>
-                #${escapeHtml(card.number)} &middot; ${price}
+                <span class="meta">#${escapeHtml(card.number)} &middot; ${price}</span>
                 ${card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
             </div>
         `;
@@ -677,16 +650,16 @@ function selectPrinting(cardId) {
 }
 
 function displaySimilarCards(cards) {
-    let html = '<div class="similar-cards"><h3 style="margin-bottom: 10px;">Similar Cards Found:</h3>';
-    
+    let html = '<div class="similar-cards"><div class="list-heading">No exact match</div><div class="list-subheading">Did you mean:</div>';
+
     if (cards.length === 0) {
-        html += '<p style="color: #999;">No similar cards found.</p>';
+        html += '<div class="empty-state">No similar cards found.</div>';
     } else {
         cards.forEach(card => {
             html += `
-                <div class="similar-card" onclick="selectSimilarCard('${card.name.replace(/'/g, "\\'")}')">
-                    <strong>${card.name}</strong><br>
-                    <small>${card.set} - ${card.price}</small>
+                <div class="similar-card" onclick="selectSimilarCard('${escapeHtml(card.name.replace(/'/g, "\\'"))}')">
+                    <strong>${escapeHtml(card.name)}</strong><br>
+                    <small>${escapeHtml(card.set)} · ${card.price}</small>
                 </div>
             `;
         });
@@ -705,7 +678,7 @@ function adjustQtyInput(inputId, delta) {
 
 function addToInventoryBoth() {
     if (!currentCard) {
-        addLog(new Date().toLocaleTimeString(), 'error', 'No card selected');
+        addLog(timeNow(), 'error', 'No card selected');
         return;
     }
 
@@ -715,7 +688,7 @@ function addToInventoryBoth() {
     const condition = document.getElementById('condition').value;
 
     if (regularQty === 0 && foilQty === 0 && surgeQty === 0) {
-        addLog(new Date().toLocaleTimeString(), 'warning', 'Please set at least one quantity');
+        addLog(timeNow(), 'warning', 'Please set at least one quantity');
         return;
     }
 
@@ -758,7 +731,7 @@ function addToInventory(autoMode = false) {
 
     if (!currentCard) {
         console.error('addToInventory: No card selected!');
-        addLog(new Date().toLocaleTimeString(), 'error', 'No card selected');
+        addLog(timeNow(), 'error', 'No card selected');
         return;
     }
 
@@ -804,13 +777,13 @@ function dismissCard() {
 
     // Clear the card display
     document.getElementById('card-display').innerHTML = `
-        <p style="text-align: center; color: #95a5a6; padding: 40px 0;">
+        <div class="empty-state">
             Card skipped.<br>
-            Ready to scan next card.
-        </p>
+            Ready to scan the next card.
+        </div>
     `;
 
-    addLog(new Date().toLocaleTimeString(), 'info', 'Card dismissed - ready for next card');
+    addLog(timeNow(), 'info', 'Card dismissed - ready for next card');
 }
 
 function addLog(timestamp, level, message) {
@@ -873,7 +846,7 @@ function refreshAIModels() {
     refreshBtn.textContent = '⏳';
     modelSelect.innerHTML = '<option value="">Refreshing models...</option>';
 
-    addLog(new Date().toLocaleTimeString(), 'info', `Refreshing ${provider} models...`);
+    addLog(timeNow(), 'info', `Refreshing ${provider} models...`);
 
     // For local provider, dynamically fetch from Ollama
     if (provider === 'local') {
@@ -892,11 +865,11 @@ function refreshAIModels() {
                 // Re-populate dropdown
                 populateModelDropdown(provider, currentModel);
 
-                addLog(new Date().toLocaleTimeString(), 'success', `${provider} models refreshed`);
+                addLog(timeNow(), 'success', `${provider} models refreshed`);
             })
             .catch(error => {
                 console.error('Error refreshing models:', error);
-                addLog(new Date().toLocaleTimeString(), 'error', 'Failed to refresh models');
+                addLog(timeNow(), 'error', 'Failed to refresh models');
             })
             .finally(() => {
                 // Reset button
@@ -940,20 +913,20 @@ function loadLocalModels(selectedModel = null) {
                 // Update available models with live Ollama models
                 availableModels['local'] = data.models;
                 console.log('Local models loaded:', data.models);
-                addLog(new Date().toLocaleTimeString(), 'success', `Found ${data.models.length} local models`);
+                addLog(timeNow(), 'success', `Found ${data.models.length} local models`);
 
                 // Populate dropdown
                 populateModelDropdown('local', selectedModel);
             } else {
                 // Fall back to static list
                 console.warn('Could not fetch local models, using static list');
-                addLog(new Date().toLocaleTimeString(), 'warning', 'Using static model list (local server not available)');
+                addLog(timeNow(), 'warning', 'Using static model list (local server not available)');
                 populateModelDropdown('local', selectedModel);
             }
         })
         .catch(error => {
             console.error('Error loading local models:', error);
-            addLog(new Date().toLocaleTimeString(), 'warning', 'Could not connect to local AI server');
+            addLog(timeNow(), 'warning', 'Could not connect to local AI server');
 
             // Fall back to static list
             populateModelDropdown('local', selectedModel);
@@ -1048,13 +1021,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 toggleAutoScanning(); // Stop auto-scanning
             }
             autoScanBtn.disabled = true;
-            autoScanBtn.style.opacity = '0.5';
-            autoScanBtn.style.cursor = 'not-allowed';
         } else {
             // When enabling detection, enable the button
             autoScanBtn.disabled = false;
-            autoScanBtn.style.opacity = '1';
-            autoScanBtn.style.cursor = 'pointer';
         }
     });
 
@@ -1064,12 +1033,12 @@ document.addEventListener('DOMContentLoaded', function() {
         fastScanMode = enabled;  // Update global state
         console.log(`🔧 Fast Scan Mode toggled: ${enabled}, fastScanMode variable is now: ${fastScanMode}`);
         socket.emit('toggle_fast_scan', {enabled: enabled});
-        addLog(new Date().toLocaleTimeString(), 'info', `Fast Scan Mode ${enabled ? 'enabled (quick scan + auto-add)' : 'disabled'}`);
+        addLog(timeNow(), 'info', `Fast Scan Mode ${enabled ? 'enabled (quick scan + auto-add)' : 'disabled'}`);
 
         // Update hint if auto-scanning is active
         if (autoScanningEnabled) {
             const hint = document.getElementById('auto-scan-hint');
-            hint.innerHTML = '💡 Auto scanning active' + (enabled ? ' (Fast Mode)' : '');
+            hint.textContent = 'Auto scanning active' + (enabled ? ' (fast mode)' : '');
         }
     });
 
@@ -1084,14 +1053,14 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('toggle-debug-trace').addEventListener('change', function(e) {
         const enabled = e.target.checked;
         socket.emit('toggle_debug_trace', {enabled: enabled});
-        addLog(new Date().toLocaleTimeString(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
+        addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
     });
 
     // Toggle audio
     document.getElementById('toggle-audio').addEventListener('change', function(e) {
         const enabled = e.target.checked;
         audioManager.setEnabled(enabled);
-        addLog(new Date().toLocaleTimeString(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
+        addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
 
         // Play test sound when enabling
         if (enabled) {
@@ -1120,7 +1089,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const modelSelect = document.getElementById('ai-model');
                 const model = modelSelect.value;
                 socket.emit('set_ai_provider', {provider: provider, model: model});
-                addLog(new Date().toLocaleTimeString(), 'info', `Changing AI provider to ${provider}...`);
+                addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
             }, 500);
         } else {
             // Populate model dropdown for cloud providers
@@ -1132,7 +1101,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Send update to server
             socket.emit('set_ai_provider', {provider: provider, model: model});
-            addLog(new Date().toLocaleTimeString(), 'info', `Changing AI provider to ${provider}...`);
+            addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
         }
     });
 
@@ -1143,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Send update to server
         socket.emit('set_ai_provider', {provider: provider, model: model});
-        addLog(new Date().toLocaleTimeString(), 'info', `Changing model to ${model}...`);
+        addLog(timeNow(), 'info', `Changing model to ${model}...`);
     });
     
     // Load stats every 5 seconds
@@ -1198,13 +1167,13 @@ function loadInventory() {
                 renderInventory();
             } else {
                 document.getElementById('inventory-list').innerHTML =
-                    '<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading inventory</p>';
+                    '<div class="empty-state is-error">Error loading inventory</div>';
             }
         })
         .catch(error => {
             console.error('Error loading inventory:', error);
             document.getElementById('inventory-list').innerHTML =
-                '<p style="text-align: center; padding: 20px; color: #e74c3c;">Failed to load inventory</p>';
+                '<div class="empty-state is-error">Failed to load inventory</div>';
         });
 }
 
@@ -1214,7 +1183,7 @@ function renderInventory() {
 
     if (filteredInventory.length === 0) {
         statsDiv.innerHTML = '';
-        listDiv.innerHTML = '<p style="text-align: center; padding: 40px; color: #999;">No cards in inventory yet.<br>Start scanning cards to build your collection!</p>';
+        listDiv.innerHTML = '<div class="empty-state">No cards in inventory yet.<br>Start scanning cards to build your collection!</div>';
         return;
     }
 
@@ -1283,7 +1252,7 @@ function renderInventory() {
                 <div class="inventory-card-number">#${index + 1}</div>
                 <div class="inventory-card-info">
                     <div class="inventory-card-name">
-                        ${quantity > 1 ? `<span style="color: #11998e; font-weight: bold;">${quantity}x</span> ` : ''}${escapeHtml(card['Card Name'])}
+                        ${quantity > 1 ? `<span class="inventory-qty">${quantity}×</span> ` : ''}${escapeHtml(card['Card Name'])}
                     </div>
                     <div class="inventory-card-details">
                         ${escapeHtml(card.Set)} ${card['Card Number'] ? '#' + card['Card Number'] : ''}
@@ -1291,14 +1260,14 @@ function renderInventory() {
                     </div>
                     <div class="inventory-card-meta">
                         ${rarity ? `<span class="inventory-badge ${rarity}">${rarity.toUpperCase()}</span>` : ''}
-                        ${surge ? '<span class="inventory-badge surge">⚡ SURGE</span>' : (foil ? '<span class="inventory-badge foil">✨ FOIL</span>' : '')}
+                        ${surge ? '<span class="inventory-badge surge">SURGE</span>' : (foil ? '<span class="inventory-badge foil">FOIL</span>' : '')}
                         ${colorIdentity ? `<span class="inventory-badge">${escapeHtml(colorIdentity)}</span>` : ''}
-                        <span style="color: #999;">${card.Condition || 'Near Mint'}</span>
+                        <span>${escapeHtml(card.Condition || 'Near Mint')}</span>
                     </div>
                 </div>
                 <div class="inventory-card-price">
                     <div class="inventory-price-value">$${totalValue.toFixed(2)}</div>
-                    ${quantity > 1 ? `<div style="font-size: 11px; color: #999;">($${price.toFixed(2)} each)</div>` : ''}
+                    ${quantity > 1 ? `<div class="inventory-price-each">$${price.toFixed(2)} each</div>` : ''}
                     <div class="inventory-timestamp">${card.Timestamp}</div>
                 </div>
                 <div class="inventory-card-actions">
@@ -1308,11 +1277,12 @@ function renderInventory() {
                         data-card-name="${escapeHtml(card['Card Name'])}"
                         data-condition="${escapeHtml(card.Condition || 'Near Mint')}"
                         data-foil="${foil ? 'Yes' : 'No'}"
-                        data-surge="${surge ? 'Yes' : 'No'}">
-                        ✏️
+                        data-surge="${surge ? 'Yes' : 'No'}"
+                        title="Edit">
+                        <svg class="icon"><use href="#i-edit"/></svg>
                     </button>
-                    <button class="btn-delete" data-index="${actualIndex}" data-card-name="${escapeHtml(card['Card Name'])}">
-                        🗑️
+                    <button class="btn-delete" data-index="${actualIndex}" data-card-name="${escapeHtml(card['Card Name'])}" title="Delete">
+                        <svg class="icon"><use href="#i-trash"/></svg>
                     </button>
                 </div>
             </div>
@@ -1340,7 +1310,7 @@ function filterInventory() {
 
 function refreshInventory() {
     loadInventory();
-    addLog(new Date().toLocaleTimeString(), 'info', 'Inventory refreshed');
+    addLog(timeNow(), 'info', 'Inventory refreshed');
 }
 
 function exportInventory() {
@@ -1355,11 +1325,11 @@ function exportInventory() {
     document.body.removeChild(downloadLink);
 
     // Log the action
-    addLog(new Date().toLocaleTimeString(), 'success', 'Inventory export started...');
+    addLog(timeNow(), 'success', 'Inventory export started...');
 
     // Optional: Show a brief success message
     setTimeout(() => {
-        addLog(new Date().toLocaleTimeString(), 'success', 'Check your downloads folder for the CSV file');
+        addLog(timeNow(), 'success', 'Check your downloads folder for the CSV file');
     }, 500);
 }
 
@@ -1375,11 +1345,11 @@ function exportInventoryMoxfield() {
     document.body.removeChild(downloadLink);
 
     // Log the action
-    addLog(new Date().toLocaleTimeString(), 'success', 'Moxfield export started...');
+    addLog(timeNow(), 'success', 'Moxfield export started...');
 
     // Show success message with import link
     setTimeout(() => {
-        addLog(new Date().toLocaleTimeString(), 'success', 'Moxfield CSV ready! Import at: moxfield.com/account/collection');
+        addLog(timeNow(), 'success', 'Moxfield CSV ready! Import at: moxfield.com/account/collection');
     }, 500);
 }
 
@@ -1388,11 +1358,10 @@ function updateDatabase() {
 
     // Disable button and show loading state
     updateBtn.disabled = true;
-    updateBtn.innerHTML = '⏳ Updating...';
-    updateBtn.style.background = '#95a5a6';
+    updateBtn.textContent = 'Updating...';
 
-    addLog(new Date().toLocaleTimeString(), 'info', 'Starting database update from Scryfall...');
-    addLog(new Date().toLocaleTimeString(), 'warning', 'This will take 5-10 minutes. Please do not close the browser.');
+    addLog(timeNow(), 'info', 'Starting database update from Scryfall...');
+    addLog(timeNow(), 'warning', 'This will take 5-10 minutes. Please do not close the browser.');
 
     // Emit the update request
     socket.emit('update_database');
@@ -1408,11 +1377,10 @@ function rebuildDatabase() {
 
     // Disable button and show loading state
     rebuildBtn.disabled = true;
-    rebuildBtn.innerHTML = '⏳ Rebuilding...';
-    rebuildBtn.style.background = '#95a5a6';
+    rebuildBtn.textContent = 'Rebuilding...';
 
-    addLog(new Date().toLocaleTimeString(), 'info', 'Starting database schema rebuild...');
-    addLog(new Date().toLocaleTimeString(), 'info', 'This will optimize database structure and indexes (~30 seconds)');
+    addLog(timeNow(), 'info', 'Starting database schema rebuild...');
+    addLog(timeNow(), 'info', 'This will optimize database structure and indexes (~30 seconds)');
 
     // Emit the rebuild request
     socket.emit('rebuild_database');
@@ -1423,13 +1391,13 @@ function importInventory() {
     const file = fileInput.files[0];
 
     if (!file) {
-        addLog(new Date().toLocaleTimeString(), 'warning', 'No file selected');
+        addLog(timeNow(), 'warning', 'No file selected');
         return;
     }
 
     // Check file extension
     if (!file.name.endsWith('.csv')) {
-        addLog(new Date().toLocaleTimeString(), 'error', 'Only CSV files are supported');
+        addLog(timeNow(), 'error', 'Only CSV files are supported');
         fileInput.value = ''; // Clear the input
         return;
     }
@@ -1443,7 +1411,7 @@ function importInventory() {
     );
 
     // Show loading state
-    addLog(new Date().toLocaleTimeString(), 'info', `Importing inventory from ${file.name}...`);
+    addLog(timeNow(), 'info', `Importing inventory from ${file.name}...`);
 
     // Create form data
     const formData = new FormData();
@@ -1459,7 +1427,7 @@ function importInventory() {
     .then(data => {
         if (data.success) {
             const stats = data.stats;
-            addLog(new Date().toLocaleTimeString(), 'success',
+            addLog(timeNow(), 'success',
                 `Import complete! Added: ${stats.added}, Updated: ${stats.updated}, Skipped: ${stats.skipped}, Errors: ${stats.errors}`
             );
 
@@ -1470,14 +1438,14 @@ function importInventory() {
             // Clear the file input
             fileInput.value = '';
         } else {
-            addLog(new Date().toLocaleTimeString(), 'error', 'Import failed: ' + (data.error || 'Unknown error'));
+            addLog(timeNow(), 'error', 'Import failed: ' + (data.error || 'Unknown error'));
             alert('Import failed: ' + (data.error || 'Unknown error'));
             fileInput.value = '';
         }
     })
     .catch(error => {
         console.error('Import error:', error);
-        addLog(new Date().toLocaleTimeString(), 'error', 'Import failed: ' + error);
+        addLog(timeNow(), 'error', 'Import failed: ' + error);
         alert('Import failed. Please check the file format and try again.');
         fileInput.value = '';
     });
@@ -1495,7 +1463,7 @@ function clearInventory() {
     }
 
     // Show loading state
-    addLog(new Date().toLocaleTimeString(), 'warning', 'Clearing inventory...');
+    addLog(timeNow(), 'warning', 'Clearing inventory...');
 
     // Call API to clear inventory
     fetch('/api/clear_inventory', {
@@ -1504,7 +1472,7 @@ function clearInventory() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            addLog(new Date().toLocaleTimeString(), 'success', `Inventory cleared: ${data.deleted} entries removed`);
+            addLog(timeNow(), 'success', `Inventory cleared: ${data.deleted} entries removed`);
 
             // Reload inventory and stats
             loadInventory();
@@ -1513,13 +1481,13 @@ function clearInventory() {
             // Show success message
             alert(`Inventory cleared successfully!\n\n${data.deleted} entries were removed.`);
         } else {
-            addLog(new Date().toLocaleTimeString(), 'error', 'Failed to clear inventory: ' + (data.error || 'Unknown error'));
+            addLog(timeNow(), 'error', 'Failed to clear inventory: ' + (data.error || 'Unknown error'));
             alert('Failed to clear inventory: ' + (data.error || 'Unknown error'));
         }
     })
     .catch(error => {
         console.error('Clear inventory error:', error);
-        addLog(new Date().toLocaleTimeString(), 'error', 'Failed to clear inventory: ' + error);
+        addLog(timeNow(), 'error', 'Failed to clear inventory: ' + error);
         alert('Failed to clear inventory. Please try again.');
     });
 }
@@ -1667,7 +1635,7 @@ function saveEditCard() {
 
     // Show loading state
     const cardName = document.getElementById('edit-card-name').textContent;
-    addLog(new Date().toLocaleTimeString(), 'info', `Updating ${cardName}...`);
+    addLog(timeNow(), 'info', `Updating ${cardName}...`);
 
     // Save the index before closing modal (closeEditCard sets it to null)
     const indexToUpdate = currentEditIndex;
@@ -1710,22 +1678,22 @@ function saveEditCard() {
     })
     .then(data => {
         if (data.success) {
-            addLog(new Date().toLocaleTimeString(), 'success', `${cardName} updated successfully`);
+            addLog(timeNow(), 'success', `${cardName} updated successfully`);
             if (data.split) {
-                addLog(new Date().toLocaleTimeString(), 'info', 'Entry was split due to foil type change');
+                addLog(timeNow(), 'info', 'Entry was split due to foil type change');
             }
             // Reload inventory
             loadInventory();
             // Update main stats
             loadStats();
         } else {
-            addLog(new Date().toLocaleTimeString(), 'error', 'Failed to update card: ' + (data.error || data.message || 'Unknown error'));
+            addLog(timeNow(), 'error', 'Failed to update card: ' + (data.error || data.message || 'Unknown error'));
             alert('Failed to update card: ' + (data.error || data.message || 'Unknown error'));
         }
     })
     .catch(error => {
         console.error('Update error:', error);
-        addLog(new Date().toLocaleTimeString(), 'error', 'Update failed: ' + error.message);
+        addLog(timeNow(), 'error', 'Update failed: ' + error.message);
         alert('Failed to update card. Check console for details.');
     });
 }
@@ -1737,7 +1705,7 @@ function deleteCard(index, cardName) {
     }
 
     // Show loading state
-    addLog(new Date().toLocaleTimeString(), 'info', `Deleting ${cardName}...`);
+    addLog(timeNow(), 'info', `Deleting ${cardName}...`);
 
     // Delete via API
     fetch(`/api/inventory/delete/${index}`, {
@@ -1746,28 +1714,51 @@ function deleteCard(index, cardName) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            addLog(new Date().toLocaleTimeString(), 'success', `${cardName} deleted from inventory`);
+            addLog(timeNow(), 'success', `${cardName} deleted from inventory`);
             // Reload inventory
             loadInventory();
             // Update main stats
             loadStats();
         } else {
-            addLog(new Date().toLocaleTimeString(), 'error', 'Failed to delete card: ' + (data.error || 'Unknown error'));
+            addLog(timeNow(), 'error', 'Failed to delete card: ' + (data.error || 'Unknown error'));
             alert('Failed to delete card from inventory');
         }
     })
     .catch(error => {
         console.error('Delete error:', error);
-        addLog(new Date().toLocaleTimeString(), 'error', 'Delete failed: ' + error);
+        addLog(timeNow(), 'error', 'Delete failed: ' + error);
         alert('Failed to delete card from inventory');
     });
 }
+
+function openSettings() {
+    document.getElementById('settings-drawer').classList.add('show');
+}
+
+function closeSettings() {
+    document.getElementById('settings-drawer').classList.remove('show');
+}
+
+// Close the topmost overlay with Escape
+document.addEventListener('keydown', function(event) {
+    if (event.key !== 'Escape') return;
+    if (document.getElementById('edit-card-modal').classList.contains('show')) {
+        closeEditCard();
+    } else if (document.getElementById('inventory-modal').classList.contains('show')) {
+        closeInventory();
+    } else {
+        closeSettings();
+    }
+});
 
 // Close modal when clicking outside
 window.onclick = function(event) {
     const inventoryModal = document.getElementById('inventory-modal');
     const editModal = document.getElementById('edit-card-modal');
 
+    if (event.target === document.getElementById('settings-drawer')) {
+        closeSettings();
+    }
     if (event.target === inventoryModal) {
         closeInventory();
     }
@@ -1818,7 +1809,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Test audio function (called from HTML button)
 function testAudio() {
     console.log('🔊 Test Audio button clicked');
-    addLog(new Date().toLocaleTimeString(), 'info', 'Testing audio system...');
+    addLog(timeNow(), 'info', 'Testing audio system...');
 
     // Ensure audio context is initialized
     audioManager.ensureAudioContext().then(() => {
@@ -1826,16 +1817,16 @@ function testAudio() {
 
         // Play all sounds in sequence
         audioManager.playCapture();
-        addLog(new Date().toLocaleTimeString(), 'info', '1/3: Capture sound');
+        addLog(timeNow(), 'info', '1/3: Capture sound');
 
         setTimeout(() => {
             audioManager.playSuccess();
-            addLog(new Date().toLocaleTimeString(), 'info', '2/3: Success sound');
+            addLog(timeNow(), 'info', '2/3: Success sound');
         }, 400);
 
         setTimeout(() => {
             audioManager.playNextReady();
-            addLog(new Date().toLocaleTimeString(), 'success', '3/3: Next Ready sound - Check browser console');
+            addLog(timeNow(), 'success', '3/3: Next Ready sound - Check browser console');
         }, 1000);
     });
 }
