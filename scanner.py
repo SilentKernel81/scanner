@@ -200,6 +200,7 @@ class CardScanner:
         self.auto_capture_callback = None
         self.card_under_review = False  # Prevent auto-capture while card is being reviewed
         self.last_capture = None  # (card image RGB, is_warped) of the last capture - prompt editor tests
+        self.capture_pending = False  # Auto-capture triggered, image / focus probe not done yet
 
         self.initialize_camera()
     
@@ -885,6 +886,7 @@ class CardScanner:
                                     self.last_auto_capture_time = time.time()
                                     self.card_under_review = True  # Set flag to prevent further auto-captures
                                     self._mark_captured()  # Next auto-capture needs a new card
+                                    self.capture_pending = True  # Until the image is taken (app.announce_capture)
                                     # Call the callback in a non-blocking way
                                     threading.Thread(target=self.auto_capture_callback).start()
 
@@ -983,20 +985,20 @@ class CardScanner:
                 'is_stable': self.stable_frames >= self.required_stable_frames,
                 'awaiting_new_card': self.awaiting_new_card and self.auto_capture_enabled,
                 'in_focus': self.card_in_focus,
-                'focusing': self.focus_sweep_running
+                'focusing': self.focus_sweep_running,
+                'capturing': self.capture_pending
             }
 
-    def capture_card_image_only(self, card_number):
+    def capture_card_image_only(self, card_number, settle=0.3):
         """
         Capture and save a card image WITHOUT AI processing.
+        settle: wait before taking the image - auto-captures pass 0 (the card has already been
+            still for stability_frames)
         Returns: (image_path, card_image_rgb, is_warped) or (None, None, False) on failure
-        This is used for async AI processing in Fast Scan Mode.
         """
         self.log(f"Capturing card #{card_number}...")
-
-        # Wait a moment for frames to stabilize
-        self.log("Waiting for stable image...")
-        time.sleep(0.3)  # Brief pause to let autofocus settle
+        if settle:
+            time.sleep(settle)  # Let the image steady (manual captures)
 
         card_image, card_name, is_warped = self.get_detected_card()
         self._mark_captured()  # don't auto-capture this card again

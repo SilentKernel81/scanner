@@ -442,11 +442,22 @@ def initialize_components():
         global auto_capture_counter, current_card_info, processing_queue_count
         logger.info(f"Auto-capture triggered #{auto_capture_counter}")
 
-        # Send notification to client
-        socketio.emit('auto_capture_triggered', {
-            'counter': auto_capture_counter,
-            'message': f'Auto-capture #{auto_capture_counter}'
-        }, namespace='/')
+        def announce_capture(taken=True):
+            """
+            The capture beep - the signal to drop the next card: sent once the image is taken
+            and a focus probe started by this capture (~1 s, every refocus_every cards) is done
+            """
+            if scanner.capture_pending and not taken:
+                scanner.capture_pending = False
+            elif scanner.capture_pending:
+                deadline = time.time() + 2.5
+                while scanner.focus_probe_running and time.time() < deadline:
+                    time.sleep(0.05)
+                scanner.capture_pending = False
+                socketio.emit('auto_capture_triggered', {
+                    'counter': current_capture_number,
+                    'message': f'Auto-capture #{current_capture_number}'
+                }, namespace='/')
 
         current_capture_number = auto_capture_counter
         auto_capture_counter += 1
@@ -465,6 +476,7 @@ def initialize_components():
             is_detected = scanner.is_card_detected()
             if not is_detected:
                 logger.warning("Auto-capture triggered but no card detected")
+                scanner.capture_pending = False
                 processing_queue_count -= 1
                 socketio.emit('processing_queue_update', {
                     'queue_count': processing_queue_count
@@ -476,7 +488,8 @@ def initialize_components():
             # ========================================================================
             if was_fast_scan_mode:
                 # Capture image ONLY (no AI processing) - fast!
-                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number)
+                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number, settle=0)
+                announce_capture(taken=bool(image_path))
 
                 if not image_path:
                     logger.error("Fast Scan: Failed to capture image")
@@ -505,7 +518,9 @@ def initialize_components():
             # ========================================================================
             else:
                 # Synchronous capture with AI processing (blocks until AI completes)
-                image_path, vision_ai_result = scanner.capture_card_image(current_capture_number)
+                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number, settle=0)
+                announce_capture(taken=bool(image_path))
+                vision_ai_result = scanner.identify_card_from_image(card_image_rgb, detect_foil=is_warped) if image_path else None
 
                 if not image_path:
                     logger.error("Normal Mode: Failed to capture image")
@@ -555,9 +570,10 @@ def initialize_components():
         except Exception as e:
             logger.exception(f"Error in auto-capture: {e}")
             log_to_client(f"Auto-capture error: {e}", level="error")
-            # Clear flag on error to prevent getting stuck (in both modes)
+            # Clear flags on error to prevent getting stuck (in both modes)
             if scanner:
                 scanner.card_under_review = False
+                scanner.capture_pending = False
             # Decrement queue counter on error too
             processing_queue_count -= 1
             socketio.emit('processing_queue_update', {

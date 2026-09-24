@@ -177,8 +177,10 @@ first.
    *"Foil: ★ next to the set code"* or *"only printed in foil"*.
 4. Adjust quantity or condition if needed and click **Add to inventory**, or **Skip**.
 
-Auto scanning is made for dropping cards onto a pile in the box. Each card is captured once:
-after a capture the status shows **Captured - drop the next card**, and the next capture happens
+Auto scanning is made for dropping cards onto a pile in the box. Each card is captured once.
+**Drop the next card when you hear the capture beep**: it sounds once the image is taken (every
+few cards the scanner also checks the focus first, ~1 s, while the status shows *Capturing -
+wait for the beep*); then the status shows **Captured - drop the next card**, and the next capture happens
 when a new card has been dropped on top and has settled. The drop is recognized by the motion
 (the card briefly vanishing or jumping, a hand) and by where the new card lands, so two
 identical copies in a row are both captured.

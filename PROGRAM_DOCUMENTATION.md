@@ -158,7 +158,17 @@ sleeve slides (0.8 s after landing): with 4 frames and only the frame-to-frame t
 cards were captured mid-slide; with the drift test and 6 frames none (slides of 2-3 px/frame),
 captured ~0.5 s after the card stopped. 4 frames with the drift test still let a 2 px/frame
 slide through. The status
-pill shows *Focusing*, *Stabilizing n/N*, *Ready*, or *Captured - drop the next card*.
+pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the beep*, or
+*Captured - drop the next card*.
+
+**The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
+flash) is sent by `app.handle_auto_capture` once the image is taken and a focus probe started by
+that capture is done (`announce_capture`; `scanner.capture_pending` / status `capturing` until
+then). Auto-captures take the image at once (`capture_card_image_only(settle=0)` - the card has
+already been still for `stability_frames`); the beep used to come *before* the image, which was
+taken 0.3 s later, and a card dropped right away could land in it. Adding a card (after the AI,
+1-2 s later) only plays the success ding. Measured with a fake camera and a probe on every
+capture: image at t, probe done and beep at t + 1.0 s; without a probe, right after the image.
 
 ### One capture per card
 
@@ -398,7 +408,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset` |
 | `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `set_game` | `game_changed` (to every client; stops auto scanning) |

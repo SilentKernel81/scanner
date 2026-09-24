@@ -161,14 +161,8 @@ socket.on('similar_cards', function(data) {
 socket.on('inventory_updated', function(data) {
     console.log('Inventory updated:', data.stats);
 
-    // In fast scan mode, play "ready for next card" sound, otherwise regular success
-    if (fastScanMode) {
-        console.log('✅ Card added - playing NEXT READY sound');
-        audioManager.playNextReady();
-        // Show clear message
-    } else {
-        audioManager.playSuccess();
-    }
+    // The drop signal is the capture beep; adding (1-2 s later, after the AI) just dings
+    audioManager.playSuccess();
 
     loadStats();
     const added = data.added;
@@ -210,9 +204,9 @@ socket.on('auto_capture_triggered', function(data) {
     console.log(logSeparator());
     console.log('AUTO-CAPTURE TRIGGERED');
     console.log(logSeparator());
-    console.log('Card number:', data.card_number);
+    console.log('Card number:', data.counter);
 
-    // Play capture sound immediately when image is captured
+    // The image is taken: this beep is the signal to drop the next card
     console.log('📸 Playing capture sound...');
     audioManager.playCapture().catch(err => {
         console.error('❌ Failed to play capture sound:', err);
@@ -223,12 +217,7 @@ socket.on('auto_capture_triggered', function(data) {
     videoContainer.classList.add('capture-flash');
     setTimeout(() => videoContainer.classList.remove('capture-flash'), 500);
 
-    // In fast scan mode, show clear instruction in log
-    if (fastScanMode) {
-        addLog(timeNow(), 'info', '📸 CAPTURED! Remove card...');
-    }
-
-    addLog(timeNow(), 'info', `Auto-capture triggered for card #${data.card_number}`);
+    addLog(timeNow(), 'info', `📸 Card #${data.counter} captured${fastScanMode ? ' - drop the next card' : ''}`);
 });
 
 socket.on('processing_queue_update', function(data) {
@@ -382,6 +371,15 @@ function updateDetectionStatus(status) {
         statusDiv.classList.add('status-stabilizing');
         statusIcon.textContent = '🎯';
         statusText.textContent = 'Focusing - finding the sharpest image...';
+        captureBtn.disabled = true;
+        return;
+    }
+
+    // Image being taken (and, every few cards, the focus checked) - the beep says when to drop
+    if (status.capturing) {
+        statusDiv.classList.add('status-stabilizing');
+        statusIcon.textContent = '📸';
+        statusText.textContent = 'Capturing - wait for the beep';
         captureBtn.disabled = true;
         return;
     }
