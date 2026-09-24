@@ -13,6 +13,8 @@ let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last c
 let availableModels = {}; // Store available models for each provider
 let currentProvider = 'gemini';
 let currentModel = null;
+let activeProvider = null;  // provider/model the server is actually using (not just selected)
+let activeModel = null;
 
 // Helper function for console logging
 function timeNow() {
@@ -255,6 +257,8 @@ socket.on('ai_provider_set', function(data) {
     console.log('Message:', data.message);
     currentProvider = data.provider;
     currentModel = data.model;
+    activeProvider = data.provider;
+    activeModel = data.model;
     addLog(timeNow(), 'success', data.message);
 });
 
@@ -1063,8 +1067,10 @@ socket.on('ai_credential_saved', function(data) {
 });
 
 function applyProvider(provider) {
-    // Load the provider's models and switch the scanner to it
-    const loaded = provider === 'local' ? loadLocalModels() : Promise.resolve(populateModelDropdown(provider));
+    // Load the provider's models and switch the scanner to it; returning to the active
+    // provider keeps its model instead of jumping to the first one in the list
+    const keepModel = provider === activeProvider ? activeModel : null;
+    const loaded = provider === 'local' ? loadLocalModels(keepModel) : Promise.resolve(populateModelDropdown(provider, keepModel));
     loaded.then(() => {
         const model = document.getElementById('ai-model').value;
         socket.emit('set_ai_provider', {provider: provider, model: model});
@@ -1081,6 +1087,8 @@ function loadAIProvider() {
                 providerSelect.value = data.provider;
                 currentProvider = data.provider;
                 currentModel = data.model;
+                activeProvider = data.provider;
+                activeModel = data.model;
 
                 // For local provider, fetch live models from Ollama
                 if (data.provider === 'local') {
