@@ -545,14 +545,14 @@ function suggestedFinish(card) {
     return {finish: 'regular', reason: null};
 }
 
-function quantityRow(id, label, kind, value = 0) {
+function quantityCell(id, label, kind, value = 0) {
     return `
-        <div class="qty-row ${kind}">
+        <div class="qty-cell ${kind}">
             <span class="qty-label"><span class="qty-dot"></span>${label}</span>
             <div class="qty-stepper">
-                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease">−</button>
-                <input type="number" id="${id}" value="${value}" min="0" max="999">
-                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase">+</button>
+                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease ${label}">−</button>
+                <input type="number" id="${id}" value="${value}" min="0" max="999" aria-label="${label} quantity">
+                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase ${label}">+</button>
             </div>
         </div>
     `;
@@ -561,48 +561,28 @@ function quantityRow(id, label, kind, value = 0) {
 function displayCard(card) {
     const suggestion = suggestedFinish(card);
     const finishLabels = {regular: 'Regular', foil: 'Foil', surge: 'Surge foil'};
-    let html = '';
-
-    if (card.image_uri) {
-        html += `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">`;
+    // Only show prices that exist (e.g. foil-only printings have no regular price)
+    const prices = [];
+    if (card.price > 0) {
+        prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
+    }
+    if (card.price_foil > 0) {
+        prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
+    }
+    if (prices.length === 0) {
+        prices.push('<span class="price-label">No price data</span>');
     }
 
-    html += `
-        <div class="card-details">
-            <div class="detail-row">
-                <span class="detail-label">Name</span>
-                <span class="detail-value"><strong>${escapeHtml(card.name)}</strong></span>
+    const html = `
+        <div class="card-summary">
+            ${card.image_uri ? `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">` : ''}
+            <div class="card-facts">
+                <div class="card-title">${escapeHtml(card.name)}</div>
+                <div class="card-meta">${escapeHtml(card.set)} · #${escapeHtml(card.number)}</div>
+                <div class="card-meta"><span class="card-rarity">${escapeHtml(card.rarity)}</span> · ${escapeHtml(card.type)}</div>
+                ${card.treatments && card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
+                <div class="card-prices">${prices.join('<span class="price-sep">·</span>')}</div>
             </div>
-            <div class="detail-row">
-                <span class="detail-label">Set</span>
-                <span class="detail-value">${escapeHtml(card.set)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Number</span>
-                <span class="detail-value">${escapeHtml(card.number)}</span>
-            </div>
-            ${card.treatments && card.treatments.length ? `
-            <div class="detail-row">
-                <span class="detail-label">Treatment</span>
-                <span class="detail-value">${treatmentTagsHtml(card.treatments)}</span>
-            </div>` : ''}
-            <div class="detail-row">
-                <span class="detail-label">Rarity</span>
-                <span class="detail-value">${escapeHtml(card.rarity)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Type</span>
-                <span class="detail-value">${escapeHtml(card.type)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Price</span>
-                <span class="price">$${card.price.toFixed(2)}</span>
-            </div>
-            ${card.price_foil > 0 ? `
-            <div class="detail-row">
-                <span class="detail-label">Price (foil)</span>
-                <span class="price">$${card.price_foil.toFixed(2)}</span>
-            </div>` : ''}
         </div>
 
         <div class="input-group">
@@ -619,10 +599,10 @@ function displayCard(card) {
 
         <div class="input-group">
             <span class="field-label">Quantity</span>
-            <div class="qty-list">
-                ${quantityRow('regular-qty', 'Regular', 'regular', suggestion.finish === 'regular' ? 1 : 0)}
-                ${quantityRow('foil-qty', 'Foil', 'foil', suggestion.finish === 'foil' ? 1 : 0)}
-                ${quantityRow('surge-qty', 'Surge foil', 'surge', suggestion.finish === 'surge' ? 1 : 0)}
+            <div class="qty-grid">
+                ${quantityCell('regular-qty', 'Regular', 'regular', suggestion.finish === 'regular' ? 1 : 0)}
+                ${quantityCell('foil-qty', 'Foil', 'foil', suggestion.finish === 'foil' ? 1 : 0)}
+                ${quantityCell('surge-qty', 'Surge foil', 'surge', suggestion.finish === 'surge' ? 1 : 0)}
             </div>
             ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabels[suggestion.finish]}: ${suggestion.reason}</div>` : ''}
         </div>

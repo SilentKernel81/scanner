@@ -606,61 +606,77 @@ input[type="radio"] {
 .empty-state.is-success { color: var(--success); }
 .empty-state.is-error { color: var(--danger); }
 
-.card-image {
-    display: block;
-    width: 100%;
-    max-width: 300px;
-    margin: 0 auto 18px;
-    border-radius: 14px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-}
-
-.card-details {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 4px 14px;
-    margin-bottom: 18px;
-}
-
-.detail-row {
+.card-summary {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 0;
-    border-bottom: 1px solid var(--border);
+    gap: 16px;
+    margin-bottom: 16px;
 }
 
-.detail-row:last-child {
-    border-bottom: none;
+.card-image {
+    width: 42%;
+    max-width: 200px;
+    align-self: flex-start;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.detail-label {
-    color: var(--text-muted);
+.card-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.card-title {
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+.card-meta {
     font-size: 13px;
+    color: var(--text-muted);
 }
 
-.detail-value {
-    text-align: right;
+.card-rarity {
+    text-transform: capitalize;
+}
+
+.card-prices {
+    margin-top: auto;
+    padding-top: 6px;
 }
 
 .price {
     font-weight: 650;
+    font-size: 16px;
     color: var(--success);
     font-variant-numeric: tabular-nums;
 }
 
-.qty-list {
-    display: flex;
-    flex-direction: column;
+.price-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.price-sep {
+    margin: 0 8px;
+    color: var(--text-subtle);
+}
+
+/* Quantity: Regular / Foil / Surge foil side by side */
+.qty-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
 }
 
-.qty-row {
+.qty-cell {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    padding: 8px 8px 8px 14px;
+    gap: 6px;
+    padding: 8px 4px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
@@ -669,8 +685,10 @@ input[type="radio"] {
 .qty-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    font-size: 13px;
     font-weight: 550;
+    white-space: nowrap;
 }
 
 .qty-dot {
@@ -680,23 +698,23 @@ input[type="radio"] {
     background: var(--text-muted);
 }
 
-.qty-row.foil .qty-dot { background: var(--foil); }
-.qty-row.surge .qty-dot { background: var(--surge); }
+.qty-cell.foil .qty-dot { background: var(--foil); }
+.qty-cell.surge .qty-dot { background: var(--surge); }
 
 .qty-stepper {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
 }
 
 .qty-stepper button {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
+    width: 26px;
+    height: 28px;
+    border-radius: 6px;
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-size: 16px;
+    font-size: 15px;
     cursor: pointer;
 }
 
@@ -706,14 +724,21 @@ input[type="radio"] {
 }
 
 .qty-stepper input {
-    width: 52px;
-    padding: 5px;
+    width: 40px;
+    padding: 4px 2px;
     text-align: center;
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: 6px;
     background: var(--surface);
     color: var(--text);
     font: inherit;
+    -moz-appearance: textfield;
+}
+
+.qty-stepper input::-webkit-outer-spin-button,
+.qty-stepper input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 .finish-hint {
@@ -728,7 +753,7 @@ input[type="radio"] {
 .card-actions {
     display: flex;
     gap: 10px;
-    margin-top: 18px;
+    margin-top: 16px;
 }
 
 .card-actions .btn-success {
@@ -805,11 +830,6 @@ input[type="radio"] {
     flex-wrap: wrap;
     gap: 4px;
     margin-top: 4px;
-}
-
-.detail-value .treatment-tags {
-    justify-content: flex-end;
-    margin-top: 0;
 }
 
 .treatment-tag {
