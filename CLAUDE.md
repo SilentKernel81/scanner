@@ -76,6 +76,9 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   and `keep_alive`; the parser accepts answers with or without `NAME:/NUMBER:/SET:` labels.
 - **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use
   their own `RLock`. Auto-capture callbacks and the AI worker run in their own threads.
+- **No native `confirm()` / `alert()`** in the web UI: browsers can silently block them ("prevent
+  this page from creating additional dialogs"), after which `confirm()` always returns false - this
+  broke "Clear all". Use `confirmDialog()` / `choiceDialog()` / `notify()` in scanner.js.
 - **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
   in PROGRAM_DOCUMENTATION.md.
 - **Logs**: `data/logs/app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log`.

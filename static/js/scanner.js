@@ -1394,13 +1394,15 @@ function updateDatabase() {
     socket.emit('update_database');
 }
 
-function rebuildDatabase() {
+async function rebuildDatabase() {
     const rebuildBtn = document.getElementById('rebuild-database-btn');
 
-    // Confirm action
-    if (!confirm('Rebuild database schema? This will optimize the database structure and add performance indexes. Your data will be preserved. Continue?')) {
-        return;
-    }
+    const ok = await confirmDialog({
+        title: 'Rebuild database schema?',
+        message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your inventory is not touched.',
+        confirmText: 'Rebuild'
+    });
+    if (!ok) return;
 
     // Disable button and show loading state
     rebuildBtn.disabled = true;
@@ -1413,7 +1415,7 @@ function rebuildDatabase() {
     socket.emit('rebuild_database');
 }
 
-function importInventory() {
+async function importInventory() {
     const fileInput = document.getElementById('import-file-input');
     const file = fileInput.files[0];
 
@@ -1429,13 +1431,20 @@ function importInventory() {
         return;
     }
 
-    // Ask user about replace mode
-    const replaceExisting = confirm(
-        'Import Options:\n\n' +
-        'OK = REPLACE all existing inventory with this file\n' +
-        'Cancel = MERGE with existing inventory (add/update quantities)\n\n' +
-        'Choose how to import:'
-    );
+    const mode = await choiceDialog({
+        title: `Import ${file.name}`,
+        message: 'Add the cards in this file to your inventory (quantities of matching cards are added up), or replace your whole inventory with this file?',
+        choices: [
+            {label: 'Cancel', value: null},
+            {label: 'Replace inventory', value: 'replace', style: 'danger'},
+            {label: 'Add to inventory', value: 'merge', style: 'primary'}
+        ]
+    });
+    if (!mode) {
+        fileInput.value = '';
+        return;
+    }
+    const replaceExisting = mode === 'replace';
 
     // Show loading state
     addLog(timeNow(), 'info', `Importing inventory from ${file.name}...`);
@@ -1465,29 +1474,26 @@ function importInventory() {
             // Clear the file input
             fileInput.value = '';
         } else {
-            addLog(timeNow(), 'error', 'Import failed: ' + (data.error || 'Unknown error'));
-            alert('Import failed: ' + (data.error || 'Unknown error'));
+            notify('Import failed: ' + (data.error || 'Unknown error'), 'error');
             fileInput.value = '';
         }
     })
     .catch(error => {
         console.error('Import error:', error);
-        addLog(timeNow(), 'error', 'Import failed: ' + error);
-        alert('Import failed. Please check the file format and try again.');
+        notify('Import failed - check the file format and try again (' + error + ')', 'error');
         fileInput.value = '';
     });
 }
 
-function clearInventory() {
-    // Double confirmation for destructive action
-    if (!confirm('⚠️ WARNING: Clear ALL Inventory?\n\nThis will permanently delete ALL cards from your inventory.\n\nThis action CANNOT be undone!\n\nAre you sure you want to continue?')) {
-        return;
-    }
-
-    // Second confirmation
-    if (!confirm('⚠️ FINAL WARNING\n\nYou are about to delete your ENTIRE inventory.\n\nHave you exported a backup first?\n\nClick OK to proceed with deletion.')) {
-        return;
-    }
+async function clearInventory() {
+    const count = document.getElementById('inv-cards').textContent;
+    const ok = await confirmDialog({
+        title: 'Clear the whole inventory?',
+        message: `This permanently deletes all ${count} cards from your inventory and can't be undone.\n\nExport a CSV first if you want a backup.`,
+        confirmText: 'Delete everything',
+        danger: true
+    });
+    if (!ok) return;
 
     // Show loading state
     addLog(timeNow(), 'warning', 'Clearing inventory...');
@@ -1499,23 +1505,18 @@ function clearInventory() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            addLog(timeNow(), 'success', `Inventory cleared: ${data.deleted} entries removed`);
+            notify(`Inventory cleared: ${data.deleted} entries removed`, 'success');
 
             // Reload inventory and stats
             loadInventory();
             loadStats();
-
-            // Show success message
-            alert(`Inventory cleared successfully!\n\n${data.deleted} entries were removed.`);
         } else {
-            addLog(timeNow(), 'error', 'Failed to clear inventory: ' + (data.error || 'Unknown error'));
-            alert('Failed to clear inventory: ' + (data.error || 'Unknown error'));
+            notify('Failed to clear inventory: ' + (data.error || 'Unknown error'), 'error');
         }
     })
     .catch(error => {
         console.error('Clear inventory error:', error);
-        addLog(timeNow(), 'error', 'Failed to clear inventory: ' + error);
-        alert('Failed to clear inventory. Please try again.');
+        notify('Failed to clear inventory: ' + error, 'error');
     });
 }
 
@@ -1627,7 +1628,7 @@ function saveEditCard() {
 
     if (currentEditIndex === null) {
         console.error('currentEditIndex is null!');
-        alert('Error: No card selected for editing');
+        notify('No card selected for editing', 'error');
         return;
     }
 
@@ -1643,7 +1644,7 @@ function saveEditCard() {
 
         // Validate split quantity
         if (splitQuantity < 1 || splitQuantity > originalQuantity) {
-            alert(`Split quantity must be between 1 and ${originalQuantity}`);
+            notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
             return;
         }
     }
@@ -1652,7 +1653,7 @@ function saveEditCard() {
 
     // Validate quantity
     if (isNaN(quantity) || quantity < 1 || quantity > 999) {
-        alert('Please enter a valid quantity between 1 and 999');
+        notify('Please enter a quantity between 1 and 999', 'warning');
         return;
     }
 
@@ -1714,22 +1715,23 @@ function saveEditCard() {
             // Update main stats
             loadStats();
         } else {
-            addLog(timeNow(), 'error', 'Failed to update card: ' + (data.error || data.message || 'Unknown error'));
-            alert('Failed to update card: ' + (data.error || data.message || 'Unknown error'));
+            notify('Failed to update card: ' + (data.error || data.message || 'Unknown error'), 'error');
         }
     })
     .catch(error => {
         console.error('Update error:', error);
-        addLog(timeNow(), 'error', 'Update failed: ' + error.message);
-        alert('Failed to update card. Check console for details.');
+        notify('Failed to update card: ' + error.message, 'error');
     });
 }
 
-function deleteCard(index, cardName) {
-    // Confirm deletion
-    if (!confirm(`Are you sure you want to delete "${cardName}" from your inventory?\n\nThis action cannot be undone.`)) {
-        return;
-    }
+async function deleteCard(index, cardName) {
+    const ok = await confirmDialog({
+        title: 'Delete card?',
+        message: `Delete "${cardName}" from your inventory? This can't be undone.`,
+        confirmText: 'Delete',
+        danger: true
+    });
+    if (!ok) return;
 
     // Show loading state
     addLog(timeNow(), 'info', `Deleting ${cardName}...`);
@@ -1747,15 +1749,68 @@ function deleteCard(index, cardName) {
             // Update main stats
             loadStats();
         } else {
-            addLog(timeNow(), 'error', 'Failed to delete card: ' + (data.error || 'Unknown error'));
-            alert('Failed to delete card from inventory');
+            notify('Failed to delete card: ' + (data.error || 'Unknown error'), 'error');
         }
     })
     .catch(error => {
         console.error('Delete error:', error);
-        addLog(timeNow(), 'error', 'Delete failed: ' + error);
-        alert('Failed to delete card from inventory');
+        notify('Failed to delete card: ' + error, 'error');
     });
+}
+
+// ============================================================================
+// In-page dialogs and notifications
+// Native confirm()/alert() can be silently blocked by the browser ("prevent this page from
+// creating additional dialogs"), after which confirm() always returns false - so the app
+// uses its own.
+// ============================================================================
+
+let dialogResolve = null;
+
+function choiceDialog({title, message, choices}) {
+    // choices: [{label, value, style: 'primary' | 'danger' | undefined}]; resolves with the
+    // chosen value, or null when dismissed (Escape, click outside)
+    return new Promise(resolve => {
+        if (dialogResolve) dialogResolve(null);
+        dialogResolve = resolve;
+        document.getElementById('dialog-title').textContent = title;
+        document.getElementById('dialog-message').textContent = message;
+        const buttons = document.getElementById('dialog-buttons');
+        buttons.innerHTML = '';
+        choices.forEach(choice => {
+            const button = document.createElement('button');
+            button.className = 'btn' + (choice.style ? ` btn-${choice.style}` : '');
+            button.textContent = choice.label;
+            button.onclick = () => closeDialog(choice.value);
+            buttons.appendChild(button);
+        });
+        document.getElementById('dialog-modal').classList.add('show');
+        buttons.firstChild.focus();  // the safe choice (Cancel) is first
+    });
+}
+
+function closeDialog(value = null) {
+    document.getElementById('dialog-modal').classList.remove('show');
+    const resolve = dialogResolve;
+    dialogResolve = null;
+    if (resolve) resolve(value);
+}
+
+function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
+    return choiceDialog({title, message, choices: [
+        {label: 'Cancel', value: false},
+        {label: confirmText, value: true, style: danger ? 'danger' : 'primary'}
+    ]}).then(value => value === true);
+}
+
+function notify(message, level = 'info') {
+    // Shows a short notification and records it in the activity log
+    addLog(timeNow(), level, message);
+    const toast = document.createElement('div');
+    toast.className = `toast ${level}`;
+    toast.textContent = message;
+    document.getElementById('toast-container').appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
 }
 
 function openSettings() {
@@ -1769,7 +1824,9 @@ function closeSettings() {
 // Close the topmost overlay with Escape
 document.addEventListener('keydown', function(event) {
     if (event.key !== 'Escape') return;
-    if (document.getElementById('edit-card-modal').classList.contains('show')) {
+    if (document.getElementById('dialog-modal').classList.contains('show')) {
+        closeDialog(null);
+    } else if (document.getElementById('edit-card-modal').classList.contains('show')) {
         closeEditCard();
     } else if (document.getElementById('inventory-modal').classList.contains('show')) {
         closeInventory();
@@ -1785,6 +1842,9 @@ window.onclick = function(event) {
 
     if (event.target === document.getElementById('settings-drawer')) {
         closeSettings();
+    }
+    if (event.target === document.getElementById('dialog-modal')) {
+        closeDialog(null);
     }
     if (event.target === inventoryModal) {
         closeInventory();

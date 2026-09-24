@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=13">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=14">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -328,7 +328,22 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=13"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=13"></script>
+    <!-- Confirmation dialog: in-page, because browsers can silently block native confirm() -->
+    <div id="dialog-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <h2 id="dialog-title"></h2>
+            </div>
+            <div class="modal-body">
+                <p id="dialog-message" class="dialog-message"></p>
+                <div id="dialog-buttons" class="modal-actions dialog-buttons"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=14"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=14"></script>
 </body>
 </html>
