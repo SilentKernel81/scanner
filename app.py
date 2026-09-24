@@ -290,13 +290,14 @@ def similar_cards_payload(similar):
     }
 
 
-def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False):
+def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None):
     """
     Search for card in database and emit results to client
 
     Args:
         card_name: Card name from AI
         collector_number: Collector number from AI
+        set_code: Set code from AI (e.g. "HOB")
         processing_time: AI processing time in seconds
         was_fast_scan_mode: Whether this was a fast scan auto-add
 
@@ -312,7 +313,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         log_to_client(f"Auto-searching database for: {card_name}")
 
     # Search database
-    db_card_info = searcher.search_by_name(card_name, collector_number, ai_model=get_ai_model_info())
+    db_card_info = searcher.search_by_name(card_name, collector_number, ai_model=get_ai_model_info(), set_code=set_code)
 
     # Log scanned card
     log_scanned_card(
@@ -374,10 +375,12 @@ def ai_processing_worker():
             # Extract card info
             card_name = ""
             collector_number = ""
+            set_code = ""
             foil_status = 'unknown'
             if card_info and isinstance(card_info, dict):
                 card_name = card_info.get('name', '')
                 collector_number = card_info.get('collector_number', '')
+                set_code = card_info.get('set_code', '')
                 foil_status = card_info.get('foil', 'unknown')
                 if card_info.get('processing_time') is None:
                     card_info['processing_time'] = processing_time
@@ -387,6 +390,7 @@ def ai_processing_worker():
                 'image_path': str(image_path),
                 'card_name': card_name,
                 'collector_number': collector_number,
+                'set_code': set_code,
                 'card_number': card_number,
                 'processing_time': processing_time,
                 'foil': foil_status
@@ -394,7 +398,7 @@ def ai_processing_worker():
 
             # Auto-search database if Vision AI identified the card
             if card_name and card_name.strip():
-                search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode)
+                search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode, set_code=set_code)
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -533,11 +537,13 @@ def initialize_components():
                 # Extract card name from vision AI result
                 card_name = ""
                 collector_number = ""
+                set_code = ""
                 processing_time = None
                 foil_status = 'unknown'
                 if vision_ai_result and isinstance(vision_ai_result, dict):
                     card_name = vision_ai_result.get('name', '')
                     collector_number = vision_ai_result.get('collector_number', '')
+                    set_code = vision_ai_result.get('set_code', '')
                     processing_time = vision_ai_result.get('processing_time')
                     foil_status = vision_ai_result.get('foil', 'unknown')
 
@@ -546,6 +552,7 @@ def initialize_components():
                     'image_path': str(image_path),
                     'card_name': card_name,
                     'collector_number': collector_number,
+                    'set_code': set_code,
                     'card_number': current_capture_number,
                     'processing_time': processing_time,
                     'foil': foil_status
@@ -553,7 +560,7 @@ def initialize_components():
 
                 # Auto-search database if Vision AI identified the card
                 if card_name and card_name.strip():
-                    search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False)
+                    search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False, set_code=set_code)
 
                 # Normal mode: card awaits user review (card_under_review stays True)
                 logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
@@ -1043,11 +1050,13 @@ def handle_capture(data):
         # Extract card name from vision AI result (if identified)
         card_name = ""
         collector_number = ""
+        set_code = ""
         processing_time = None
         foil_status = 'unknown'
         if vision_ai_result and isinstance(vision_ai_result, dict):
             card_name = vision_ai_result.get('name', '')
             collector_number = vision_ai_result.get('collector_number', '')
+            set_code = vision_ai_result.get('set_code', '')
             processing_time = vision_ai_result.get('processing_time')
             foil_status = vision_ai_result.get('foil', 'unknown')
 
@@ -1055,6 +1064,7 @@ def handle_capture(data):
             'image_path': str(image_path),
             'card_name': card_name,
             'collector_number': collector_number,
+            'set_code': set_code,
             'card_number': card_number,
             'processing_time': processing_time,
             'foil': foil_status
@@ -1063,7 +1073,7 @@ def handle_capture(data):
 
         # Automatically search database if Vision AI identified the card
         if card_name and card_name.strip():
-            search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False)
+            search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False, set_code=set_code)
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")
@@ -1085,6 +1095,7 @@ def handle_search(data):
 
     card_name = (data.get('card_name') or '').strip()
     collector_number = (data.get('collector_number') or '').strip() or None
+    set_code = (data.get('set_code') or '').strip() or None
     treatment = (data.get('treatment') or '').strip() or None
 
     if not card_name:
@@ -1093,7 +1104,7 @@ def handle_search(data):
         return
 
     try:
-        resolved_name, printings = searcher.find_printings(card_name, collector_number, treatment)
+        resolved_name, printings = searcher.find_printings(card_name, collector_number, treatment, set_code)
 
         if len(printings) == 1:
             current_card_info = printings[0]

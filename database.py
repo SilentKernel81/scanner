@@ -9,7 +9,7 @@ import json
 import logging
 import requests
 import threading
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from config import Config
 from utils import normalize_text
 
@@ -40,6 +40,9 @@ CARD_COLUMNS = [
     ('promo_types', 'TEXT'),
     ('finishes', 'TEXT'),
     ('released_at', 'TEXT'),
+    # Lowercase, accent-free names for searching ("Fíli" -> "fili"), see search_key()
+    ('name_search', 'TEXT'),
+    ('flavor_search', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -77,6 +80,34 @@ def collector_number_variants(collector_number):
     number_str = number_match.group(1)
     base_number = str(int(number_str))  # Remove leading zeros: "0330" -> "330"
     return {base_number, number_str, base_number + 's', number_str + 's'}
+
+
+def search_key(text):
+    """Normalize a card name for searching: lowercase, no accents ("Fíli" -> "fili", "Æther" -> "aether")"""
+    if not text:
+        return None
+    return normalize_text(text).lower().replace('æ', 'ae').strip()
+
+
+def names_match(query, row):
+    """
+    Loose check that a name read from a card matches a database row: same name, a
+    shortened legendary name ("Thanos" / "Thanos, the Mad Titan"), a double-faced
+    card's front face, or a close spelling. Checks the flavor name too.
+    """
+    query_key = search_key(query)
+    if not query_key:
+        return False
+    for full_name in (row['name'], row['flavor_name']):
+        for face in (full_name or '').split(' // '):
+            key = search_key(face)
+            if not key:
+                continue
+            if key == query_key or key.startswith(query_key) or query_key.startswith(key):
+                return True
+            if SequenceMatcher(None, query_key, key).ratio() >= 0.6:
+                return True
+    return False
 
 
 def _json_list(value):
@@ -122,6 +153,11 @@ class CardDatabase:
             if column not in existing_columns:
                 logger.info(f"Adding {column} column to existing cards table")
                 cursor.execute(f"ALTER TABLE cards ADD COLUMN {column} {column_type}")
+
+        if 'name_search' not in existing_columns:
+            logger.info("Filling search name columns")
+            self.conn.create_function('search_key', 1, search_key, deterministic=True)
+            cursor.execute("UPDATE cards SET name_search = search_key(name), flavor_search = search_key(flavor_name)")
 
         self._create_card_indexes(cursor)
 
@@ -193,6 +229,8 @@ class CardDatabase:
         """Create performance indexes on the cards table"""
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_name ON cards(name COLLATE NOCASE)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_flavor_name ON cards(flavor_name COLLATE NOCASE)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_name_search ON cards(name_search)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_flavor_search ON cards(flavor_search)')
         # Composite index for exact version lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_set_number ON cards(set_code, collector_number)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_rarity ON cards(rarity)')
@@ -297,7 +335,9 @@ class CardDatabase:
                     1 if card.get('full_art') else 0,
                     json.dumps(card.get('promo_types', [])),
                     json.dumps(card.get('finishes', [])),
-                    card.get('released_at')
+                    card.get('released_at'),
+                    search_key(card.get('name')),
+                    search_key(card.get('flavor_name'))
                 ))
                 
                 inserted += 1
@@ -315,237 +355,164 @@ class CardDatabase:
         
         return inserted
     
-    def search_card_exact(self, card_name, collector_number=None):
+    def search_card_exact(self, card_name, collector_number=None, set_code=None):
         """
-        Search for an exact card by name and optionally collector number
+        Search for an exact printing by set code, collector number and name
 
         Strategy:
-        1. Try exact case-insensitive match with SQL (uses index)
-        2. If collector number provided, filter by it
-        3. Fall back to prefix search for accent-insensitive matching
-        4. Fall back to fuzzy search as last resort
+        1. Set code + collector number (unique per printing), if the name roughly matches
+        2. Name (accent/case-insensitive, or shortened legendary name) + collector number
+        3. Name only
+        4. Fuzzy name match, then the collector number to pick the printing
 
         Args:
             card_name: The card name
             collector_number: Optional collector number (e.g., "123", "0330", "123s")
+            set_code: Optional set code (e.g., "HOB")
 
         Returns:
             Card dict if found, None otherwise
         """
         with self._lock:
-            logger.info(f"Searching for card: '{card_name}'" + (f" #{collector_number}" if collector_number else ""))
+            logger.info(f"Searching for card: '{card_name}'" + (f" #{collector_number}" if collector_number else "")
+                        + (f" [{set_code}]" if set_code else ""))
             cursor = self.conn.cursor()
-
-            # Step 1: Try exact case-insensitive match with collector number (fastest, uses index)
+            key = search_key(card_name)
             number_variants = collector_number_variants(collector_number)
-            if number_variants:
-                placeholders = ', '.join('?' * len(number_variants))
-                cursor.execute(f'''
-                    SELECT * FROM cards
-                    WHERE (LOWER(name) = LOWER(?) OR LOWER(flavor_name) = LOWER(?))
-                    AND collector_number IN ({placeholders})
-                    LIMIT 1
-                ''', (card_name, card_name, *number_variants))
+            number_placeholders = ', '.join('?' * len(number_variants))
 
-                result = cursor.fetchone()
-                if result:
-                    logger.info(f"Found exact match with collector number: {result['name']} #{result['collector_number']}")
-                    return self._format_card_result(result)
+            # Step 1: Set code + collector number identify the printing exactly
+            set_number_row = None
+            if set_code and number_variants:
+                set_number_row = self._find_by_set_number(set_code, number_variants)
+                if set_number_row and names_match(card_name, set_number_row):
+                    logger.info(f"Found by set + number: {set_number_row['name']} "
+                                f"({set_number_row['set_code']} #{set_number_row['collector_number']})")
+                    return self._format_card_result(set_number_row)
+                if set_number_row:
+                    logger.warning(f"{set_code} #{collector_number} is '{set_number_row['name']}', not '{card_name}' - searching by name")
 
-                # Step 1b: Shortened name + collector number (AI often reads just "Thanos"
-                # for "Thanos, the Mad Titan")
-                cursor.execute(f'''
-                    SELECT * FROM cards
-                    WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(flavor_name) LIKE LOWER(?))
-                    AND collector_number IN ({placeholders})
-                    LIMIT 1
-                ''', (card_name + '%', card_name + '%', *number_variants))
+            if key and number_variants:
+                # Step 2: Name + collector number, then shortened name ("Thanos" for
+                # "Thanos, the Mad Titan") + collector number
+                for comparison, value in (('=', key), ('LIKE', key + '%')):
+                    cursor.execute(f'''
+                        SELECT * FROM cards
+                        WHERE (name_search {comparison} ? OR flavor_search {comparison} ?)
+                        AND collector_number IN ({number_placeholders})
+                        LIMIT 1
+                    ''', (value, value, *number_variants))
+                    result = cursor.fetchone()
+                    if result:
+                        logger.info(f"Found name match with collector number: {result['name']} #{result['collector_number']}")
+                        return self._format_card_result(result)
 
-                result = cursor.fetchone()
-                if result:
-                    logger.info(f"Found name-prefix match with collector number: {result['name']} #{result['collector_number']}")
-                    return self._format_card_result(result)
-
-            # Step 2: Try exact case-insensitive match without collector number (uses index, check both name and flavor_name)
-            cursor.execute('''
-                SELECT * FROM cards
-                WHERE LOWER(name) = LOWER(?) OR LOWER(flavor_name) = LOWER(?)
-                LIMIT 1
-            ''', (card_name, card_name))
-
-            result = cursor.fetchone()
-            if result:
-                logger.info(f"Found exact case-insensitive match: {result['name']}")
-                return self._format_card_result(result)
-
-            # Step 3: Try accent-insensitive match with prefix search (optimized, not full table scan)
-            normalized_search_name = normalize_text(card_name).lower()
-
-            # Use first 3 characters as prefix to limit search space
-            prefix = card_name[:3].lower() if len(card_name) >= 3 else card_name.lower()
-
-            cursor.execute('''
-                SELECT * FROM cards
-                WHERE LOWER(name) LIKE ? OR LOWER(flavor_name) LIKE ?
-                LIMIT 200
-            ''', (prefix + '%', prefix + '%'))
-
-            # Filter results in Python (but only limited rows)
-            matching_cards = []
-            for result in cursor.fetchall():
-                db_name = result['name']
-                db_flavor_name = result['flavor_name']
-                if normalize_text(db_name).lower() == normalized_search_name:
-                    matching_cards.append(result)
-                elif db_flavor_name and normalize_text(db_flavor_name).lower() == normalized_search_name:
-                    matching_cards.append(result)
-
-            if matching_cards:
-                logger.info(f"Found {len(matching_cards)} cards via accent-insensitive match")
-
-                # If collector number provided, try to find matching card
-                for card in matching_cards:
-                    if card['collector_number'] in number_variants:
-                        logger.info(f"Found match with collector number: {card['name']} #{card['collector_number']}")
-                        return self._format_card_result(card)
-
-                # Return first match if no collector number or no match found
-                return self._format_card_result(matching_cards[0])
-
-            # Step 4: Fallback to fuzzy search
-            logger.info(f"No exact match found for '{card_name}', trying fuzzy search")
+            # Step 3: Name only
             match = self.search_card(card_name, fuzzy=True)
 
             # Fuzzy matching resolves the name; use the collector number to pick the printing
             if match and number_variants:
-                placeholders = ', '.join('?' * len(number_variants))
                 cursor.execute(f'''
-                    SELECT * FROM cards WHERE name = ? AND collector_number IN ({placeholders}) LIMIT 1
+                    SELECT * FROM cards WHERE name = ? AND collector_number IN ({number_placeholders}) LIMIT 1
                 ''', (match['name'], *number_variants))
                 result = cursor.fetchone()
                 if result:
                     return self._format_card_result(result)
+
+            # Number didn't match: prefer a printing of this card from the same set
+            if match and set_code:
+                result = cursor.execute('''
+                    SELECT * FROM cards WHERE name = ? AND set_code = ?
+                    ORDER BY CAST(collector_number AS INTEGER) LIMIT 1
+                ''', (match['name'], set_code.strip().lower())).fetchone()
+                if result:
+                    return self._format_card_result(result)
+
+            # Name not found at all (badly misread): trust the printed set + number
+            if not match and set_number_row:
+                logger.warning(f"No card named '{card_name}' - using {set_code} #{collector_number}: {set_number_row['name']}")
+                return self._format_card_result(set_number_row)
             return match
 
+    def _find_by_set_number(self, set_code, number_variants):
+        """Row for a set code + collector number (any of the number variants), or None"""
+        placeholders = ', '.join('?' * len(number_variants))
+        return self.conn.execute(f'''
+            SELECT * FROM cards WHERE set_code = ? AND collector_number IN ({placeholders}) LIMIT 1
+        ''', (set_code.strip().lower(), *number_variants)).fetchone()
+
+    def get_card_by_set_number(self, set_code, collector_number):
+        """Card dict for a set code + collector number, or None"""
+        number_variants = collector_number_variants(collector_number)
+        if not set_code or not number_variants:
+            return None
+        with self._lock:
+            row = self._find_by_set_number(set_code, number_variants)
+            return self._format_card_result(row) if row else None
+
     def search_card(self, card_name, fuzzy=True):
-        """Search for a card by name or flavor name"""
+        """Search for a card by name or flavor name (case- and accent-insensitive)"""
+        key = search_key(card_name)
+        if not key:
+            return None
+
         with self._lock:
             cursor = self.conn.cursor()
 
-            # Try exact case-insensitive match first (uses index, check both name and flavor_name)
-            cursor.execute('''
-                SELECT * FROM cards
-                WHERE LOWER(name) = LOWER(?) OR LOWER(flavor_name) = LOWER(?)
-                LIMIT 1
-            ''', (card_name, card_name))
-
-            result = cursor.fetchone()
-
+            # Exact name or flavor name
+            result = cursor.execute('''
+                SELECT * FROM cards WHERE name_search = ? OR flavor_search = ? LIMIT 1
+            ''', (key, key)).fetchone()
             if result:
                 return self._format_card_result(result)
 
-            # Try accent-insensitive match with prefix search (optimized)
-            normalized_search_name = normalize_text(card_name).lower()
-
-            # Use first 3 characters as prefix to limit search space
-            prefix = card_name[:3].lower() if len(card_name) >= 3 else card_name.lower()
-
-            cursor.execute('''
-                SELECT * FROM cards
-                WHERE LOWER(name) LIKE ? OR LOWER(flavor_name) LIKE ?
-                LIMIT 200
-            ''', (prefix + '%', prefix + '%'))
-
-            # Filter results in Python (but only limited rows)
-            for result in cursor.fetchall():
-                db_name = result['name']
-                db_flavor_name = result['flavor_name']
-                if normalize_text(db_name).lower() == normalized_search_name:
-                    logger.info(f"Found card via accent-insensitive name match: {db_name}")
-                    return self._format_card_result(result)
-                elif db_flavor_name and normalize_text(db_flavor_name).lower() == normalized_search_name:
-                    logger.info(f"Found card via accent-insensitive flavor name match: {db_flavor_name} (Oracle: {db_name})")
-                    return self._format_card_result(result)
-
             # Shortened legendary name ("Thanos" -> "Thanos, the Mad Titan") - fuzzy
             # matching on whole names would prefer unrelated cards like "Thayan Evokers"
-            cursor.execute('''
-                SELECT * FROM cards
-                WHERE LOWER(name) LIKE LOWER(?) OR LOWER(flavor_name) LIKE LOWER(?)
-                LIMIT 1
-            ''', (card_name + ',%', card_name + ',%'))
-            result = cursor.fetchone()
+            result = cursor.execute('''
+                SELECT * FROM cards WHERE name_search LIKE ? OR flavor_search LIKE ? LIMIT 1
+            ''', (key + ',%', key + ',%')).fetchone()
             if result:
                 logger.info(f"Found card via shortened name: {card_name} -> {result['name']}")
                 return self._format_card_result(result)
 
-            # Fuzzy matching fallback (optimized to use prefix search)
-            if fuzzy:
-                # Get limited set of names with prefix match (check both name and flavor_name)
-                cursor.execute('''
-                    SELECT DISTINCT name, flavor_name FROM cards
-                    WHERE LOWER(name) LIKE ? OR LOWER(flavor_name) LIKE ?
-                    LIMIT 500
-                ''', (prefix + '%', prefix + '%'))
+            if not fuzzy:
+                return None
 
-                # Build candidate names from both name and flavor_name
-                candidate_names = []
-                name_to_card = {}  # Map normalized name to original card name for lookup
-                for row in cursor.fetchall():
-                    card_name = row[0]
-                    flavor_name = row[1]
-                    candidate_names.append(card_name)
-                    name_to_card[card_name] = card_name
-                    if flavor_name:
-                        candidate_names.append(flavor_name)
-                        name_to_card[flavor_name] = card_name  # Map flavor name to card name for lookup
+            # Fuzzy match against names sharing the first letters (widen if there are few)
+            candidates = {}
+            for prefix_length in (3, 2):
+                rows = cursor.execute('''
+                    SELECT DISTINCT name, flavor_name, name_search, flavor_search FROM cards
+                    WHERE name_search LIKE ? OR flavor_search LIKE ?
+                ''', (key[:prefix_length] + '%', key[:prefix_length] + '%')).fetchall()
+                for row in rows:
+                    candidates[row['name_search']] = row['name']
+                    if row['flavor_search']:
+                        candidates[row['flavor_search']] = row['name']  # flavor name -> card name
+                if len(candidates) >= 50:
+                    break
 
-                # If prefix search returns too few results, expand search
-                if len(candidate_names) < 50:
-                    cursor.execute('SELECT DISTINCT name, flavor_name FROM cards LIMIT 1000')
-                    for row in cursor.fetchall():
-                        card_name = row[0]
-                        flavor_name = row[1]
-                        if card_name not in candidate_names:
-                            candidate_names.append(card_name)
-                            name_to_card[card_name] = card_name
-                        if flavor_name and flavor_name not in candidate_names:
-                            candidate_names.append(flavor_name)
-                            name_to_card[flavor_name] = card_name
-
-                # Try fuzzy matching on normalized names
-                normalized_names = {normalize_text(name).lower(): name for name in candidate_names}
-                matches = get_close_matches(normalized_search_name, normalized_names.keys(), n=1, cutoff=0.6)
-
-                if matches:
-                    original_name = normalized_names[matches[0]]
-                    lookup_name = name_to_card.get(original_name, original_name)
-                    cursor.execute('''
-                        SELECT * FROM cards
-                        WHERE name = ?
-                        LIMIT 1
-                    ''', (lookup_name,))
-
-                    result = cursor.fetchone()
-                    if result:
-                        logger.info(f"Found card via fuzzy match: {original_name} -> {lookup_name}")
-                        return self._format_card_result(result)
+            matches = get_close_matches(key, candidates.keys(), n=1, cutoff=0.6)
+            if matches:
+                lookup_name = candidates[matches[0]]
+                result = cursor.execute('SELECT * FROM cards WHERE name = ? LIMIT 1', (lookup_name,)).fetchone()
+                if result:
+                    logger.info(f"Found card via fuzzy match: {card_name} -> {lookup_name}")
+                    return self._format_card_result(result)
 
             return None
-    
+
     def search_cards_by_partial_name(self, partial_name, limit=10):
         """Search for cards with partial name match (searches both name and flavor_name)"""
-        cursor = self.conn.cursor()
+        key = search_key(partial_name) or ''
+        with self._lock:
+            return self.conn.execute('''
+                SELECT name, set_name, price_usd FROM cards
+                WHERE name_search LIKE ? OR flavor_search LIKE ?
+                ORDER BY name
+                LIMIT ?
+            ''', (f'%{key}%', f'%{key}%', limit)).fetchall()
 
-        cursor.execute('''
-            SELECT name, set_name, price_usd FROM cards
-            WHERE LOWER(name) LIKE LOWER(?) OR LOWER(flavor_name) LIKE LOWER(?)
-            ORDER BY name
-            LIMIT ?
-        ''', (f'%{partial_name}%', f'%{partial_name}%', limit))
-
-        return cursor.fetchall()
-    
     def _format_card_result(self, row):
         """Format database row as card dict"""
         card = {
@@ -614,8 +581,9 @@ class CardDatabase:
             excluded every printing
         """
         with self._lock:
-            name_condition = "(LOWER(name) = LOWER(?) OR LOWER(flavor_name) = LOWER(?))"
-            params = (card_name, card_name)
+            key = search_key(card_name)
+            name_condition = "(name_search = ? OR flavor_search = ?)"
+            params = (key, key)
 
             exact = self.conn.execute(f"SELECT name FROM cards WHERE {name_condition} LIMIT 1", params).fetchone()
             if exact:

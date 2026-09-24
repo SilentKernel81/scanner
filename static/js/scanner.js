@@ -68,6 +68,7 @@ socket.on('card_captured', function(data) {
 
     document.getElementById('card-name').value = data.card_name;
     document.getElementById('collector-number').value = data.collector_number || '';
+    document.getElementById('set-code').value = data.set_code || '';
     currentImagePath = data.image_path;
     document.getElementById('search-btn').disabled = false;
 
@@ -172,6 +173,7 @@ socket.on('inventory_updated', function(data) {
     `;
     document.getElementById('card-name').value = '';
     document.getElementById('collector-number').value = '';
+    document.getElementById('set-code').value = '';
     document.getElementById('card-treatment').value = '';
     detectedFoilStatus = 'unknown';
     currentCard = null;
@@ -456,6 +458,7 @@ function searchCard() {
 
     const cardName = document.getElementById('card-name').value.trim();
     const collectorNumber = document.getElementById('collector-number').value.trim();
+    const setCode = document.getElementById('set-code').value.trim().toUpperCase();
     const treatmentSelect = document.getElementById('card-treatment');
     const treatment = treatmentSelect.value;
     console.log("Card name from input:", cardName);
@@ -465,11 +468,12 @@ function searchCard() {
         const data = {
             card_name: cardName,
             collector_number: collectorNumber || null,
+            set_code: setCode || null,
             treatment: treatment || null
         };
         console.log("Emitting search_card event with data:", data);
 
-        const numberInfo = collectorNumber ? ` #${collectorNumber}` : '';
+        const numberInfo = (setCode ? ` ${setCode}` : '') + (collectorNumber ? ` #${collectorNumber}` : '');
         const treatmentInfo = treatment ? ` (${treatmentSelect.options[treatmentSelect.selectedIndex].text})` : '';
         addLog(timeNow(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
 
@@ -967,6 +971,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Allow Enter key to search (both fields)
     document.getElementById('card-name').addEventListener('keypress', function(e) {
         if (e.key === 'Enter' && !this.disabled) {
+            searchCard();
+        }
+    });
+
+    document.getElementById('set-code').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
             searchCard();
         }
     });

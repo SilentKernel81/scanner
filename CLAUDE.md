@@ -105,11 +105,11 @@ All settings centralized in `config.py`:
 **Identification (On Capture):**
 1. User triggers capture (or auto-capture)
 2. Cropped card image sent to Vision AI (Gemini/GPT-4/Claude)
-3. AI identifies BOTH:
+3. AI identifies:
    - Card name (from top of card)
-   - Collector number (from bottom left corner, e.g., "123/456")
+   - Collector number and set code (bottom-left corner, e.g. "U 0014" / "HOB • EN")
 4. Foil check (`vision_ai.detect_foil`, outline-detected captures only): a second small AI request on a zoomed crop of the bottom-left corner asks whether the set/language separator is a star (★ = foil) or a dot (•). The web UI (`suggestedFinish()` in scanner.js) combines this with the printing's `finishes` (foil-only / nonfoil-only printings are certain) to pre-fill the Regular/Foil/Surge quantity; Fast Scan auto-add uses the same suggestion
-5. Database search uses BOTH fields to find exact card version
+5. Database search: set code + collector number first (unique per printing; accepted only if the name roughly matches, `names_match()`), then name + number, then name only (preferring the same set)
 6. Falls back to name-only search if exact match not found
 7. User confirms and adds to inventory
 
@@ -160,7 +160,7 @@ Disable AI: `VISION_AI_ENABLED = False`
 
 ### Search Strategy
 All search methods check both `name` and `flavor_name` fields:
-1. Exact match: Case-insensitive SQL query (e.g., "Bucklebury Ferry" finds "Oboro, Palace in the Clouds")
+1. Exact match on `name_search` / `flavor_search` - lowercase, accent-free copies of the names (`search_key()`: "Fíli" -> "fili"), filled automatically on startup for older databases (e.g., "Bucklebury Ferry" finds "Oboro, Palace in the Clouds")
    - Shortened legendary names match by prefix ("Thanos" → "Thanos, the Mad Titan"), before fuzzy matching
 2. Fuzzy match: Python `difflib.get_close_matches()` with 0.6 cutoff
 3. Partial match: SQL LIKE query for similar cards

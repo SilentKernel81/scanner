@@ -485,7 +485,8 @@ body {
 
 .search-row {
     display: grid;
-    grid-template-columns: minmax(200px, 2fr) minmax(120px, 1fr) minmax(140px, 1fr) auto;
+    /* name, set, number, treatment, button */
+    grid-template-columns: minmax(180px, 2fr) minmax(64px, 0.55fr) minmax(80px, 0.75fr) minmax(130px, 1fr) auto;
     gap: 12px;
     align-items: end;
 }
@@ -1273,23 +1274,23 @@ input[type="radio"] {
    ============================================================================ */
 
 @media (max-width: 1280px) {
-    /* Name and button on the first row, number and treatment below */
+    /* Name and button on the first row; set, number and treatment below */
     .search-row {
-        grid-template-columns: 1fr 1fr auto;
+        grid-template-columns: 0.7fr 1fr 1fr auto;
     }
 
     .search-row .search-name {
-        grid-column: 1 / 3;
+        grid-column: 1 / 4;
         grid-row: 1;
     }
 
     .search-row .btn {
-        grid-column: 3;
+        grid-column: 4;
         grid-row: 1;
     }
 
     .search-row .search-treatment {
-        grid-column: 2 / -1;
+        grid-column: 3 / -1;
     }
 }
 
@@ -1338,7 +1339,7 @@ input[type="radio"] {
     }
 
     .search-row .search-treatment {
-        grid-column: auto;
+        grid-column: 1 / -1;
     }
 
     .inventory-card {

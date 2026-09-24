@@ -13,11 +13,12 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
    four-sided shape with a card's 88×63 mm proportions. This takes a few milliseconds and
    isn't fooled by foil glare inside the card.
 2. **Capture** - the card is cut out and perspective-corrected into a flat, upright image.
-3. **Identify** - a vision AI reads the card name and collector number from that image.
+3. **Identify** - a vision AI reads the card name, collector number and set code from that image.
 4. **Foil check** - modern cards print a star (`HOB★EN`) instead of a dot (`HOB•EN`) next to
    the set code on foil copies. The AI is shown a zoomed crop of that corner and asked which
    one it is.
-5. **Match the printing** - name + collector number are looked up in a local copy of
+5. **Match the printing** - set code + collector number (unique for every printing), checked
+   against the name, are looked up in a local copy of
    [Scryfall](https://scryfall.com)'s card data, which also provides prices, images and
    which finishes each printing exists in.
 6. **Add to inventory** - you confirm (or Fast Scan adds it automatically) and the card is
@@ -31,9 +32,9 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
   captures quickly, identifies cards in the background and adds them automatically.
 - **Vision AI providers** - Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model
   via Ollama (or another OpenAI-compatible server). Switch provider and model from the UI.
-- **Exact printing identification** using the collector number, with fuzzy name matching,
-  accent-insensitive search, flavor names ("Bucklebury Ferry") and shortened legendary
-  names ("Thanos" → "Thanos, the Mad Titan").
+- **Exact printing identification** from the set code and collector number, with name
+  matching that tolerates misreads, accents ("Fili" → "Fíli"), flavor names ("Bucklebury
+  Ferry") and shortened legendary names ("Thanos" → "Thanos, the Mad Titan").
 - **Foil detection** from the ★/• marker, combined with printing data: printings that only
   exist in foil (or only non-foil) are known for certain. The card panel pre-selects the
   finish and shows why.
@@ -162,9 +163,11 @@ how many are still being identified.
 
 ### Searching manually
 
-Type a name in **Search**, optionally with a collector number and a **Treatment** (e.g.
-Borderless). If more than one printing matches, choose yours from the thumbnail grid. Press
-Enter in the name field to search.
+Type a name in **Search**, optionally with the **Set** code and **Number** from the card's
+bottom-left corner (e.g. `HOB` and `14`) - together they go straight to the exact printing -
+and a **Treatment** (e.g. Borderless). If more than one printing matches, choose yours from
+the thumbnail grid. After a capture, the fields are filled with what the AI read, so you can
+correct a misread and search again. Press Enter in any field to search.
 
 ### Inventory
 
@@ -245,8 +248,8 @@ switch provider in Settings.
 **Local AI returns 404** - Ollama answers 404 when the requested model isn't installed. Pick
 one of the models listed in Settings (they come from your server) or `ollama pull` it.
 
-**Wrong printing** - make sure the collector number was read (it's shown in the Search panel
-after a capture); correct it there and search again, or pick the printing from the grid.
+**Wrong printing** - check the set code and number the AI read (shown in the Search bar after
+a capture); correct them there and search again, or pick the printing from the grid.
 
 **Installation fails on a very new Python** - create the virtual environment with Python
 3.12 (e.g. `uv venv --python 3.12 venv`).

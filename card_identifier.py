@@ -93,10 +93,11 @@ class CardIdentifier:
             self.log(f"Card identifier initialized with {provider} ({self.model})")
 
     # Card identification prompt (shared across all AI providers)
-    CARD_IDENTIFICATION_PROMPT = """This is a Magic: The Gathering card. Please identify TWO pieces of information:
+    CARD_IDENTIFICATION_PROMPT = """This is a Magic: The Gathering card. Please identify THREE pieces of information:
 
 1. The card name (located at the top-left of the card)
 2. The collector number (located at the BOTTOM-LEFT corner of the card)
+3. The set code (the 3-4 character code at the start of LINE 2 in the BOTTOM-LEFT corner)
 
 IMPORTANT INSTRUCTIONS FOR COLLECTOR NUMBER:
 - The collector number is at the BOTTOM-LEFT corner in a TWO-LINE format:
@@ -108,9 +109,14 @@ IMPORTANT INSTRUCTIONS FOR COLLECTOR NUMBER:
 - DO NOT confuse it with the mana cost symbols in the TOP-RIGHT corner
 - The mana cost has symbols like {1}, {W}, {U}, {B}, {R}, {G} - IGNORE these completely
 
+IMPORTANT INSTRUCTIONS FOR SET CODE:
+- It is the first thing on LINE 2, before the separator and language (e.g. "LTR" in "LTR · EN")
+- Return only the code, e.g. "LTR", "M21", "HOB" - if you cannot read it, return "Unknown"
+
 Return your answer in EXACTLY this format:
 NAME: [card name]
 NUMBER: [4-digit number only]
+SET: [set code]
 
 Rules:
 - If you see a double-faced card, return the front face name
@@ -121,6 +127,7 @@ Rules:
 Example response:
 NAME: Lightning Bolt
 NUMBER: 0367
+SET: M21
 
 Your response:"""
 
@@ -220,13 +227,25 @@ Your response:"""
 
     def _parse_response(self, response_text, source):
         """
-        Parse 'NAME: ... / NUMBER: ...' response text from any provider
+        Parse 'NAME: ... / NUMBER: ... / SET: ...' response text from any provider
 
         Returns:
-            dict: {'name': str, 'collector_number': str} or None if no name found
+            dict: {'name': str, 'collector_number': str, 'set_code': str} or None if no name found
         """
         name_match = re.search(r'NAME:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
         number_match = re.search(r'NUMBER:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+        # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"); anything else (e.g. "Unknown") is ignored
+        set_match = re.search(r'SET:\s*([A-Za-z0-9]{2,5})\s*(?:\n|$)', response_text, re.IGNORECASE)
+        set_code = set_match.group(1).upper() if set_match else ""
+
+        # Some models drop the labels and answer with bare lines: name / number / set
+        if not name_match:
+            lines = [line.strip() for line in response_text.splitlines() if line.strip()]
+            if 2 <= len(lines) <= 3 and re.fullmatch(r'[A-Za-z]?\s*\d{1,4}[a-z]?', lines[1]):
+                name_match = re.match(r'(.+)', lines[0])
+                number_match = re.match(r'(.+)', lines[1])
+                if len(lines) == 3 and re.fullmatch(r'[A-Za-z0-9]{2,5}', lines[2]):
+                    set_code = lines[2].upper()
 
         card_name = name_match.group(1).strip() if name_match else ""
         collector_number = number_match.group(1).strip() if number_match else ""
@@ -237,12 +256,13 @@ Your response:"""
         if collector_number.lower() == "unknown":
             collector_number = ""
 
-        self.log(f"{source} identified: '{card_name}' #{collector_number or 'not found'}")
+        self.log(f"{source} identified: '{card_name}' #{collector_number or 'not found'} [{set_code or 'set not found'}]")
 
         if card_name:
             return {
                 'name': card_name,
-                'collector_number': collector_number
+                'collector_number': collector_number,
+                'set_code': set_code
             }
         self.log(f"{source} could not identify card name", level="warning")
         return None
@@ -351,7 +371,7 @@ Your response:"""
             "messages": [{"role": "user", "content": prompt, "images": [base64_image]}],
             "stream": False,
             "think": False,  # Thinking models otherwise spend the token budget reasoning and return no answer
-            "options": {"temperature": 0.1}
+            "options": {"temperature": 0}
         }
 
         try:

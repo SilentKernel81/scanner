@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=7">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -60,9 +60,13 @@
                             <label for="card-name">Card name</label>
                             <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
                         </div>
+                        <div class="input-group search-set">
+                            <label for="set-code">Set</label>
+                            <input type="text" id="set-code" placeholder="e.g. HOB" maxlength="5" autocapitalize="characters">
+                        </div>
                         <div class="input-group">
-                            <label for="collector-number">Collector number</label>
-                            <input type="text" id="collector-number" placeholder="Optional, e.g. 123">
+                            <label for="collector-number">Number</label>
+                            <input type="text" id="collector-number" placeholder="e.g. 123">
                         </div>
                         <div class="input-group search-treatment">
                             <label for="card-treatment">Treatment</label>
@@ -317,7 +321,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=6"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=6"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=7"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=7"></script>
 </body>
 </html>
