@@ -167,8 +167,10 @@ class CardIdentifier:
 
     def read_foil_symbol_verbose(self, card_image, instructions=None):
         """read_foil_symbol that also returns the AI's raw answer: (raw_text, result)"""
+        # Bottom 14% x left 45%: tall enough to still hold the set line when the detected
+        # outline also takes in the edge of the card underneath
         height, width = card_image.shape[:2]
-        corner = card_image[int(height * 0.91):, :int(width * 0.55)]
+        corner = card_image[int(height * 0.86):, :int(width * 0.45)]
         corner = cv2.resize(corner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
         if instructions is None:
             prompt = prompts.prompt('foil', self.provider, self.model, games.active_id())

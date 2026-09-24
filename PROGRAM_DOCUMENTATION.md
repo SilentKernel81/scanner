@@ -262,8 +262,16 @@ shown as a picker when there's more than one.
 
 Modern cards print a star instead of a dot between set code and language on foil copies
 (`HOB★EN` vs `HOB•EN`). For captures found by outline detection - where the corner is known to
-be in the image - `read_foil_symbol()` sends the bottom-left corner (lowest 9% × left 55% of
-the flat card, enlarged 3×) and asks "star or dot?" (`vision_ai.detect_foil`).
+be in the image - `read_foil_symbol()` sends the bottom-left corner (lowest 14% × left 45% of
+the flat card, enlarged 3×) and asks which symbol it is (`vision_ai.detect_foil`).
+
+The wording matters. Asked only "is the separator a STAR or a DOT?", qwen3.5:9b called regular
+cards foil when the capture was a little soft: 25 of 84 regular cards (from a scanning session
+where auto-added lands came out foil). Describing both shapes ("a dot is a plain round point; a
+star has five sharp points") fixed that on the same set - checked by eye: 84/84 regular and
+40/40 readable foils right; 3 unreadable, blurry foils were called dot. qwen3.5:4b still called
+12 of the 84 regular cards foil (23 with the old wording). The taller crop keeps the set line in
+view when the detected outline also takes in the edge of the card underneath in the pile.
 
 The web page combines this with the printing's `finishes` in `suggestedFinish()`:
 

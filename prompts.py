@@ -46,9 +46,11 @@ SET: <set code>""",
         # foil copies; asked about a zoomed crop of the bottom-left corner
         'foil': {
             'label': 'Foil marker (★/•)',
-            'instructions': ("This is the bottom-left corner of a Magic: The Gathering card. The last line shows a set code, "
-                             "a small separator symbol, and a language code - for example 'HOB • EN' or 'HOB ★ EN'. "
-                             "Is the separator a five-pointed STAR or a round DOT?"),
+            # Describing both shapes matters: asked only "star or dot?", qwen3.5:9b called
+            # 25 of 84 regular cards foil; with this wording none (40/40 readable foils right)
+            'instructions': ("This is the bottom-left corner of a Magic: The Gathering card. Find the line with the set code "
+                             "and the language code, like 'HOB•EN' or 'HOB★EN'. Look closely at the small symbol between "
+                             "them: a dot is a plain round point; a star has five sharp points. Which is it?"),
             'answer_format': "Answer with one word: star, dot, or unclear.",
         },
     },
