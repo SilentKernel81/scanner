@@ -38,6 +38,54 @@ def _is_inner_frame(gray, corners, band=4):
     return cv2.mean(gray, outside)[0] < cv2.mean(gray, inside)[0]
 
 
+def _perimeter_coverage(edges, corners, samples=240, reach=3):
+    """Fraction of points along a rectangle's sides that lie on (or within `reach` of) an edge"""
+    near = cv2.dilate(edges, np.ones((2 * reach + 1, 2 * reach + 1), np.uint8))
+    hits = total = 0
+    for start, end in zip(corners, np.roll(corners, -1, axis=0)):
+        for t in np.linspace(0, 1, samples // 4, endpoint=False):
+            x, y = (start + (end - start) * t).astype(int)
+            if 0 <= y < near.shape[0] and 0 <= x < near.shape[1]:
+                total += 1
+                hits += near[y, x] > 0
+    return hits / max(total, 1)
+
+
+def _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance):
+    """
+    Fallback for an outline with a gap: where a card's edge has the brightness of the background
+    (e.g. a borderless foil's silver frame against the white box) the outline breaks and no
+    closed contour exists. Edge pieces lying close together are grouped, and a group whose hull
+    is a card-shaped rectangle with edges along most of its sides is taken as the card.
+
+    Returns:
+        tuple: (area, corners, fill) or None
+    """
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(cv2.dilate(edges, np.ones((15, 15), np.uint8)))
+    best = None
+    for group in range(1, count):
+        if stats[group, cv2.CC_STAT_WIDTH] * stats[group, cv2.CC_STAT_HEIGHT] < min_area:
+            continue
+        ys, xs = np.nonzero((labels == group) & (edges > 0))
+        hull = cv2.convexHull(np.column_stack([xs, ys]).astype(np.int32))
+        corners = _order_corners(cv2.boxPoints(cv2.minAreaRect(hull)))
+        side_w = np.linalg.norm(corners[1] - corners[0])
+        side_h = np.linalg.norm(corners[3] - corners[0])
+        if min(side_w, side_h) == 0 or (side_w > side_h and not allow_landscape):
+            continue
+        area = side_w * side_h
+        ratio = max(side_w, side_h) / min(side_w, side_h)
+        fill = cv2.contourArea(hull) / area
+        if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.9:
+            continue
+        if (best is not None and area <= best[0]) or _perimeter_coverage(edges, corners) < 0.8:
+            continue
+        if _is_inner_frame(gray, corners):
+            continue
+        best = (area, corners, fill)
+    return best
+
+
 def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640):
     """
     Find a card by its outline: the largest 4-sided contour with a card's aspect ratio.
@@ -93,6 +141,8 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
             continue
         best = (area, corners, fill)
 
+    if best is None:
+        best = _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance)
     if best is None:
         return None, 0
     return best[1] / scale, float(best[2])

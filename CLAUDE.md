@@ -39,7 +39,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 
 | Area | Code |
 |---|---|
-| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline`, `warp_card`, `ObjectDetector.detect` |
+| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline` (+ `_outline_from_edge_groups` for broken outlines), `warp_card`, `ObjectDetector.detect` |
 | Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured` |
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe` (drift tracking between drops), `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |

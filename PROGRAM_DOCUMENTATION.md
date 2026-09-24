@@ -115,6 +115,14 @@ working. The preview stream encodes each new frame once, shared by all browser t
      must not be darker than the band just inside (this happens when the card's outer edge
      is cut off by the image border).
 4. The largest remaining rectangle is the card; its four corners are returned.
+5. **Broken outline fallback** (only when step 3 finds nothing): where a card's edge is as
+   bright as the background - a borderless foil's silver frame against the white box - the
+   outline has a gap and no closed contour exists (a Gwen Stacy borderless: the right edge
+   along the text box, ~100 px, had no edge at all). Edge pieces within ~15 px of each other
+   are grouped; a group's hull counts as the card if its rectangle passes the same ratio,
+   portrait and inner-frame checks, the hull fills ≥ 90% of it, and edges run along ≥ 80% of
+   its perimeter. On 100 recorded frames it found only that card (no false detection on empty
+   boxes, piles or screenshots); it costs ~5 ms more on frames where it runs.
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
