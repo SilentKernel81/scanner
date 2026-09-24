@@ -86,6 +86,12 @@ def collector_number_variants(collector_number):
     return {base_number, number_str, base_number + 's', number_str + 's'}
 
 
+def _leading_number(collector_number):
+    """Numeric part of a collector number ("0134" -> 134, "401z" -> 401), or None"""
+    match = re.search(r'\d+', collector_number or '')
+    return int(match.group()) if match else None
+
+
 def search_key(text):
     """Normalize a card name for searching: lowercase, no accents ("Fíli" -> "fili", "Æther" -> "aether")"""
     if not text:
@@ -110,6 +116,10 @@ def names_match(query, row):
             if key == query_key or key.startswith(query_key) or query_key.startswith(key):
                 return True
             if SequenceMatcher(None, query_key, key).ratio() >= 0.6:
+                return True
+            # A misread short name ("Thands") against a legendary name ("Thanos, the Mad Titan")
+            short_name = key.split(',')[0]
+            if short_name != key and SequenceMatcher(None, query_key.split(',')[0], short_name).ratio() >= 0.75:
                 return True
     return False
 
@@ -423,14 +433,25 @@ class CardDatabase:
                 if result:
                     return self._tagged(result, 'name_number')
 
-            # Number didn't match: prefer a printing of this card from the same set
-            if match and set_code:
-                result = cursor.execute('''
-                    SELECT * FROM cards WHERE name = ? AND set_code = ?
-                    ORDER BY CAST(collector_number AS INTEGER) LIMIT 1
-                ''', (match['name'], set_code.strip().lower())).fetchone()
-                if result:
-                    return self._tagged(result, 'name_set')
+            # Number didn't match (misread): prefer a printing from the same set, and the
+            # printing whose collector number is closest to what was read
+            if match and (set_code or number_variants):
+                rows = cursor.execute('SELECT * FROM cards WHERE name = ?', (match['name'],)).fetchall()
+                wanted_set = (set_code or '').strip().lower()
+                in_set = [row for row in rows if row['set_code'] == wanted_set]
+                candidates = in_set or rows
+                read_number = _leading_number(collector_number)
+
+                def closeness(row):
+                    # (distance to the number read, collector number) - lowest wins
+                    number = _leading_number(row['collector_number'])
+                    if number is None:
+                        return (float('inf'), float('inf'))
+                    return (abs(number - read_number) if read_number is not None else 0, number)
+
+                if candidates and (in_set or read_number is not None):
+                    best = min(candidates, key=closeness)
+                    return self._tagged(best, 'name_set' if in_set else 'name')
 
             # Name not found at all (badly misread): trust the printed set + number
             if not match and set_number_row:

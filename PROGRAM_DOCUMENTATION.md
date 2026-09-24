@@ -200,9 +200,9 @@ model is preloaded (`warm_up`) when auto scanning starts, because loading a 9B m
 
 | Step | Match | Tag |
 |---|---|---|
-| 1 | Set code + collector number (unique per printing), accepted if the name roughly matches (`names_match`: same, prefix, a double-faced card's face, or ≥ 60% similar) | `set_number` |
+| 1 | Set code + collector number (unique per printing), accepted if the name roughly matches (`names_match`: same, prefix, a double-faced card's face, ≥ 60% similar, or ≥ 75% similar to the short name before the comma - "Thands" / "Thanos, the Mad Titan") | `set_number` |
 | 2 | Name + collector number, then shortened name ("Thanos" → "Thanos, the Mad Titan") + number | `name_number` |
-| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else a printing from the same set | `name_set` / `name` / `fuzzy` |
+| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read | `name_set` / `name` / `fuzzy` |
 | 4 | Name unrecognizable but set + number exist: trust the printed set + number | `set_number_unverified` |
 
 Collector numbers are compared in their variants ("0014" → 14, 0014, 14s, 0014s). Names are
@@ -330,6 +330,15 @@ Measured on an x86-64 laptop with an Anker PowerConf C200 at 2560 × 1440 and a 
 | Card landed → capture | ~0.15–0.5 s (settling) |
 | AI identification | 0.7–1.3 s; the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
 | Smaller images to the AI | tested and rejected: 1024 px was 30% faster but misread 2 of 16 cards |
+
+Vision models compared on 90 scans (identification + foil check):
+
+| Model | Hardware | Time per card | Notes |
+|---|---|---|---|
+| `qwen3.5:9b` (Q4_K_M, 6.6 GB) | Ollama server on the network | 1.6 s | reference; says "unknown" when the ★/• is unreadable |
+| `qwen3.5:4b` (Q4_K_M, 3.4 GB) | laptop RTX 3050 6 GB (fits entirely) | 3.4 s | image processing ~920 vs ~2,560 tokens/s on the server; called 3 regular cards foil |
+
+The 9B doesn't fit in a 6 GB GPU (it would be split with the CPU); the 4B is a usable fallback.
 | Set + number lookup | 0.1 ms; fuzzy name search ~90 ms |
 
 ## Known limitations

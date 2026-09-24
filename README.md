@@ -127,6 +127,10 @@ requests, so "thinking" models such as `qwen3.5` answer in about a second instea
 reasoning for tens of seconds. The model is preloaded when you start auto scanning and kept
 loaded for 30 minutes, so the first card doesn't wait ~10 s for it to load.
 
+`qwen3.5:9b` is the recommended model (about 1.6 s per card on a desktop GPU). It needs more
+than 6 GB of GPU memory; on smaller GPUs `qwen3.5:4b` works, but it is slower on weak GPUs and
+more often mistakes regular cards for foil - see PROGRAM_DOCUMENTATION.md for the comparison.
+
 The foil check sends one extra small request per card. It is free with a local model; for
 cloud providers you can turn it off with `vision_ai.detect_foil: false`.
 
