@@ -41,12 +41,13 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 |---|---|
 | Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline`, `warp_card`, `ObjectDetector.detect` |
 | Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured` |
+| Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_check_focus_drift`, `set_continuous_autofocus` |
 | AI providers, prompts, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `CARD_IDENTIFICATION_PROMPT`, `read_foil_symbol`, `warm_up` |
 | Card search / printing match / confidence | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
 | Inventory add/merge/undo/split/export | `inventory.py` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/settings.json` (UI choices: AI provider/model, `auto_add`) |
+| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`) |
 
 ## Conventions and Pitfalls
 
@@ -63,7 +64,10 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   serving the old page. Static files are served fresh - bump the `?v=N` query in the template
   when changing CSS/JS so browsers don't use cached copies.
 - **The camera is exclusive**: only one process can open it; stop the running app before
-  testing with the real camera.
+  testing with the real camera. Camera *controls* (`v4l2-ctl -c ...`) can be changed while
+  another process streams - handy for focus experiments measured through `/video_feed`.
+- **Focus timing**: a `focus_absolute` change takes ~0.4 s to show up in frames; measure after
+  that, or sweeps score the previous lens position.
 - **Ollama**: requests must send `think: false` (thinking models otherwise return empty answers)
   and `keep_alive`; the parser accepts answers with or without `NAME:/NUMBER:/SET:` labels.
 - **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use

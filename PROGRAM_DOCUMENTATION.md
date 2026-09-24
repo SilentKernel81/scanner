@@ -13,10 +13,11 @@ deployment see [INSTALL.md](INSTALL.md).
 6. [Matching the printing](#matching-the-printing)
 7. [Foil and finish](#foil-and-finish)
 8. [Database](#database)
-9. [Web interface](#web-interface)
-10. [Configuration and files](#configuration-and-files)
-11. [Performance](#performance)
-12. [Known limitations](#known-limitations)
+9. [Focus](#focus)
+10. [Web interface](#web-interface)
+11. [Configuration and files](#configuration-and-files)
+12. [Performance](#performance)
+13. [Known limitations](#known-limitations)
 
 ## Overview
 
@@ -109,7 +110,8 @@ the same place.
 
 **YOLO fallback** (`detection.method: auto` or `yolo`, requires `requirements-yolo.txt`): the
 pre-trained COCO YOLOv8n model has no card class, so it only gives a rough bounding box (it
-labels cards "cell phone" or "book"); boxes are filtered by aspect ratio and smoothed. If
+labels cards "cell phone" or "book"); boxes are filtered by aspect ratio and smoothed. The model
+(`yolov8n.pt`, AGPL-3.0) is downloaded into `data/` on first use. If
 ultralytics isn't installed, the detector logs a warning and uses outlines only.
 
 For display, the last detection is held for 6 s when the card is briefly lost ("HOLD"), but a
@@ -248,6 +250,34 @@ adding an existing combination increases `quantity`. Also stores rarity, type, m
 color identity, price and timestamp. Editing the finish of part of a stack splits the row.
 Exports: full CSV and Moxfield CSV; CSV import merges duplicates.
 
+## Focus
+
+USB cameras start in **continuous autofocus**, unless a focus position has been locked. Measured
+on an Anker PowerConf C200 looking into the box, continuous autofocus settled at a position
+about 4× less sharp than the best manual position, and re-hunts whenever the image changes -
+so a card dropped at the wrong moment can end up blurry.
+
+Because the camera-to-card distance is fixed, the scanner can **lock** the focus instead:
+
+- **Refocus** (button, `reset_focus` → `CardScanner.refocus`): switches autofocus off and runs
+  `focus_sweep()` - a coarse pass over the camera's `focus_absolute` range (step 50), then a fine
+  pass (step 10) around the best position, scoring each position by the sharpness of the card
+  (or the image centre when there's no card); finally a parabola through the best position and
+  its neighbours predicts the peak between the fine steps, which is measured and kept if sharper.
+  On the C200 the sweep found 444 against a measured peak of 446 (without the parabola: 440, 4%
+  less sharp). A lens move takes ~0.4 s to show up in the frames
+  (lens + camera buffer), so each position waits 0.45 s; if re-measuring the chosen position
+  doesn't confirm it, the sweep repeats with 0.8 s. About 10 s in total. The position is saved
+  (`focus_value` in `data/settings.json`) and restored on startup.
+- **Automatic refocus** (`_check_focus_drift`): with a locked focus, a card that stays still but
+  below `auto_capture.min_sharpness` for 3 s triggers a new sweep (at most every 15 s) - the pile
+  grows toward the camera as cards are added.
+- During a sweep the status shows *Focusing* and auto-capture pauses.
+- **Settings → Camera autofocus** (`set_autofocus`) returns to continuous autofocus and forgets
+  the locked position; switching it off runs a sweep.
+
+Cameras without a `focus_absolute` control (and the Pi camera module) keep their own autofocus.
+
 ## Web interface
 
 `templates/scanner.html` + `static/js/scanner.js` + `static/css/style.css` (dark/light theme via
@@ -260,7 +290,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
 | `set_ai_provider`, `update_database`, `rebuild_database` | `ai_provider_set`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 
 HTTP endpoints are listed in the README.
@@ -271,7 +301,7 @@ HTTP endpoints are listed in the README.
 |---|---|
 | `config.yaml` | Camera, detection, auto-capture, vision AI defaults, web server, cleanup |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
-| `data/settings.json` | Choices made in the UI: AI provider/model, add automatically |
+| `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
 | `data/cards_database.db` | Card data and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |

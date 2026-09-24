@@ -1320,7 +1320,10 @@ def set_auto_add(enabled):
 @app.route('/api/scan_settings')
 def get_scan_settings():
     """Scanning preferences the page needs on load"""
-    return jsonify({'auto_add': bool(scanner.fast_scan_mode) if scanner else True})
+    return jsonify({
+        'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
+        'autofocus': scanner.focus_locked_value is None if scanner else True
+    })
 
 
 @socketio.on('toggle_fast_scan')
@@ -1385,14 +1388,23 @@ def handle_reset_focus():
         return
 
     logger.info("Focus reset requested by user")
-    success = scanner.reset_focus()
-
-    if success:
-        emit('focus_reset', {'message': 'Focus reset successful'})
-        logger.info("Focus reset completed")
+    if scanner.reset_focus():
+        # The sweep runs in the background; the result arrives as a log message
+        emit('focus_reset', {'message': 'Focusing...'})
+    elif scanner.focus_sweep_running:
+        emit('focus_reset', {'message': 'Already focusing...'})
     else:
-        emit('error', {'message': 'Failed to reset focus'})
-        logger.error("Focus reset failed")
+        emit('error', {'message': 'This camera has no manual focus control'})
+
+
+@socketio.on('set_autofocus')
+def handle_set_autofocus(data):
+    """Continuous autofocus on, or off = find the sharpest focus and lock it"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    if not scanner.set_continuous_autofocus(bool(data.get('enabled'))):
+        emit('error', {'message': 'This camera has no manual focus control'})
 
 
 @socketio.on('set_ai_provider')

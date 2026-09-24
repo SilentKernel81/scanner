@@ -40,16 +40,11 @@ anti_glare:
   enabled: false
   method: adaptive  # Options: 'adaptive', 'clahe', 'inpaint'
 
-# Focus Settings
-focus:
-  lock_on_stable: true
-
 # Auto-capture Settings (now controlled via UI button)
 auto_capture:
   delay: 1.0  # Minimum seconds between auto-captures (the next capture also waits until the card is swapped)
   stability_frames: 5  # Consecutive still, in-focus frames required for normal mode
   min_sharpness: 250  # Don't auto-capture below this sharpness (blurry / still focusing); lower it if cards never become "Ready"
-  wait_for_focus: false  # Wait for focus lock
 
 # Fast Scan Mode Settings
 fast_scan:

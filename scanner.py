@@ -10,6 +10,7 @@ import time
 import threading
 import subprocess
 import logging
+import re
 from datetime import datetime
 from config import Config
 from object_detector import ObjectDetector, warp_card
@@ -20,10 +21,54 @@ from settings import Settings
 logger = logging.getLogger('scanner')
 
 
+def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_step=10, settle=0.2):
+    """
+    Find the sharpest manual focus position: a coarse pass over the whole range, then a
+    fine pass around the best coarse position.
+
+    Args:
+        set_focus: callable(position) that moves the lens
+        measure_sharpness: callable() -> sharpness of the current image
+        low, high: focus range of the camera
+        settle: seconds to wait after moving the lens before measuring
+
+    Returns:
+        tuple: (best_position, best_sharpness, {position: sharpness})
+    """
+    scores = {}
+
+    def score(position):
+        set_focus(position)
+        time.sleep(settle)
+        scores[position] = measure_sharpness()
+
+    for position in list(range(low, high + 1, coarse_step)) + [high]:
+        if position not in scores:
+            score(position)
+    best = max(scores, key=scores.get)
+    for position in range(max(low, best - coarse_step + fine_step), min(high, best + coarse_step - fine_step) + 1, fine_step):
+        if position not in scores:
+            score(position)
+    best = max(scores, key=scores.get)
+
+    # The sharpness curve is smooth around its peak: a parabola through the best position
+    # and its neighbours predicts the peak between the fine steps - measure it, keep the better
+    left, right = scores.get(best - fine_step), scores.get(best + fine_step)
+    if left is not None and right is not None:
+        curvature = left - 2 * scores[best] + right
+        if curvature < 0:
+            offset = fine_step * (left - right) / (2 * curvature)
+            peak = int(round(best + max(-fine_step, min(fine_step, offset))))
+            if peak not in scores and low <= peak <= high:
+                score(peak)
+                best = max(scores, key=scores.get)
+    return best, scores[best], scores
+
+
 class CardScanner:
     """Handles camera operations and card scanning"""
     
-    def __init__(self, log_callback=None, model_path='yolov8n.pt'):
+    def __init__(self, log_callback=None, model_path=None):
         self.log_callback = log_callback
         self.camera = None
         self.camera_type = None
@@ -36,7 +81,8 @@ class CardScanner:
         self.capture_thread = None
         self.running = False
         self.object_detector = ObjectDetector(
-            model_path=model_path,
+            # Only used by the optional YOLO detector; downloaded here on first use
+            model_path=model_path or str(Config.DATA_DIR / 'yolov8n.pt'),
             method=Config.DETECTION_METHOD,
             allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE
         )
@@ -116,14 +162,19 @@ class CardScanner:
         # Anti-glare preprocessing (user-toggleable via web interface)
         self.log(f"Anti-glare preprocessing: {('enabled' if Config.ANTI_GLARE_ENABLED else 'disabled')} by default (toggle in UI for foil cards)", level="info")
 
-        # Auto-capture focus requirement
-        if Config.AUTO_CAPTURE_WAIT_FOR_FOCUS and Config.FOCUS_LOCK_ON_STABLE:
-            self.log("Auto-capture will wait for focus lock (ensures sharp images)", level="info")
-
         # Bounding box smoothing to eliminate flicker
         self.smoothed_bbox = None  # Smoothed bounding box coordinates
         self.bbox_smoothing_alpha = 0.3  # Smoothing factor (0.3 = 30% new, 70% old)
         self.bbox_movement_threshold = 5  # Minimum pixel movement to update (reduces jitter)
+
+        # Focus: continuous autofocus, or a manual focus found by a sweep and locked
+        # (the camera-to-card distance is fixed, and continuous autofocus can hunt and
+        # settle on a blurry position when cards are dropped quickly)
+        self.focus_range = None  # (min, max) of the camera's focus_absolute control
+        self.focus_locked_value = self.settings.get('focus_value')  # None = continuous autofocus
+        self.focus_sweep_running = False
+        self.last_focus_sweep = 0.0
+        self.out_of_focus_since = None
 
         # Auto-capture settings (enabled state controlled via UI button)
         self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
@@ -313,6 +364,23 @@ class CardScanner:
             return True
         return self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3
 
+    def _check_focus_drift(self):
+        """
+        With a locked focus, refocus automatically when a still card stays blurry for
+        3 s (the pile grows towards the camera as cards are added).
+        """
+        if self.focus_locked_value is None or self.focus_sweep_running:
+            return
+        movement, _ = getattr(self, 'last_frame_change', (1.0, 0.0))
+        if self.card_in_focus or movement >= 0.01:
+            self.out_of_focus_since = None
+            return
+        now = time.time()
+        if self.out_of_focus_since is None:
+            self.out_of_focus_since = now
+        elif now - self.out_of_focus_since > 3.0 and now - self.last_focus_sweep > 15.0:
+            self.refocus("card out of focus")
+
     def _mark_captured(self):
         """Remember the captured card; auto-capture waits for the next one"""
         self.awaiting_new_card = True
@@ -465,13 +533,13 @@ class CardScanner:
         self._run_v4l2_command('-c', 'sharpness=50')  # Default sharpness
         self._run_v4l2_command('-c', 'zoom_absolute=100')  # Minimum zoom (widest field of view)
 
-        # ALWAYS enable continuous autofocus (critical for sharp images)
-        self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
-        self.log("Camera settings: Reset to defaults (sharpness=50, zoom=100, autofocus=enabled)")
-
-        # Keep autofocus continuous (no locking)
-        if not Config.FOCUS_LOCK_ON_STABLE:
-            self.log("Autofocus: Continuous (no locking)")
+        self.focus_range = self._query_focus_range()
+        if self.focus_locked_value is not None and self.focus_range:
+            self._set_manual_focus(self.focus_locked_value)
+            self.log(f"Camera settings: sharpness=50, zoom=100, focus locked at {self.focus_locked_value}")
+        else:
+            self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
+            self.log("Camera settings: sharpness=50, zoom=100, continuous autofocus")
 
         self.log(f"Resolution: {width}x{height} @ {fps} FPS")
 
@@ -581,6 +649,8 @@ class CardScanner:
                                     self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
                                 else:
                                     self.stable_frames = 0
+
+                                self._check_focus_drift()
 
                                 if self.awaiting_new_card and self._new_card_arrived(gap):
                                     self.awaiting_new_card = False
@@ -708,6 +778,7 @@ class CardScanner:
                             not is_cached_detection and  # Only auto-capture current detections, not cached ones
                             not self.card_under_review and  # Don't auto-capture if card is being reviewed
                             not self.awaiting_new_card and  # Still the card from the last capture
+                            not self.focus_sweep_running and  # Frames are blurry while the lens moves
                             (display_corners is not None or self.is_card_sized(display_bbox)) and
                             self.stable_frames >= self.required_stable_frames):
 
@@ -783,7 +854,8 @@ class CardScanner:
                 'required_frames': self.required_stable_frames,
                 'is_stable': self.stable_frames >= self.required_stable_frames,
                 'awaiting_new_card': self.awaiting_new_card and self.auto_capture_enabled,
-                'in_focus': self.card_in_focus
+                'in_focus': self.card_in_focus,
+                'focusing': self.focus_sweep_running
             }
 
     def capture_card_image_only(self, card_number):
@@ -890,30 +962,105 @@ class CardScanner:
             self.log(f"v4l2-ctl command failed: {e}", level="warning")
             return False
 
-    def _enable_v4l2_autofocus(self):
-        """Enable continuous autofocus using v4l2-ctl"""
-        success = self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
-        if success:
-            self.log("Enabled continuous autofocus via v4l2-ctl")
-        return success
+    def _query_focus_range(self):
+        """(min, max) of the camera's manual focus control, or None if it has none"""
+        try:
+            video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
+            output = subprocess.run(['v4l2-ctl', '-d', video_device, '--list-ctrls'],
+                                    capture_output=True, text=True, timeout=2).stdout
+        except Exception:
+            return None
+        for line in output.splitlines():
+            if line.strip().startswith('focus_absolute'):
+                low, high = re.search(r'min=(-?\d+)', line), re.search(r'max=(-?\d+)', line)
+                if low and high:
+                    return int(low.group(1)), int(high.group(1))
+        return None
+
+    def _set_manual_focus(self, position):
+        """Switch off autofocus and move the lens to `position`"""
+        self._run_v4l2_command('-c', 'focus_automatic_continuous=0')
+        self._run_v4l2_command('-c', f'focus_absolute={int(position)}')
+
+    def _measure_focus_sharpness(self, samples=3):
+        """Median sharpness of the card (or the image centre when there is no card) over a few frames"""
+        values = []
+        for _ in range(samples):
+            with self.frame_lock:
+                frame = self.current_frame
+                detected = self.detected_card
+            if frame is None:
+                time.sleep(0.05)
+                continue
+            if detected is not None:
+                x1, y1, x2, y2 = detected[1]
+                region = frame[y1:y2, x1:x2]
+            else:
+                h, w = frame.shape[:2]
+                region = frame[h // 4:3 * h // 4, w // 4:3 * w // 4]
+            if region.size:
+                small = cv2.resize(region, (320, max(1, int(320 * region.shape[0] / region.shape[1]))), interpolation=cv2.INTER_AREA)
+                values.append(cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var())
+            time.sleep(0.04)
+        return float(np.median(values)) if values else 0.0
+
+    def refocus(self, reason="manual"):
+        """
+        Find the sharpest focus with a sweep and lock it (runs in the background, ~7 s).
+
+        Returns:
+            bool: False if the camera has no manual focus or a sweep is already running
+        """
+        if self.camera_type != 'usb' or not self.focus_range:
+            self.log("This camera has no manual focus control", level="warning")
+            return False
+        if self.focus_sweep_running:
+            return False
+        self.focus_sweep_running = True
+        threading.Thread(target=self._run_focus_sweep, args=(reason,), daemon=True, name="Focus-Sweep").start()
+        return True
+
+    def _run_focus_sweep(self, reason):
+        try:
+            self.log(f"Focusing ({reason}) - finding the sharpest image...")
+            self._run_v4l2_command('-c', 'focus_automatic_continuous=0')
+            set_focus = lambda position: self._run_v4l2_command('-c', f'focus_absolute={position}')
+            low, high = self.focus_range
+            best = sharpness = None
+            # Lens + camera buffer need ~0.4 s before a move shows up in the image; if the
+            # result doesn't hold up, the sweep is repeated with a longer wait
+            for settle in (0.45, 0.8):
+                best, sharpness, _ = focus_sweep(set_focus, self._measure_focus_sharpness, low, high, settle=settle)
+                set_focus(best)
+                time.sleep(settle + 0.2)
+                if self._measure_focus_sharpness() >= 0.7 * sharpness:
+                    break
+            self.focus_locked_value = best
+            self.settings.set('focus_value', best)
+            self.log(f"Focus locked at {best}", level="success")
+        except Exception as e:
+            self.log(f"Focus sweep failed: {e}", level="error")
+        finally:
+            self.focus_sweep_running = False
+            self.last_focus_sweep = time.time()
+            self.out_of_focus_since = None
+
+    def set_continuous_autofocus(self, enabled):
+        """Continuous autofocus on, or find and lock the best focus"""
+        if enabled:
+            self.focus_locked_value = None
+            self.settings.set('focus_value', None)
+            self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
+            self.log("Continuous autofocus on")
+            return True
+        return self.refocus("locking focus")
 
     def reset_focus(self):
-        """Reset focus - re-enable autofocus for refocusing"""
-        if self.camera and self.camera_type == 'usb':
-            try:
-                # Re-enable autofocus to force refocus
-                if self._enable_v4l2_autofocus():
-                    self.log("Focus reset - autofocus re-enabled for refocusing", level="success")
-                    return True
-                else:
-                    self.log("Failed to reset focus via v4l2-ctl", level="warning")
-                    return False
-            except Exception as e:
-                self.log(f"Failed to reset focus: {e}", level="error")
-                return False
-        else:
+        """Reset focus button: find the sharpest focus and lock it"""
+        if self.camera_type != 'usb':
             self.log("Focus reset only available for USB cameras", level="warning")
             return False
+        return self.refocus("manual")
 
     def set_detection_enabled(self, enabled):
         """Enable or disable card detection"""

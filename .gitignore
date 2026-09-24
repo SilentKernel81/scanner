@@ -247,3 +247,6 @@ runs/
 
 # Optional YOLO detector settings (set by the systemd service)
 data/.ultralytics/
+
+# YOLO model weights (AGPL-3.0, downloaded automatically into data/ when YOLO is used)
+*.pt

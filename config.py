@@ -54,13 +54,11 @@ class Config:
     ANTI_GLARE_METHOD = config.get('anti_glare', 'method', default='adaptive')
 
     # Focus settings
-    FOCUS_LOCK_ON_STABLE = config.get('focus', 'lock_on_stable', default=False)
 
     # Auto-capture settings (enabled state now controlled via UI button)
     AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=1.0)
     AUTO_CAPTURE_STABILITY_FRAMES = config.get('auto_capture', 'stability_frames', default=5)
     AUTO_CAPTURE_MIN_SHARPNESS = config.get('auto_capture', 'min_sharpness', default=250)
-    AUTO_CAPTURE_WAIT_FOR_FOCUS = config.get('auto_capture', 'wait_for_focus', default=False)
 
     # Fast scan mode settings
     FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=4)

@@ -17,6 +17,7 @@ class Settings:
         'ai_model': None,  # None means use provider's default
         'auto_capture_enabled': False,  # Controlled via UI button, not config
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
+        'focus_value': None,  # Locked manual focus position (None = continuous autofocus)
         'detection_enabled': True,
     }
 

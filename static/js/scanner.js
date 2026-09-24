@@ -262,7 +262,9 @@ socket.on('focus_reset', function(data) {
     console.log(logSeparator());
     console.log('FOCUS RESET SUCCESS');
     console.log(logSeparator());
-    addLog(timeNow(), 'success', 'Focus reset - camera will refocus');
+    addLog(timeNow(), 'info', data.message || 'Focusing...');
+    // Refocusing locks the focus - reflect that in the settings switch
+    document.getElementById('toggle-autofocus').checked = false;
 });
 
 socket.on('database_update_progress', function(data) {
@@ -368,6 +370,15 @@ function updateDetectionStatus(status) {
         statusText.textContent = 'Manual Mode - Click Capture';
         captureBtn.disabled = false;
         console.log('Capture button ENABLED (detection disabled)');
+        return;
+    }
+
+    // Focus sweep in progress (Refocus button, or automatic when the card stays blurry)
+    if (status.focusing) {
+        statusDiv.classList.add('status-stabilizing');
+        statusIcon.textContent = '🎯';
+        statusText.textContent = 'Focusing - finding the sharpest image...';
+        captureBtn.disabled = true;
         return;
     }
 
@@ -515,6 +526,7 @@ function loadScanSettings() {
         .then(data => {
             fastScanMode = data.auto_add;
             document.getElementById('toggle-fast-scan').checked = data.auto_add;
+            document.getElementById('toggle-autofocus').checked = data.autofocus;
         })
         .catch(error => console.error('Error loading scan settings:', error));
 }
@@ -1064,6 +1076,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (autoScanningEnabled) {
             document.getElementById('auto-scan-hint').textContent = autoScanHint();
         }
+    });
+
+    // Continuous autofocus on/off (off = find the sharpest focus and lock it)
+    document.getElementById('toggle-autofocus').addEventListener('change', function(e) {
+        socket.emit('set_autofocus', {enabled: e.target.checked});
     });
 
     // Toggle anti-glare

@@ -101,7 +101,8 @@ Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number
 `python3-picamera2` with apt and create the venv with `--system-site-packages`.
 
 The optional YOLO fallback detector (`detection.method: auto` or `yolo`) needs
-`requirements-yolo.txt`, which pulls in PyTorch. With the default outline detection it is not
+`requirements-yolo.txt`, which pulls in PyTorch; its model (`yolov8n.pt`) is downloaded into
+`data/` on first use. With the default outline detection it is not
 needed; if it's configured but not installed, the scanner logs a warning and uses outline
 detection.
 
@@ -200,6 +201,11 @@ condition and finish increases its quantity instead of creating a duplicate.
   `detection.method: auto` (YOLO fallback) or capture them with auto-detection turned off.
 - **Keep the whole card in view** with a small margin. If an edge is cut off, the card isn't
   detected - and the foil marker in the bottom-left corner can't be read.
+- **Focus**: click **Refocus** once with a card in the box. The scanner sweeps through the
+  camera's focus range (~10 s), locks the sharpest position and remembers it - no autofocus
+  hunting when cards are dropped quickly. If a card stays blurry for 3 s (the pile grows toward
+  the camera) it refocuses by itself. **Settings → Camera autofocus** switches back to the
+  camera's continuous autofocus.
 - **Light** evenly from above; the **Anti-glare** option helps with reflective foils.
 - Cards printed before the ★/• convention (roughly before 2020) have no foil marker; for
   those, set the finish yourself when both versions exist.
@@ -257,7 +263,7 @@ Logs are written to `data/logs/`:
 and set `camera.usb_index`. Only one program can use the camera at a time.
 
 **Auto scanning never captures** - the status tells you why: *Focusing* (image not sharp
-enough - check focus, or lower `auto_capture.min_sharpness`), *Stabilizing* (card still
+enough - click **Refocus**, or lower `auto_capture.min_sharpness`), *Stabilizing* (card still
 moving), or *Captured - drop the next card* (it's waiting for a new card to land). The log
 shows *New card detected* with the measured jump and image change for each drop.
 
@@ -328,6 +334,12 @@ The web interface uses these endpoints, which you can also call directly:
 
 Scanning, searching and settings go through Socket.IO events (`capture_card`, `search_card`,
 `select_printing`, `add_to_inventory`, `toggle_auto_capture`, ...); see `app.py`.
+
+## License
+
+[MIT](LICENSE) - free to use, modify and share, including commercially, as long as the
+copyright notice is kept. The optional YOLO detector (Ultralytics library and model) is not part
+of this repository and is licensed separately under AGPL-3.0.
 
 ## Acknowledgments
 

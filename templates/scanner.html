@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=13">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -91,8 +91,8 @@
                 <section class="panel video-section">
                     <div class="panel-header">
                         <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> Camera</h2>
-                        <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Re-enable autofocus">
-                            <svg class="icon"><use href="#i-focus"/></svg> Reset focus
+                        <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Find the sharpest focus and lock it (~7 s)">
+                            <svg class="icon"><use href="#i-focus"/></svg> Refocus
                         </button>
                     </div>
                     <div class="video-container">
@@ -163,6 +163,13 @@
                             <span class="switch-desc">Auto-scanned cards go straight to the inventory (uncertain matches pause for review). Off: confirm each card.</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-fast-scan" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Camera autofocus</span>
+                            <span class="switch-desc">Off: the sharpest focus is found once and locked - no hunting when cards are dropped quickly. Refocus finds it again.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-autofocus" checked>
                     </label>
                     <label class="switch-row">
                         <span class="switch-text">
@@ -321,7 +328,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=12"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=12"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=13"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=13"></script>
 </body>
 </html>
