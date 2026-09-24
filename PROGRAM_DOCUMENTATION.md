@@ -337,10 +337,25 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   (lens + camera buffer), so each position waits 0.45 s; if re-measuring the chosen position
   doesn't confirm it, the sweep repeats with 0.8 s. About 10 s in total. The position is saved
   (`focus_value` in `data/settings.json`) and restored on startup.
+- **The lens has play**: the same `focus_absolute` reached from above measured up to 5× blurrier
+  than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
+  or restored position is approached from 30 below (`_move_focus`).
+- **Focus probe while scanning** (`_run_focus_probe`, every `auto_capture.refocus_every`
+  captures, default 3): the best position drifts - in one session it moved from 395 to 430 in
+  about 45 minutes (lens warming up, pile height), and the text in the captures became ~10×
+  blurrier while the card as a whole still passed `min_sharpness`, so the automatic refocus
+  never started. In the gap after a capture (~1 s, the image is already taken) the probe
+  measures the card here and one step (10) away and keeps the sharper position (> 5% better);
+  an improvement keeps the direction for the next probe, otherwise the next one tries the other
+  way. Near the peak the sharpness changes ~3× per step, far more than the noise. A probe blurs
+  only slightly (measured at ±40: card movement ≤ 0.4%, image change ≤ 0.1, against 3% / 0.3
+  for a drop), so drops keep being detected; a drop during a probe discards it. Simulated with
+  30 drops every 1.5 s and a peak 35 away: every card captured, focus at the peak after 9 cards.
 - **Automatic refocus** (`_check_focus_drift`): with a locked focus, a card that stays still but
   below `auto_capture.min_sharpness` for 3 s triggers a new sweep (at most every 15 s) - the pile
   grows toward the camera as cards are added.
-- During a sweep the status shows *Focusing* and auto-capture pauses.
+- During a sweep the status shows *Focusing* and auto-capture pauses; new-card detection is off
+  until 0.6 s after it (the heavy blur changes the card image like a drop would).
 - **Settings → Camera autofocus** (`set_autofocus`) returns to continuous autofocus and forgets
   the locked position; switching it off runs a sweep.
 

@@ -218,8 +218,9 @@ condition and finish increases its quantity instead of creating a duplicate.
   detected - and the foil marker in the bottom-left corner can't be read.
 - **Focus**: click **Refocus** once with a card in the box. The scanner sweeps through the
   camera's focus range (~10 s), locks the sharpest position and remembers it - no autofocus
-  hunting when cards are dropped quickly. If a card stays blurry for 3 s (the pile grows toward
-  the camera) it refocuses by itself. **Settings → Camera autofocus** switches back to the
+  hunting when cards are dropped quickly. While you scan, every few cards it checks whether a
+  slightly different focus is sharper and follows it (the best focus drifts as the pile grows
+  and the camera warms up); if a card stays blurry for 3 s it refocuses completely. **Settings → Camera autofocus** switches back to the
   camera's continuous autofocus.
 - **Light** evenly from above; the **Anti-glare** option helps with reflective foils.
 - Cards printed before the ★/• convention (roughly before 2020) have no foil marker; for
@@ -239,6 +240,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
+| `auto_capture.refocus_every` | `3` | Every this many captures, check if a focus one step away is sharper and follow it; `0` = off |
 | `fast_scan.stability_frames` | `4` | Same, when adding cards automatically (~0.15 s, lets a dropped card stop sliding) |
 | `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |

@@ -187,6 +187,10 @@ class CardScanner:
         self.focus_sweep_running = False
         self.last_focus_sweep = 0.0
         self.out_of_focus_since = None
+        self.captures_since_focus = 0  # Captures since the last focus sweep / probe (refocus_every)
+        self.focus_probe_running = False  # Short focus probe between two drops
+        self.focus_probe_direction = 1  # Probe up (+1) or down (-1) next
+        self.disturbed_during_focus = False  # A card was dropped while probing
 
         # Auto-capture settings (enabled state controlled via UI button)
         self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
@@ -382,7 +386,7 @@ class CardScanner:
         With a locked focus, refocus automatically when a still card stays blurry for
         3 s (the pile grows towards the camera as cards are added).
         """
-        if self.focus_locked_value is None or self.focus_sweep_running:
+        if self.focus_locked_value is None or self.focus_sweep_running or self.focus_probe_running:
             return
         movement, _ = getattr(self, 'last_frame_change', (1.0, 0.0))
         if self.card_in_focus or movement >= 0.01:
@@ -701,7 +705,13 @@ class CardScanner:
 
                                 self._check_focus_drift()
 
-                                if self.awaiting_new_card and self._new_card_arrived(gap):
+                                # A full sweep blurs the image heavily: not a new card. A focus probe only
+                                # blurs slightly (measured +-40: movement <= 0.4%, image change <= 0.1),
+                                # so drops keep being detected - and spoil the probe's measurement
+                                focus_moving = self.focus_sweep_running or time.time() - self.last_focus_sweep < 0.6
+                                if self.focus_probe_running and self.card_disturbed:
+                                    self.disturbed_during_focus = True
+                                if self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
                                     self.awaiting_new_card = False
                                     self.stable_frames = 0  # the new card must settle first
                                     if self.auto_capture_enabled:
@@ -829,6 +839,7 @@ class CardScanner:
                             not self.card_under_review and  # Don't auto-capture if card is being reviewed
                             not self.awaiting_new_card and  # Still the card from the last capture
                             not self.focus_sweep_running and  # Frames are blurry while the lens moves
+                            not self.focus_probe_running and
                             (display_corners is not None or self.is_card_sized(display_bbox)) and
                             self.stable_frames >= self.required_stable_frames):
 
@@ -964,6 +975,8 @@ class CardScanner:
 
         card_image, card_name, is_warped = self.get_detected_card()
         self._mark_captured()  # don't auto-capture this card again
+        if is_warped:
+            self._count_capture()
 
         if card_image is None:
             # No card detected - capture full frame
@@ -1082,15 +1095,33 @@ class CardScanner:
     def _set_manual_focus(self, position):
         """Switch off autofocus and move the lens to `position`"""
         self._run_v4l2_command('-c', 'focus_automatic_continuous=0')
-        self._run_v4l2_command('-c', f'focus_absolute={int(position)}')
+        self._move_focus(position)
+
+    def _move_focus(self, position, from_below=True):
+        """
+        Move the lens to `position`. The lens has play: the same position reached from above
+        measured up to 5x blurrier than from below, so sweeps measure while moving up and
+        the final position is approached from below too.
+        """
+        position = int(position)
+        if from_below and self.focus_range:
+            self._run_v4l2_command('-c', f'focus_absolute={max(self.focus_range[0], position - 30)}')
+            time.sleep(0.15)
+        self._run_v4l2_command('-c', f'focus_absolute={position}')
 
     def _measure_focus_sharpness(self, samples=3):
         """Median sharpness of the card (or the image centre when there is no card) over a few frames"""
         values = []
+        last_id = None
         for _ in range(samples):
+            # Each sample from a new frame
+            deadline = time.time() + 0.3
+            while self.frame_id == last_id and time.time() < deadline:
+                time.sleep(0.01)
             with self.frame_lock:
                 frame = self.current_frame
                 detected = self.detected_card
+                last_id = self.frame_id
             if frame is None:
                 time.sleep(0.05)
                 continue
@@ -1103,7 +1134,6 @@ class CardScanner:
             if region.size:
                 small = cv2.resize(region, (320, max(1, int(320 * region.shape[0] / region.shape[1]))), interpolation=cv2.INTER_AREA)
                 values.append(cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var())
-            time.sleep(0.04)
         return float(np.median(values)) if values else 0.0
 
     def refocus(self, reason="manual"):
@@ -1116,7 +1146,7 @@ class CardScanner:
         if self.camera_type != 'usb' or not self.focus_range:
             self.log("This camera has no manual focus control", level="warning")
             return False
-        if self.focus_sweep_running:
+        if self.focus_sweep_running or self.focus_probe_running:
             return False
         self.focus_sweep_running = True
         threading.Thread(target=self._run_focus_sweep, args=(reason,), daemon=True, name="Focus-Sweep").start()
@@ -1133,12 +1163,13 @@ class CardScanner:
             # result doesn't hold up, the sweep is repeated with a longer wait
             for settle in (0.45, 0.8):
                 best, sharpness, _ = focus_sweep(set_focus, self._measure_focus_sharpness, low, high, settle=settle)
-                set_focus(best)
+                self._move_focus(best)
                 time.sleep(settle + 0.2)
                 if self._measure_focus_sharpness() >= 0.7 * sharpness:
                     break
             self.focus_locked_value = best
             self.settings.set('focus_value', best)
+            self.captures_since_focus = 0
             self.log(f"Focus locked at {best}", level="success")
         except Exception as e:
             self.log(f"Focus sweep failed: {e}", level="error")
@@ -1146,6 +1177,51 @@ class CardScanner:
             self.focus_sweep_running = False
             self.last_focus_sweep = time.time()
             self.out_of_focus_since = None
+
+    def _count_capture(self):
+        """After a capture (image already taken): probe the focus every refocus_every captures"""
+        self.captures_since_focus += 1
+        every = Config.AUTO_CAPTURE_REFOCUS_EVERY
+        if (every and self.captures_since_focus >= every and self.focus_locked_value is not None
+                and self.camera_type == 'usb' and self.focus_range
+                and not self.focus_sweep_running and not self.focus_probe_running):
+            self.captures_since_focus = 0
+            self.focus_probe_running = True
+            threading.Thread(target=self._run_focus_probe, daemon=True, name="Focus-Probe").start()
+
+    def _run_focus_probe(self, step=10, settle=0.5, margin=1.05):
+        """
+        Follow the best focus while cards are being dropped (it drifts as the pile grows and
+        the lens warms up): in the gap after a capture (~1 s), compare the card's sharpness
+        here and one step away, and keep the sharper position. An improvement keeps the
+        direction for the next probe; otherwise the next probe tries the other way. A card
+        dropped meanwhile spoils the comparison - the probe is then dropped.
+        """
+        low, high = self.focus_range
+        start = self.focus_locked_value
+        direction = self.focus_probe_direction
+        if not low <= start + direction * step <= high:
+            direction = -direction
+        probe = start + direction * step
+        try:
+            self.disturbed_during_focus = False
+            here = self._measure_focus_sharpness()
+            self._move_focus(probe)
+            time.sleep(settle)
+            there = self._measure_focus_sharpness()
+            if not self.disturbed_during_focus and there > here * margin:
+                self.focus_locked_value = probe
+                self.settings.set('focus_value', probe)
+                self.focus_probe_direction = direction
+                self.log(f"Focus adjusted {start} -> {probe} ({there / max(here, 1e-6):.2f}x sharper)")
+            else:
+                self._move_focus(start)
+                if not self.disturbed_during_focus:
+                    self.focus_probe_direction = -direction
+        except Exception as e:
+            self.log(f"Focus probe failed: {e}", level="warning")
+        finally:
+            self.focus_probe_running = False
 
     def set_continuous_autofocus(self, enabled):
         """Continuous autofocus on, or find and lock the best focus"""

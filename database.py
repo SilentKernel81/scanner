@@ -97,10 +97,15 @@ def _one_digit_off(read_number, collector_number):
     Whether a collector number read from a card differs from a printing's in exactly one digit
     ("0189" vs "188") - a blurry digit, not another card
     """
-    read, actual = _leading_number(read_number), _leading_number(collector_number)
-    if read is None or actual is None:
+    read = re.search(r'\d+', read_number or '')
+    actual = _leading_number(collector_number)
+    if not read or actual is None:
         return False
-    read, actual = str(read), str(actual)
+    # Compare as printed: modern cards show 4 digits ("0186"), so a leading 0 misread as
+    # "6186" is one digit off too
+    read = read.group()
+    actual = str(actual).zfill(len(read)) if len(read) == 4 else str(actual)
+    read = read if len(read) == 4 else read.lstrip('0') or '0'
     return len(read) == len(actual) and sum(a != b for a, b in zip(read, actual)) == 1
 
 

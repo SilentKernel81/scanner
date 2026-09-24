@@ -45,6 +45,10 @@ auto_capture:
   delay: 1.0  # Minimum seconds between auto-captures (the next capture also waits until the card is swapped)
   stability_frames: 5  # Consecutive still, in-focus frames required for normal mode
   min_sharpness: 250  # Don't auto-capture below this sharpness (blurry / still focusing); lower it if cards never become "Ready"
+  # With a locked focus: every this many captures, compare the focus one step away in the
+  # gap before the next drop (~1 s) and keep the sharper one - the best position drifts as
+  # the pile grows and the lens warms up. 0 = never
+  refocus_every: 3
 
 # Fast Scan Mode Settings
 fast_scan:
