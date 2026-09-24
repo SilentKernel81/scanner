@@ -74,6 +74,7 @@ class Config:
     VISION_AI_ENABLED = config.get('vision_ai', 'enabled', default=True)
     # Ask the AI about the star (foil) / dot marker on outline-detected captures
     VISION_AI_DETECT_FOIL = config.get('vision_ai', 'detect_foil', default=True)
+    VISION_AI_IMAGE_SIZE = int(config.get('vision_ai', 'image_size', default=1024))
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://192.168.1.60:11434/v1/chat/completions')

@@ -130,7 +130,7 @@ requests, so "thinking" models such as `qwen3.5` answer in about a second instea
 reasoning for tens of seconds. The model is preloaded when you start auto scanning and kept
 loaded for 30 minutes, so the first card doesn't wait ~10 s for it to load.
 
-`qwen3.5:9b` is the recommended model (about 1.6 s per card on a desktop GPU). It needs more
+`qwen3.5:9b` is the recommended model (about 1 s per card on a desktop GPU). It needs more
 than 6 GB of GPU memory; on smaller GPUs `qwen3.5:4b` works, but it is slower on weak GPUs and
 more often mistakes regular cards for foil - see PROGRAM_DOCUMENTATION.md for the comparison.
 
@@ -243,6 +243,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |
+| `vision_ai.image_size` | `1024` | Longest side of the card image sent for identification (larger = slower, not more accurate) |
 | `vision_ai.local.endpoint` | | Local AI server (the model is chosen in Settings) |
 | `flask.host` / `port` | `0.0.0.0` / `5000` | Web server address |
 | `cleanup.enabled` / `days` | `true` / `7` | Delete scanned images older than N days on startup |

@@ -178,16 +178,19 @@ a card dropped meanwhile is captured right after.
 
 ## Identification (vision AI)
 
-`CardIdentifier.identify_card()` sends the flat card image (JPEG, max 2048 px) with a prompt
-asking for three values from fixed places on the card:
+`CardIdentifier.identify_card()` sends the flat card image (JPEG, longest side
+`vision_ai.image_size`, 1024 px) with a prompt asking for three values from fixed places on the
+card:
 
 ```
 NAME: <card name>            top of the card
-NUMBER: <4-digit number>     bottom-left, line 1 ("U 0014")
+NUMBER: <collector number>   bottom-left, line 1 ("U 0014")
 SET: <set code>              bottom-left, line 2 ("HOB • EN")
 ```
 
-The parser also accepts the three values without labels (some local models drop them).
+The parser also accepts the values without labels, or with only the first label missing
+(`Card Name / NUMBER: … / SET: …` - qwen3.5:9b answers like that for about 1 card in 10). Ollama
+answers are capped (`num_predict`), so a model that starts reasoning aloud can't take seconds.
 
 ### Prompts
 
@@ -209,9 +212,21 @@ text in the editor, without saving, and shows the raw answer, how it was read, a
 match it would get (confirmed → added automatically, or review). The foil test needs a capture
 with a detected outline.
 
-Moving the answer format after the rules (the old prompt had the rules after it) made no
-difference: on 60 recorded cards qwen3.5:4b gave the same result with both versions (58/60 the
-same printing as qwen3.5:9b).
+**The built-in identification prompt has no example values.** With examples ("E 0367",
+"LTR · EN", "Lightning Bolt / 0367 / M21") models copied them on blurry cards instead of
+answering Unknown - once producing a real but wrong LTR #367 printing. Measured on 90 recorded
+scans (the 4 blurry ones checked by eye), with the native Ollama API:
+
+| Prompt, image | qwen3.5:9b (server) | qwen3.5:4b (RTX 3050) |
+|---|---|---|
+| old prompt with examples, 2048 px | 86/90 correct, 84 confirmed, 1.42 s | - |
+| same, answer format moved last, 2048 px | 87/90, 85 confirmed, 1.41 s | 89/90, 85 confirmed, 2.42 s |
+| **no examples, 1024 px (built-in)** | **89/90, 83 confirmed, 0.92 s** | **89/90, 86 confirmed, 1.50 s** |
+| no examples, 2048 px | 88/90, 84 confirmed, 1.27 s | 90/90, 85 confirmed, 2.23 s |
+| no examples, 768 px | 87/90, 80 confirmed, 0.75 s | 88/90, 83 confirmed, 1.13 s |
+
+No variant produced a confirmed (auto-added) wrong printing. Halving the image cuts the image
+tokens (~1,400 → ~900), which is most of the prompt; shortening the text saved ~350 tokens.
 
 Providers share one request function per API (`_ask_gemini`, `_ask_openai`, `_ask_anthropic`,
 `_ask_local`). For Ollama, requests set `think: false` (thinking models otherwise spend the
@@ -356,10 +371,11 @@ Measured on an x86-64 laptop with an Anker PowerConf C200 at 2560 × 1440 and a 
 | App CPU while scanning | ~20–25% of one core - was ~120% (full-size decode, 8 OpenCV threads) |
 | Outline detection | ~3 ms per frame (YOLO on CPU: ~550 ms) |
 | Card landed → capture | ~0.15–0.5 s (settling) |
-| AI identification | 0.7–1.3 s; the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
-| Smaller images to the AI | tested and rejected: 1024 px was 30% faster but misread 2 of 16 cards |
+| AI identification | ~0.9 s (qwen3.5:9b, 1024 px image); the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
+| Set + number lookup | 0.1 ms; fuzzy name search ~90 ms |
 
-Vision models compared on 90 scans (identification + foil check):
+Vision models compared on 90 scans (identification + foil check, before the prompt and image
+size change - identification alone is now 0.9 s / 1.5 s, see *Prompts*):
 
 | Model | Hardware | Time per card | Notes |
 |---|---|---|---|
@@ -367,7 +383,6 @@ Vision models compared on 90 scans (identification + foil check):
 | `qwen3.5:4b` (Q4_K_M, 3.4 GB) | laptop RTX 3050 6 GB (fits entirely) | 3.4 s | image processing ~920 vs ~2,560 tokens/s on the server; called 3 regular cards foil |
 
 The 9B doesn't fit in a 6 GB GPU (it would be split with the CPU); the 4B is a usable fallback.
-| Set + number lookup | 0.1 ms; fuzzy name search ~90 ms |
 
 ## Known limitations
 

@@ -131,7 +131,8 @@ class CardIdentifier:
             else:
                 prompt = prompts.build('identify', instructions)
             self.log(f"Sending image to {self.provider} ({self.model}) for identification...")
-            response_text = self._ask(self._image_array_to_base64(image_array), prompt, max_tokens=100)
+            image = self._image_array_to_base64(image_array, max_dimension=Config.VISION_AI_IMAGE_SIZE)
+            response_text = self._ask(image, prompt, max_tokens=100)
             result = self._parse_response(response_text, f"{self.provider} ({self.model})") if response_text else None
 
             # Log processing time
@@ -217,10 +218,13 @@ class CardIdentifier:
         set_match = re.search(r'SET:\s*([A-Za-z0-9]{2,5})\s*(?:\n|$)', response_text, re.IGNORECASE)
         set_code = set_match.group(1).upper() if set_match else ""
 
-        # Some models drop the labels and answer with bare lines: name / number / set
+        # Some models drop the labels and answer with bare lines: name / number / set,
+        # or drop only the first one: name / NUMBER: ... / SET: ...
         if not name_match:
             lines = [line.strip() for line in response_text.splitlines() if line.strip()]
-            if 2 <= len(lines) <= 3 and re.fullmatch(r'[A-Za-z]?\s*\d{1,4}[a-z]?', lines[1]):
+            if number_match and lines and not re.match(r'(NUMBER|SET)\s*:', lines[0], re.IGNORECASE):
+                name_match = re.match(r'(.+)', lines[0])
+            elif 2 <= len(lines) <= 3 and re.fullmatch(r'[A-Za-z]?\s*\d{1,4}[a-z]?', lines[1]):
                 name_match = re.match(r'(.+)', lines[0])
                 number_match = re.match(r'(.+)', lines[1])
                 if len(lines) == 3 and re.fullmatch(r'[A-Za-z0-9]{2,5}', lines[2]):
@@ -334,7 +338,7 @@ class CardIdentifier:
         """Local vision AI server (Ollama, vLLM, LM Studio, ...)"""
         # Ollama: prefer its native /api/chat endpoint (better vision support)
         if '/v1/chat/completions' in self.local_endpoint:
-            answer = self._ask_ollama_native(base64_image, prompt)
+            answer = self._ask_ollama_native(base64_image, prompt, max_tokens)
             if answer:
                 return answer
             self.log("Ollama native API failed, trying OpenAI-compatible endpoint...", level="warning")
@@ -342,7 +346,7 @@ class CardIdentifier:
         # OpenAI-compatible endpoint (vLLM, LM Studio, newer Ollama)
         return self._ask_openai_compatible(base64_image, prompt, max_tokens)
 
-    def _ask_ollama_native(self, base64_image, prompt):
+    def _ask_ollama_native(self, base64_image, prompt, max_tokens):
         """Ollama's native /api/chat endpoint"""
         ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
         payload = {
@@ -351,7 +355,9 @@ class CardIdentifier:
             "stream": False,
             "think": False,  # Thinking models otherwise spend the token budget reasoning and return no answer
             "keep_alive": self.OLLAMA_KEEP_ALIVE,
-            "options": {"temperature": 0}
+            # num_predict caps the answer: a model that starts reasoning aloud would
+            # otherwise write hundreds of tokens (seconds) before answering
+            "options": {"temperature": 0, "num_predict": max(max_tokens, 50)}
         }
 
         try:

@@ -30,42 +30,17 @@ BUILT_IN = {
     'mtg': {
         'identify': {
             'label': 'Card identification',
-            'instructions': """This is a Magic: The Gathering card. Please identify THREE pieces of information:
-
-1. The card name (located at the top-left of the card)
-2. The collector number (located at the BOTTOM-LEFT corner of the card)
-3. The set code (the 3-4 character code at the start of LINE 2 in the BOTTOM-LEFT corner)
-
-IMPORTANT INSTRUCTIONS FOR COLLECTOR NUMBER:
-- The collector number is at the BOTTOM-LEFT corner in a TWO-LINE format:
-  * LINE 1: A letter followed by 4-digit number (e.g., "E 0367", "D 0045", "B 0123")
-  * LINE 2: Set code · Language (e.g., "LTR · EN", "M21 · EN")
-- Look for this two-line pattern to identify the correct location
-- Return ONLY the 4-digit number from Line 1 (e.g., "0367" not "E 0367")
-- The letter is just a visual marker to help you find it - don't include it
-- DO NOT confuse it with the mana cost symbols in the TOP-RIGHT corner
-- The mana cost has symbols like {1}, {W}, {U}, {B}, {R}, {G} - IGNORE these completely
-
-IMPORTANT INSTRUCTIONS FOR SET CODE:
-- It is the first thing on LINE 2, before the separator and language (e.g. "LTR" in "LTR · EN")
-- Return only the code, e.g. "LTR", "M21", "HOB" - if you cannot read it, return "Unknown"
-
-Rules:
-- If you see a double-faced card, return the front face name
-- Return ONLY the 4-digit number (e.g., "0367", "0045", "0123")
-- If you cannot find the collector number, return "Unknown"
-- NEVER use the top-right corner mana cost as the collector number""",
-            'answer_format': """Return your answer in EXACTLY this format:
-NAME: [card name]
-NUMBER: [4-digit number only]
-SET: [set code]
-
-Example response:
-NAME: Lightning Bolt
-NUMBER: 0367
-SET: M21
-
-Your response:""",
+            # No example values on purpose: on blurry cards, models copied them ("0367",
+            # "LTR") instead of saying they could not read the card
+            'instructions': """This is a Magic: The Gathering card. Read three things:
+- NAME: the card name at the top-left (for a double-faced card, the front face).
+- NUMBER: the collector number at the bottom-left corner, first line: a letter and a number - give only the number, with its leading zeros. It is not the mana cost at the top-right.
+- SET: the set code (3-4 letters or digits) at the start of the bottom-left second line, before the language code.
+Copy exactly what is printed. If a value is blurry or unreadable, write Unknown - do not guess.""",
+            'answer_format': """Answer with exactly three lines:
+NAME: <card name>
+NUMBER: <collector number>
+SET: <set code>""",
         },
         # Modern cards print a star instead of a dot between set code and language on
         # foil copies; asked about a zoomed crop of the bottom-left corner

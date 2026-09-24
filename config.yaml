@@ -57,6 +57,9 @@ vision_ai:
   # Check the foil marker (★ = foil, • = non-foil) next to the set code - one extra small
   # AI request per card, only for captures found by outline detection
   detect_foil: true
+  # Longest side (px) of the card image sent for identification. 1024 was as accurate as
+  # 2048 and ~35% faster with qwen3.5 (fewer image tokens); 768 lost accuracy
+  image_size: 1024
 
   # API keys are read from environment variables (GEMINI_API_KEY, OPENAI_API_KEY,
   # ANTHROPIC_API_KEY) - put them in .env (see .env.example)
@@ -64,9 +67,7 @@ vision_ai:
   # Local AI Settings (self-hosted models)
   local:
     endpoint: http://192.168.1.23:11434/v1/chat/completions
-    model: llava:13b
-    # Note: Local models have ~40-50% accuracy on collector numbers
-    # Consider using Gemini Flash for better accuracy (~95%)
+    model: qwen3.5:9b  # default until a model is chosen in Settings
 
 # Flask Settings
 flask:
