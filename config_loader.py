@@ -59,24 +59,6 @@ class ConfigLoader:
                 return default
         return value
 
-    def set(self, *keys, value):
-        """Set nested configuration value (in memory only)"""
-        if len(keys) == 0:
-            return
-
-        config = self.config
-        for key in keys[:-1]:
-            if key not in config:
-                config[key] = {}
-            config = config[key]
-
-        config[keys[-1]] = value
-
-    def save(self):
-        """Save current configuration back to YAML file"""
-        with open(self.config_file, 'w') as f:
-            yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
-
 
 # Create global config instance
 _config_loader = None

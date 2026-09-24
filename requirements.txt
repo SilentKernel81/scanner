@@ -1,41 +1,20 @@
-# Card Scanner Dependencies - NumPy 1.x Compatible
+# Card Scanner Dependencies
+# Tested with Python 3.12. For a CPU-only PyTorch (much smaller download), install it first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Core Web Framework
-flask==3.0.0
-flask-socketio==5.3.5
-python-socketio[client]==5.10.0
+# Web server (SocketIO runs in threading mode - no eventlet/gevent needed)
+flask>=3.0
+flask-socketio>=5.3
 
-# WSGI Server
-eventlet==0.33.3
-gevent==23.9.1
-gevent-websocket==0.10.1
+# Computer vision
+numpy
+opencv-python>=4.10
+ultralytics>=8.3
 
-# NumPy (must be 1.x for OpenCV compatibility)
-numpy==1.26.4
-
-# Computer Vision
-opencv-python==4.8.1.78
-
-# Raspberry Pi Camera (optional - only needed for Pi Camera)
-# picamera2==0.3.16
-
-# AI Object Detection
-ultralytics
-torch
-
-# Image Processing
-Pillow==10.1.0
-
-# HTTP Requests
-requests==2.31.0
-
-# Additional dependencies
-bidict==0.22.1
-
-# Configuration
+# Image processing / HTTP / config
+Pillow
+requests
 pyyaml>=6.0
-
-# Vision AI for card identification
-google-generativeai>=0.3.0
-
 python-dotenv
+
+# Raspberry Pi Camera (optional - install via apt on the Pi: python3-picamera2)

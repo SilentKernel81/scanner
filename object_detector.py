@@ -18,22 +18,6 @@ class ObjectDetector:
         self.model = YOLO(model_path)
         self.names = self.model.names
 
-    def predict(self, image_path):
-        """
-        Performs object detection on an image file.
-
-        Args:
-            image_path (str): The path to the image file.
-
-        Returns:
-            tuple: A tuple containing (bounding_box, card_name, confidence), or (None, "", 0) if no card is detected.
-        """
-        img = cv2.imread(image_path)
-        if img is None:
-            return None, "", 0
-
-        return self.predict_frame(img)
-
     def predict_frame(self, frame, conf_threshold=0.1, verbose=False, target_size=640):
         """
         Performs object detection on a raw image frame.

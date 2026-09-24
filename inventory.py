@@ -221,7 +221,7 @@ class InventoryManager:
             cursor = self.conn.cursor()
             cursor.execute('''
                 SELECT * FROM inventory
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, id DESC
             ''')
 
             cards = []
@@ -273,7 +273,7 @@ class InventoryManager:
             # Get recent cards
             cursor.execute('''
                 SELECT * FROM inventory
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, id DESC
                 LIMIT 5
             ''')
 
@@ -577,26 +577,6 @@ class InventoryManager:
                 'errors': 0
             }
 
-    def get_color_breakdown(self):
-        """Get breakdown of cards by color identity"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                SELECT color_identity, SUM(quantity) as count
-                FROM inventory
-                GROUP BY color_identity
-            ''')
-
-            color_counts = {}
-            for row in cursor.fetchall():
-                color_counts[row['color_identity']] = row['count']
-
-            return color_counts
-
-        except Exception as e:
-            self.log(f"Error analyzing colors: {e}", level="error")
-            return {}
-
     def get_detailed_stats(self):
         """Get detailed inventory statistics including color breakdown"""
         try:
@@ -699,7 +679,6 @@ class InventoryManager:
                   AND condition = ?
                   AND foil = ?
                   AND surge = ?
-                LIMIT 1
             ''', (
                 card['Card Name'],
                 card['Set'],
@@ -717,9 +696,6 @@ class InventoryManager:
         except Exception as e:
             self.log(f"Error deleting card: {e}", level="error")
             return False
-
-    # NOTE: Quantity updates now use update_card() method instead
-    # The update_quantity() method was removed as update_card() provides more comprehensive functionality
 
     def update_card(self, index, quantity=None, condition=None, is_foil=None, is_surge=None, split_quantity=None):
         """

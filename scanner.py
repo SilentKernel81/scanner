@@ -10,7 +10,6 @@ import threading
 import subprocess
 import logging
 from datetime import datetime
-import numpy as np
 from config import Config
 from object_detector import ObjectDetector
 from card_identifier import CardIdentifier
@@ -40,7 +39,6 @@ class CardScanner:
         # Frame stability tracking (for auto-capture)
         self.stable_frames = 0
         self.required_stable_frames = 5  # Require 5 stable frames before capture
-        self.stable_since = None  # Track when card became stable
         self.frames_since_card_lost = 0  # Track frames without card detection
 
         # User settings
@@ -49,11 +47,10 @@ class CardScanner:
         # Vision AI for card identification
         self.card_identifier = None
         if Config.VISION_AI_ENABLED:
+            # Load saved provider and model from settings
+            saved_provider = self.settings.get_ai_provider()
+            saved_model = self.settings.get_ai_model()
             try:
-                # Load saved provider and model from settings
-                saved_provider = self.settings.get_ai_provider()
-                saved_model = self.settings.get_ai_model()
-
                 self.card_identifier = CardIdentifier(
                     provider=saved_provider,
                     model=saved_model,
@@ -63,14 +60,15 @@ class CardScanner:
             except Exception as e:
                 # Fallback to config default if saved settings fail
                 self.log(f"Failed to load saved AI settings, using config defaults: {e}", level="warning")
-                self.card_identifier = CardIdentifier(
-                    provider=Config.VISION_AI_PROVIDER,
-                    log_callback=log_callback
-                )
-                self.log(f"Vision AI enabled ({Config.VISION_AI_PROVIDER})", level="success")
-            except Exception as e:
-                self.log(f"Vision AI initialization failed: {e}", level="warning")
-                self.log("Continuing without AI identification", level="warning")
+                try:
+                    self.card_identifier = CardIdentifier(
+                        provider=Config.VISION_AI_PROVIDER,
+                        log_callback=log_callback
+                    )
+                    self.log(f"Vision AI enabled ({Config.VISION_AI_PROVIDER})", level="success")
+                except Exception as e:
+                    self.log(f"Vision AI initialization failed: {e}", level="warning")
+                    self.log("Continuing without AI identification", level="warning")
 
         # Detection settings
         self.enable_detection = True  # Toggle auto-detection
@@ -110,9 +108,6 @@ class CardScanner:
         # Auto-capture settings (enabled state controlled via UI button)
         self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
         self.auto_capture_delay = Config.AUTO_CAPTURE_DELAY
-        self.auto_capture_stability_frames = Config.AUTO_CAPTURE_STABILITY_FRAMES
-        self.stable_detection_count = 0
-        self.auto_capture_ready = False
         self.last_auto_capture_time = 0
         self.auto_capture_callback = None
         self.card_under_review = False  # Prevent auto-capture while card is being reviewed
@@ -289,24 +284,6 @@ class CardScanner:
             self.log(f"Failed to initialize camera: {e}", level="error")
             raise
 
-    def get_available_models(self, provider=None):
-        """
-        Get available models for a provider
-
-        Args:
-            provider: Provider name (if None, uses current provider)
-
-        Returns:
-            list: Available model names
-        """
-        if provider is None:
-            if self.card_identifier:
-                provider = self.card_identifier.provider
-            else:
-                provider = Config.VISION_AI_PROVIDER
-
-        return CardIdentifier.AVAILABLE_MODELS.get(provider.lower(), [])
-
     def set_ai_provider(self, provider, model=None):
         """
         Dynamically change the AI provider and/or model for card identification
@@ -454,7 +431,6 @@ class CardScanner:
                     # Detection is disabled - clear all detection state
                     self.last_card_detection = None
                     self.stable_frames = 0
-                    self.stable_since = None
                     with self.frame_lock:
                         self.detected_card = None
                         self.detected_card_name = ""
@@ -478,9 +454,6 @@ class CardScanner:
                             x1, y1, x2, y2 = bounding_box
                             width = x2 - x1
                             height = y2 - y1
-
-                            # Track previous stability for state change detection
-                            prev_stable_frames = self.stable_frames
 
                             # Check if this is a card-sized object
                             if self.is_card_sized(bounding_box):
@@ -510,10 +483,6 @@ class CardScanner:
                                 display_bbox = None  # Don't show non-card boxes
                                 # Reset stability counter since this isn't a valid card
                                 self.stable_frames = 0
-
-                            # Mark when card became stable
-                            if prev_stable_frames < self.required_stable_frames and self.stable_frames >= self.required_stable_frames:
-                                self.stable_since = time.time()
 
                             # Crop the detected card
                             cropped = frame[y1:y2, x1:x2]
@@ -559,7 +528,6 @@ class CardScanner:
                         # Reset stability if no detection (cached or current)
                         if not display_bbox:
                             self.stable_frames = 0
-                            self.stable_since = None
                             # Reset smoothed bounding box after losing card for several frames
                             if self.frames_since_card_lost > 10:
                                 self.smoothed_bbox = None
@@ -625,7 +593,6 @@ class CardScanner:
                                     self.last_auto_capture_time = time.time()
                                     self.card_under_review = True  # Set flag to prevent further auto-captures
                                     # Call the callback in a non-blocking way
-                                    import threading
                                     threading.Thread(target=self.auto_capture_callback).start()
 
                 with self.frame_lock:
@@ -668,35 +635,6 @@ class CardScanner:
                 'is_stable': self.stable_frames >= self.required_stable_frames
             }
 
-    def _sharpen_frame(self, frame):
-        """Apply a sharpening filter to the frame"""
-        kernel = np.array([[-1, -1, -1],
-                           [-1,  9, -1],
-                           [-1, -1, -1]])
-        sharpened = cv2.filter2D(frame, -1, kernel)
-        return sharpened
-
-    def _enhance_for_ai(self, frame):
-        """
-        Enhanced preprocessing for better AI recognition
-        Applies multiple techniques to improve image quality
-        """
-        # 1. Light sharpening first for better text clarity
-        sharpened = self._sharpen_frame(frame)
-
-        # 2. Moderate contrast enhancement using CLAHE
-        lab = cv2.cvtColor(sharpened, cv2.COLOR_RGB2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        enhanced = cv2.merge([l, a, b])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2RGB)
-
-        # 3. Light denoising at the end (gentle - preserve detail)
-        denoised = cv2.fastNlMeansDenoisingColored(enhanced, None, 3, 3, 7, 21)
-
-        return denoised
-    
     def capture_card_image_only(self, card_number):
         """
         Capture and save a card image WITHOUT AI processing.
@@ -761,7 +699,6 @@ class CardScanner:
                 self.log("Vision AI could not identify card", level="warning")
         else:
             self.log("⚠ Vision AI not enabled - set API key to enable automatic identification", level="warning")
-            self.log("See SETUP_VISION_AI.md for instructions", level="info")
 
         return card_info
 
@@ -800,13 +737,6 @@ class CardScanner:
         success = self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
         if success:
             self.log("Enabled continuous autofocus via v4l2-ctl")
-        return success
-
-    def _disable_v4l2_autofocus(self):
-        """Disable continuous autofocus using v4l2-ctl (freezes current focus)"""
-        success = self._run_v4l2_command('-c', 'focus_automatic_continuous=0')
-        if success:
-            self.log("Disabled continuous autofocus via v4l2-ctl (focus locked)")
         return success
 
     def reset_focus(self):

@@ -83,33 +83,22 @@ This project provides an automated solution for scanning and cataloging Magic: T
 
 ## Installation
 
-### Method 1: Automatic Installation (Recommended)
-
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd scanner
-
-# Run the installation script
-chmod +x install.sh
-./install.sh
-```
-
-### Method 2: Manual Installation
-
-```bash
-# Create virtual environment
+# Create a Python 3.12 virtual environment (uv: `uv venv --python 3.12 venv`)
 python3 -m venv venv
 source venv/bin/activate
+
+# Optional: CPU-only PyTorch (much smaller than the default CUDA build)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Download Scryfall database (~150MB, 5-10 minutes)
+# Download Scryfall database (~80MB download, a few minutes)
 python3 setup_database.py
 
-# Test your system
-python3 test_system.py
+# Add your API key(s)
+cp .env.example .env   # then edit .env
 ```
 
 ### Vision AI Setup
@@ -168,11 +157,6 @@ Open your browser and navigate to:
 5. Confirm to add to inventory
 
 ### 4. Export Your Inventory
-
-**Command Line:**
-```bash
-python3 export_inventory.py
-```
 
 **Web Interface:**
 - Click the inventory icon (📦)
@@ -360,41 +344,12 @@ python3 setup_database.py
 ```
 Downloads and processes Scryfall's card database.
 
-#### Test System
+#### Clean Up Scanned Images
 ```bash
-python3 test_system.py
+python3 cleanup.py --stats      # show image statistics
+python3 cleanup.py --days 30    # delete images older than 30 days
+python3 cleanup.py --dry-run    # preview what would be deleted
 ```
-Verifies database, camera, and directory setup.
-
-#### Test Camera
-```bash
-python3 test_camera.py
-```
-Opens camera feed for testing.
-
-#### Test Vision AI
-```bash
-python3 test_vision_ai.py path/to/card/image.jpg
-```
-Tests AI identification on a specific image.
-
-#### Export Inventory
-```bash
-python3 export_inventory.py
-```
-Interactive export with statistics and format options.
-
-#### Search for Cards
-```bash
-python3 test_search.py "Lightning Bolt"
-```
-Search the database for specific cards.
-
-#### Camera Diagnostics
-```bash
-python3 camera_diagnostics.py
-```
-Display camera capabilities and settings.
 
 ### Web Interface
 
@@ -462,10 +417,6 @@ socket.emit('add_to_inventory', {
     is_surge: false,  // Surge foil variant
     quantity: 1
 });
-
-// Export inventory
-socket.emit('export_inventory');
-socket.emit('export_inventory_moxfield');
 ```
 
 **Server → Client:**
@@ -518,38 +469,22 @@ python3 camera_diagnostics.py
 ```bash
 # Re-download database
 python3 setup_database.py
-
-# Verify database
-python3 check_card_in_db.py "Lightning Bolt"
 ```
 
 #### Vision AI Errors
 
 ```bash
-# Test API key
-python3 test_vision_ai.py test_image.jpg
+# Check the key is in .env (loaded automatically on startup)
+grep GEMINI_API_KEY .env
 
-# Check environment variable
-echo $GEMINI_API_KEY
-
-# Try different provider in config.py
-```
-
-#### NumPy Version Issues
-
-The project requires NumPy 1.x for OpenCV compatibility:
-```bash
-pip install "numpy<2.0"
+# Check data/logs/ai.log for the API error; switch provider/model in the web UI
 ```
 
 #### Focus Issues
 
 ```bash
-# Test autofocus manually
-python3 test_focus.py
-
-# Adjust focus settings in config.py
-CAMERA_FOCUS_LOCK_DELAY = 2.0  # Increase for slower focus
+# List camera controls (autofocus control names vary by camera)
+v4l2-ctl -d /dev/video0 --list-ctrls
 ```
 
 ### Log Files
@@ -575,11 +510,13 @@ scanner/
 ├── database.py                 # Scryfall database
 ├── card_search.py              # Search engine
 ├── inventory.py                # Inventory management
-├── ocr_processor.py            # OCR (legacy)
-├── config.py                   # Configuration
+├── anti_glare.py               # Glare reduction for foil cards
+├── cleanup.py                  # Scanned image cleanup
+├── config.py / config.yaml     # Configuration
+├── config_loader.py            # YAML loader
+├── settings.py                 # Persisted UI preferences
+├── utils.py                    # Shared helpers
 ├── setup_database.py           # Database setup
-├── migrate_inventory.py        # CSV to DB migration tool
-├── export_inventory.py         # Export tool
 ├── requirements.txt            # Dependencies
 │
 ├── templates/
@@ -596,8 +533,7 @@ scanner/
 │   └── logs/                  # Application logs
 │
 ├── scanned_cards/             # Captured card images
-├── models/                    # ML models (YOLO)
-└── docs/                      # Documentation
+└── yolov8n.pt                 # YOLOv8 model
 ```
 
 ### Adding a New Vision AI Provider
@@ -681,16 +617,8 @@ To add fields:
 
 ### Testing
 
-```bash
-# Run all tests
-python3 test_system.py
-
-# Test individual components
-python3 test_camera.py
-python3 test_detection.py
-python3 test_vision_ai.py image.jpg
-python3 test_search.py "Card Name"
-```
+There is no automated test suite yet. To verify a setup, run `python3 setup_database.py`
+and then `python3 app.py`; startup logs report camera, database and Vision AI status.
 
 ## Contributing
 

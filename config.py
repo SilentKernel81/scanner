@@ -23,9 +23,6 @@ class Config:
 
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')
-    if isinstance(DATABASE_FILE, str) and not DATABASE_FILE.startswith('/'):
-        DATABASE_FILE = DATA_DIR / DATABASE_FILE.replace('data/', '')
-    CSV_OUTPUT = DATA_DIR / 'card_inventory.csv'
 
     # API URLs
     SCRYFALL_BULK_URL = config.get('api', 'scryfall_bulk', default="https://api.scryfall.com/bulk-data/default-cards")
@@ -55,10 +52,7 @@ class Config:
     ANTI_GLARE_METHOD = config.get('anti_glare', 'method', default='adaptive')
 
     # Focus settings
-    AUTOFOCUS_ENABLED = config.get('focus', 'autofocus_enabled', default=True)
-    FOCUS_VALUE = config.get('focus', 'focus_value', default=500)
     FOCUS_LOCK_ON_STABLE = config.get('focus', 'lock_on_stable', default=False)
-    FOCUS_LOCK_DELAY = config.get('focus', 'lock_delay', default=1.0)
 
     # Auto-capture settings (enabled state now controlled via UI button)
     AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=4.0)
@@ -73,10 +67,6 @@ class Config:
     HOST = config.get('flask', 'host', default='0.0.0.0')
     PORT = config.get('flask', 'port', default=5000)
     DEBUG = config.get('flask', 'debug', default=False)
-
-    # DEPRECATED: OCR functionality replaced by Vision AI
-    # OCR_LANGUAGE = config.get('ocr', 'language', default='eng')
-    # OCR_CONFIG = config.get('ocr', 'config', default='-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\',.()& --oem 3 --psm 6')
 
     # Vision AI settings - Environment variables take precedence
     VISION_AI_PROVIDER = os.getenv('VISION_AI_PROVIDER') or config.get('vision_ai', 'provider', default='gemini')

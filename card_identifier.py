@@ -12,6 +12,7 @@ import re
 import time
 from PIL import Image
 import requests
+from config import Config
 
 # Create AI logger
 logger = logging.getLogger('ai')
@@ -20,32 +21,26 @@ logger = logging.getLogger('ai')
 class CardIdentifier:
     """Identifies Magic cards using vision AI"""
 
-    # Available models for each provider
+    # Available models for each provider (first entry is the default)
     AVAILABLE_MODELS = {
         'gemini': [
-            'gemini-2.0-flash-exp',
-            'gemini-exp-1206',
-            'gemini-2.0-flash-thinking-exp-1219',
-            'gemini-2.5-flash-lite',
             'gemini-flash-latest',
-            'gemini-2.0-flash',
+            'gemini-flash-lite-latest',
             'gemini-pro-latest',
-            'gemini-1.5-flash',
-            'gemini-1.5-pro'
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
+            'gemini-2.5-pro'
         ],
         'openai': [
+            'gpt-4.1-mini',
+            'gpt-4.1',
             'gpt-4o',
-            'gpt-4o-mini',
-            'gpt-4-turbo',
-            'gpt-4-turbo-preview',
-            'gpt-4-vision-preview'
+            'gpt-4o-mini'
         ],
         'anthropic': [
-            'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620',
-            'claude-3-opus-20240229',
-            'claude-3-sonnet-20240229',
-            'claude-3-haiku-20240307'
+            'claude-sonnet-5',
+            'claude-haiku-4-5-20251001',
+            'claude-opus-5-5'
         ],
         'local': [
             'qwen3-vl:4b',
@@ -54,10 +49,7 @@ class CardIdentifier:
             'llava:13b',
             'llava:34b',
             'llava-phi3',
-            'moondream',
-            'llava-v1.6-mistral-7b-hf',
-            'llava-1.5-13b-hf',
-            'llava-v1.6-34b-hf'
+            'moondream'
         ]
     }
 
@@ -91,24 +83,10 @@ class CardIdentifier:
         # Get API key from parameter or environment (skip for local provider)
         if self.provider == 'local':
             self.api_key = None  # No API key needed for local
-            # Get local endpoint from environment or use default
-            self.local_endpoint = os.getenv('LOCAL_AI_ENDPOINT', 'http://localhost:11434/v1/chat/completions')
+            self.local_endpoint = Config.LOCAL_AI_ENDPOINT
             self.log(f"Card identifier initialized with local AI at {self.local_endpoint} ({self.model})")
-        elif api_key:
-            self.api_key = api_key
-            self.log(f"Card identifier initialized with {provider} ({self.model})")
-        elif self.provider == 'gemini':
-            self.api_key = os.getenv('GEMINI_API_KEY')
-            if not self.api_key:
-                raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
-            self.log(f"Card identifier initialized with {provider} ({self.model})")
-        elif self.provider == 'openai':
-            self.api_key = os.getenv('OPENAI_API_KEY')
-            if not self.api_key:
-                raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
-            self.log(f"Card identifier initialized with {provider} ({self.model})")
-        elif self.provider == 'anthropic':
-            self.api_key = os.getenv('ANTHROPIC_API_KEY')
+        else:
+            self.api_key = api_key or os.getenv(f"{self.provider.upper()}_API_KEY")
             if not self.api_key:
                 raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
             self.log(f"Card identifier initialized with {provider} ({self.model})")
@@ -216,62 +194,63 @@ Your response:"""
         # Encode to base64
         return base64.b64encode(image_bytes).decode('utf-8')
 
+    def _parse_response(self, response_text, source):
+        """
+        Parse 'NAME: ... / NUMBER: ...' response text from any provider
+
+        Returns:
+            dict: {'name': str, 'collector_number': str} or None if no name found
+        """
+        name_match = re.search(r'NAME:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+        number_match = re.search(r'NUMBER:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+
+        card_name = name_match.group(1).strip() if name_match else ""
+        collector_number = number_match.group(1).strip() if number_match else ""
+
+        # Clean up "Unknown" responses
+        if card_name.lower() == "unknown":
+            card_name = ""
+        if collector_number.lower() == "unknown":
+            collector_number = ""
+
+        self.log(f"{source} identified: '{card_name}' #{collector_number or 'not found'}")
+
+        if card_name:
+            return {
+                'name': card_name,
+                'collector_number': collector_number
+            }
+        self.log(f"{source} could not identify card name", level="warning")
+        return None
+
     def _identify_with_gemini(self, image_array):
-        """Identify card using Google Gemini Vision"""
-        import google.generativeai as genai
+        """Identify card using Google Gemini Vision (REST API)"""
+        base64_image = self._image_array_to_base64(image_array)
 
-        genai.configure(api_key=self.api_key)
-
-        # Convert array to PIL Image (preserve detail for text recognition)
-        pil_image = Image.fromarray(image_array)
-
-        # Downscale if too large (but preserve detail for small text like collector numbers)
-        width, height = pil_image.size
-        max_dimension = 2048
-        if max(width, height) > max_dimension:
-            scale = max_dimension / max(width, height)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
-
-        prompt = self.CARD_IDENTIFICATION_PROMPT
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": self.CARD_IDENTIFICATION_PROMPT},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}}
+                ]
+            }]
+        }
 
         self.log(f"Sending image to Gemini ({self.model}) for identification...")
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+            json=payload,
+            timeout=30
+        )
 
-        try:
-            model = genai.GenerativeModel(self.model)
-            response = model.generate_content([prompt, pil_image])
-            response_text = response.text.strip()
-
-            # Parse the response
-            name_match = re.search(r'NAME:\s*(.+)', response_text, re.IGNORECASE)
-            number_match = re.search(r'NUMBER:\s*(.+)', response_text, re.IGNORECASE)
-
-            card_name = name_match.group(1).strip() if name_match else ""
-            collector_number = number_match.group(1).strip() if number_match else ""
-
-            # Clean up "Unknown" responses
-            if card_name.lower() == "unknown":
-                card_name = ""
-            if collector_number.lower() == "unknown":
-                collector_number = ""
-
-            self.log(f"Gemini ({self.model}) identified: '{card_name}' #{collector_number}")
-
-            if card_name:
-                return {
-                    'name': card_name,
-                    'collector_number': collector_number
-                }
-            else:
-                return None
-
-        except Exception as e:
-            error_msg = str(e)
-            raise Exception(f"Gemini identification failed: {error_msg}")
+        response.raise_for_status()
+        parts = response.json()['candidates'][0]['content']['parts']
+        response_text = ''.join(part.get('text', '') for part in parts).strip()
+        return self._parse_response(response_text, f"Gemini ({self.model})")
 
     def _identify_with_openai(self, image_array):
-        """Identify card using OpenAI GPT-4 Vision"""
+        """Identify card using OpenAI Vision"""
         base64_image = self._image_array_to_base64(image_array)
 
         headers = {
@@ -311,29 +290,7 @@ Your response:"""
 
         response.raise_for_status()
         response_text = response.json()['choices'][0]['message']['content'].strip()
-
-        # Parse the response
-        name_match = re.search(r'NAME:\s*(.+)', response_text, re.IGNORECASE)
-        number_match = re.search(r'NUMBER:\s*(.+)', response_text, re.IGNORECASE)
-
-        card_name = name_match.group(1).strip() if name_match else ""
-        collector_number = number_match.group(1).strip() if number_match else ""
-
-        # Clean up "Unknown" responses
-        if card_name.lower() == "unknown":
-            card_name = ""
-        if collector_number.lower() == "unknown":
-            collector_number = ""
-
-        self.log(f"OpenAI identified: '{card_name}' #{collector_number}")
-
-        if card_name:
-            return {
-                'name': card_name,
-                'collector_number': collector_number
-            }
-        else:
-            return None
+        return self._parse_response(response_text, "OpenAI")
 
     def _identify_with_anthropic(self, image_array):
         """Identify card using Anthropic Claude Vision"""
@@ -379,67 +336,37 @@ Your response:"""
 
         response.raise_for_status()
         response_text = response.json()['content'][0]['text'].strip()
-
-        # Parse the response
-        name_match = re.search(r'NAME:\s*(.+)', response_text, re.IGNORECASE)
-        number_match = re.search(r'NUMBER:\s*(.+)', response_text, re.IGNORECASE)
-
-        card_name = name_match.group(1).strip() if name_match else ""
-        collector_number = number_match.group(1).strip() if number_match else ""
-
-        # Clean up "Unknown" responses
-        if card_name.lower() == "unknown":
-            card_name = ""
-        if collector_number.lower() == "unknown":
-            collector_number = ""
-
-        self.log(f"Claude identified: '{card_name}' #{collector_number}")
-
-        if card_name:
-            return {
-                'name': card_name,
-                'collector_number': collector_number
-            }
-        else:
-            return None
+        return self._parse_response(response_text, "Claude")
 
     def _identify_with_local(self, image_array):
         """Identify card using local vision AI server (Ollama, vLLM, etc.)"""
         base64_image = self._image_array_to_base64(image_array)
-
-        # First, try Ollama's native API (more reliable for vision)
-        # If that fails, fall back to OpenAI-compatible endpoint
 
         # Detect if this is an Ollama server
         is_ollama = '/v1/chat/completions' in self.local_endpoint
 
         if is_ollama:
             # Use Ollama's native /api/chat endpoint for better vision support
-            result = self._identify_with_ollama_native(image_array, base64_image)
+            result = self._identify_with_ollama_native(base64_image)
             if result:
                 return result
             # If native API fails, try OpenAI-compatible as fallback
             self.log("Ollama native API failed, trying OpenAI-compatible endpoint...", level="warning")
 
         # OpenAI-compatible endpoint (vLLM, LM Studio, newer Ollama)
-        return self._identify_with_openai_compatible(image_array, base64_image)
+        return self._identify_with_openai_compatible(base64_image)
 
-    def _identify_with_ollama_native(self, image_array, base64_image):
+    def _identify_with_ollama_native(self, base64_image):
         """Use Ollama's native /api/chat endpoint (better vision support)"""
-
-        # Get Ollama base URL (remove /v1/chat/completions)
         ollama_base = self.local_endpoint.replace('/v1/chat/completions', '')
         ollama_endpoint = f"{ollama_base}/api/chat"
 
-        prompt_text = self.CARD_IDENTIFICATION_PROMPT
-
-        # Ollama native API format
         payload = {
             "model": self.model,
             "messages": [
                 {
                     "role": "user",
-                    "content": prompt_text,
+                    "content": self.CARD_IDENTIFICATION_PROMPT,
                     "images": [base64_image]
                 }
             ],
@@ -452,60 +379,24 @@ Your response:"""
         self.log(f"Sending image to Ollama ({self.model}) at {ollama_endpoint}...")
 
         try:
-            response = requests.post(
-                ollama_endpoint,
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=60
-            )
-
+            response = requests.post(ollama_endpoint, json=payload, timeout=60)
             response.raise_for_status()
             response_json = response.json()
 
-            # Extract response text (Ollama native format)
-            if 'message' in response_json and 'content' in response_json['message']:
-                response_text = response_json['message']['content'].strip()
-            else:
+            if 'message' not in response_json or 'content' not in response_json['message']:
                 self.log(f"Unexpected Ollama response format: {response_json}", level="error")
                 return None
 
-            # Log raw response for debugging
+            response_text = response_json['message']['content'].strip()
             self.log(f"Ollama raw response: {response_text[:200]}", level="info")
-
-            # Parse the response
-            name_match = re.search(r'NAME:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-            number_match = re.search(r'NUMBER:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-
-            card_name = name_match.group(1).strip() if name_match else ""
-            collector_number = number_match.group(1).strip() if number_match else ""
-
-            # Clean up "Unknown" responses
-            if card_name.lower() == "unknown":
-                card_name = ""
-            if collector_number.lower() == "unknown":
-                collector_number = ""
-
-            self.log(f"Local AI identified: '{card_name}' #{collector_number if collector_number else 'not found'}")
-
-            if card_name:
-                return {
-                    'name': card_name,
-                    'collector_number': collector_number
-                }
-            else:
-                self.log("Local AI could not identify card name", level="warning")
-                return None
+            return self._parse_response(response_text, "Local AI")
 
         except Exception as e:
             self.log(f"Ollama native API error: {e}", level="warning")
             return None
 
-    def _identify_with_openai_compatible(self, image_array, base64_image):
+    def _identify_with_openai_compatible(self, base64_image):
         """Use OpenAI-compatible endpoint (vLLM, LM Studio, newer Ollama)"""
-
-        prompt_text = self.CARD_IDENTIFICATION_PROMPT
-
-        # OpenAI-compatible payload
         payload = {
             "model": self.model,
             "messages": [
@@ -514,7 +405,7 @@ Your response:"""
                     "content": [
                         {
                             "type": "text",
-                            "text": prompt_text
+                            "text": self.CARD_IDENTIFICATION_PROMPT
                         },
                         {
                             "type": "image_url",
@@ -532,58 +423,23 @@ Your response:"""
         self.log(f"Sending image to local AI ({self.model}) at {self.local_endpoint}...")
 
         try:
-            response = requests.post(
-                self.local_endpoint,
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=60
-            )
-
+            response = requests.post(self.local_endpoint, json=payload, timeout=60)
             response.raise_for_status()
             response_json = response.json()
 
-            # Extract response text (OpenAI-compatible format)
-            if 'choices' in response_json and len(response_json['choices']) > 0:
-                response_text = response_json['choices'][0]['message']['content'].strip()
-            else:
+            if not response_json.get('choices'):
                 self.log(f"Unexpected response format: {response_json}", level="error")
                 return None
 
-            # Log raw response for debugging
+            response_text = response_json['choices'][0]['message']['content'].strip()
             self.log(f"Local AI raw response: {response_text[:200]}", level="info")
-
-            # Parse the response
-            name_match = re.search(r'NAME:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-            number_match = re.search(r'NUMBER:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-
-            card_name = name_match.group(1).strip() if name_match else ""
-            collector_number = number_match.group(1).strip() if number_match else ""
-
-            # Clean up "Unknown" responses
-            if card_name.lower() == "unknown":
-                card_name = ""
-            if collector_number.lower() == "unknown":
-                collector_number = ""
-
-            self.log(f"Local AI identified: '{card_name}' #{collector_number if collector_number else 'not found'}")
-
-            if card_name:
-                return {
-                    'name': card_name,
-                    'collector_number': collector_number
-                }
-            else:
-                self.log("Local AI could not identify card name", level="warning")
-                return None
+            return self._parse_response(response_text, "Local AI")
 
         except requests.exceptions.ConnectionError:
             self.log(f"Failed to connect to local AI server at {self.local_endpoint}", level="error")
             self.log("Is the server running? Check with: curl " + self.local_endpoint.replace('/v1/chat/completions', '/api/tags'), level="error")
             return None
         except requests.exceptions.Timeout:
-            self.log(f"Local AI request timed out after 60s", level="error")
+            self.log("Local AI request timed out after 60s", level="error")
             self.log("Model may be slow, try a smaller model", level="warning")
             return None
-        except Exception as e:
-            error_msg = str(e)
-            raise Exception(f"Local AI identification failed: {error_msg}")
