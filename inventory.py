@@ -23,6 +23,7 @@ class InventoryManager:
         self.log_callback = log_callback
         self.conn = None
         self._lock = threading.RLock()  # Thread-safe inventory access
+        self.last_added = None  # (row key, quantity) of the most recent add_card, for undo
         self.initialize_connection()
 
     def log(self, message, level="info"):
@@ -130,7 +131,29 @@ class InventoryManager:
             row = cursor.fetchone()
             final_quantity = row[0] if row else quantity
             total_value = price * final_quantity
+            self.last_added = ((card_name, set_name, card_number, condition, 1 if is_foil else 0, 1 if is_surge else 0), quantity)
             self.log(f"Added to inventory: {quantity}x {card_name} ({color_identity}) - ${total_value:.2f}", level="success")
+
+    def undo_last_add(self):
+        """
+        Take back the most recent add_card: lower that entry's quantity by the amount
+        added, deleting it if nothing is left.
+
+        Returns:
+            str: the card name, or None if there is nothing to undo
+        """
+        with self._lock:
+            if not self.last_added:
+                return None
+            key, quantity = self.last_added
+            self.last_added = None
+            where = 'card_name = ? AND set_name = ? AND card_number = ? AND condition = ? AND foil = ? AND surge = ?'
+            cursor = self.conn.cursor()
+            cursor.execute(f'UPDATE inventory SET quantity = quantity - ? WHERE {where}', (quantity, *key))
+            cursor.execute(f'DELETE FROM inventory WHERE quantity <= 0 AND {where}', key)
+            self.conn.commit()
+            self.log(f"Undid add: {quantity}x {key[0]}", level="info")
+            return key[0]
 
     def _find_existing_card(self, card_name, set_name, card_number, condition, is_foil, is_surge=False):
         """

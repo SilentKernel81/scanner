@@ -21,15 +21,16 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
    against the name, are looked up in a local copy of
    [Scryfall](https://scryfall.com)'s card data, which also provides prices, images and
    which finishes each printing exists in.
-6. **Add to inventory** - you confirm (or Fast Scan adds it automatically) and the card is
+6. **Add to inventory** - auto scanning adds it automatically (or you confirm it) and the card is
    stored with quantity, condition and finish.
 
 ## Features
 
 - **Live camera view** with the detected card outlined; the status turns from
   *Stabilizing* to *Ready* when the card is still.
-- **Manual or automatic capture** - capture on demand, or start auto scanning. **Fast Scan**
-  captures quickly, identifies cards in the background and adds them automatically.
+- **Manual or automatic capture** - capture on demand, or start auto scanning and just drop
+  cards into the box: each one is identified in the background and added to the inventory
+  automatically, with a one-click Undo.
 - **Vision AI providers** - Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model
   via Ollama (or another OpenAI-compatible server). Switch provider and model from the UI.
 - **Exact printing identification** from the set code and collector number, with name
@@ -161,14 +162,18 @@ Auto scanning is made for dropping cards onto a pile in the box. Each card is ca
 after a capture the status shows **Captured - drop the next card**, and the next capture happens
 when a new card has been dropped on top and has settled. The drop is recognized by the motion
 (the card briefly vanishing or jumping, a hand) and by where the new card lands, so two
-identical copies in a row are both captured. In normal mode it also waits until you've added or
-skipped the current card; a card dropped before you click Add is captured right after.
+identical copies in a row are both captured.
 
-With **Fast Scan mode** (Settings) cards are identified in the background and added
-automatically, so you can keep feeding cards; the *Processing* counter in the top bar shows
-how many are still being identified. Only cards whose exact printing is confirmed (set code +
-number, or name + number) are added automatically - anything less certain pauses auto
-scanning so you can review it.
+By default (**Settings → Add cards automatically**) cards are identified in the background and
+added to the inventory without review, so you can keep dropping cards; the *Processing* counter
+in the top bar shows how many are still being identified. After each add the card panel shows
+what was added (name, set, finish) with an **Undo** button. Only cards whose exact printing is
+confirmed (set code + number, or name + number) are added automatically - anything less certain
+pauses auto scanning so you can review it.
+
+Turn the switch off to confirm each card with **Add** / **Skip** instead; auto scanning then
+waits for you before the next capture (a card dropped before you click Add is captured right
+after). The setting is remembered.
 
 ### Searching manually
 
@@ -210,7 +215,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
-| `fast_scan.stability_frames` | `4` | Same, in Fast Scan mode (~0.15 s, lets a dropped card stop sliding) |
+| `fast_scan.stability_frames` | `4` | Same, when adding cards automatically (~0.15 s, lets a dropped card stop sliding) |
 | `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |

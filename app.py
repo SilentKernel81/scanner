@@ -452,7 +452,7 @@ def initialize_components():
     # Initialize scanner (CPU-based YOLOv8)
     logger.info("Initializing scanner...")
     scanner = CardScanner(log_callback=log_to_client)
-    scanner.fast_scan_mode = False  # Initialize fast scan mode flag
+    set_auto_add(scanner.settings.get('auto_add', True))  # remembered in data/settings.json
     log_to_client("Scanner initialized with YOLOv8 detection", level="info")
 
     # Initialize searcher
@@ -1201,10 +1201,17 @@ def handle_add_inventory(data):
             quantity
         )
 
-        # Send updated stats
+        # Send updated stats and what was added (the page offers an Undo)
         inv_stats = inventory.get_summary()
         emit('inventory_updated', {
-            'stats': inv_stats
+            'stats': inv_stats,
+            'added': {
+                'name': current_card_info['name'],
+                'set': current_card_info['set'],
+                'number': current_card_info['number'],
+                'finish': 'Surge foil' if is_surge else 'Foil' if is_foil else 'Regular',
+                'quantity': quantity
+            }
         })
 
         logger.info("Card added to inventory successfully")
@@ -1222,6 +1229,20 @@ def handle_add_inventory(data):
         # Clear flag even on error to prevent getting stuck
         if scanner:
             scanner.card_under_review = False
+
+
+@socketio.on('undo_last_add')
+def handle_undo_last_add():
+    """Take back the most recent add to the inventory"""
+    if not inventory:
+        emit('error', {'message': 'Inventory not initialized'})
+        return
+
+    undone = inventory.undo_last_add()
+    if undone:
+        emit('inventory_undone', {'name': undone, 'stats': inventory.get_summary()})
+    else:
+        emit('error', {'message': 'Nothing to undo'})
 
 
 @socketio.on('dismiss_card')
@@ -1285,25 +1306,39 @@ def handle_toggle_auto_capture(data):
     log_to_client(f"Auto-capture {('enabled' if enabled else 'disabled')}", level="info")
 
 
+def set_auto_add(enabled):
+    """
+    Auto-add ("fast scan") mode: auto-captured cards are identified in the background and
+    confirmed ones are added to the inventory without review; otherwise each card waits
+    for Add / Skip.
+    """
+    scanner.fast_scan_mode = enabled
+    scanner.required_stable_frames = Config.FAST_SCAN_STABILITY_FRAMES if enabled else Config.AUTO_CAPTURE_STABILITY_FRAMES
+    scanner.auto_capture_delay = Config.AUTO_CAPTURE_DELAY
+
+
+@app.route('/api/scan_settings')
+def get_scan_settings():
+    """Scanning preferences the page needs on load"""
+    return jsonify({'auto_add': bool(scanner.fast_scan_mode) if scanner else True})
+
+
 @socketio.on('toggle_fast_scan')
 def handle_toggle_fast_scan(data):
-    """Toggle fast scan mode - reduces required stable frames for quicker scanning"""
+    """Toggle adding auto-scanned cards to the inventory automatically (remembered)"""
     global scanner
 
     if not scanner:
-        logger.error("Toggle fast scan requested but scanner not initialized")
+        logger.error("Toggle auto-add requested but scanner not initialized")
         emit('error', {'message': 'Scanner not initialized'})
         return
 
-    enabled = data.get('enabled', False)
-    # Fast mode: Use configured stability frames, same delay for both modes
-    scanner.required_stable_frames = Config.FAST_SCAN_STABILITY_FRAMES if enabled else Config.AUTO_CAPTURE_STABILITY_FRAMES
-    scanner.auto_capture_delay = Config.AUTO_CAPTURE_DELAY  # Same delay for both modes
-    # Track fast scan mode state (used to determine when to clear card_under_review flag)
-    scanner.fast_scan_mode = enabled
+    enabled = bool(data.get('enabled', False))
+    set_auto_add(enabled)
+    scanner.settings.set('auto_add', enabled)
     emit('fast_scan_toggled', {'enabled': enabled})
-    logger.info(f"Fast scan mode toggled: {enabled} (required frames: {scanner.required_stable_frames}, delay: {scanner.auto_capture_delay}s)")
-    log_to_client(f"Fast Scan Mode {'enabled (quick scan + auto-add, ' + str(Config.AUTO_CAPTURE_DELAY) + 's cooldown)' if enabled else 'disabled'}", level="info")
+    logger.info(f"Auto-add toggled: {enabled} (required frames: {scanner.required_stable_frames})")
+    log_to_client(f"Add cards automatically: {'on' if enabled else 'off - review each card'}", level="info")
 
 
 @socketio.on('toggle_anti_glare')

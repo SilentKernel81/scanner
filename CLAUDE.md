@@ -108,7 +108,7 @@ All settings centralized in `config.py`:
 3. AI identifies:
    - Card name (from top of card)
    - Collector number and set code (bottom-left corner, e.g. "U 0014" / "HOB • EN")
-4. Foil check (`vision_ai.detect_foil`, outline-detected captures only): a second small AI request on a zoomed crop of the bottom-left corner asks whether the set/language separator is a star (★ = foil) or a dot (•). The web UI (`suggestedFinish()` in scanner.js) combines this with the printing's `finishes` (foil-only / nonfoil-only printings are certain) to pre-fill the Regular/Foil/Surge quantity; Fast Scan auto-add uses the same suggestion
+4. Foil check (`vision_ai.detect_foil`, outline-detected captures only): a second small AI request on a zoomed crop of the bottom-left corner asks whether the set/language separator is a star (★ = foil) or a dot (•). The web UI (`suggestedFinish()` in scanner.js) combines this with the printing's `finishes` (foil-only / nonfoil-only printings are certain) to pre-fill the Regular/Foil/Surge quantity; automatic adds use the same suggestion
 5. Database search: set code + collector number first (unique per printing; accepted only if the name roughly matches, `names_match()`), then name + number, then name only (preferring the same set)
 6. Falls back to name-only search if exact match not found
 7. User confirms and adds to inventory
@@ -119,7 +119,7 @@ Cards with same name can have different printings (sets, art, rarities, prices).
 ### Auto-Capture Rules (scanner.py)
 - A frame counts toward `stable_frames` only if the card is settled (`_is_card_settled`): corners moved < 1% of card size, sharpness changed < 20% (autofocus) and sharpness >= `auto_capture.min_sharpness`
 - Cards are dropped onto a pile, so the view never empties. After any capture `awaiting_new_card` is set; `_new_card_arrived()` re-arms on a drop: a jump > 3% of card size or card-image change > 0.3 (tiny normalized thumbnails), the card reappearing > 0.8% away after a detection gap, a card gone for >= 6 frames, or a different-looking card than the captured one. Measured noise of a card lying still: movement <= 0.4%, image change <= 0.07, detection gaps <= 2 frames
-- Fast Scan auto-adds only `CONFIRMED_MATCHES` (database.py: set+number or name+number); other results pause auto scanning (`card_under_review`) for review
+- "Add cards automatically" (internally `fast_scan_mode`, default on, saved as `auto_add` in data/settings.json): auto-captured cards go through the AI queue and are added without review - but only `CONFIRMED_MATCHES` (database.py: set+number or name+number); other results pause auto scanning (`card_under_review`) for review. `undo_last_add` takes back the most recent add
 - Local Ollama models are preloaded (`CardIdentifier.warm_up`) when auto scanning starts and kept loaded 30 min (`keep_alive`)
 
 ### Frame Processing Pipeline

@@ -605,6 +605,14 @@ input[type="radio"] {
 }
 
 .empty-state.is-success { color: var(--success); }
+
+.added-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: var(--text);
+    margin: 4px 0;
+}
 .empty-state.is-error { color: var(--danger); }
 
 .card-summary {

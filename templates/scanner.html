@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=11">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=12">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -159,10 +159,10 @@
                     </label>
                     <label class="switch-row">
                         <span class="switch-text">
-                            <span class="switch-title">Fast scan mode</span>
-                            <span class="switch-desc">Quicker captures, identified cards are added automatically</span>
+                            <span class="switch-title">Add cards automatically</span>
+                            <span class="switch-desc">Auto-scanned cards go straight to the inventory (uncertain matches pause for review). Off: confirm each card.</span>
                         </span>
-                        <input type="checkbox" class="switch" id="toggle-fast-scan">
+                        <input type="checkbox" class="switch" id="toggle-fast-scan" checked>
                     </label>
                     <label class="switch-row">
                         <span class="switch-text">
@@ -321,7 +321,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=11"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=11"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=12"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=12"></script>
 </body>
 </html>

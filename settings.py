@@ -16,6 +16,7 @@ class Settings:
         'ai_provider': 'gemini',
         'ai_model': None,  # None means use provider's default
         'auto_capture_enabled': False,  # Controlled via UI button, not config
+        'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
         'detection_enabled': True,
     }
 

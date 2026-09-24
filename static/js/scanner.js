@@ -8,7 +8,7 @@ let cardDetected = false;
 let lastDetectionStatus = {detected: false, stable_frames: 0, required_frames: 0, is_stable: false};  // from /api/detection_status
 let detectionEnabled = true;  // Track detection state
 let autoScanningEnabled = false;  // Track auto-scanning state
-let fastScanMode = false;  // Track fast scan mode state
+let fastScanMode = true;  // "Add cards automatically" - loaded from /api/scan_settings
 let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last capture: 'foil' | 'non-foil' | 'unknown'
 let availableModels = {}; // Store available models for each provider
 let currentProvider = 'gemini';
@@ -41,6 +41,7 @@ socket.on('connect', function() {
     loadStats();
     // Connection message sent from server
     startDetectionPolling();
+    loadScanSettings();
 });
 
 socket.on('disconnect', function() {
@@ -102,18 +103,12 @@ socket.on('card_found', function(data) {
 
     // Check auto_add flag from server (set at capture time, not current mode state)
     // This allows queued cards to complete even if fast scan mode is disabled
-    console.log('🔍 Checking if auto_add is true...');
     if (data.auto_add) {
-        console.log('⚡ Fast Scan: Scheduling auto-add in 500ms...');
-        addLog(timeNow(), 'info', '⚡ Fast Scan: Auto-adding in 0.5s...');
         setTimeout(function() {
-            console.log('⚡ Fast Scan: Timeout fired, currentCard:', currentCard);
             if (currentCard) {  // Verify card still loaded
-                console.log('⚡ Fast Scan: Calling addToInventory(true)...');
-                addLog(timeNow(), 'success', '⚡ Fast Scan: Adding to inventory NOW!');
                 addToInventory(true);  // Pass true for autoMode
             } else {
-                console.warn('⚡ Fast Scan: currentCard is null, skipping auto-add');
+                console.warn('Auto-add: currentCard is null, skipping');
             }
         }, 500);  // 0.5 second delay
     } else {
@@ -147,6 +142,17 @@ socket.on('card_printings', function(data) {
     displayPrintings(data.name, data.cards);
 });
 
+socket.on('inventory_undone', function(data) {
+    loadStats();
+    addLog(timeNow(), 'warning', `Removed ${data.name} from the inventory (undo)`);
+    document.getElementById('card-display').innerHTML = `
+        <div class="empty-state">
+            Removed <strong>${escapeHtml(data.name)}</strong> from the inventory.<br>
+            <span class="hint">Ready for the next card.</span>
+        </div>
+    `;
+});
+
 socket.on('similar_cards', function(data) {
     console.log('Similar cards received:', data.cards.length);
     displaySimilarCards(data.cards);
@@ -160,16 +166,19 @@ socket.on('inventory_updated', function(data) {
         console.log('✅ Card added - playing NEXT READY sound');
         audioManager.playNextReady();
         // Show clear message
-        addLog(timeNow(), 'success', '✓ Added! DROP NEXT CARD NOW');
     } else {
         audioManager.playSuccess();
     }
 
     loadStats();
+    const added = data.added;
     document.getElementById('card-display').innerHTML = `
         <div class="empty-state is-success">
-            ✓ Card added to inventory<br>
-            <span class="hint">Ready to scan the next card.</span>
+            ✓ Added to inventory
+            ${added ? `<div class="added-card">${added.quantity > 1 ? added.quantity + '× ' : ''}<strong>${escapeHtml(added.name)}</strong>
+                <span class="hint">${escapeHtml(added.set)} · #${escapeHtml(added.number)} · ${added.finish}</span></div>
+                <button class="btn btn-small" onclick="undoLastAdd()">Undo</button>` : ''}
+            <span class="hint">Ready for the next card.</span>
         </div>
     `;
     document.getElementById('card-name').value = '';
@@ -491,6 +500,25 @@ function searchCard() {
     console.log(logSeparator());
 }
 
+function autoScanHint() {
+    return fastScanMode ? 'Auto scanning - adding cards automatically' : 'Auto scanning - confirm each card';
+}
+
+function undoLastAdd() {
+    socket.emit('undo_last_add');
+}
+
+function loadScanSettings() {
+    // "Add cards automatically" is remembered on the server
+    fetch('/api/scan_settings')
+        .then(response => response.json())
+        .then(data => {
+            fastScanMode = data.auto_add;
+            document.getElementById('toggle-fast-scan').checked = data.auto_add;
+        })
+        .catch(error => console.error('Error loading scan settings:', error));
+}
+
 function resetFocus() {
     console.log(logSeparator());
     console.log("RESET FOCUS BUTTON CLICKED");
@@ -518,11 +546,11 @@ function toggleAutoScanning() {
     hint.classList.toggle('is-active', autoScanningEnabled);
     if (autoScanningEnabled) {
         btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Stop auto scanning';
-        hint.textContent = 'Auto scanning active' + (fastScanMode ? ' (fast mode)' : '');
+        hint.textContent = autoScanHint();
 
         console.log('Sending toggle_auto_capture with enabled=true');
         socket.emit('toggle_auto_capture', {enabled: true});
-        addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' (Fast Mode)' : ''}`);
+        addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' - adding cards automatically' : ' - confirm each card'}`);
     } else {
         btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Start auto scanning';
         hint.textContent = 'Click to start automatic card scanning';
@@ -738,7 +766,7 @@ function addToInventoryBoth() {
 }
 
 function addToInventory(autoMode = false) {
-    // Fast Scan auto-add: one Near Mint copy in the suggested finish
+    // Automatic add: one Near Mint copy in the suggested finish
     console.log(`addToInventory called with autoMode=${autoMode}, currentCard:`, currentCard);
 
     if (!currentCard) {
@@ -1030,14 +1058,11 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('toggle-fast-scan').addEventListener('change', function(e) {
         const enabled = e.target.checked;
         fastScanMode = enabled;  // Update global state
-        console.log(`🔧 Fast Scan Mode toggled: ${enabled}, fastScanMode variable is now: ${fastScanMode}`);
-        socket.emit('toggle_fast_scan', {enabled: enabled});
-        addLog(timeNow(), 'info', `Fast Scan Mode ${enabled ? 'enabled (quick scan + auto-add)' : 'disabled'}`);
+        socket.emit('toggle_fast_scan', {enabled: enabled});  // server logs the change
 
         // Update hint if auto-scanning is active
         if (autoScanningEnabled) {
-            const hint = document.getElementById('auto-scan-hint');
-            hint.textContent = 'Auto scanning active' + (enabled ? ' (fast mode)' : '');
+            document.getElementById('auto-scan-hint').textContent = autoScanHint();
         }
     });
 
