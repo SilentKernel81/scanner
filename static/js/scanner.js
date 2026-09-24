@@ -5,6 +5,7 @@ let cardNumber = 1;
 let currentImagePath = '';
 let currentCard = null;
 let cardDetected = false;
+let lastDetectionStatus = {detected: false, stable_frames: 0, required_frames: 0, is_stable: false};  // from /api/detection_status
 let detectionEnabled = true;  // Track detection state
 let autoScanningEnabled = false;  // Track auto-scanning state
 let fastScanMode = false;  // Track fast scan mode state
@@ -342,11 +343,7 @@ socket.on('database_rebuild_error', function(data) {
 function updateDetectionStatus(status) {
     console.log('Detection status update:', status);
 
-    // Handle old format (boolean) for backwards compatibility
-    if (typeof status === 'boolean') {
-        status = { detected: status, stable_frames: 0, is_stable: false, focus_locked: false };
-    }
-
+    lastDetectionStatus = status;
     cardDetected = status.detected;
     const statusDiv = document.getElementById('detection-status');
     const statusIcon = statusDiv.querySelector('.status-icon');
@@ -362,6 +359,15 @@ function updateDetectionStatus(status) {
         statusText.textContent = 'Manual Mode - Click Capture';
         captureBtn.disabled = false;
         console.log('Capture button ENABLED (detection disabled)');
+        return;
+    }
+
+    // Auto scanning captured this card and waits for the next one
+    if (status.awaiting_new_card) {
+        statusDiv.classList.add('status-locked');
+        statusIcon.textContent = '✅';
+        statusText.textContent = 'Captured - drop the next card';
+        captureBtn.disabled = !status.detected;
         return;
     }
 
@@ -385,7 +391,7 @@ function updateDetectionStatus(status) {
             // Card detected but still stabilizing
             statusDiv.classList.add('status-stabilizing');
             statusIcon.textContent = '🟠';
-            statusText.textContent = `Stabilizing ${status.stable_frames}/${status.required_frames}...`;
+            statusText.textContent = status.in_focus === false ? 'Focusing...' : `Stabilizing ${status.stable_frames}/${status.required_frames}...`;
             console.log('Capture button ENABLED (stabilizing)');
         }
     } else {
@@ -585,6 +591,7 @@ function displayCard(card) {
                 <div class="card-meta">${escapeHtml(card.set)} · #${escapeHtml(card.number)}</div>
                 <div class="card-meta"><span class="card-rarity">${escapeHtml(card.rarity)}</span> · ${escapeHtml(card.type)}</div>
                 ${card.treatments && card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
+                ${card.confirmed === false ? '<div class="card-warning">Printing not confirmed - check the set and number</div>' : ''}
                 <div class="card-prices">${prices.join('<span class="price-sep">·</span>')}</div>
             </div>
         </div>
@@ -1004,8 +1011,8 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.emit('toggle_detection', {enabled: enabled});
         // Log message will be sent from server
 
-        // Update UI immediately
-        updateDetectionStatus(cardDetected);
+        // Update UI immediately (the next poll refreshes it from the server)
+        updateDetectionStatus(lastDetectionStatus);
 
         if (!enabled) {
             // When disabling detection, also stop auto-scanning
@@ -1117,21 +1124,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadAIModels();
     setTimeout(loadAIProvider, 100); // Small delay to ensure models are loaded first
 
-    // Simulate detection status for demo
-    // In production, this would come from the server
-    simulateDetection();
 });
-
-// Temporary: Simulate detection status
-// Remove this when implementing real detection status API
-function simulateDetection() {
-    let detected = false;
-    setInterval(function() {
-        // Randomly toggle for demo (replace with real API call)
-        detected = Math.random() > 0.5;
-        updateDetectionStatus(detected);
-    }, 2000);
-}
 
 // ============================================================================
 // Inventory Viewer Functions

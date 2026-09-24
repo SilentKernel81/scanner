@@ -125,7 +125,8 @@ remembered in `data/settings.json`.
 **Local models**: pick a vision-capable model in **Settings → Vision AI** - the list is loaded
 from your server (or check with `curl http://<server>:11434/api/tags`). Thinking is switched off for Ollama
 requests, so "thinking" models such as `qwen3.5` answer in about a second instead of
-reasoning for tens of seconds.
+reasoning for tens of seconds. The model is preloaded when you start auto scanning and kept
+loaded for 30 minutes, so the first card doesn't wait ~10 s for it to load.
 
 The foil check sends one extra small request per card. It is free with a local model; for
 cloud providers you can turn it off with `vision_ai.detect_foil: false`.
@@ -148,7 +149,7 @@ see `mtg-scanner.service` (it assumes the project lives in `/home/pi/scanner`).
 ### Scanning cards
 
 1. Put a card in front of the camera. It gets an outline in the video and the status pill
-   shows **Stabilizing**, then **Ready**.
+   shows **Focusing** / **Stabilizing**, then **Ready** once the card is still and sharp.
 2. Click **Capture card**, or **Start auto scanning** to capture every time a new card is
    ready.
 3. The card panel shows the identified printing, its price and treatment. The finish
@@ -156,10 +157,18 @@ see `mtg-scanner.service` (it assumes the project lives in `/home/pi/scanner`).
    *"Foil: ★ next to the set code"* or *"only printed in foil"*.
 4. Adjust quantity or condition if needed and click **Add to inventory**, or **Skip**.
 
-In auto scanning, the next capture waits until you've added or skipped the current card.
+Auto scanning is made for dropping cards onto a pile in the box. Each card is captured once:
+after a capture the status shows **Captured - drop the next card**, and the next capture happens
+when a new card has been dropped on top and has settled. The drop is recognized by the motion
+(the card briefly vanishing or jumping, a hand) and by where the new card lands, so two
+identical copies in a row are both captured. In normal mode it also waits until you've added or
+skipped the current card; a card dropped before you click Add is captured right after.
+
 With **Fast Scan mode** (Settings) cards are identified in the background and added
 automatically, so you can keep feeding cards; the *Processing* counter in the top bar shows
-how many are still being identified.
+how many are still being identified. Only cards whose exact printing is confirmed (set code +
+number, or name + number) are added automatically - anything less certain pauses auto
+scanning so you can review it.
 
 ### Searching manually
 
@@ -198,9 +207,10 @@ Settings live in `config.yaml`. The most useful ones:
 | `camera.resolution` / `fps` | `[2560, 1440]` / `20` | Capture resolution and frame rate |
 | `detection.method` | `contour` | `contour` (outline only), `auto` (outline, then YOLO), `yolo` |
 | `detection.allow_landscape` | `false` | Accept cards lying sideways (a card's art box can look like a sideways card) |
-| `auto_capture.delay` | `4.0` | Minimum seconds between automatic captures |
-| `auto_capture.stability_frames` | `5` | Still frames required before capturing |
-| `fast_scan.stability_frames` | `2` | Same, in Fast Scan mode |
+| `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
+| `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
+| `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
+| `fast_scan.stability_frames` | `4` | Same, in Fast Scan mode (~0.15 s, lets a dropped card stop sliding) |
 | `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |
@@ -237,6 +247,11 @@ Logs are written to `data/logs/`:
 
 **No camera found / black video** - check the device number with `v4l2-ctl --list-devices`
 and set `camera.usb_index`. Only one program can use the camera at a time.
+
+**Auto scanning never captures** - the status tells you why: *Focusing* (image not sharp
+enough - check focus, or lower `auto_capture.min_sharpness`), *Stabilizing* (card still
+moving), or *Captured - drop the next card* (it's waiting for a new card to land). The log
+shows *New card detected* with the measured jump and image change for each drop.
 
 **Card not detected** - make sure the whole card is visible with some margin and the
 background contrasts with the border (see *Tips*). For cards without a clear outline, set

@@ -169,7 +169,7 @@ logger = setup_logging()
 scanned_cards_logger = logging.getLogger('scanned_cards')
 
 from config import Config
-from database import CardDatabase
+from database import CardDatabase, CONFIRMED_MATCHES
 from card_search import CardSearcher
 from inventory import InventoryManager
 from cleanup import cleanup_old_images, get_images_stats
@@ -272,7 +272,9 @@ def card_payload(card):
         'price_foil': card['price_foil'],
         'image_uri': card['image_uri'],
         'treatments': card['treatments'],
-        'finishes': card['finishes']
+        'finishes': card['finishes'],
+        # How an AI-identified card was matched (None for manual picks); see CONFIRMED_MATCHES
+        'confirmed': card.get('match') in CONFIRMED_MATCHES if card.get('match') else None
     }
 
 
@@ -315,13 +317,22 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     # Search database
     db_card_info = searcher.search_by_name(card_name, collector_number, ai_model=get_ai_model_info(), set_code=set_code)
 
+    # Fast Scan only adds cards whose exact printing was confirmed (set + number or
+    # name + number); anything less certain pauses auto scanning for a review
+    confirmed = db_card_info is not None and db_card_info.get('match') in CONFIRMED_MATCHES
+    auto_add = was_fast_scan_mode and confirmed
+    if was_fast_scan_mode and not confirmed and scanner:
+        scanner.card_under_review = True
+        what = f"the exact printing of {db_card_info['name']}" if db_card_info else f"'{card_name}'"
+        log_to_client(f"Couldn't confirm {what} - please review (auto scanning paused)", level="warning")
+
     # Log scanned card
     log_scanned_card(
         card_name=card_name,
         collector_number=collector_number,
         ai_model=get_ai_model_info(),
         db_found=(db_card_info is not None),
-        added_to_inventory=was_fast_scan_mode,
+        added_to_inventory=auto_add,
         processing_time=processing_time
     )
 
@@ -329,7 +340,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         current_card_info = db_card_info
         socketio.emit('card_found', {
             'card': card_payload(db_card_info),
-            'auto_add': was_fast_scan_mode
+            'auto_add': auto_add
         }, namespace='/')
     else:
         # Try to find similar cards
@@ -1258,6 +1269,10 @@ def handle_toggle_auto_capture(data):
 
     enabled = data.get('enabled', True)
     scanner.auto_capture_enabled = enabled
+
+    # Load a local AI model now, so the first auto-captured card doesn't wait for it
+    if enabled and scanner.card_identifier:
+        scanner.card_identifier.warm_up()
 
     # When disabling, also clear the card_under_review flag to reset state
     if not enabled:

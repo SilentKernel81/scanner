@@ -46,13 +46,14 @@ focus:
 
 # Auto-capture Settings (now controlled via UI button)
 auto_capture:
-  delay: 4.0  # Seconds to wait before capturing (used for both normal and fast scan mode)
-  stability_frames: 5  # Consecutive frames required for normal mode
+  delay: 1.0  # Minimum seconds between auto-captures (the next capture also waits until the card is swapped)
+  stability_frames: 5  # Consecutive still, in-focus frames required for normal mode
+  min_sharpness: 250  # Don't auto-capture below this sharpness (blurry / still focusing); lower it if cards never become "Ready"
   wait_for_focus: false  # Wait for focus lock
 
 # Fast Scan Mode Settings
 fast_scan:
-  stability_frames: 2  # Consecutive frames required in fast scan mode (lower for speed)
+  stability_frames: 4  # Consecutive still frames in fast scan mode (~0.15 s - lets a dropped card stop sliding)
 
 # Vision AI Settings
 vision_ai:

@@ -9,6 +9,7 @@ import io
 import os
 import logging
 import re
+import threading
 import time
 import cv2
 from PIL import Image
@@ -136,6 +137,9 @@ Your response:"""
     FOIL_SYMBOL_PROMPT = ("This is the bottom-left corner of a Magic: The Gathering card. The last line shows a set code, "
                           "a small separator symbol, and a language code - for example 'HOB • EN' or 'HOB ★ EN'. "
                           "Is the separator a five-pointed STAR or a round DOT? Answer with one word: star, dot, or unclear.")
+
+    # How long Ollama keeps the model loaded after a request (its default is 5 minutes)
+    OLLAMA_KEEP_ALIVE = "30m"
 
     def log(self, message, level="info"):
         """Send log message to both file logger and UI callback"""
@@ -371,6 +375,7 @@ Your response:"""
             "messages": [{"role": "user", "content": prompt, "images": [base64_image]}],
             "stream": False,
             "think": False,  # Thinking models otherwise spend the token budget reasoning and return no answer
+            "keep_alive": self.OLLAMA_KEEP_ALIVE,
             "options": {"temperature": 0}
         }
 
@@ -394,6 +399,26 @@ Your response:"""
         except Exception as e:
             self.log(f"Ollama native API error: {e}", level="warning")
             return None
+
+    def warm_up(self):
+        """
+        Preload the local model so the first card isn't slowed down by loading it
+        (Ollama unloads idle models; loading a 9B model takes ~10 s). Runs in the
+        background; no-op for cloud providers.
+        """
+        if self.provider != 'local' or '/v1/chat/completions' not in self.local_endpoint:
+            return
+
+        def load():
+            ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
+            try:
+                # An empty message list just loads the model
+                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120)
+                self.log(f"Local model {self.model} loaded")
+            except Exception as e:
+                self.log(f"Could not preload local model: {e}", level="warning")
+
+        threading.Thread(target=load, daemon=True, name="AI-Warmup").start()
 
     def _ask_openai_compatible(self, base64_image, prompt, max_tokens):
         """OpenAI-compatible endpoint on a local server"""

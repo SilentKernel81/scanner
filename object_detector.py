@@ -94,13 +94,17 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
     return best[1] / scale, float(best[2])
 
 
-def warp_card(frame, corners):
-    """Perspective-correct the card inside `corners` into a flat, portrait image"""
+def warp_card(frame, corners, out_h=None):
+    """
+    Perspective-correct the card inside `corners` into a flat, portrait image.
+    out_h: output height (default: the card's own height in the frame)
+    """
     tl, tr, br, bl = corners
     if np.linalg.norm(tr - tl) > np.linalg.norm(bl - tl):
         # Card lying sideways - rotate so the output is portrait
         tl, tr, br, bl = bl, tl, tr, br
-    out_h = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
+    if out_h is None:
+        out_h = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
     out_w = int(out_h / CARD_ASPECT_RATIO)
     src = np.array([tl, tr, br, bl], dtype=np.float32)
     dst = np.array([[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32)

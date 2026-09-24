@@ -116,6 +116,12 @@ All settings centralized in `config.py`:
 **Why Collector Number Matters:**
 Cards with same name can have different printings (sets, art, rarities, prices). Using collector number ensures we identify the EXACT version of the card being scanned.
 
+### Auto-Capture Rules (scanner.py)
+- A frame counts toward `stable_frames` only if the card is settled (`_is_card_settled`): corners moved < 1% of card size, sharpness changed < 20% (autofocus) and sharpness >= `auto_capture.min_sharpness`
+- Cards are dropped onto a pile, so the view never empties. After any capture `awaiting_new_card` is set; `_new_card_arrived()` re-arms on a drop: a jump > 3% of card size or card-image change > 0.3 (tiny normalized thumbnails), the card reappearing > 0.8% away after a detection gap, a card gone for >= 6 frames, or a different-looking card than the captured one. Measured noise of a card lying still: movement <= 0.4%, image change <= 0.07, detection gaps <= 2 frames
+- Fast Scan auto-adds only `CONFIRMED_MATCHES` (database.py: set+number or name+number); other results pause auto scanning (`card_under_review`) for review
+- Local Ollama models are preloaded (`CardIdentifier.warm_up`) when auto scanning starts and kept loaded 30 min (`keep_alive`)
+
 ### Frame Processing Pipeline
 1. Capture frame (RGB)
 2. Run YOLO detection (if enabled)

@@ -57,12 +57,13 @@ class Config:
     FOCUS_LOCK_ON_STABLE = config.get('focus', 'lock_on_stable', default=False)
 
     # Auto-capture settings (enabled state now controlled via UI button)
-    AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=4.0)
+    AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=1.0)
     AUTO_CAPTURE_STABILITY_FRAMES = config.get('auto_capture', 'stability_frames', default=5)
+    AUTO_CAPTURE_MIN_SHARPNESS = config.get('auto_capture', 'min_sharpness', default=250)
     AUTO_CAPTURE_WAIT_FOR_FOCUS = config.get('auto_capture', 'wait_for_focus', default=False)
 
     # Fast scan mode settings
-    FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=2)
+    FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=4)
 
     # Flask settings
     SECRET_KEY = config.get('flask', 'secret_key', default='card_scanner_secret_key_change_in_production')

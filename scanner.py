@@ -45,6 +45,17 @@ class CardScanner:
         self.stable_frames = 0
         self.required_stable_frames = 5  # Require 5 stable frames before capture
         self.frames_since_card_lost = 0  # Track frames without card detection
+        self.previous_card_points = None  # Card corners in the previous frame (stillness check)
+        self.previous_sharpness = None  # Card sharpness in the previous frame (autofocus check)
+        self.card_in_focus = False  # Card sharpness above auto_capture.min_sharpness
+        self.previous_thumbnail = None  # Tiny normalized card image of the previous frame
+        self.captured_thumbnail = None  # Tiny normalized card image at the last capture
+        self.card_disturbed = False  # Latest frame showed a jump (a card being dropped, a hand)
+        self.missing_frames = 0  # Consecutive frames without a real detection
+        # Cards are dropped onto a stack, so the view never empties: after a capture,
+        # auto-capture waits for the next drop (see _new_card_arrived) so the same card
+        # is never captured twice
+        self.awaiting_new_card = False
 
         # User settings
         self.settings = Settings()
@@ -83,6 +94,10 @@ class CardScanner:
         # Card size detection - keep box visible longer for card-sized objects
         self.last_card_detection = None  # Store last valid card detection (bbox, time)
         self.card_display_duration = 6.0  # Keep detection box visible for 6 seconds (increased from 3.0 for stability)
+        # Frames without a card that always count as a change of card (the detector can
+        # miss 1-2 frames of a card lying still; shorter gaps are judged by where the
+        # card reappears, see _new_card_arrived)
+        self.missing_frames_for_new_card = 6
         self.card_aspect_ratio_target = 88.0 / 63.0  # Magic card: 88mm x 63mm = 1.397
         self.aspect_ratio_tolerance = Config.ASPECT_RATIO_TOLERANCE  # Load from config (adjustable in config.yaml)
 
@@ -229,6 +244,80 @@ class CardScanner:
         self.smoothed_bbox = (x1_smooth, y1_smooth, x2_smooth, y2_smooth)
         return self.smoothed_bbox
 
+    def _is_card_settled(self, frame, points):
+        """
+        True if the card is still and in focus: its corners moved less than ~1% of the
+        card size since the previous frame, its sharpness changed by less than 20%
+        (autofocus still adjusting changes it a lot between frames), and the image is
+        sharp enough to read (a camera that hasn't focused yet is steady but blurry).
+        """
+        points = np.asarray(points, dtype=np.float32)
+        x1, y1 = np.maximum(points.min(axis=0).astype(int), 0)
+        x2, y2 = points.max(axis=0).astype(int)
+        region = frame[y1:y2, x1:x2]
+        if region.size == 0:
+            return False
+        small = cv2.resize(region, (160, max(1, int(160 * region.shape[0] / region.shape[1]))), interpolation=cv2.INTER_AREA)
+        sharpness = cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var()
+
+        self.card_in_focus = bool(sharpness >= Config.AUTO_CAPTURE_MIN_SHARPNESS)  # plain bool: sent as JSON
+        thumbnail = self._card_thumbnail(frame, points)
+
+        previous_points, previous_sharpness = self.previous_card_points, self.previous_sharpness
+        previous_thumbnail = self.previous_thumbnail
+        self.previous_card_points, self.previous_sharpness, self.previous_thumbnail = points, sharpness, thumbnail
+        if previous_points is None or previous_sharpness is None:
+            self.card_disturbed = True
+            return False
+
+        card_size = np.linalg.norm(points[2] - points[0])
+        movement = np.linalg.norm(points - previous_points, axis=1).max() / card_size
+        sharpness_change = abs(sharpness - previous_sharpness) / max(previous_sharpness, 1e-6)
+        image_change = self._thumbnail_difference(thumbnail, previous_thumbnail)
+
+        # A drop (or a hand) makes the card jump or change far beyond camera noise
+        # (measured on a card lying still: movement <= 0.4%, image change <= 0.07)
+        self.card_disturbed = movement > 0.03 or image_change > 0.3
+        self.last_frame_change = (movement, image_change)
+        return movement < 0.01 and sharpness_change < 0.2 and self.card_in_focus
+
+    @staticmethod
+    def _card_thumbnail(frame, points):
+        """Tiny, brightness-normalized, perspective-corrected card image for comparisons"""
+        card = warp_card(frame, points, out_h=180)
+        gray = cv2.cvtColor(cv2.resize(card, (32, 45), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        return (gray - gray.mean()) / (gray.std() + 1e-6)
+
+    @staticmethod
+    def _thumbnail_difference(a, b):
+        """Mean difference between two card thumbnails (0 = identical)"""
+        if a is None or b is None or a.shape != b.shape:
+            return 0.0
+        return float(np.abs(a - b).mean())
+
+    def _new_card_arrived(self, gap):
+        """
+        After a capture: has the next card been dropped onto the pile?
+        - the card jumped or its image changed sharply (the drop itself, a hand), or
+        - it reappears after a short gap in a different spot: a falling card usually
+          can't be detected for a few frames, and a dropped card never lands exactly
+          where the previous one lay (a detector hiccup leaves it within ~0.3%), or
+        - the card on the pile looks different from the captured one.
+        Identical copies are caught by the drop, not by their looks.
+        gap: frames without a detection just before this one
+        """
+        if self.card_disturbed:
+            return True
+        movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
+        if gap >= 1 and movement > 0.008:
+            return True
+        return self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3
+
+    def _mark_captured(self):
+        """Remember the captured card; auto-capture waits for the next one"""
+        self.awaiting_new_card = True
+        self.captured_thumbnail = self.previous_thumbnail
+
     def detect_camera_type(self):
         """Auto-detect available camera"""
         camera_type = Config.CAMERA_TYPE.lower()
@@ -319,6 +408,7 @@ class CardScanner:
 
             # If successful, replace the old identifier
             self.card_identifier = new_identifier
+            new_identifier.warm_up()
 
             # Save the selection to settings for persistence
             self.settings.set_ai_provider(provider, model)
@@ -451,6 +541,13 @@ class CardScanner:
                     )
 
                     if bounding_box:
+                        gap = self.missing_frames  # frames without a card just before this one
+                        self.missing_frames = 0
+                        # Measure movement on the raw detection, before smoothing
+                        raw_points = corners if corners is not None else np.array(
+                            [[bounding_box[0], bounding_box[1]], [bounding_box[2], bounding_box[1]],
+                             [bounding_box[2], bounding_box[3]], [bounding_box[0], bounding_box[3]]], dtype=np.float32)
+
                         # Apply smoothing to eliminate flicker
                         smoothed_box = self.smooth_bounding_box(bounding_box)
 
@@ -479,8 +576,18 @@ class CardScanner:
                                 # Card is detected - reset lost frames counter
                                 self.frames_since_card_lost = 0
 
-                                # Track stable frames
-                                self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
+                                # Count consecutive frames where the card is still and in focus
+                                if self._is_card_settled(frame, raw_points):
+                                    self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
+                                else:
+                                    self.stable_frames = 0
+
+                                if self.awaiting_new_card and self._new_card_arrived(gap):
+                                    self.awaiting_new_card = False
+                                    self.stable_frames = 0  # the new card must settle first
+                                    if self.auto_capture_enabled:
+                                        movement, image_change = getattr(self, 'last_frame_change', (0, 0))
+                                        self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
                             else:
                                 # Not card-sized - ignore this detection
                                 # Log occasionally for debugging (throttled to avoid spam, controlled by UI toggle)
@@ -507,6 +614,17 @@ class CardScanner:
                     else:
                         # No current detection - signal to smoothing algorithm
                         self.smooth_bounding_box(None)
+
+                        # A cached (held) detection is not a still card: the next card
+                        # must settle from scratch
+                        self.stable_frames = 0
+
+                        # Card gone for more than a detector hiccup: treat as a change of card
+                        self.missing_frames += 1
+                        if self.awaiting_new_card and self.missing_frames >= self.missing_frames_for_new_card:
+                            self.awaiting_new_card = False
+                            if self.auto_capture_enabled:
+                                self.log("Card gone - ready for the next card")
 
                         # Check if we have a recent cached card detection
                         if self.last_card_detection:
@@ -535,12 +653,9 @@ class CardScanner:
                             # No cached detection available
                             self.frames_since_card_lost += 1
 
-                        # Reset stability if no detection (cached or current)
-                        if not display_bbox:
-                            self.stable_frames = 0
-                            # Reset smoothed bounding box after losing card for several frames
-                            if self.frames_since_card_lost > 10:
-                                self.smoothed_bbox = None
+                        # Reset smoothed bounding box after losing card for several frames
+                        if not display_bbox and self.frames_since_card_lost > 10:
+                            self.smoothed_bbox = None
 
                         # Update detection state
                         if not display_bbox:
@@ -572,13 +687,19 @@ class CardScanner:
                         if is_cached_detection:
                             time_remaining = self.card_display_duration - (time.time() - self.last_card_detection['time'])
                             label += f" [HOLD {time_remaining:.1f}s]"
+                        elif self.awaiting_new_card and self.auto_capture_enabled:
+                            label += " [Captured - drop next card]"
+                        elif not self.card_in_focus:
+                            label += " [Focusing]"
                         elif self.stable_frames < self.required_stable_frames:
                             label += f" [Stabilizing {self.stable_frames}/{self.required_stable_frames}]"
                         else:
                             label += " [Ready]"
 
-                        cv2.putText(annotated, label, (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2)
+                        # Scale the label with the frame so it stays readable in the (downscaled) stream
+                        text_scale = max(0.7, frame.shape[1] / 1280 * 0.7)
+                        cv2.putText(annotated, label, (x1, max(int(30 * text_scale), y1 - 10)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, text_scale, box_color, max(2, int(2 * text_scale)))
 
                         # Auto-capture logic: Trigger when card-sized object is stable and ready
                         # Re-check auto_capture_enabled right before triggering to avoid race conditions
@@ -586,6 +707,7 @@ class CardScanner:
                             self.auto_capture_enabled and
                             not is_cached_detection and  # Only auto-capture current detections, not cached ones
                             not self.card_under_review and  # Don't auto-capture if card is being reviewed
+                            not self.awaiting_new_card and  # Still the card from the last capture
                             (display_corners is not None or self.is_card_sized(display_bbox)) and
                             self.stable_frames >= self.required_stable_frames):
 
@@ -605,6 +727,7 @@ class CardScanner:
                                     self.log(f"Auto-capturing card (stable={self.stable_frames}/{self.required_stable_frames}, cooldown={time_since_last_capture:.1f}s)", level="info")
                                     self.last_auto_capture_time = time.time()
                                     self.card_under_review = True  # Set flag to prevent further auto-captures
+                                    self._mark_captured()  # Next auto-capture needs a new card
                                     # Call the callback in a non-blocking way
                                     threading.Thread(target=self.auto_capture_callback).start()
 
@@ -658,7 +781,9 @@ class CardScanner:
                 'detected': self.card_detected,
                 'stable_frames': self.stable_frames,
                 'required_frames': self.required_stable_frames,
-                'is_stable': self.stable_frames >= self.required_stable_frames
+                'is_stable': self.stable_frames >= self.required_stable_frames,
+                'awaiting_new_card': self.awaiting_new_card and self.auto_capture_enabled,
+                'in_focus': self.card_in_focus
             }
 
     def capture_card_image_only(self, card_number):
@@ -674,6 +799,7 @@ class CardScanner:
         time.sleep(0.3)  # Brief pause to let autofocus settle
 
         card_image, card_name, is_warped = self.get_detected_card()
+        self._mark_captured()  # don't auto-capture this card again
 
         if card_image is None:
             # No card detected - capture full frame

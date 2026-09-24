@@ -69,6 +69,10 @@ PROMO_TYPE_LABELS = {
 }
 
 
+# Matches that identify the exact printing (safe to add to the inventory without review)
+CONFIRMED_MATCHES = {'set_number', 'name_number'}
+
+
 def collector_number_variants(collector_number):
     """
     Collector numbers a scanned/typed number may correspond to in Scryfall data
@@ -388,7 +392,7 @@ class CardDatabase:
                 if set_number_row and names_match(card_name, set_number_row):
                     logger.info(f"Found by set + number: {set_number_row['name']} "
                                 f"({set_number_row['set_code']} #{set_number_row['collector_number']})")
-                    return self._format_card_result(set_number_row)
+                    return self._tagged(set_number_row, 'set_number')
                 if set_number_row:
                     logger.warning(f"{set_code} #{collector_number} is '{set_number_row['name']}', not '{card_name}' - searching by name")
 
@@ -405,7 +409,7 @@ class CardDatabase:
                     result = cursor.fetchone()
                     if result:
                         logger.info(f"Found name match with collector number: {result['name']} #{result['collector_number']}")
-                        return self._format_card_result(result)
+                        return self._tagged(result, 'name_number')
 
             # Step 3: Name only
             match = self.search_card(card_name, fuzzy=True)
@@ -417,7 +421,7 @@ class CardDatabase:
                 ''', (match['name'], *number_variants))
                 result = cursor.fetchone()
                 if result:
-                    return self._format_card_result(result)
+                    return self._tagged(result, 'name_number')
 
             # Number didn't match: prefer a printing of this card from the same set
             if match and set_code:
@@ -426,13 +430,23 @@ class CardDatabase:
                     ORDER BY CAST(collector_number AS INTEGER) LIMIT 1
                 ''', (match['name'], set_code.strip().lower())).fetchone()
                 if result:
-                    return self._format_card_result(result)
+                    return self._tagged(result, 'name_set')
 
             # Name not found at all (badly misread): trust the printed set + number
             if not match and set_number_row:
                 logger.warning(f"No card named '{card_name}' - using {set_code} #{collector_number}: {set_number_row['name']}")
-                return self._format_card_result(set_number_row)
+                return self._tagged(set_number_row, 'set_number_unverified')
             return match
+
+    def _tagged(self, row, match):
+        """
+        Card dict plus how it was matched: 'set_number' / 'name_number' (the printing is
+        confirmed - see CONFIRMED_MATCHES), 'name_set', 'name', 'fuzzy' or
+        'set_number_unverified' (the printed set + number, name not recognized)
+        """
+        card = self._format_card_result(row)
+        card['match'] = match
+        return card
 
     def _find_by_set_number(self, set_code, number_variants):
         """Row for a set code + collector number (any of the number variants), or None"""
@@ -464,7 +478,7 @@ class CardDatabase:
                 SELECT * FROM cards WHERE name_search = ? OR flavor_search = ? LIMIT 1
             ''', (key, key)).fetchone()
             if result:
-                return self._format_card_result(result)
+                return self._tagged(result, 'name')
 
             # Shortened legendary name ("Thanos" -> "Thanos, the Mad Titan") - fuzzy
             # matching on whole names would prefer unrelated cards like "Thayan Evokers"
@@ -473,7 +487,7 @@ class CardDatabase:
             ''', (key + ',%', key + ',%')).fetchone()
             if result:
                 logger.info(f"Found card via shortened name: {card_name} -> {result['name']}")
-                return self._format_card_result(result)
+                return self._tagged(result, 'name')
 
             if not fuzzy:
                 return None
@@ -498,7 +512,7 @@ class CardDatabase:
                 result = cursor.execute('SELECT * FROM cards WHERE name = ? LIMIT 1', (lookup_name,)).fetchone()
                 if result:
                     logger.info(f"Found card via fuzzy match: {card_name} -> {lookup_name}")
-                    return self._format_card_result(result)
+                    return self._tagged(result, 'fuzzy')
 
             return None
 

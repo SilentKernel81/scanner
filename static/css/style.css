@@ -278,11 +278,11 @@ body {
     line-height: 1;
 }
 
-.status-stabilizing { border-color: var(--warning); }
+.status-stabilizing .status-indicator { border-color: var(--warning); }
 .status-stabilizing .status-text { color: #fcd34d; }
-.status-ready { border-color: var(--success); }
+.status-ready .status-indicator { border-color: var(--success); }
 .status-ready .status-text { color: #86efac; }
-.status-locked { border-color: var(--info); }
+.status-locked .status-indicator { border-color: var(--info); }
 .status-locked .status-text { color: #7dd3fc; }
 
 .controls {
@@ -641,6 +641,11 @@ input[type="radio"] {
 
 .card-rarity {
     text-transform: capitalize;
+}
+
+.card-warning {
+    font-size: 12px;
+    color: var(--warning);
 }
 
 .card-prices {
