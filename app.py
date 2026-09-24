@@ -619,39 +619,15 @@ def index():
 
 
 def generate_frames():
-    """Generate frames for video streaming"""
-    global scanner
-
-    # Target streaming resolution (optimized for bandwidth)
-    STREAM_WIDTH = 1280  # Half of 2560
-    STREAM_HEIGHT = 720  # Half of 1440
-
+    """MJPEG stream of the annotated live view (each new frame once; encoding is shared)"""
+    last_id = -1
     while True:
-        if scanner:
-            frame = scanner.get_frame(annotated=True)
-
-            if frame is not None:
-                # Downscale for streaming (significant bandwidth savings)
-                if frame.shape[0] > STREAM_HEIGHT:
-                    scale_factor = STREAM_HEIGHT / frame.shape[0]
-                    new_width = int(frame.shape[1] * scale_factor)
-                    frame = cv2.resize(frame, (new_width, STREAM_HEIGHT), interpolation=cv2.INTER_AREA)
-
-                # Convert to BGR for JPEG encoding
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-                # Adaptive quality: higher when card detected (clear view), lower during scanning (bandwidth savings)
-                # Quality 65 for normal scanning, 75 when card detected for better clarity
-                quality = 75 if (scanner and scanner.card_detected) else 65
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-                ret, buffer = cv2.imencode('.jpg', frame_bgr, encode_params)
-
-                if ret:
-                    frame_bytes = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-        time.sleep(0.033)  # ~30 FPS
+        frame_id, jpeg = scanner.get_stream_jpeg() if scanner else (-1, None)
+        if jpeg is None or frame_id == last_id:
+            time.sleep(0.01)
+            continue
+        last_id = frame_id
+        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n'
 
 
 @app.route('/video_feed')

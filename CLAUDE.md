@@ -66,6 +66,10 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **The camera is exclusive**: only one process can open it; stop the running app before
   testing with the real camera. Camera *controls* (`v4l2-ctl -c ...`) can be changed while
   another process streams - handy for focus experiments measured through `/video_feed`.
+- **Frame sizes**: with a raw-JPEG camera ≥ 1920 px wide, `current_frame`, detections, corners
+  and the stream are **half size**; only captures decode full size (`get_detected_card`,
+  `get_full_frame`). Don't crop captures from `current_frame` directly.
+- **CPU**: `cv2.setNumThreads(2)` in scanner.py - OpenCV's default (all cores) doubled CPU use.
 - **Focus timing**: a `focus_absolute` change takes ~0.4 s to show up in frames; measure after
   that, or sweeps score the previous lens position.
 - **Ollama**: requests must send `think: false` (thinking models otherwise return empty answers)

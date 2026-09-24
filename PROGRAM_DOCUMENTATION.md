@@ -89,6 +89,16 @@ camera frame ──> outline detection ──> settled? ──> new card? ──
 
 ## Card detection
 
+**Frames.** USB cameras deliver MJPEG; the scanner asks OpenCV for the raw JPEG
+(`CAP_PROP_CONVERT_RGB = 0`) and `grab()`s every frame off the camera (so frames are never stale)
+but decodes only `camera.fps` of them. For cameras of 1920 px and wider, live frames are decoded
+at **half size** (2560 × 1440 → 1280 × 720): detection, stability, focus measurement and the
+preview stream all work at that size, and a capture decodes the stored JPEG at full size and
+scales the card's corners up (`get_detected_card`, `get_full_frame`). OpenCV runs with 2 threads
+(`cv2.setNumThreads(2)`) - its default of one thread per core spent more CPU spin-waiting than
+working. The preview stream encodes each new frame once, shared by all browser tabs
+(`get_stream_jpeg`).
+
 `object_detector.find_card_outline(frame)` runs on every frame (~3 ms):
 
 1. Downscale to 640 px on the long side, grayscale, Gaussian blur.
@@ -313,10 +323,13 @@ Measured on an x86-64 laptop with an Anker PowerConf C200 at 2560 × 1440 and a 
 
 | Step | Time |
 |---|---|
-| Camera | 27–29 fps at 2560 × 1440 (MJPEG) |
+| Camera | 27–29 fps at 2560 × 1440 (MJPEG); 20 fps processed (`camera.fps`) |
+| Per processed frame | ~10 ms (half-size decode, detection, stability) - was ~24 ms at full size |
+| App CPU while scanning | ~20–25% of one core - was ~120% (full-size decode, 8 OpenCV threads) |
 | Outline detection | ~3 ms per frame (YOLO on CPU: ~550 ms) |
 | Card landed → capture | ~0.15–0.5 s (settling) |
-| AI identification | 0.7–1.3 s (+ ~0.6 s foil check); ~10 s once if the model has to load |
+| AI identification | 0.7–1.3 s; the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
+| Smaller images to the AI | tested and rejected: 1024 px was 30% faster but misread 2 of 16 cards |
 | Set + number lookup | 0.1 ms; fuzzy name search ~90 ms |
 
 ## Known limitations

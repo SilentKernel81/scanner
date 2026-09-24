@@ -20,6 +20,10 @@ from settings import Settings
 # Create scanner logger
 logger = logging.getLogger('scanner')
 
+# OpenCV spreads each small operation over all CPU cores and its idle workers spin-wait:
+# with 8 threads the capture loop used 121% of a core, with 2 it uses 59% at the same speed
+cv2.setNumThreads(2)
+
 
 def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_step=10, settle=0.2):
     """
@@ -72,7 +76,13 @@ class CardScanner:
         self.log_callback = log_callback
         self.camera = None
         self.camera_type = None
-        self.current_frame = None
+        self.current_frame = None  # Live frame (RGB) - half resolution with a raw-JPEG camera
+        self.current_raw = None  # The camera's JPEG of current_frame (full-resolution source), or None
+        self.raw_mjpeg = False  # Camera delivers raw JPEG: decode at half size live, full size on capture
+        self.half_size_decode = False
+        self.next_retrieve = 0.0  # When the next raw frame is due for decoding (CAMERA_FPS pacing)
+        self.frame_id = 0  # Increments with every processed frame (stream skips repeats)
+        self._stream_cache = (-1, None)
         self.annotated_frame = None  # Frame with card detection overlay
         self.detected_card = None  # (frame, bbox, corners) of the detected card - see get_detected_card()
         self.detected_card_name = "" # Name of the detected card
@@ -546,6 +556,19 @@ class CardScanner:
         # Give camera time to initialize
         time.sleep(2)
 
+        # Ask OpenCV for the camera's raw JPEG instead of decoded frames: live frames are
+        # then decoded at half size (detection, preview) and full size only for captures
+        self.camera.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+        ret, raw = self.camera.read()
+        if ret and raw is not None and raw.ndim == 2 and raw.size > 2 and bytes(raw.ravel()[:2]) == b'\xff\xd8':
+            full = cv2.imdecode(raw.ravel(), cv2.IMREAD_COLOR)
+            self.raw_mjpeg = full is not None
+            self.half_size_decode = self.raw_mjpeg and full.shape[1] >= 1920
+        if not self.raw_mjpeg:
+            self.camera.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+        self.log("Frames: " + ("raw JPEG, live view decoded at half size" if self.half_size_decode
+                               else "raw JPEG" if self.raw_mjpeg else "decoded by OpenCV"))
+
         self.log(f"USB camera initialized (index: {Config.USB_CAMERA_INDEX})")
     
     def _initialize_picamera(self):
@@ -569,14 +592,36 @@ class CardScanner:
         """Continuously capture frames and perform object detection"""
         while self.running:
             try:
-                if self.camera_type == 'usb':
+                raw = None
+                if self.camera_type == 'usb' and self.raw_mjpeg:
+                    # grab() takes every frame off the camera (so the next one is fresh, no
+                    # stale buffered frames) without decoding; only CAMERA_FPS are decoded
+                    if not self.camera.grab():
+                        self.log("Failed to read frame from USB camera", level="error")
+                        time.sleep(0.1)
+                        continue
+                    now = time.time()
+                    if now < self.next_retrieve:
+                        continue
+                    # Keep a steady CAMERA_FPS schedule (e.g. 2 of every 3 frames of a 30 fps camera)
+                    self.next_retrieve = max(self.next_retrieve + 1.0 / Config.CAMERA_FPS, now - 1.0 / Config.CAMERA_FPS)
+                    ret, raw = self.camera.retrieve()
+                    if not ret or raw is None:
+                        continue
+                    raw = raw.ravel()
+                    frame = cv2.imdecode(raw, cv2.IMREAD_REDUCED_COLOR_2 if self.half_size_decode else cv2.IMREAD_COLOR)
+                    if frame is None:
+                        continue  # corrupt JPEG from the camera
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                elif self.camera_type == 'usb':
                     ret, frame = self.camera.read()
                     if not ret:
                         self.log("Failed to read frame from USB camera", level="error")
                         time.sleep(0.1)
                         continue
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
+
                 elif self.camera_type == 'picamera':
                     frame = self.camera.capture_array()
                     if len(frame.shape) == 3 and frame.shape[2] == 4:
@@ -636,7 +681,8 @@ class CardScanner:
                                     'name': card_name,
                                     'confidence': confidence,
                                     'time': time.time(),
-                                    'frame': frame
+                                    'frame': frame,
+                                    'raw': raw
                                 }
                                 display_bbox = bounding_box
                                 display_corners = corners
@@ -673,7 +719,7 @@ class CardScanner:
                             # Keep the card (only if it passed the card checks) for capture
                             if display_bbox:
                                 with self.frame_lock:
-                                    self.detected_card = (frame, display_bbox, corners)
+                                    self.detected_card = (frame, display_bbox, corners, raw)
                                     self.detected_card_name = card_name
                                     self.card_detected = True
                             else:
@@ -710,7 +756,8 @@ class CardScanner:
 
                                 # Make the cached card available for capture
                                 with self.frame_lock:
-                                    self.detected_card = (self.last_card_detection['frame'], display_bbox, display_corners)
+                                    self.detected_card = (self.last_card_detection['frame'], display_bbox, display_corners,
+                                                          self.last_card_detection['raw'])
                                     self.detected_card_name = card_name
                                     self.card_detected = True
 
@@ -804,9 +851,12 @@ class CardScanner:
 
                 with self.frame_lock:
                     self.current_frame = frame
+                    self.current_raw = raw
                     self.annotated_frame = annotated
-                    
-                time.sleep(1.0 / Config.CAMERA_FPS)
+                    self.frame_id += 1
+
+                if raw is None:  # grab() already paces raw-JPEG cameras
+                    time.sleep(1.0 / Config.CAMERA_FPS)
             except Exception as e:
                 self.log(f"Error capturing frame: {e}", level="error")
                 time.sleep(0.1)
@@ -819,6 +869,37 @@ class CardScanner:
             elif self.current_frame is not None:
                 return self.current_frame.copy()
         return None
+
+    def get_full_frame(self):
+        """Current frame at full camera resolution (RGB) - for captures"""
+        with self.frame_lock:
+            frame, raw = self.current_frame, self.current_raw
+        if raw is not None and self.half_size_decode:
+            return cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+        return None if frame is None else frame.copy()
+
+    def get_stream_jpeg(self, max_height=720):
+        """
+        (frame_id, JPEG bytes) of the annotated live view. Each frame is encoded once, no
+        matter how many browser tabs are watching; callers skip ids they already sent.
+        """
+        with self.frame_lock:
+            frame_id, annotated, card_detected = self.frame_id, self.annotated_frame, self.card_detected
+            cached_id, cached_jpeg = self._stream_cache
+        if annotated is None:
+            return -1, None
+        if cached_id == frame_id:
+            return frame_id, cached_jpeg
+        if annotated.shape[0] > max_height:
+            width = int(annotated.shape[1] * max_height / annotated.shape[0])
+            annotated = cv2.resize(annotated, (width, max_height), interpolation=cv2.INTER_AREA)
+        # Higher quality while a card is in view
+        ok, buffer = cv2.imencode('.jpg', cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR),
+                                  [int(cv2.IMWRITE_JPEG_QUALITY), 75 if card_detected else 65])
+        jpeg = buffer.tobytes() if ok else None
+        with self.frame_lock:
+            self._stream_cache = (frame_id, jpeg)
+        return frame_id, jpeg
     
     def get_detected_card(self):
         """
@@ -834,7 +915,15 @@ class CardScanner:
             return None, "", False
 
         # Frames are never modified after capture, so cropping outside the lock is safe
-        frame, bbox, corners = detected
+        frame, bbox, corners, raw = detected
+        if raw is not None and self.half_size_decode:
+            # Detection ran on the half-size frame: cut the card from the full-size image
+            full = cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            scale_x, scale_y = full.shape[1] / frame.shape[1], full.shape[0] / frame.shape[0]
+            frame = full
+            if corners is not None:
+                corners = corners * np.array([scale_x, scale_y], dtype=np.float32)
+            bbox = (int(bbox[0] * scale_x), int(bbox[1] * scale_y), int(bbox[2] * scale_x), int(bbox[3] * scale_y))
         if corners is not None:
             return warp_card(frame, corners), card_name, True
         x1, y1, x2, y2 = bbox
@@ -876,7 +965,7 @@ class CardScanner:
         if card_image is None:
             # No card detected - capture full frame
             self.log("No card detected, capturing full frame", level="info")
-            frame = self.get_frame(annotated=False)
+            frame = self.get_full_frame()
             if frame is None:
                 self.log("Failed to capture frame", level="error")
                 return None, None, False
@@ -912,7 +1001,18 @@ class CardScanner:
         card_info = None
         if self.card_identifier:
             self.log("Identifying card with Vision AI...")
+            # The foil check runs alongside the identification (saves ~0.3 s per card with
+            # Ollama, more with cloud providers that serve requests in parallel)
+            foil_result = {}
+            foil_thread = None
+            if detect_foil and Config.VISION_AI_DETECT_FOIL:
+                foil_thread = threading.Thread(
+                    target=lambda: foil_result.update(foil=self.card_identifier.read_foil_symbol(card_image_rgb)),
+                    daemon=True)
+                foil_thread.start()
             card_info = self.card_identifier.identify_card(card_image_rgb)
+            if foil_thread:
+                foil_thread.join(timeout=60)
 
             if card_info and card_info.get('name'):
                 name = card_info['name']
@@ -922,9 +1022,7 @@ class CardScanner:
                 else:
                     self.log(f"✓ Card identified: {name} (no collector number)", level="success")
 
-                card_info['foil'] = 'unknown'
-                if detect_foil and Config.VISION_AI_DETECT_FOIL:
-                    card_info['foil'] = self.card_identifier.read_foil_symbol(card_image_rgb)
+                card_info['foil'] = foil_result.get('foil', 'unknown')
             else:
                 self.log("Vision AI could not identify card", level="warning")
         else:
