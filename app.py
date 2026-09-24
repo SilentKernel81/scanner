@@ -24,6 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 # Load API keys etc. from .env before config is imported (config reads env vars)
 load_dotenv(Path(__file__).parent / '.env')
 
+# Keys entered in the web interface (data/api_keys.env) override .env
+from api_keys import load_saved_keys, credential_status, save_credential  # noqa: E402
+load_saved_keys()
+
 # ============================================================================
 # Logging Configuration
 # ============================================================================
@@ -917,6 +921,12 @@ def get_ai_provider():
     })
 
 
+@app.route('/api/ai_credentials')
+def get_ai_credentials():
+    """Per provider: whether an API key is set (masked, never the full key) / the local endpoint"""
+    return jsonify(credential_status())
+
+
 @app.route('/api/ai_models')
 def get_ai_models():
     """Get available models for all providers"""
@@ -1416,6 +1426,19 @@ def handle_set_ai_provider(data):
         logger.error(f"Failed to set AI provider: {result['message']}")
 
 
+@socketio.on('save_ai_credential')
+def handle_save_ai_credential(data):
+    """Save a provider's API key (or the local endpoint) entered in Settings"""
+    provider = (data.get('provider') or '').lower()
+    try:
+        save_credential(provider, data.get('value', ''))
+    except (ValueError, OSError) as e:
+        emit('error', {'message': f'Could not save: {e}'})
+        return
+    logger.info(f"Credential for {provider} {'saved' if data.get('value') else 'removed'} from the web interface")
+    emit('ai_credential_saved', {'provider': provider, 'status': credential_status()[provider]})
+
+
 @socketio.on('update_database')
 def handle_update_database():
     """Handle database update request"""
@@ -1598,7 +1621,7 @@ def main():
     else:
         logger.warning("Vision AI disabled - no API key configured")
         print(f"⚠ Vision AI disabled")
-        print(f"  To enable: Set {Config.VISION_AI_PROVIDER.upper()}_API_KEY environment variable")
+        print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
 
     print("\n" + "="*60)
     print("Web Interface Starting...")

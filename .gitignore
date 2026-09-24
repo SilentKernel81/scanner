@@ -250,3 +250,6 @@ data/.ultralytics/
 
 # YOLO model weights (AGPL-3.0, downloaded automatically into data/ when YOLO is used)
 *.pt
+
+# API keys entered in the web interface
+data/api_keys.env

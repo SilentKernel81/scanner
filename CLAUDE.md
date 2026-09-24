@@ -47,7 +47,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
 | Inventory add/merge/undo/split/export | `inventory.py` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`) |
+| Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`) |
 
 ## Conventions and Pitfalls
 
@@ -76,6 +76,8 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   and `keep_alive`; the parser accepts answers with or without `NAME:/NUMBER:/SET:` labels.
 - **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use
   their own `RLock`. Auto-capture callbacks and the AI worker run in their own threads.
+- **Never send full API keys to the browser** (no login on the web UI): `api_keys.credential_status()`
+  masks them; the UI can only replace or remove a key.
 - **No native `confirm()` / `alert()`** in the web UI: browsers can silently block them ("prevent
   this page from creating additional dialogs"), after which `confirm()` always returns false - this
   broke "Clear all". Use `confirmDialog()` / `choiceDialog()` / `notify()` in scanner.js.

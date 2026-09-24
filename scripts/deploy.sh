@@ -241,10 +241,10 @@ fi
 case "$provider" in
     local) ok "Vision AI: local model server ($(config_get vision_ai.local.endpoint))" ;;
     *)  key_var="$(echo "$provider" | tr '[:lower:]' '[:upper:]')_API_KEY"
-        if grep -Eq "^${key_var}=.+" .env; then
-            ok "Vision AI: ${provider} (API key found in .env)"
+        if grep -Eqs "^${key_var}=.+" .env data/api_keys.env; then
+            ok "Vision AI: ${provider} (API key configured)"
         else
-            warn "Vision AI: ${provider} - add ${key_var}=... to ${DIR}/.env (or pick a local model in Settings)"
+            warn "Vision AI: ${provider} - no API key yet: enter it in Settings -> Vision AI (or add ${key_var}=... to .env)"
         fi ;;
 esac
 

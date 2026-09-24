@@ -1029,6 +1029,14 @@ input[type="radio"] {
     gap: 8px;
 }
 
+.hint a {
+    color: var(--accent);
+}
+
+.hint.is-missing {
+    color: var(--warning);
+}
+
 .settings-section .btn-block + .hint {
     margin-bottom: 12px;
 }
@@ -1305,6 +1313,12 @@ input[type="radio"] {
     box-shadow: var(--shadow);
     font-size: 13px;
     animation: popIn 0.15s ease-out;
+}
+
+/* The settings drawer covers the right side - show notifications on the left meanwhile */
+.drawer.show ~ .toast-container {
+    right: auto;
+    left: 20px;
 }
 
 .toast.success { border-left-color: var(--success); }

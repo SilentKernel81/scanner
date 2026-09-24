@@ -108,7 +108,10 @@ detection.
 
 ## Choosing a vision AI provider
 
-API keys are read from environment variables; `app.py` loads them from `.env` automatically.
+Enter API keys in **Settings → Vision AI**: pick a provider and a key field appears (keys you
+saved before are shown masked, e.g. `AIza…3f9Q`, never in full). They are stored in
+`data/api_keys.env` (readable only by you) and used immediately. Keys can also be put in `.env`;
+keys saved in the web interface take precedence.
 
 | Provider | Setting | Key / endpoint |
 |---|---|---|

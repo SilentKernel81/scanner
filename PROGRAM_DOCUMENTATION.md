@@ -301,7 +301,7 @@ Socket.IO events:
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered`, `processing_queue_update`, `*_toggled`, `focus_reset` |
-| `set_ai_provider`, `update_database`, `rebuild_database` | `ai_provider_set`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
+| `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 
 HTTP endpoints are listed in the README.
 
@@ -311,6 +311,7 @@ HTTP endpoints are listed in the README.
 |---|---|
 | `config.yaml` | Camera, detection, auto-capture, vision AI defaults, web server, cleanup |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
+| `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
 | `data/cards_database.db` | Card data and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |

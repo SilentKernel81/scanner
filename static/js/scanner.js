@@ -966,8 +966,114 @@ function loadLocalModels(selectedModel = null) {
         });
 }
 
+// ============================================================================
+// API keys / local endpoint (Settings -> Vision AI)
+// Keys are shown masked only: the server never sends a full key to the browser.
+// ============================================================================
+
+let aiCredentials = {};
+const PROVIDER_INFO = {
+    gemini: {name: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey'},
+    openai: {name: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys'},
+    anthropic: {name: 'Anthropic', keyUrl: 'https://console.anthropic.com/settings/keys'},
+    local: {name: 'Local AI'}
+};
+
+function loadCredentials() {
+    return fetch('/api/ai_credentials')
+        .then(response => response.json())
+        .then(data => {
+            aiCredentials = data;
+            renderCredentialField(document.getElementById('ai-provider').value);
+        })
+        .catch(error => console.error('Error loading API key status:', error));
+}
+
+function hasCredential(provider) {
+    return provider === 'local' || Boolean(aiCredentials[provider] && aiCredentials[provider].configured);
+}
+
+function renderCredentialField(provider) {
+    const input = document.getElementById('ai-credential');
+    const label = document.getElementById('ai-credential-label');
+    const hint = document.getElementById('ai-credential-hint');
+    const info = PROVIDER_INFO[provider] || {name: provider};
+    const status = aiCredentials[provider] || {};
+    input.value = '';
+    hint.classList.remove('is-missing');
+
+    if (provider === 'local') {
+        label.textContent = 'Server address';
+        input.type = 'text';
+        input.value = status.endpoint || '';
+        input.placeholder = 'http://localhost:11434/v1/chat/completions';
+        hint.textContent = 'Ollama or another OpenAI-compatible server';
+        return;
+    }
+
+    label.textContent = `${info.name} API key`;
+    input.type = 'password';
+    if (status.configured) {
+        input.placeholder = `Saved: ${status.masked} - type a new key to replace it`;
+        hint.textContent = `Key configured (${status.masked})`;
+    } else {
+        input.placeholder = 'Paste your API key';
+        hint.innerHTML = `No key yet - <a href="${info.keyUrl}" target="_blank" rel="noopener">get one from ${escapeHtml(info.name)}</a>`;
+        hint.classList.add('is-missing');
+    }
+}
+
+async function saveCredential() {
+    const provider = document.getElementById('ai-provider').value;
+    const input = document.getElementById('ai-credential');
+    const value = input.value.trim();
+    const info = PROVIDER_INFO[provider] || {name: provider};
+
+    if (!value) {
+        if (provider === 'local' || !hasCredential(provider)) {
+            notify(provider === 'local' ? 'Enter the server address' : 'Paste an API key first', 'warning');
+            return;
+        }
+        const remove = await confirmDialog({
+            title: `Remove the ${info.name} key?`,
+            message: 'Removes the key saved in the web interface. A key in the .env file (if any) is used again after a restart.',
+            confirmText: 'Remove key',
+            danger: true
+        });
+        if (!remove) return;
+    }
+    socket.emit('save_ai_credential', {provider: provider, value: value});
+}
+
+socket.on('ai_credential_saved', function(data) {
+    aiCredentials[data.provider] = data.status;
+    const info = PROVIDER_INFO[data.provider] || {name: data.provider};
+    const selected = document.getElementById('ai-provider').value;
+    renderCredentialField(selected);
+
+    if (data.provider === 'local') {
+        notify('Local AI address saved', 'success');
+    } else {
+        notify(data.status.configured ? `${info.name} API key saved` : `${info.name} API key removed`, 'success');
+    }
+    // Use the new key / address right away for the selected provider
+    if (data.provider === selected && hasCredential(selected)) {
+        applyProvider(selected);
+    }
+});
+
+function applyProvider(provider) {
+    // Load the provider's models and switch the scanner to it
+    const loaded = provider === 'local' ? loadLocalModels() : Promise.resolve(populateModelDropdown(provider));
+    loaded.then(() => {
+        const model = document.getElementById('ai-model').value;
+        socket.emit('set_ai_provider', {provider: provider, model: model});
+        addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
+    });
+}
+
 function loadAIProvider() {
-    fetch('/api/ai_provider')
+    return fetch('/api/ai_provider')
         .then(response => response.json())
         .then(data => {
             if (data.provider) {
@@ -1116,34 +1222,24 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('volume-value').textContent = e.target.value + '%';
     });
 
-    // Change AI provider - update model dropdown
+    // Change AI provider: show its key / address field; switch once it has a key
     document.getElementById('ai-provider').addEventListener('change', function(e) {
         const provider = e.target.value;
         currentProvider = provider;
+        renderCredentialField(provider);
 
-        // For local provider, dynamically load models from Ollama
-        if (provider === 'local') {
-            loadLocalModels();
-
-            // Wait for models to load before sending to server
-            setTimeout(() => {
-                const modelSelect = document.getElementById('ai-model');
-                const model = modelSelect.value;
-                socket.emit('set_ai_provider', {provider: provider, model: model});
-                addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
-            }, 500);
+        if (hasCredential(provider)) {
+            applyProvider(provider);
         } else {
-            // Populate model dropdown for cloud providers
             populateModelDropdown(provider);
-
-            // Get the first model (default)
-            const modelSelect = document.getElementById('ai-model');
-            const model = modelSelect.value;
-
-            // Send update to server
-            socket.emit('set_ai_provider', {provider: provider, model: model});
-            addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
+            document.getElementById('ai-credential').focus();
+            notify(`Enter your ${PROVIDER_INFO[provider].name} API key to use it`, 'warning');
         }
+    });
+
+    // Enter in the key field saves it
+    document.getElementById('ai-credential').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') saveCredential();
     });
 
     // Change AI model
@@ -1164,7 +1260,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load available models first, then load current provider/model
     loadAIModels();
-    setTimeout(loadAIProvider, 100); // Small delay to ensure models are loaded first
+    // Small delay to ensure models are loaded first; the key field needs the current provider
+    setTimeout(() => loadAIProvider().then(loadCredentials), 100);
 
 });
 

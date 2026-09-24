@@ -80,10 +80,12 @@ Each step is skipped when it's already done, so it's safe to run again at any ti
 
 Pick the provider in the web interface (**Settings → Vision AI**); the choice is remembered.
 
-- **Cloud**: put the key in `.env` - `GEMINI_API_KEY=...`, `OPENAI_API_KEY=...` or
-  `ANTHROPIC_API_KEY=...` - and restart the scanner.
-- **Local (Ollama)**: set `vision_ai.local.endpoint` in `config.yaml` to your server, e.g.
-  `http://192.168.1.20:11434/v1/chat/completions`, and pick a vision model in Settings. On the
+- **Cloud**: pick the provider in Settings and paste the API key into the field that appears -
+  it's saved to `data/api_keys.env` and used right away. (Or put `GEMINI_API_KEY=...`,
+  `OPENAI_API_KEY=...` / `ANTHROPIC_API_KEY=...` in `.env` and restart.)
+- **Local (Ollama)**: pick *Local*, enter your server's address, e.g.
+  `http://192.168.1.20:11434/v1/chat/completions` (or set `vision_ai.local.endpoint` in
+  `config.yaml`), and pick a vision model. On the
   Ollama machine, make it listen on the network (`OLLAMA_HOST=0.0.0.0`).
 
 ## Deploying from your computer
