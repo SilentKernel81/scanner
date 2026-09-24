@@ -243,14 +243,14 @@ model is preloaded (`warm_up`) when auto scanning starts, because loading a 9B m
 |---|---|---|
 | 1 | Set code + collector number (unique per printing), accepted if the name roughly matches (`names_match`: same, prefix, a double-faced card's face, ≥ 60% similar, or ≥ 75% similar to the short name before the comma - "Thands" / "Thanos, the Mad Titan") | `set_number` |
 | 2 | Name + collector number, then shortened name ("Thanos" → "Thanos, the Mad Titan") + number | `name_number` |
-| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read | `name_set` / `name` / `fuzzy` |
+| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read. If the name was read exactly, the set read has only that one printing of it, and the number read is one digit off ("0189" for #188 - a blurry 8), that printing is certain | `name_set_digit` / `name_set` / `name` / `fuzzy` |
 | 4 | Name unrecognizable but set + number exist: trust the printed set + number | `set_number_unverified` |
 
 Collector numbers are compared in their variants ("0014" → 14, 0014, 14s, 0014s). Names are
 compared through `name_search` / `flavor_search` columns - lowercase, accent-free copies
 (`search_key`: "Fíli" → "fili", "Æther" → "aether").
 
-Only `CONFIRMED_MATCHES` (`set_number`, `name_number`) are added automatically; the card panel
+Only `CONFIRMED_MATCHES` (`set_number`, `name_number`, `name_set_digit`) are added automatically; the card panel
 warns "Printing not confirmed" for the others.
 
 **Manual search** (`CardSearcher.find_printings`): set + number go straight to the printing;

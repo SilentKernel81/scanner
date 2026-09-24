@@ -70,7 +70,7 @@ PROMO_TYPE_LABELS = {
 
 
 # Matches that identify the exact printing (safe to add to the inventory without review)
-CONFIRMED_MATCHES = {'set_number', 'name_number'}
+CONFIRMED_MATCHES = {'set_number', 'name_number', 'name_set_digit'}
 
 
 def collector_number_variants(collector_number):
@@ -90,6 +90,18 @@ def _leading_number(collector_number):
     """Numeric part of a collector number ("0134" -> 134, "401z" -> 401), or None"""
     match = re.search(r'\d+', collector_number or '')
     return int(match.group()) if match else None
+
+
+def _one_digit_off(read_number, collector_number):
+    """
+    Whether a collector number read from a card differs from a printing's in exactly one digit
+    ("0189" vs "188") - a blurry digit, not another card
+    """
+    read, actual = _leading_number(read_number), _leading_number(collector_number)
+    if read is None or actual is None:
+        return False
+    read, actual = str(read), str(actual)
+    return len(read) == len(actual) and sum(a != b for a, b in zip(read, actual)) == 1
 
 
 def search_key(text):
@@ -400,6 +412,11 @@ class CardDatabase:
 
                 if candidates and (in_set or read_number is not None):
                     best = min(candidates, key=closeness)
+                    # The name read exactly, the only printing of it in the set read, and the
+                    # number one digit off (a blurry "0188" read as "0189"): that printing
+                    if (len(in_set) == 1 and match['match'] == 'name'
+                            and _one_digit_off(collector_number, best['collector_number'])):
+                        return self._tagged(best, 'name_set_digit')
                     return self._tagged(best, 'name_set' if in_set else 'name')
 
             # Name not found at all (badly misread): trust the printed set + number
@@ -411,7 +428,8 @@ class CardDatabase:
     def _tagged(self, row, match):
         """
         Card dict plus how it was matched: 'set_number' / 'name_number' (the printing is
-        confirmed - see CONFIRMED_MATCHES), 'name_set', 'name', 'fuzzy' or
+        confirmed - see CONFIRMED_MATCHES), 'name_set_digit' (confirmed too: the only printing
+        of the name in the set read, number one digit off), 'name_set', 'name', 'fuzzy' or
         'set_number_unverified' (the printed set + number, name not recognized)
         """
         card = self._format_card_result(row)
