@@ -62,7 +62,7 @@ class Config:
     AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=3))
 
     # Fast scan mode settings
-    FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=4)
+    FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=6)
 
     # Flask settings
     SECRET_KEY = config.get('flask', 'secret_key', default='card_scanner_secret_key_change_in_production')

@@ -241,7 +241,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
 | `auto_capture.refocus_every` | `3` | Every this many captures, check if a focus one step away is sharper and follow it; `0` = off |
-| `fast_scan.stability_frames` | `4` | Same, when adding cards automatically (~0.15 s, lets a dropped card stop sliding) |
+| `fast_scan.stability_frames` | `6` | Same, when adding cards automatically (~0.3 s, lets a dropped sleeved card stop sliding) |
 | `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |

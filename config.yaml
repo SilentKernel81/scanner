@@ -52,7 +52,7 @@ auto_capture:
 
 # Fast Scan Mode Settings
 fast_scan:
-  stability_frames: 4  # Consecutive still frames in fast scan mode (~0.15 s - lets a dropped card stop sliding)
+  stability_frames: 6  # Consecutive still frames when adding automatically (~0.3 s) - with the drift check, a sleeved card sliding >= ~1.3 px/frame is no longer captured mid-slide (4 frames still let slow slides through)
 
 # Vision AI Settings
 vision_ai:

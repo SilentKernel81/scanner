@@ -190,7 +190,8 @@ class CardScanner:
         self.captures_since_focus = 0  # Captures since the last focus sweep / probe (refocus_every)
         self.focus_probe_running = False  # Short focus probe between two drops
         self.focus_probe_direction = 1  # Probe up (+1) or down (-1) next
-        self.disturbed_during_focus = False  # A card was dropped while probing
+        self.disturbed_during_focus = False  # A card was dropped while the focus was moving
+        self.last_focus_move = 0.0  # When the last sweep / probe ended
 
         # Auto-capture settings (enabled state controlled via UI button)
         self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
@@ -315,7 +316,8 @@ class CardScanner:
     def _is_card_settled(self, frame, points):
         """
         True if the card is still and in focus: its corners moved less than ~1% of the
-        card size since the previous frame, its sharpness changed by less than 20%
+        card size since the previous frame and since the still streak began, its sharpness
+        changed by less than 20%
         (autofocus still adjusting changes it a lot between frames), and the image is
         sharp enough to read (a camera that hasn't focused yet is steady but blurry).
         """
@@ -340,6 +342,12 @@ class CardScanner:
 
         card_size = np.linalg.norm(points[2] - points[0])
         movement = np.linalg.norm(points - previous_points, axis=1).max() / card_size
+        # Drift since the still streak began: a sleeved card sliding slowly moves less than 1%
+        # per frame, passes the frame-to-frame test and used to be captured mid-slide (blurred,
+        # then captured again once it stopped)
+        if self.stable_frames == 0 or getattr(self, 'settle_anchor', None) is None:
+            self.settle_anchor = points
+        drift = np.linalg.norm(points - self.settle_anchor, axis=1).max() / card_size
         sharpness_change = abs(sharpness - previous_sharpness) / max(previous_sharpness, 1e-6)
         image_change = self._thumbnail_difference(thumbnail, previous_thumbnail)
 
@@ -347,7 +355,10 @@ class CardScanner:
         # (measured on a card lying still: movement <= 0.4%, image change <= 0.07)
         self.card_disturbed = movement > 0.03 or image_change > 0.3
         self.last_frame_change = (movement, image_change)
-        return movement < 0.01 and sharpness_change < 0.2 and self.card_in_focus
+        settled = movement < 0.01 and drift < 0.01 and sharpness_change < 0.2 and self.card_in_focus
+        if not settled:
+            self.settle_anchor = points
+        return settled
 
     @staticmethod
     def _card_thumbnail(frame, points):
@@ -380,6 +391,10 @@ class CardScanner:
         if gap >= 1 and movement > 0.008:
             return True
         return self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3
+
+    def _focus_moving(self):
+        """A focus sweep or probe is running, or ended less than 0.6 s ago"""
+        return self.focus_sweep_running or self.focus_probe_running or time.time() - self.last_focus_move < 0.6
 
     def _check_focus_drift(self):
         """
@@ -705,13 +720,22 @@ class CardScanner:
 
                                 self._check_focus_drift()
 
-                                # A full sweep blurs the image heavily: not a new card. A focus probe only
-                                # blurs slightly (measured +-40: movement <= 0.4%, image change <= 0.1),
-                                # so drops keep being detected - and spoil the probe's measurement
-                                focus_moving = self.focus_sweep_running or time.time() - self.last_focus_sweep < 0.6
-                                if self.focus_probe_running and self.card_disturbed:
+                                # While the lens moves, the blur can hide the card for a few frames and
+                                # shift its outline (a probe once looked like a 1.9% jump and caused a
+                                # second capture of the same card): no new-card rules until 0.6 s after.
+                                # A real drop then is still seen by its big jump - the card counts as new
+                                # once the focus is done (and spoils a probe's measurement)
+                                focus_moving = self._focus_moving()
+                                movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
+                                if focus_moving and not self.focus_sweep_running and movement > 0.03:
                                     self.disturbed_during_focus = True
-                                if self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
+                                if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
+                                    self.disturbed_during_focus = False
+                                    self.awaiting_new_card = False
+                                    self.stable_frames = 0
+                                    if self.auto_capture_enabled:
+                                        self.log("New card detected (dropped while focusing)")
+                                elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
                                     self.awaiting_new_card = False
                                     self.stable_frames = 0  # the new card must settle first
                                     if self.auto_capture_enabled:
@@ -749,7 +773,8 @@ class CardScanner:
                         self.stable_frames = 0
 
                         # Card gone for more than a detector hiccup: treat as a change of card
-                        self.missing_frames += 1
+                        # (not while the lens moves - the blur can hide the card)
+                        self.missing_frames = 0 if self._focus_moving() else self.missing_frames + 1
                         if self.awaiting_new_card and self.missing_frames >= self.missing_frames_for_new_card:
                             self.awaiting_new_card = False
                             if self.auto_capture_enabled:
@@ -1097,15 +1122,15 @@ class CardScanner:
         self._run_v4l2_command('-c', 'focus_automatic_continuous=0')
         self._move_focus(position)
 
-    def _move_focus(self, position, from_below=True):
+    def _move_focus(self, position, from_below=True, approach=30):
         """
         Move the lens to `position`. The lens has play: the same position reached from above
         measured up to 5x blurrier than from below, so sweeps measure while moving up and
-        the final position is approached from below too.
+        the final position is approached from `approach` below too.
         """
         position = int(position)
         if from_below and self.focus_range:
-            self._run_v4l2_command('-c', f'focus_absolute={max(self.focus_range[0], position - 30)}')
+            self._run_v4l2_command('-c', f'focus_absolute={max(self.focus_range[0], position - approach)}')
             time.sleep(0.15)
         self._run_v4l2_command('-c', f'focus_absolute={position}')
 
@@ -1174,8 +1199,8 @@ class CardScanner:
         except Exception as e:
             self.log(f"Focus sweep failed: {e}", level="error")
         finally:
+            self.last_focus_move = self.last_focus_sweep = time.time()
             self.focus_sweep_running = False
-            self.last_focus_sweep = time.time()
             self.out_of_focus_since = None
 
     def _count_capture(self):
@@ -1206,7 +1231,8 @@ class CardScanner:
         try:
             self.disturbed_during_focus = False
             here = self._measure_focus_sharpness()
-            self._move_focus(probe)
+            # Approaching from only 15 below keeps the card sharp enough to stay detected
+            self._move_focus(probe, approach=15)
             time.sleep(settle)
             there = self._measure_focus_sharpness()
             if not self.disturbed_during_focus and there > here * margin:
@@ -1215,7 +1241,7 @@ class CardScanner:
                 self.focus_probe_direction = direction
                 self.log(f"Focus adjusted {start} -> {probe} ({there / max(here, 1e-6):.2f}x sharper)")
             else:
-                self._move_focus(start)
+                self._move_focus(start, approach=15)
                 if not self.disturbed_during_focus:
                     self.focus_probe_direction = -direction
                 # Log file only - every few cards would clutter the activity log
@@ -1224,6 +1250,7 @@ class CardScanner:
         except Exception as e:
             self.log(f"Focus probe failed: {e}", level="warning")
         finally:
+            self.last_focus_move = time.time()
             self.focus_probe_running = False
 
     def set_continuous_autofocus(self, enabled):

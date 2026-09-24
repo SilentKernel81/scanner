@@ -143,14 +143,21 @@ held detection never counts as a still card.
 
 A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
 
-- the corners moved less than **1%** of the card size since the previous frame,
+- the corners moved less than **1%** of the card size since the previous frame **and** since
+  the still streak began - a sleeved card sliding slowly (a few px per frame) passes the
+  frame-to-frame test on every frame and used to be captured mid-slide: blurred, then captured
+  again when it stopped (seen live with a Lake-town),
 - sharpness (variance of the Laplacian on a 160 px wide crop) changed by less than **20%**
   (autofocus still adjusting changes it a lot),
 - sharpness is at least `auto_capture.min_sharpness` (**250**) - a camera that hasn't focused
   yet is steady but blurry.
 
 A capture needs `auto_capture.stability_frames` (5) such frames in a row, or
-`fast_scan.stability_frames` (4, about 0.15 s) when cards are added automatically. The status
+`fast_scan.stability_frames` (6, about 0.3 s) when cards are added automatically. Simulated
+sleeve slides (0.8 s after landing): with 4 frames and only the frame-to-frame test, 12 of 12
+cards were captured mid-slide; with the drift test and 6 frames none (slides of 2-3 px/frame),
+captured ~0.5 s after the card stopped. 4 frames with the drift test still let a 2 px/frame
+slide through. The status
 pill shows *Focusing*, *Stabilizing n/N*, *Ready*, or *Captured - drop the next card*.
 
 ### One capture per card
@@ -359,10 +366,16 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   never started. In the gap after a capture (~1 s, the image is already taken) the probe
   measures the card here and one step (10) away and keeps the sharper position (> 5% better);
   an improvement keeps the direction for the next probe, otherwise the next one tries the other
-  way. Near the peak the sharpness changes ~3× per step, far more than the noise. A probe blurs
-  only slightly (measured at ±40: card movement ≤ 0.4%, image change ≤ 0.1, against 3% / 0.3
-  for a drop), so drops keep being detected; a drop during a probe discards it. Simulated with
-  30 drops every 1.5 s and a peak 35 away: every card captured, focus at the peak after 9 cards.
+  way. Near the peak the sharpness changes ~3× per step, far more than the noise. Probes
+  approach their positions from only 15 below (instead of 30) to keep the card readable.
+- **While the lens moves** (sweep or probe, and 0.6 s after) the new-card rules are paused: the
+  blur can hide the card for a few frames and shift its outline, and the "reappeared elsewhere"
+  / "card gone" rules then took the same card for a new one (a probe caused two duplicate
+  captures in a live session, reproduced in simulation: 22 captures for 15 drops). A real drop
+  during a probe is still recognized by its jump (> 3%; the blur shifted the outline ≤ 1.9%):
+  the card counts as new once the focus is done, and the probe's measurement is discarded.
+  Simulated with 30 drops every 1.5 s and a peak 35 away: every card captured once, focus at
+  the peak after 9 cards.
 - **Automatic refocus** (`_check_focus_drift`): with a locked focus, a card that stays still but
   below `auto_capture.min_sharpness` for 3 s triggers a new sweep (at most every 15 s) - the pile
   grows toward the camera as cards are added.
