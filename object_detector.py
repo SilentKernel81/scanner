@@ -16,6 +16,24 @@ def _order_corners(pts):
     return np.array([pts[np.argmin(sums)], pts[np.argmin(diffs)], pts[np.argmax(sums)], pts[np.argmax(diffs)]])
 
 
+def _is_inner_frame(gray, corners, band=4):
+    """
+    True if the outline looks like the frame *inside* a card's dark border rather than
+    the card's outer edge: the band just outside it is darker than the band just inside.
+    (The inner frame has nearly the card's aspect ratio, so it can match when the card's
+    outer edge is cut off by the image border.) Assumes a background lighter than the
+    card border, like a white scanning box.
+    """
+    polygon = np.zeros(gray.shape, np.uint8)
+    cv2.fillPoly(polygon, [corners.astype(np.int32)], 255)
+    kernel = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
+    outside = cv2.dilate(polygon, kernel) & ~polygon
+    inside = polygon & ~cv2.erode(polygon, kernel)
+    if not outside.any() or not inside.any():
+        return False
+    return cv2.mean(gray, outside)[0] < cv2.mean(gray, inside)[0]
+
+
 def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640):
     """
     Find a card by its outline: the largest 4-sided contour with a card's aspect ratio.
@@ -65,8 +83,11 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
         fill = area / (side_w * side_h)  # 1.0 = perfectly rectangular
         if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.85:
             continue
-        if best is None or area > best[0]:
-            best = (area, corners, fill)
+        if best is not None and area <= best[0]:
+            continue
+        if _is_inner_frame(gray, corners):
+            continue
+        best = (area, corners, fill)
 
     if best is None:
         return None, 0

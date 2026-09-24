@@ -368,17 +368,17 @@ def ai_processing_worker():
 
             # Run AI identification (this is the slow part - 13-36 seconds)
             start_time = time.time()
-            card_info = scanner.identify_card_from_image(card_image_rgb)
+            card_info = scanner.identify_card_from_image(card_image_rgb, detect_foil=item['is_warped'])
             processing_time = time.time() - start_time
 
             # Extract card info
             card_name = ""
             collector_number = ""
-            foil_status = 'non-foil'
+            foil_status = 'unknown'
             if card_info and isinstance(card_info, dict):
                 card_name = card_info.get('name', '')
                 collector_number = card_info.get('collector_number', '')
-                foil_status = card_info.get('foil', 'non-foil')
+                foil_status = card_info.get('foil', 'unknown')
                 if card_info.get('processing_time') is None:
                     card_info['processing_time'] = processing_time
 
@@ -491,7 +491,7 @@ def initialize_components():
             # ========================================================================
             if was_fast_scan_mode:
                 # Capture image ONLY (no AI processing) - fast!
-                image_path, card_image_rgb = scanner.capture_card_image_only(current_capture_number)
+                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number)
 
                 if not image_path:
                     logger.error("Fast Scan: Failed to capture image")
@@ -506,6 +506,7 @@ def initialize_components():
                     'card_number': current_capture_number,
                     'card_image': card_image_rgb,
                     'image_path': image_path,
+                    'is_warped': is_warped,
                     'fast_scan_mode': True
                 })
 
@@ -533,12 +534,12 @@ def initialize_components():
                 card_name = ""
                 collector_number = ""
                 processing_time = None
-                foil_status = 'non-foil'
+                foil_status = 'unknown'
                 if vision_ai_result and isinstance(vision_ai_result, dict):
                     card_name = vision_ai_result.get('name', '')
                     collector_number = vision_ai_result.get('collector_number', '')
                     processing_time = vision_ai_result.get('processing_time')
-                    foil_status = vision_ai_result.get('foil', 'non-foil')
+                    foil_status = vision_ai_result.get('foil', 'unknown')
 
                 # Emit card captured event
                 socketio.emit('card_captured', {
@@ -1043,12 +1044,12 @@ def handle_capture(data):
         card_name = ""
         collector_number = ""
         processing_time = None
-        foil_status = 'non-foil'
+        foil_status = 'unknown'
         if vision_ai_result and isinstance(vision_ai_result, dict):
             card_name = vision_ai_result.get('name', '')
             collector_number = vision_ai_result.get('collector_number', '')
             processing_time = vision_ai_result.get('processing_time')
-            foil_status = vision_ai_result.get('foil', 'non-foil')
+            foil_status = vision_ai_result.get('foil', 'unknown')
 
         result = {
             'image_path': str(image_path),

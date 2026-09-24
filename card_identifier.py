@@ -10,6 +10,7 @@ import os
 import logging
 import re
 import time
+import cv2
 from PIL import Image
 import requests
 from config import Config
@@ -123,6 +124,12 @@ NUMBER: 0367
 
 Your response:"""
 
+    # Foil check: modern cards print a star instead of a dot between set code and
+    # language on foil copies. Asked about a zoomed crop of the bottom-left corner.
+    FOIL_SYMBOL_PROMPT = ("This is the bottom-left corner of a Magic: The Gathering card. The last line shows a set code, "
+                          "a small separator symbol, and a language code - for example 'HOB • EN' or 'HOB ★ EN'. "
+                          "Is the separator a five-pointed STAR or a round DOT? Answer with one word: star, dot, or unclear.")
+
     def log(self, message, level="info"):
         """Send log message to both file logger and UI callback"""
         # Log to file
@@ -146,17 +153,9 @@ Your response:"""
         start_time = time.time()
 
         try:
-            if self.provider == 'gemini':
-                result = self._identify_with_gemini(image_array)
-            elif self.provider == 'openai':
-                result = self._identify_with_openai(image_array)
-            elif self.provider == 'anthropic':
-                result = self._identify_with_anthropic(image_array)
-            elif self.provider == 'local':
-                result = self._identify_with_local(image_array)
-            else:
-                self.log(f"Unknown provider: {self.provider}", level="error")
-                return None
+            self.log(f"Sending image to {self.provider} ({self.model}) for identification...")
+            response_text = self._ask(self._image_array_to_base64(image_array), self.CARD_IDENTIFICATION_PROMPT, max_tokens=100)
+            result = self._parse_response(response_text, f"{self.provider} ({self.model})") if response_text else None
 
             # Log processing time
             elapsed_time = time.time() - start_time
@@ -172,6 +171,31 @@ Your response:"""
             elapsed_time = time.time() - start_time
             self.log(f"Card identification error after {elapsed_time:.2f}s: {e}", level="error")
             return None
+
+    def read_foil_symbol(self, card_image):
+        """
+        Check the star/dot foil marker in the bottom-left corner of a card.
+
+        Args:
+            card_image: Perspective-corrected (flat, portrait, tightly cropped) RGB card
+                image, so the corner is at a known position
+
+        Returns:
+            str: 'foil', 'non-foil' or 'unknown'
+        """
+        height, width = card_image.shape[:2]
+        corner = card_image[int(height * 0.91):, :int(width * 0.55)]
+        corner = cv2.resize(corner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+
+        try:
+            answer = (self._ask(self._image_array_to_base64(corner), self.FOIL_SYMBOL_PROMPT, max_tokens=10) or '').lower()
+        except Exception as e:
+            self.log(f"Foil check failed: {e}", level="warning")
+            return 'unknown'
+
+        foil = 'foil' if 'star' in answer else 'non-foil' if 'dot' in answer else 'unknown'
+        self.log(f"Foil marker: {answer.strip()!r} -> {foil}")
+        return foil
 
     def _image_array_to_base64(self, image_array, quality=95, max_dimension=2048):
         """Convert NumPy image array to base64 string (optimized for text readability)"""
@@ -223,160 +247,112 @@ Your response:"""
         self.log(f"{source} could not identify card name", level="warning")
         return None
 
-    def _identify_with_gemini(self, image_array):
-        """Identify card using Google Gemini Vision (REST API)"""
-        base64_image = self._image_array_to_base64(image_array)
+    # ------------------------------------------------------------------------
+    # Provider requests: send one image + prompt, return the response text
+    # ------------------------------------------------------------------------
 
+    def _ask(self, base64_image, prompt, max_tokens):
+        """Send an image and a prompt to the configured provider and return the text answer"""
+        if self.provider == 'gemini':
+            return self._ask_gemini(base64_image, prompt, max_tokens)
+        if self.provider == 'openai':
+            return self._ask_openai(base64_image, prompt, max_tokens)
+        if self.provider == 'anthropic':
+            return self._ask_anthropic(base64_image, prompt, max_tokens)
+        if self.provider == 'local':
+            return self._ask_local(base64_image, prompt, max_tokens)
+        raise ValueError(f"Unknown provider: {self.provider}")
+
+    def _ask_gemini(self, base64_image, prompt, max_tokens):
+        """Google Gemini (REST API)"""
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": self.CARD_IDENTIFICATION_PROMPT},
+                    {"text": prompt},
                     {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}}
                 ]
             }]
         }
-
-        self.log(f"Sending image to Gemini ({self.model}) for identification...")
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
             json=payload,
             timeout=30
         )
-
         response.raise_for_status()
         parts = response.json()['candidates'][0]['content']['parts']
-        response_text = ''.join(part.get('text', '') for part in parts).strip()
-        return self._parse_response(response_text, f"Gemini ({self.model})")
+        return ''.join(part.get('text', '') for part in parts).strip()
 
-    def _identify_with_openai(self, image_array):
-        """Identify card using OpenAI Vision"""
-        base64_image = self._image_array_to_base64(image_array)
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
+    def _ask_openai(self, base64_image, prompt, max_tokens):
+        """OpenAI chat completions"""
         payload = {
             "model": self.model,
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": self.CARD_IDENTIFICATION_PROMPT
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]
                 }
             ],
-            "max_tokens": 100
+            "max_tokens": max_tokens
         }
-
-        self.log(f"Sending image to OpenAI ({self.model}) for identification...")
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
-            headers=headers,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
             json=payload,
             timeout=30
         )
-
         response.raise_for_status()
-        response_text = response.json()['choices'][0]['message']['content'].strip()
-        return self._parse_response(response_text, "OpenAI")
+        return response.json()['choices'][0]['message']['content'].strip()
 
-    def _identify_with_anthropic(self, image_array):
-        """Identify card using Anthropic Claude Vision"""
-        base64_image = self._image_array_to_base64(image_array)
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01"
-        }
-
+    def _ask_anthropic(self, base64_image, prompt, max_tokens):
+        """Anthropic Messages API"""
         payload = {
             "model": self.model,
-            "max_tokens": 100,
+            "max_tokens": max_tokens,
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": base64_image
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": self.CARD_IDENTIFICATION_PROMPT
-                        }
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_image}},
+                        {"type": "text", "text": prompt}
                     ]
                 }
             ]
         }
-
-        self.log(f"Sending image to Claude ({self.model}) for identification...")
         response = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers=headers,
+            headers={"Content-Type": "application/json", "x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
             json=payload,
             timeout=30
         )
-
         response.raise_for_status()
-        response_text = response.json()['content'][0]['text'].strip()
-        return self._parse_response(response_text, "Claude")
+        return response.json()['content'][0]['text'].strip()
 
-    def _identify_with_local(self, image_array):
-        """Identify card using local vision AI server (Ollama, vLLM, etc.)"""
-        base64_image = self._image_array_to_base64(image_array)
-
-        # Detect if this is an Ollama server
-        is_ollama = '/v1/chat/completions' in self.local_endpoint
-
-        if is_ollama:
-            # Use Ollama's native /api/chat endpoint for better vision support
-            result = self._identify_with_ollama_native(base64_image)
-            if result:
-                return result
-            # If native API fails, try OpenAI-compatible as fallback
+    def _ask_local(self, base64_image, prompt, max_tokens):
+        """Local vision AI server (Ollama, vLLM, LM Studio, ...)"""
+        # Ollama: prefer its native /api/chat endpoint (better vision support)
+        if '/v1/chat/completions' in self.local_endpoint:
+            answer = self._ask_ollama_native(base64_image, prompt)
+            if answer:
+                return answer
             self.log("Ollama native API failed, trying OpenAI-compatible endpoint...", level="warning")
 
         # OpenAI-compatible endpoint (vLLM, LM Studio, newer Ollama)
-        return self._identify_with_openai_compatible(base64_image)
+        return self._ask_openai_compatible(base64_image, prompt, max_tokens)
 
-    def _identify_with_ollama_native(self, base64_image):
-        """Use Ollama's native /api/chat endpoint (better vision support)"""
-        ollama_base = self.local_endpoint.replace('/v1/chat/completions', '')
-        ollama_endpoint = f"{ollama_base}/api/chat"
-
+    def _ask_ollama_native(self, base64_image, prompt):
+        """Ollama's native /api/chat endpoint"""
+        ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": self.CARD_IDENTIFICATION_PROMPT,
-                    "images": [base64_image]
-                }
-            ],
+            "messages": [{"role": "user", "content": prompt, "images": [base64_image]}],
             "stream": False,
-            "options": {
-                "temperature": 0.1
-            }
+            "think": False,  # Thinking models otherwise spend the token budget reasoning and return no answer
+            "options": {"temperature": 0.1}
         }
-
-        self.log(f"Sending image to Ollama ({self.model}) at {ollama_endpoint}...")
 
         try:
             response = requests.post(ollama_endpoint, json=payload, timeout=60)
@@ -387,40 +363,34 @@ Your response:"""
                 self.log(f"Unexpected Ollama response format: {response_json}", level="error")
                 return None
 
-            response_text = response_json['message']['content'].strip()
-            self.log(f"Ollama raw response: {response_text[:200]}", level="info")
-            return self._parse_response(response_text, "Local AI")
+            answer = response_json['message']['content'].strip()
+            self.log(f"Ollama raw response: {answer[:200]}", level="info")
+            return answer
 
+        except requests.exceptions.HTTPError as e:
+            # Ollama explains errors (e.g. "model not found") in the response body
+            self.log(f"Ollama native API error: {e} - {e.response.text[:200]}", level="warning")
+            return None
         except Exception as e:
             self.log(f"Ollama native API error: {e}", level="warning")
             return None
 
-    def _identify_with_openai_compatible(self, base64_image):
-        """Use OpenAI-compatible endpoint (vLLM, LM Studio, newer Ollama)"""
+    def _ask_openai_compatible(self, base64_image, prompt, max_tokens):
+        """OpenAI-compatible endpoint on a local server"""
         payload = {
             "model": self.model,
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": self.CARD_IDENTIFICATION_PROMPT
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]
                 }
             ],
-            "max_tokens": 150,
+            "max_tokens": max(max_tokens, 150),
             "temperature": 0.1
         }
-
-        self.log(f"Sending image to local AI ({self.model}) at {self.local_endpoint}...")
 
         try:
             response = requests.post(self.local_endpoint, json=payload, timeout=60)
@@ -431,9 +401,9 @@ Your response:"""
                 self.log(f"Unexpected response format: {response_json}", level="error")
                 return None
 
-            response_text = response_json['choices'][0]['message']['content'].strip()
-            self.log(f"Local AI raw response: {response_text[:200]}", level="info")
-            return self._parse_response(response_text, "Local AI")
+            answer = response_json['choices'][0]['message']['content'].strip()
+            self.log(f"Local AI raw response: {answer[:200]}", level="info")
+            return answer
 
         except requests.exceptions.ConnectionError:
             self.log(f"Failed to connect to local AI server at {self.local_endpoint}", level="error")

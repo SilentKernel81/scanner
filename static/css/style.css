@@ -698,6 +698,15 @@ input[type="radio"] {
     font: inherit;
 }
 
+.finish-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.finish-hint.foil { color: var(--foil); }
+.finish-hint.surge { color: var(--surge); }
+
 .card-actions {
     display: flex;
     gap: 10px;

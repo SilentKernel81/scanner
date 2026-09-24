@@ -352,6 +352,20 @@ class CardDatabase:
                     logger.info(f"Found exact match with collector number: {result['name']} #{result['collector_number']}")
                     return self._format_card_result(result)
 
+                # Step 1b: Shortened name + collector number (AI often reads just "Thanos"
+                # for "Thanos, the Mad Titan")
+                cursor.execute(f'''
+                    SELECT * FROM cards
+                    WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(flavor_name) LIKE LOWER(?))
+                    AND collector_number IN ({placeholders})
+                    LIMIT 1
+                ''', (card_name + '%', card_name + '%', *number_variants))
+
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"Found name-prefix match with collector number: {result['name']} #{result['collector_number']}")
+                    return self._format_card_result(result)
+
             # Step 2: Try exact case-insensitive match without collector number (uses index, check both name and flavor_name)
             cursor.execute('''
                 SELECT * FROM cards
@@ -400,7 +414,18 @@ class CardDatabase:
 
             # Step 4: Fallback to fuzzy search
             logger.info(f"No exact match found for '{card_name}', trying fuzzy search")
-            return self.search_card(card_name, fuzzy=True)
+            match = self.search_card(card_name, fuzzy=True)
+
+            # Fuzzy matching resolves the name; use the collector number to pick the printing
+            if match and number_variants:
+                placeholders = ', '.join('?' * len(number_variants))
+                cursor.execute(f'''
+                    SELECT * FROM cards WHERE name = ? AND collector_number IN ({placeholders}) LIMIT 1
+                ''', (match['name'], *number_variants))
+                result = cursor.fetchone()
+                if result:
+                    return self._format_card_result(result)
+            return match
 
     def search_card(self, card_name, fuzzy=True):
         """Search for a card by name or flavor name"""
@@ -441,6 +466,18 @@ class CardDatabase:
                 elif db_flavor_name and normalize_text(db_flavor_name).lower() == normalized_search_name:
                     logger.info(f"Found card via accent-insensitive flavor name match: {db_flavor_name} (Oracle: {db_name})")
                     return self._format_card_result(result)
+
+            # Shortened legendary name ("Thanos" -> "Thanos, the Mad Titan") - fuzzy
+            # matching on whole names would prefer unrelated cards like "Thayan Evokers"
+            cursor.execute('''
+                SELECT * FROM cards
+                WHERE LOWER(name) LIKE LOWER(?) OR LOWER(flavor_name) LIKE LOWER(?)
+                LIMIT 1
+            ''', (card_name + ',%', card_name + ',%'))
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"Found card via shortened name: {card_name} -> {result['name']}")
+                return self._format_card_result(result)
 
             # Fuzzy matching fallback (optimized to use prefix search)
             if fuzzy:

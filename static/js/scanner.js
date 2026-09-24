@@ -8,7 +8,7 @@ let cardDetected = false;
 let detectionEnabled = true;  // Track detection state
 let autoScanningEnabled = false;  // Track auto-scanning state
 let fastScanMode = false;  // Track fast scan mode state
-let detectedFoilStatus = 'non-foil';  // Store AI-detected foil status
+let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last capture: 'foil' | 'non-foil' | 'unknown'
 let availableModels = {}; // Store available models for each provider
 let currentProvider = 'gemini';
 let currentModel = null;
@@ -63,7 +63,7 @@ socket.on('card_captured', function(data) {
     // Don't play sound here - it's played at capture time, not after AI processing
 
     // Store AI-detected foil status
-    detectedFoilStatus = data.foil || 'non-foil';
+    detectedFoilStatus = data.foil || 'unknown';
     console.log('AI detected foil status:', detectedFoilStatus);
 
     document.getElementById('card-name').value = data.card_name;
@@ -173,6 +173,7 @@ socket.on('inventory_updated', function(data) {
     document.getElementById('card-name').value = '';
     document.getElementById('collector-number').value = '';
     document.getElementById('card-treatment').value = '';
+    detectedFoilStatus = 'unknown';
     currentCard = null;
     currentImagePath = '';
     document.getElementById('search-btn').disabled = true;
@@ -528,13 +529,29 @@ function selectSimilarCard(cardName) {
     searchCard();
 }
 
-function quantityRow(id, label, kind) {
+function suggestedFinish(card) {
+    // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
+    // Printings that only exist in one finish are certain; otherwise use the ★/• marker
+    // the AI read next to the set code on the last capture.
+    const finishes = card.finishes || [];
+    const hasFoil = finishes.includes('foil') || finishes.includes('etched');
+    const hasNonfoil = finishes.includes('nonfoil');
+    const foilKind = (card.treatments || []).includes('Surge Foil') ? 'surge' : 'foil';
+
+    if (hasFoil && !hasNonfoil) return {finish: foilKind, reason: 'only printed in foil'};
+    if (hasNonfoil && !hasFoil) return {finish: 'regular', reason: 'only printed non-foil'};
+    if (detectedFoilStatus === 'foil') return {finish: foilKind, reason: '★ next to the set code'};
+    if (detectedFoilStatus === 'non-foil') return {finish: 'regular', reason: '• next to the set code'};
+    return {finish: 'regular', reason: null};
+}
+
+function quantityRow(id, label, kind, value = 0) {
     return `
         <div class="qty-row ${kind}">
             <span class="qty-label"><span class="qty-dot"></span>${label}</span>
             <div class="qty-stepper">
                 <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease">−</button>
-                <input type="number" id="${id}" value="0" min="0" max="999">
+                <input type="number" id="${id}" value="${value}" min="0" max="999">
                 <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase">+</button>
             </div>
         </div>
@@ -542,6 +559,8 @@ function quantityRow(id, label, kind) {
 }
 
 function displayCard(card) {
+    const suggestion = suggestedFinish(card);
+    const finishLabels = {regular: 'Regular', foil: 'Foil', surge: 'Surge foil'};
     let html = '';
 
     if (card.image_uri) {
@@ -601,10 +620,11 @@ function displayCard(card) {
         <div class="input-group">
             <span class="field-label">Quantity</span>
             <div class="qty-list">
-                ${quantityRow('regular-qty', 'Regular', 'regular')}
-                ${quantityRow('foil-qty', 'Foil', 'foil')}
-                ${quantityRow('surge-qty', 'Surge foil', 'surge')}
+                ${quantityRow('regular-qty', 'Regular', 'regular', suggestion.finish === 'regular' ? 1 : 0)}
+                ${quantityRow('foil-qty', 'Foil', 'foil', suggestion.finish === 'foil' ? 1 : 0)}
+                ${quantityRow('surge-qty', 'Surge foil', 'surge', suggestion.finish === 'surge' ? 1 : 0)}
             </div>
+            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabels[suggestion.finish]}: ${suggestion.reason}</div>` : ''}
         </div>
 
         <div class="card-actions">
@@ -727,6 +747,7 @@ function addToInventoryBoth() {
 }
 
 function addToInventory(autoMode = false) {
+    // Fast Scan auto-add: one Near Mint copy in the suggested finish
     console.log(`addToInventory called with autoMode=${autoMode}, currentCard:`, currentCard);
 
     if (!currentCard) {
@@ -735,42 +756,23 @@ function addToInventory(autoMode = false) {
         return;
     }
 
-    let quantity, condition, isFoil, isSurge;
-
-    if (autoMode) {
-        // Fast scan mode: use detected values
-        quantity = 1;
-        condition = 'Near Mint';
-        // Convert AI foil status to boolean and surge status
-        isFoil = (detectedFoilStatus === 'foil' || detectedFoilStatus === 'etched');
-        isSurge = (detectedFoilStatus === 'etched');
-        console.log(`⚡ Auto-add mode: qty=${quantity}, condition=${condition}, foil=${isFoil}, surge=${isSurge}, detectedFoilStatus=${detectedFoilStatus}`);
-    } else {
-        // Manual mode: use UI values
-        quantity = parseInt(document.getElementById('quantity').value) || 1;
-        condition = document.getElementById('condition').value;
-        isFoil = document.getElementById('is-foil').checked;
-        isSurge = false;
-        console.log(`Manual mode: qty=${quantity}, condition=${condition}, foil=${isFoil}`);
-    }
-
-    console.log('Emitting add_to_inventory event with:', {
-        quantity, condition, is_foil: isFoil, is_surge: isSurge, image_path: currentImagePath
-    });
-
-    socket.emit('add_to_inventory', {
-        quantity: quantity,
-        condition: condition,
-        is_foil: isFoil,
-        is_surge: isSurge,
+    const finish = suggestedFinish(currentCard).finish;
+    const data = {
+        quantity: 1,
+        condition: 'Near Mint',
+        is_foil: finish === 'foil',
+        is_surge: finish === 'surge',
         image_path: currentImagePath
-    });
+    };
+    console.log('Emitting add_to_inventory event with:', data);
+    socket.emit('add_to_inventory', data);
 }
 
 function dismissCard() {
     console.log('Card dismissed by user');
     currentCard = null;
     currentImagePath = null;
+    detectedFoilStatus = 'unknown';
 
     // Emit dismiss event to server to re-enable auto-capture
     socket.emit('dismiss_card');

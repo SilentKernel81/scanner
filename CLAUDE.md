@@ -108,9 +108,10 @@ All settings centralized in `config.py`:
 3. AI identifies BOTH:
    - Card name (from top of card)
    - Collector number (from bottom left corner, e.g., "123/456")
-4. Database search uses BOTH fields to find exact card version
-5. Falls back to name-only search if exact match not found
-6. User confirms and adds to inventory
+4. Foil check (`vision_ai.detect_foil`, outline-detected captures only): a second small AI request on a zoomed crop of the bottom-left corner asks whether the set/language separator is a star (★ = foil) or a dot (•). The web UI (`suggestedFinish()` in scanner.js) combines this with the printing's `finishes` (foil-only / nonfoil-only printings are certain) to pre-fill the Regular/Foil/Surge quantity; Fast Scan auto-add uses the same suggestion
+5. Database search uses BOTH fields to find exact card version
+6. Falls back to name-only search if exact match not found
+7. User confirms and adds to inventory
 
 **Why Collector Number Matters:**
 Cards with same name can have different printings (sets, art, rarities, prices). Using collector number ensures we identify the EXACT version of the card being scanned.
@@ -160,6 +161,7 @@ Disable AI: `VISION_AI_ENABLED = False`
 ### Search Strategy
 All search methods check both `name` and `flavor_name` fields:
 1. Exact match: Case-insensitive SQL query (e.g., "Bucklebury Ferry" finds "Oboro, Palace in the Clouds")
+   - Shortened legendary names match by prefix ("Thanos" → "Thanos, the Mad Titan"), before fuzzy matching
 2. Fuzzy match: Python `difflib.get_close_matches()` with 0.6 cutoff
 3. Partial match: SQL LIKE query for similar cards
 
@@ -168,6 +170,7 @@ All search methods check both `name` and `flavor_name` fields:
 - **Virtual environment**: Project uses Python venv (see `pyvenv.cfg`)
 - **Camera initialization**: 2-second warm-up after camera setup
 - **Autofocus**: Enabled for USB cameras via `cv2.CAP_PROP_AUTOFOCUS`
+- **Local AI (Ollama)**: requests send `think: false` - thinking models (e.g. qwen3.5) otherwise use the whole token budget reasoning and return an empty answer
 - **Model file**: YOLOv8 model (`yolov8n.pt`) must be present in project root
 - **Database requirement**: App checks for database existence before starting
 - **Code refactoring**: AI prompts consolidated in `card_identifier.py:CARD_IDENTIFICATION_PROMPT`, duplicate search logic extracted to `app.py:search_and_emit_card()`, shared utilities in `utils.py`

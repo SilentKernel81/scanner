@@ -15,7 +15,7 @@ detection:
   # auto    = find the card by its outline (fast, tight, perspective-corrected crop),
   #           fall back to YOLO when no outline is found (e.g. white border on white)
   # contour = outline only, yolo = YOLO only (COCO model - it has no "card" class)
-  method: auto
+  method: contour
   allow_landscape: false  # Accept sideways cards (outline mode). Off: a card's art box can look like a sideways card
   confidence_threshold: 0.05  # Low threshold to detect cards (YOLO sees them as "bottle"/"cell phone")
 
@@ -58,6 +58,9 @@ fast_scan:
 vision_ai:
   enabled: true
   provider: gemini  # Options: 'gemini', 'openai', 'anthropic', 'local'
+  # Check the foil marker (★ = foil, • = non-foil) next to the set code - one extra small
+  # AI request per card, only for captures found by outline detection
+  detect_foil: true
 
   # API keys are read from environment variables (GEMINI_API_KEY, OPENAI_API_KEY,
   # ANTHROPIC_API_KEY) - put them in .env (see .env.example)
