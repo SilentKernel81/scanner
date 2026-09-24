@@ -1,22 +1,141 @@
 # object_detector.py
+# Card detection: outline (contour) detection first, YOLO as a fallback
 
-from ultralytics import YOLO
 import cv2
 import numpy as np
 
+# Magic card aspect ratio: 88mm / 63mm
+CARD_ASPECT_RATIO = 88.0 / 63.0
+
+
+def _order_corners(pts):
+    """Order 4 points as top-left, top-right, bottom-right, bottom-left"""
+    pts = pts.reshape(4, 2).astype(np.float32)
+    sums = pts.sum(axis=1)
+    diffs = np.diff(pts, axis=1).ravel()
+    return np.array([pts[np.argmin(sums)], pts[np.argmin(diffs)], pts[np.argmax(sums)], pts[np.argmax(diffs)]])
+
+
+def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640):
+    """
+    Find a card by its outline: the largest 4-sided contour with a card's aspect ratio.
+
+    Works well when the card border contrasts with the background (e.g. a
+    black-bordered card on a light surface) and is unaffected by foil glare
+    inside the card.
+
+    Args:
+        frame: RGB image
+        allow_landscape: Accept cards lying sideways. Off by default because a
+            card's (landscape) art box has nearly the same aspect ratio as a card.
+        ratio_tolerance: Allowed relative deviation from the card aspect ratio
+        work_size: Longest side of the downscaled image used for detection
+
+    Returns:
+        tuple: (corners, score) - corners is a 4x2 float array (tl, tr, br, bl)
+        in frame coordinates and score is how rectangular the outline is (0-1);
+        (None, 0) if no card outline was found
+    """
+    height, width = frame.shape[:2]
+    scale = work_size / max(height, width)
+    small = cv2.resize(frame, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
+
+    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), (5, 5), 0)
+    median = np.median(gray)
+    edges = cv2.Canny(gray, int(max(0, 0.5 * median)), int(min(255, 1.3 * median)))
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    min_area = 0.02 * small.shape[0] * small.shape[1]  # card must cover at least 2% of the frame
+
+    best = None
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+        rect = cv2.minAreaRect(contour)
+        corners = _order_corners(cv2.boxPoints(rect))
+        side_w = np.linalg.norm(corners[1] - corners[0])
+        side_h = np.linalg.norm(corners[3] - corners[0])
+        if min(side_w, side_h) == 0:
+            continue
+        if side_w > side_h and not allow_landscape:
+            continue
+        ratio = max(side_w, side_h) / min(side_w, side_h)
+        fill = area / (side_w * side_h)  # 1.0 = perfectly rectangular
+        if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.85:
+            continue
+        if best is None or area > best[0]:
+            best = (area, corners, fill)
+
+    if best is None:
+        return None, 0
+    return best[1] / scale, float(best[2])
+
+
+def warp_card(frame, corners):
+    """Perspective-correct the card inside `corners` into a flat, portrait image"""
+    tl, tr, br, bl = corners
+    if np.linalg.norm(tr - tl) > np.linalg.norm(bl - tl):
+        # Card lying sideways - rotate so the output is portrait
+        tl, tr, br, bl = bl, tl, tr, br
+    out_h = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
+    out_w = int(out_h / CARD_ASPECT_RATIO)
+    src = np.array([tl, tr, br, bl], dtype=np.float32)
+    dst = np.array([[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32)
+    return cv2.warpPerspective(frame, cv2.getPerspectiveTransform(src, dst), (out_w, out_h))
+
+
 class ObjectDetector:
     """
-    Handles object detection using a YOLOv8 model.
+    Finds a card in a frame. Methods:
+      'contour' - outline detection only
+      'yolo'    - YOLO only (pre-trained COCO model; it has no card class)
+      'auto'    - outline detection, falling back to YOLO
     """
-    def __init__(self, model_path='yolov8n.pt'):
+    def __init__(self, model_path='yolov8n.pt', method='auto', allow_landscape=False):
         """
         Initializes the ObjectDetector.
 
         Args:
             model_path (str): The path to the YOLOv8 model file.
+            method (str): 'auto', 'contour' or 'yolo'
+            allow_landscape (bool): Accept sideways cards in outline detection
         """
-        self.model = YOLO(model_path)
-        self.names = self.model.names
+        self.method = method
+        self.allow_landscape = allow_landscape
+        self.model = None
+        if method in ('auto', 'yolo'):
+            from ultralytics import YOLO
+            self.model = YOLO(model_path)
+            self.names = self.model.names
+
+    def detect(self, frame, conf_threshold=0.1):
+        """
+        Detect a card in an RGB frame.
+
+        Returns:
+            tuple: (bounding_box, label, confidence, corners) - corners is None
+            for YOLO detections; (None, "", 0, None) if nothing was found
+        """
+        if frame is None:
+            return None, "", 0, None
+
+        if self.method in ('auto', 'contour'):
+            corners, score = find_card_outline(frame, allow_landscape=self.allow_landscape)
+            if corners is not None:
+                height, width = frame.shape[:2]
+                x1, y1 = np.floor(corners.min(axis=0)).astype(int)
+                x2, y2 = np.ceil(corners.max(axis=0)).astype(int)
+                bounding_box = (max(0, x1), max(0, y1), min(width, x2), min(height, y2))
+                return bounding_box, "Card", score, corners
+
+        if self.model is not None:
+            bounding_box, label, confidence = self.predict_frame(frame, conf_threshold=conf_threshold)
+            if bounding_box:
+                return bounding_box, f"{label} (YOLO)", confidence, None
+
+        return None, "", 0, None
 
     def predict_frame(self, frame, conf_threshold=0.1, verbose=False, target_size=640):
         """
@@ -92,9 +211,6 @@ class ObjectDetector:
         def get_box_area(box):
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
             return (x2 - x1) * (y2 - y1)
-
-        # Magic card aspect ratio: 88mm / 63mm = 1.397
-        CARD_ASPECT_RATIO = 1.397
 
         # Debug: Print all detections with aspect ratios (only if verbose=True)
         # Set to True in predict_frame() call to enable debugging

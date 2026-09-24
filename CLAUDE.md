@@ -50,7 +50,7 @@ python3 cleanup.py --all
 
 ### Component Flow
 1. **Scanner (scanner.py)** - Captures video frames in background thread, runs YOLOv8 detection, crops detected cards
-2. **Object Detection (object_detector.py)** - YOLO wrapper for rectangular card detection (uses pre-trained model, ignores class names)
+2. **Object Detection (object_detector.py)** - Finds the card by its outline (`find_card_outline`: largest portrait 4-sided contour with card aspect ratio) and falls back to YOLO (`detection.method: auto|contour|yolo`). Outline detections give corners, so captures are perspective-corrected (`warp_card`)
 3. **Card Identification (card_identifier.py)** - Vision AI (Gemini/GPT-4/Claude) identifies specific Magic card from cropped image
 4. **Database (database.py)** - SQLite wrapper for Scryfall card data with fuzzy matching
 5. **Search (card_search.py)** - Card lookup and similarity matching
@@ -98,10 +98,9 @@ All settings centralized in `config.py`:
 
 ### Card Detection & Identification Workflow
 **Detection (Real-time):**
-1. YOLOv8 model (`yolov8n.pt`) detects rectangular objects in each frame
-2. Pre-trained COCO model used - class name ignored (all objects labeled "Card")
-3. Bounding box drawn on annotated frame
-4. Card region cropped and stored in `scanner.detected_card`
+1. Outline detection finds the card's 4 corners (~3 ms/frame); if none is found, YOLOv8 (`yolov8n.pt`, COCO - it has no card class, so it is only a rough fallback) runs instead
+2. Outline (or YOLO box) drawn on the annotated frame
+3. `scanner.detected_card` stores (frame, bbox, corners); `get_detected_card()` crops on demand - perspective warp when corners are known, plain bbox crop otherwise
 
 **Identification (On Capture):**
 1. User triggers capture (or auto-capture)

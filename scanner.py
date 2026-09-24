@@ -5,13 +5,14 @@ Camera and card scanning logic with real-time object detection.
 """
 
 import cv2
+import numpy as np
 import time
 import threading
 import subprocess
 import logging
 from datetime import datetime
 from config import Config
-from object_detector import ObjectDetector
+from object_detector import ObjectDetector, warp_card
 from card_identifier import CardIdentifier
 from settings import Settings
 
@@ -28,13 +29,17 @@ class CardScanner:
         self.camera_type = None
         self.current_frame = None
         self.annotated_frame = None  # Frame with card detection overlay
-        self.detected_card = None  # Cropped card image
+        self.detected_card = None  # (frame, bbox, corners) of the detected card - see get_detected_card()
         self.detected_card_name = "" # Name of the detected card
         self.card_detected = False
         self.frame_lock = threading.Lock()
         self.capture_thread = None
         self.running = False
-        self.object_detector = ObjectDetector(model_path=model_path)
+        self.object_detector = ObjectDetector(
+            model_path=model_path,
+            method=Config.DETECTION_METHOD,
+            allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE
+        )
 
         # Frame stability tracking (for auto-capture)
         self.stable_frames = 0
@@ -425,6 +430,7 @@ class CardScanner:
 
                 # Track which detection to display (current or cached)
                 display_bbox = None
+                display_corners = None
                 is_cached_detection = False
 
                 if not self.enable_detection:
@@ -439,7 +445,7 @@ class CardScanner:
                 elif self.enable_detection:
                     # Run detection on raw frame for better performance
                     # Anti-glare is only applied during capture if enabled
-                    bounding_box, card_name, confidence = self.object_detector.predict_frame(
+                    bounding_box, card_name, confidence, corners = self.object_detector.detect(
                         frame,
                         conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD
                     )
@@ -455,17 +461,20 @@ class CardScanner:
                             width = x2 - x1
                             height = y2 - y1
 
-                            # Check if this is a card-sized object
-                            if self.is_card_sized(bounding_box):
+                            # Outline detections are already validated as card-shaped
+                            # (and may be rotated, which skews the bounding box ratio)
+                            if corners is not None or self.is_card_sized(bounding_box):
                                 # Store this as a valid card detection
                                 self.last_card_detection = {
                                     'bbox': bounding_box,
+                                    'corners': corners,
                                     'name': card_name,
                                     'confidence': confidence,
                                     'time': time.time(),
-                                    'frame': frame.copy()
+                                    'frame': frame
                                 }
                                 display_bbox = bounding_box
+                                display_corners = corners
 
                                 # Card is detected - reset lost frames counter
                                 self.frames_since_card_lost = 0
@@ -484,13 +493,17 @@ class CardScanner:
                                 # Reset stability counter since this isn't a valid card
                                 self.stable_frames = 0
 
-                            # Crop the detected card
-                            cropped = frame[y1:y2, x1:x2]
-
-                            with self.frame_lock:
-                                self.detected_card = cropped
-                                self.detected_card_name = card_name
-                                self.card_detected = True
+                            # Keep the card (only if it passed the card checks) for capture
+                            if display_bbox:
+                                with self.frame_lock:
+                                    self.detected_card = (frame, display_bbox, corners)
+                                    self.detected_card_name = card_name
+                                    self.card_detected = True
+                            else:
+                                with self.frame_lock:
+                                    self.detected_card = None
+                                    self.detected_card_name = ""
+                                    self.card_detected = False
                     else:
                         # No current detection - signal to smoothing algorithm
                         self.smooth_bounding_box(None)
@@ -501,18 +514,15 @@ class CardScanner:
                             if time_since_detection < self.card_display_duration:
                                 # Show cached card detection
                                 display_bbox = self.last_card_detection['bbox']
+                                display_corners = self.last_card_detection['corners']
                                 bounding_box = display_bbox
                                 card_name = self.last_card_detection['name']
                                 confidence = self.last_card_detection['confidence']
                                 is_cached_detection = True
 
                                 # Make the cached card available for capture
-                                cached_frame = self.last_card_detection['frame']
-                                x1, y1, x2, y2 = display_bbox
-                                cropped = cached_frame[y1:y2, x1:x2]
-
                                 with self.frame_lock:
-                                    self.detected_card = cropped
+                                    self.detected_card = (self.last_card_detection['frame'], display_bbox, display_corners)
                                     self.detected_card_name = card_name
                                     self.card_detected = True
 
@@ -551,8 +561,11 @@ class CardScanner:
                         else:
                             box_color = (255, 165, 0)  # Orange when stabilizing
 
-                        # Draw bounding box
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 3)
+                        # Draw the card outline (or bounding box for YOLO detections)
+                        if display_corners is not None:
+                            cv2.polylines(annotated, [display_corners.astype(np.int32)], True, box_color, 3)
+                        else:
+                            cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 3)
 
                         # Create label
                         label = f"{card_name} ({confidence:.2f})"
@@ -573,7 +586,7 @@ class CardScanner:
                             self.auto_capture_enabled and
                             not is_cached_detection and  # Only auto-capture current detections, not cached ones
                             not self.card_under_review and  # Don't auto-capture if card is being reviewed
-                            self.is_card_sized(display_bbox) and
+                            (display_corners is not None or self.is_card_sized(display_bbox)) and
                             self.stable_frames >= self.required_stable_frames):
 
                             # Check if enough time has passed since last auto-capture
@@ -614,11 +627,18 @@ class CardScanner:
         return None
     
     def get_detected_card(self):
-        """Get the currently detected card image"""
+        """Get the currently detected card image (perspective-corrected when the outline is known)"""
         with self.frame_lock:
-            if self.detected_card is not None:
-                return self.detected_card.copy(), self.detected_card_name
-        return None, ""
+            detected, card_name = self.detected_card, self.detected_card_name
+        if detected is None:
+            return None, ""
+
+        # Frames are never modified after capture, so cropping outside the lock is safe
+        frame, bbox, corners = detected
+        if corners is not None:
+            return warp_card(frame, corners), card_name
+        x1, y1, x2, y2 = bbox
+        return frame[y1:y2, x1:x2].copy(), card_name
     
     def is_card_detected(self):
         """Check if a card is currently detected"""

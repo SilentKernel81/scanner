@@ -35,6 +35,8 @@ class Config:
     CAMERA_FPS = config.get('camera', 'fps', default=20)
 
     # Object detection settings
+    DETECTION_METHOD = config.get('detection', 'method', default='auto')
+    DETECTION_ALLOW_LANDSCAPE = config.get('detection', 'allow_landscape', default=False)
     DETECTION_CONFIDENCE_THRESHOLD = config.get('detection', 'confidence_threshold', default=0.3)
     ASPECT_RATIO_TOLERANCE = config.get('detection', 'aspect_ratio_tolerance', default=0.15)
 
