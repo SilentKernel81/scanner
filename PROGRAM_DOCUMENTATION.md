@@ -331,7 +331,7 @@ model is preloaded (`warm_up`) when auto scanning starts, because loading a 9B m
 |---|---|---|
 | 1 | Set code + collector number (unique per printing), accepted if the name roughly matches (`names_match`: same, prefix, a double-faced card's face, ≥ 60% similar, or ≥ 75% similar to the short name before the comma - "Thands" / "Thanos, the Mad Titan") | `set_number` |
 | 2 | Name + collector number, then shortened name ("Thanos" → "Thanos, the Mad Titan") + number | `name_number` |
-| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read. If the name was read exactly, the set read has only that one printing of it, and the number read is one digit off ("0189" for #188 - a blurry 8), that printing is certain | `name_set_digit` / `name_set` / `name` / `fuzzy` |
+| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read. If the name was read exactly and exactly one printing of it in the set read is one digit off the number read - a digit misread, dropped or doubled, compared as printed with leading zeros ("0189" for #188, "6186" for 0186, "017" for 0117) - that printing is certain (with two printings a digit away it goes to review) | `name_set_digit` / `name_set` / `name` / `fuzzy` |
 | 4 | Name unrecognizable but set + number exist: trust the printed set + number | `set_number_unverified` |
 
 Collector numbers are compared in their variants ("0014" → 14, 0014, 14s, 0014s). Names are
@@ -444,8 +444,12 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   blur can hide the card for a few frames and shift its outline, and the "reappeared elsewhere"
   / "card gone" rules then took the same card for a new one (a probe caused two duplicate
   captures in a live session, reproduced in simulation: 22 captures for 15 drops). A real drop
-  during a probe is still recognized by its jump (> 3%; the blur shifted the outline ≤ 1.9%):
-  the card counts as new once the focus is done, and the probe's measurement is discarded.
+  during a probe is still recognized by its jump (> 3%; the blur shifted the outline ≤ 1.9%) -
+  in fixed-area mode by the area changing > 8 in 2 frames in a row: the card counts as new
+  once the focus is done, and the probe's measurement is discarded. Otherwise the card in view
+  becomes the reference for "looks different from the captured one": after a probe a foil's
+  glare and outline changed enough (thumbnail 0.34, other cards 0.39-0.62) that a foil was
+  captured twice. In fixed-area mode only when the area is still within 10 of the capture.
   Simulated with 30 drops every 1.5 s and a peak 35 away: every card captured once, focus at
   the peak after 9 cards.
 - **Automatic refocus** (`_check_focus_drift`): with a locked focus, a card that stays still but

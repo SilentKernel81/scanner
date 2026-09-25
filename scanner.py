@@ -482,6 +482,22 @@ class CardScanner:
         cv2.imwrite(str(folder / f"{stamp:.3f}_s{stable}.jpg"), cv2.cvtColor(small, cv2.COLOR_RGB2BGR),
                     [cv2.IMWRITE_JPEG_QUALITY, 95])
 
+    def _rebaseline_after_focus(self, focus_moving):
+        """
+        When the lens has finished moving (probe or sweep) and no drop was seen meanwhile, the
+        card in view is still the captured one: take it as the new reference. After a probe a
+        foil's glare and the outline can change enough to look like another card (a foil Part
+        in Friendship was captured twice this way).
+        """
+        if getattr(self, 'was_focus_moving', False) and not focus_moving and self.awaiting_new_card \
+                and not self.disturbed_during_focus:
+            self.captured_thumbnail = self.previous_thumbnail
+            # (in fixed-area mode only if the area still looks like the capture - a card that
+            # landed unseen during the probe differs ~21 and must stay new)
+            if self._area_difference(self.area_thumb, self.area_captured) <= self.AREA_DIFFERENT:
+                self.area_captured = self.area_thumb
+        self.was_focus_moving = focus_moving
+
     def _focus_moving(self):
         """A focus sweep or probe is running, or ended less than 0.6 s ago"""
         return self.focus_sweep_running or self.focus_probe_running or time.time() - self.last_focus_move < 0.6
@@ -599,7 +615,18 @@ class CardScanner:
             self.area_anchor = thumb
 
         self.area_big_changes = self.area_big_changes + 1 if change > self.AREA_DROP else 0
-        if self.awaiting_new_card and not focus_moving:
+        # A card falling in while a focus probe moves the lens (only slightly blurred): it counts
+        # as new once the focus is done (and the probe's measurement is discarded)
+        if focus_moving and not self.focus_sweep_running and self.area_big_changes >= 2:
+            self.disturbed_during_focus = True
+        self._rebaseline_after_focus(focus_moving)
+        if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
+            self.disturbed_during_focus = False
+            self.awaiting_new_card = False
+            self.stable_frames = 0
+            if self.auto_capture_enabled:
+                self.log("New card detected (dropped while focusing)")
+        elif self.awaiting_new_card and not focus_moving:
             different = self.area_captured is not None and \
                 self._area_difference(thumb, self.area_captured) > self.AREA_DIFFERENT
             if self.area_big_changes >= 2 or (settled and different):
@@ -971,6 +998,7 @@ class CardScanner:
                                 # A real drop then is still seen by its big jump - the card counts as new
                                 # once the focus is done (and spoils a probe's measurement)
                                 focus_moving = self._focus_moving()
+                                self._rebaseline_after_focus(focus_moving)
                                 movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
                                 if focus_moving and not self.focus_sweep_running and movement > 0.03:
                                     self.disturbed_during_focus = True

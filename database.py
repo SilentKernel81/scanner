@@ -92,21 +92,29 @@ def _leading_number(collector_number):
     return int(match.group()) if match else None
 
 
-def _one_digit_off(read_number, collector_number):
+def _edit_distance(a, b):
+    """Levenshtein distance between two short strings"""
+    previous = list(range(len(b) + 1))
+    for i, char_a in enumerate(a, 1):
+        current = [i]
+        for j, char_b in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (char_a != char_b)))
+        previous = current
+    return previous[-1]
+
+
+def _digit_distance(read_number, collector_number):
     """
-    Whether a collector number read from a card differs from a printing's in exactly one digit
-    ("0189" vs "188") - a blurry digit, not another card
+    How many digits a collector number read from a card is off from a printing's: one digit
+    misread ("0189" for 0188, "6186" for 0186), dropped ("017" for 0117) or doubled. Compared as
+    printed - modern cards show 4 digits with leading zeros - and without the zeros.
     """
     read = re.search(r'\d+', read_number or '')
     actual = _leading_number(collector_number)
     if not read or actual is None:
-        return False
-    # Compare as printed: modern cards show 4 digits ("0186"), so a leading 0 misread as
-    # "6186" is one digit off too
-    read = read.group()
-    actual = str(actual).zfill(len(read)) if len(read) == 4 else str(actual)
-    read = read if len(read) == 4 else read.lstrip('0') or '0'
-    return len(read) == len(actual) and sum(a != b for a, b in zip(read, actual)) == 1
+        return None
+    read, actual = read.group(), str(actual)
+    return min(_edit_distance(read, actual.zfill(4)), _edit_distance(read.lstrip('0') or '0', actual))
 
 
 def search_key(text):
@@ -417,11 +425,13 @@ class CardDatabase:
 
                 if candidates and (in_set or read_number is not None):
                     best = min(candidates, key=closeness)
-                    # The name read exactly, the only printing of it in the set read, and the
-                    # number one digit off (a blurry "0188" read as "0189"): that printing
-                    if (len(in_set) == 1 and match['match'] == 'name'
-                            and _one_digit_off(collector_number, best['collector_number'])):
-                        return self._tagged(best, 'name_set_digit')
+                    # The name read exactly and exactly one printing of it in the set read one
+                    # digit off the number read (a blurry "0188" read as "0189", "0117" read as
+                    # "017"): that printing
+                    one_off = [row for row in in_set
+                               if _digit_distance(collector_number, row['collector_number']) == 1]
+                    if match['match'] == 'name' and len(one_off) == 1:
+                        return self._tagged(one_off[0], 'name_set_digit')
                     return self._tagged(best, 'name_set' if in_set else 'name')
 
             # Name not found at all (badly misread): trust the printed set + number
@@ -434,7 +444,7 @@ class CardDatabase:
         """
         Card dict plus how it was matched: 'set_number' / 'name_number' (the printing is
         confirmed - see CONFIRMED_MATCHES), 'name_set_digit' (confirmed too: the only printing
-        of the name in the set read, number one digit off), 'name_set', 'name', 'fuzzy' or
+        of the name in the set read whose number is one digit off the one read), 'name_set', 'name', 'fuzzy' or
         'set_number_unverified' (the printed set + number, name not recognized)
         """
         card = self._format_card_result(row)
