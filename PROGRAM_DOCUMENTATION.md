@@ -104,7 +104,9 @@ working. The preview stream encodes each new frame once, shared by all browser t
 `object_detector.find_card_outline(frame, previous=...)` runs on every frame (~3 ms):
 
 0. **Follow the previous card** (`_track_outline`, when the scanner passes the last outline -
-   across detector gaps of up to 2 frames): fit a line to the edges along each side of the
+   across detector gaps of up to 2 frames; after a new card is detected it starts afresh, since
+   following the old outline once latched onto a new foil's inner frame, and the photo lost its
+   set line): fit a line to the edges along each side of the
    previous outline (within 6 px at 640 px, corner zones left out) and intersect them. The
    result is kept if it is card-shaped, within 15% of the previous size, has edges along ≥ 80%
    of its perimeter and moved ≤ 2% (more means it was fitted to another edge, e.g. the inner
@@ -356,7 +358,10 @@ cards foil when the capture was a little soft: 25 of 84 regular cards (from a sc
 where auto-added lands came out foil). Describing both shapes ("a dot is a plain round point; a
 star has five sharp points") fixed that on the same set - checked by eye: 84/84 regular and
 40/40 readable foils right; 3 unreadable, blurry foils were called dot. qwen3.5:4b still called
-12 of the 84 regular cards foil (23 with the old wording). The taller crop keeps the set line in
+12 of the 84 regular cards foil (23 with the old wording). The prompt also says to answer
+*unclear* when the set line is cut off: a crop that missed it (see below) was answered "dot"
+and a foil went in as regular; with the sentence that crop gives *unknown*, and 160/160
+readable cards (the set above plus later captures) stay right. The taller crop keeps the set line in
 view when the detected outline also takes in the edge of the card underneath in the pile.
 
 The web page combines this with the printing's `finishes` in `suggestedFinish()`:

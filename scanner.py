@@ -977,12 +977,17 @@ class CardScanner:
                                 if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
                                     self.disturbed_during_focus = False
                                     self.awaiting_new_card = False
+                                    self.tracked_outline = None
                                     self.stable_frames = 0
                                     if self.auto_capture_enabled:
                                         self.log("New card detected (dropped while focusing)")
                                 elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
                                     self.awaiting_new_card = False
                                     self.stable_frames = 0  # the new card must settle first
+                                    # Find the new card afresh: following the old outline could latch
+                                    # onto edges of the new card that happen to lie where the old one's
+                                    # were (a foil's inner frame - the photo then cut off its set line)
+                                    self.tracked_outline = None
                                     if self.auto_capture_enabled:
                                         movement, image_change = getattr(self, 'last_frame_change', (0, 0))
                                         self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
