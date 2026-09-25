@@ -391,8 +391,11 @@ cards (`PAL`); older cards only have a set symbol (Unknown). `Pokemon.identify` 
 | 4 | Name not recognized: the printed set + number | `set_number_unverified` |
 
 Confirmed: `set_number`, `name_number`. Measured with qwen3.5:9b on official card images
-(160 cards from Base Set to Mega Evolution, 4 random samples): 35-38 of 40 confirmed correctly
-per sample, **no confirmed wrong card**; the rest went to review - mostly basic Energy cards
+(160 cards from Base Set to Mega Evolution, 4 random samples): 39 of 40 confirmed correctly in
+each sample, ~0.94 s per card, **no confirmed wrong card**. The prompt is kept short and plain:
+an earlier, longer one (what not to read, format hints) got answers as Markdown sentences for
+14-23 of 40 cards, 35-38 confirmed, and 2-2.4 s per card on camera captures (now ~0.8-1.1 s).
+The rest went to review - mostly basic Energy cards
 (read as "ENERGY"), promos without a readable code, and cards the same name + number/total
 exist in twice (Dugtrio 19/102 is in Base Set and Triumphant). An early version confirmed an
 Eevee promo from its Pokédex number ("133/189") - no set has 189 cards, which is now a review.

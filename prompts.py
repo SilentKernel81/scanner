@@ -60,11 +60,14 @@ SET: <set code, or Unknown>""",
     'pokemon': {
         'identify': {
             'label': 'Card identification',
-            'instructions': """This is a Pokémon trading card. Read three things:
-- NAME: the card name at the top, with its suffix if it has one (ex, V, VMAX, VSTAR, GX, EX). Not the evolution line ("Evolves from") and not the HP.
-- NUMBER: the card number at the bottom-left or bottom-right corner, with the set total after the slash - give it as printed, with leading zeros and letters (like the format ###/###, TG##/TG##). Promo cards print a code instead (like SWSH###, SM##). Not the Pokédex number.
-- SET: the set abbreviation of 2-4 letters or digits printed at the bottom next to the number, before the language code (EN). Older cards only have a set symbol - then write Unknown.
-Copy exactly what is printed. If a value is blurry or unreadable, write Unknown - do not guess.""",
+            # Short and plain on purpose: a longer version (what not to read, "Pokédex number",
+            # format hints) made qwen3.5:9b answer in Markdown sentences for 14-23 of 40 cards
+            # and take 2-2.4 s on camera captures; this one ~0.9 s, 0-1 of 160 chatty
+            'instructions': """This is a Pokémon card. Read three things:
+- NAME: the card name at the top, with its suffix if any (ex, V, VMAX, VSTAR, GX).
+- NUMBER: the card number at the bottom, like 012/193 (promo cards: a code like SWSH095).
+- SET: the set code of 2-4 letters next to the number, before EN. Older cards have none: Unknown.
+Copy exactly what is printed. If a value is unreadable, write Unknown.""",
             'answer_format': """Always answer with all three lines, each with its label:
 NAME: <card name>
 NUMBER: <card number as printed, or Unknown>
