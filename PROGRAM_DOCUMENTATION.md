@@ -101,6 +101,17 @@ scales the card's corners up (`get_detected_card`, `get_full_frame`). OpenCV run
 working. The preview stream encodes each new frame once, shared by all browser tabs
 (`get_stream_jpeg`).
 
+**Rotation** (`camera.rotate` or **Settings → Camera rotation**, saved as `camera_rotation`;
+`set_camera_rotation` / `camera_rotation_updated`): every frame is rotated right after it is
+decoded - live and the full-size capture (`CardScanner._rotate`) - so detection, crops, the
+fixed area and focus all see an upright card. The card stands along the frame's short side
+(1440 px) otherwise: measured over a 67-card lot, the card grew 16% (1038 → 1204 px) as the
+pile rose ~20 mm, i.e. the camera sat ~14.5 cm above the box floor, and the card would reach
+the frame's edge after ~115 cards. With the camera mounted sideways and the image rotated 90°,
+the card's long side runs along 2560 px: at the same distance the pile can grow ~270 cards, or
+the camera can come closer (~10 cm) for ~45% more detail per card and still ~125 cards.
+Changing the rotation turns the fixed area off (it was drawn for the other orientation).
+
 `object_detector.find_card_outline(frame, previous=...)` runs on every frame (~3 ms):
 
 0. **Follow the previous card** (`_track_outline`, when the scanner passes the last outline -
@@ -216,6 +227,13 @@ still: movement ≤ 0.4%, image change ≤ 0.07, detection gaps ≤ 2 frames. In
 measured 2–5 frames without a card, jumps of 4.5–8.5% and image changes of 0.7–1.2.
 
 Captures are also at least `auto_capture.delay` (1 s) apart.
+
+When the only sign was the outline vanishing for a frame and coming back shifted (a hand
+approaching), the card must not settle as the very image just captured (`_outline_flicker`:
+thumbnail difference < 0.05) - in a 67-card lot a card was captured twice this way (0.02), while
+real copies of a card differed 0.07-0.50 and came with bigger signs (jumps, image changes).
+Over that lot the pile grew 16% in height; pace (2.0-2.5 s per card), text sharpness and focus
+stayed the same.
 
 ### Fixed area (sleeved cards)
 
@@ -474,7 +492,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `set_game` | `game_changed` (to every client; stops auto scanning) |

@@ -33,6 +33,7 @@ class Config:
     CAMERA_RESOLUTION = tuple(config.get('camera', 'resolution', default=[2560, 1440]))
     CAMERA_PREVIEW_RESOLUTION = tuple(config.get('camera', 'preview_resolution', default=[640, 480]))
     CAMERA_FPS = config.get('camera', 'fps', default=20)
+    CAMERA_ROTATE = int(config.get('camera', 'rotate', default=0))
 
     # Object detection settings
     DETECTION_METHOD = config.get('detection', 'method', default='auto')

@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=23">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=25">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -44,7 +44,7 @@
                 <span class="stat-label">Value</span>
                 <span class="stat-value" id="total-value">$0.00</span>
             </div>
-            <div class="stat-box" id="processing-queue-box" style="display: none;">
+            <div class="stat-box" id="processing-queue-box" title="Cards waiting to be identified">
                 <span class="stat-label">Processing</span>
                 <span class="stat-value" id="processing-queue">0</span>
             </div>
@@ -192,6 +192,16 @@
                         </span>
                         <input type="checkbox" class="switch" id="toggle-autofocus" checked>
                     </label>
+                    <div class="input-group">
+                        <label for="camera-rotation">Camera rotation</label>
+                        <select id="camera-rotation" class="select">
+                            <option value="0">None</option>
+                            <option value="90">90° clockwise</option>
+                            <option value="270">90° counter-clockwise</option>
+                            <option value="180">180°</option>
+                        </select>
+                        <div class="hint">A camera mounted sideways puts the card's long side along the image's long side: more detail per card and room for a taller pile</div>
+                    </div>
                     <label class="switch-row">
                         <span class="switch-text">
                             <span class="switch-title">Anti-glare</span>
@@ -398,7 +408,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=23"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=23"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=25"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=25"></script>
 </body>
 </html>

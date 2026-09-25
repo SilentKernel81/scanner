@@ -1269,7 +1269,8 @@ def get_scan_settings():
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
-        'fixed_area': scanner.fixed_area if scanner else None
+        'fixed_area': scanner.fixed_area if scanner else None,
+        'camera_rotation': scanner.rotation if scanner else 0
     })
 
 
@@ -1352,6 +1353,22 @@ def handle_set_autofocus(data):
         return
     if not scanner.set_continuous_autofocus(bool(data.get('enabled'))):
         emit('error', {'message': 'This camera has no manual focus control'})
+
+
+@socketio.on('set_camera_rotation')
+def handle_set_camera_rotation(data):
+    """Rotate the camera image (0/90/180/270 degrees clockwise) - e.g. a camera mounted sideways"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    try:
+        fixed_area_off = scanner.set_rotation(data.get('rotation', 0))
+    except (TypeError, ValueError) as e:
+        emit('error', {'message': str(e)})
+        return
+    socketio.emit('camera_rotation_updated', {'rotation': scanner.rotation, 'fixed_area_off': fixed_area_off})
+    if fixed_area_off:
+        socketio.emit('fixed_area_updated', {'enabled': False, 'area': scanner.fixed_area})
 
 
 @socketio.on('set_fixed_area')

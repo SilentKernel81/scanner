@@ -9,6 +9,10 @@ camera:
   resolution: [2560, 1440]
   preview_resolution: [640, 480]
   fps: 20
+  # Rotate the image (degrees clockwise: 0, 90, 180, 270) - e.g. a camera mounted sideways so a
+  # card's long side runs along the frame's long side: more pixels per card and more room for
+  # the pile to grow. Also settable in Settings (saved in data/settings.json)
+  rotate: 0
 
 # Detection Settings
 detection:

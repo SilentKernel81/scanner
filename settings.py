@@ -21,6 +21,7 @@ class Settings:
         'detection_enabled': True,
         'fixed_area_enabled': False,  # Judge cards by a fixed area instead of their outline (sleeves)
         'fixed_area': None,  # [x1, y1, x2, y2] as fractions of the frame
+        # 'camera_rotation' (0/90/180/270) overrides config.yaml camera.rotate once set in the UI
     }
 
     def __init__(self):

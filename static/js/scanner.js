@@ -225,17 +225,9 @@ socket.on('processing_queue_update', function(data) {
     const queueBox = document.getElementById('processing-queue-box');
     const queueValue = document.getElementById('processing-queue');
 
-    // Update the queue count
+    // Always shown (0 = nothing waiting); highlighted only when a backlog builds up
     queueValue.textContent = queueCount;
-
-    // Show/hide the queue box based on count
-    if (queueCount > 0) {
-        queueBox.style.display = '';
-        // Add visual emphasis for queue building up
-        queueBox.classList.toggle('is-busy', queueCount >= 3);
-    } else {
-        queueBox.style.display = 'none';
-    }
+    queueBox.classList.toggle('is-busy', queueCount >= 3);
 });
 
 socket.on('ai_provider_set', function(data) {
@@ -530,6 +522,7 @@ function loadScanSettings() {
             document.getElementById('toggle-fast-scan').checked = data.auto_add;
             document.getElementById('toggle-autofocus').checked = data.autofocus;
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
+            document.getElementById('camera-rotation').value = String(data.camera_rotation || 0);
         })
         .catch(error => console.error('Error loading scan settings:', error));
 }
@@ -569,6 +562,19 @@ function placeAreaLayer() {
     const rect = imageContentRect();
     const layer = document.getElementById('area-layer');
     Object.assign(layer.style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
+}
+
+socket.on('camera_rotation_updated', function(data) {
+    document.getElementById('camera-rotation').value = String(data.rotation);
+    notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
+});
+
+function updateVideoOrientation() {
+    // A rotated camera gives a portrait image: show it upright instead of letterboxed
+    const img = document.getElementById('video-feed');
+    if (img.naturalWidth && img.naturalHeight) {
+        img.parentElement.classList.toggle('portrait', img.naturalHeight > img.naturalWidth);
+    }
 }
 
 function startDrawArea() {
@@ -1557,6 +1563,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadGames();
     setupAreaDrawing();
+    setInterval(updateVideoOrientation, 1000);
+    document.getElementById('camera-rotation').addEventListener('change', function(e) {
+        socket.emit('set_camera_rotation', {rotation: parseInt(e.target.value)});
+    });
     document.getElementById('game-select').addEventListener('change', function(e) {
         socket.emit('set_game', {game: e.target.value});
     });

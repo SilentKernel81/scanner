@@ -209,6 +209,8 @@ class CardScanner:
         self.card_under_review = False  # Prevent auto-capture while card is being reviewed
         self.last_capture = None  # (card image RGB, is_warped) of the last capture - prompt editor tests
         self.capture_pending = False  # Auto-capture triggered, image / focus probe not done yet
+        # Image rotation (degrees clockwise), applied as each frame is decoded - live and full size
+        self.rotation = int(self.settings.get('camera_rotation', Config.CAMERA_ROTATE) or 0)
 
         # Fixed capture area (sleeved cards): stillness and new cards are judged by how the image
         # inside a drawn area changes, not by the card's outline (on a sleeved pile the outline
@@ -407,12 +409,18 @@ class CardScanner:
         Identical copies are caught by the drop, not by their looks.
         gap: frames without a detection just before this one
         """
+        self.new_card_gap_only = False
         if self.card_disturbed:
+            return True
+        if self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3:
             return True
         movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
         if gap >= 1 and movement > 0.008:
+            # Only this weak sign: the outline flickered and came back a little shifted. The
+            # capture gate checks it doesn't settle as the very same image (see _outline_flicker)
+            self.new_card_gap_only = True
             return True
-        return self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3
+        return False
 
     def _trace_waiting(self, detected):
         """
@@ -482,6 +490,18 @@ class CardScanner:
         cv2.imwrite(str(folder / f"{stamp:.3f}_s{stable}.jpg"), cv2.cvtColor(small, cv2.COLOR_RGB2BGR),
                     [cv2.IMWRITE_JPEG_QUALITY, 95])
 
+    def _outline_flicker(self):
+        """
+        A "new card" seen only because the outline vanished for a frame and came back shifted
+        (a hand approaching), which settled as the very image just captured: not a new card.
+        In a 67-card lot a card was captured twice this way (thumbnail difference 0.02, while
+        real copies of a card differed 0.07-0.50 and came with bigger signs).
+        """
+        same = getattr(self, 'new_card_gap_only', False) and \
+            self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) < 0.05
+        self.new_card_gap_only = False
+        return same
+
     def _rebaseline_after_focus(self, focus_moving):
         """
         When the lens has finished moving (probe or sweep) and no drop was seen meanwhile, the
@@ -543,6 +563,34 @@ class CardScanner:
     AREA_DRIFT = 4.0
     AREA_DROP = 8.0
     AREA_DIFFERENT = 10.0
+
+    ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+    def _rotate(self, image):
+        code = self.ROTATIONS.get(self.rotation)
+        return image if code is None or image is None else cv2.rotate(image, code)
+
+    def set_rotation(self, degrees):
+        """
+        Rotate the camera image (0/90/180/270 clockwise). Detection starts afresh; a fixed area
+        drawn for the old orientation is switched off (it has to be drawn again).
+        """
+        degrees = int(degrees) % 360
+        if degrees not in (0, 90, 180, 270):
+            raise ValueError("Rotation must be 0, 90, 180 or 270")
+        self.rotation = degrees
+        self.settings.set('camera_rotation', degrees)
+        with self.frame_lock:
+            self.detected_card = None
+            self.card_detected = False
+        self.tracked_outline = self.previous_card_points = self.previous_sharpness = None
+        self.smoothed_bbox = self.last_card_detection = None
+        self.stable_frames = 0
+        fixed_area_off = self.fixed_area_enabled
+        if fixed_area_off:
+            self.set_fixed_area(enabled=False)
+        self.log(f"Camera image rotated {degrees}°")
+        return fixed_area_off
 
     def _fixed_area_active(self):
         return self.fixed_area_enabled and self.fixed_area is not None and self.enable_detection
@@ -915,6 +963,7 @@ class CardScanner:
                     elif len(frame.shape) == 3 and frame.shape[2] == 3:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+                frame = self._rotate(frame)
                 annotated = frame.copy()
 
                 # Track which detection to display (current or cached)
@@ -1160,7 +1209,10 @@ class CardScanner:
                                     remaining = self.auto_capture_delay - time_since_last_capture
                                     self.log(f"Auto-capture ready, waiting for cooldown: {remaining:.1f}s remaining", level="info")
 
-                            if time_since_last_capture >= self.auto_capture_delay:
+                            if time_since_last_capture >= self.auto_capture_delay and self._outline_flicker():
+                                self.awaiting_new_card = True
+                                self.log("Same card as the last capture (its outline flickered) - not captured again")
+                            elif time_since_last_capture >= self.auto_capture_delay:
                                 self._trigger_auto_capture()
 
                 if self.debug_trace_enabled:
@@ -1192,7 +1244,7 @@ class CardScanner:
         with self.frame_lock:
             frame, raw = self.current_frame, self.current_raw
         if raw is not None and self.half_size_decode:
-            return cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            return self._rotate(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
         return None if frame is None else frame.copy()
 
     def get_stream_jpeg(self, max_height=720):
@@ -1235,7 +1287,7 @@ class CardScanner:
         frame, bbox, corners, raw = detected
         if raw is not None and self.half_size_decode:
             # Detection ran on the half-size frame: cut the card from the full-size image
-            full = cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            full = self._rotate(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
             scale_x, scale_y = full.shape[1] / frame.shape[1], full.shape[0] / frame.shape[0]
             frame = full
             if corners is not None:
