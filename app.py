@@ -690,9 +690,19 @@ def update_inventory_card(row_id):
             if finish is not None and finish not in games.active().finishes:
                 return jsonify({'success': False, 'split': False, 'error': f'Unknown finish: {finish}'}), 400
 
+            # A new finish takes the printing's price in that finish (foil / holo / reverse)
+            finish_price = None
+            entry = inventory.get_entry(row_id) if finish else None
+            if entry and finish != entry['finish'] and entry['card_id']:
+                game = games.get(entry['game']) or games.active()
+                card = game.get_card(entry['card_id'])
+                if card:
+                    finish_price = game.inventory_fields(card, finish)['price']
+
             # Changing the finish of several copies splits the entry
             result = inventory.update_card(row_id, quantity=quantity, condition=condition,
-                                           finish=finish, split_quantity=split_quantity)
+                                           finish=finish, split_quantity=split_quantity,
+                                           finish_price=finish_price)
 
             if result['success']:
                 return jsonify(result)

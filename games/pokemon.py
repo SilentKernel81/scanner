@@ -24,7 +24,7 @@ from difflib import SequenceMatcher, get_close_matches
 import requests
 
 from config import Config
-from database import search_key
+from database import _edit_distance, search_key
 from games.base import Game
 
 HEADERS = {'User-Agent': 'CardScanner/1.0', 'Accept': 'application/json'}
@@ -95,17 +95,40 @@ def parse_number(text):
     return (number_key(left) or None), (int(total.group()) if total else None)
 
 
+NAME_SUFFIXES = {'ex', 'v', 'vmax', 'vstar', 'v union', 'gx', 'break', 'prime', 'legend', 'lv.x', 'star',
+                 'δ', '☆', 'tag team', 'radiant'}
+
+
+ENERGY_TYPES = {'grass', 'fire', 'water', 'lightning', 'psychic', 'fighting', 'darkness', 'metal', 'fairy'}
+
+
+def basic_energy(name):
+    """For a name read from a basic Energy card: (True, its type or None); else (False, None).
+    Modern ones print "Basic <symbol> Energy" and the AI can't name the symbol reliably
+    (it read Metal as Fairy), so the type is often missing or wrong"""
+    match = re.fullmatch(r'(?:basic )?(?:(\w+) )?energy', search_key(name) or '')
+    if not match or (match.group(1) and match.group(1) not in ENERGY_TYPES):
+        return False, None
+    return True, match.group(1)
+
+
 def names_match(query, name):
     """A name read from a card against a card name: same, one a prefix of the other
     ("Charizard" / "Charizard ex"), or a close spelling"""
     query_key, key = search_key(query), search_key(name)
     if not query_key or not key:
         return False
+    # Modern basic Energy cards print "Basic <symbol> Energy"; the data says "Water Energy"
+    query_key, key = (re.sub(r'^basic (?=.*energy$)', '', k) for k in (query_key, key))
     if len(query_key) > 30:
         # A sentence instead of a name ("the text at the top reads ho-oh v"): the name inside it
         return re.search(rf'(?<!\w){re.escape(key)}(?!\w)', query_key) is not None
-    return (query_key == key or key.startswith(query_key + ' ') or query_key.startswith(key + ' ')
-            or SequenceMatcher(None, query_key, key).ratio() >= 0.8)
+    if query_key == key or SequenceMatcher(None, query_key, key).ratio() >= 0.8:
+        return True
+    # One is the other plus a suffix ("Charizard" / "Charizard ex") - only a suffix: "Energy"
+    # must not match "Energy Retrieval"
+    short, long = sorted((query_key, key), key=len)
+    return long.startswith(short + ' ') and long[len(short) + 1:].replace('-', ' ') in NAME_SUFFIXES
 
 
 def write_csv(rows, file):
@@ -222,7 +245,7 @@ class Pokemon(Game):
                  (s.get('cardCount') or {}).get('official'), s['serie']['id'], s.get('releaseDate'))
                 for s in sets.values()])
             self.db.conn.commit()
-        self._names = None
+        self._names = self._codes = None
         self.db.set_data_info(self.id, max((s.get('releaseDate') or '') for s in sets.values()), len(rows))
         progress(f"Pokémon card data ready: {len(rows):,} cards in {len(sets)} sets")
         return len(rows)
@@ -278,6 +301,13 @@ class Pokemon(Game):
             self.db.conn.commit()
         return card
 
+    def _set_codes(self):
+        if getattr(self, '_codes', None) is None:
+            with self.db._lock:
+                self._codes = {row[0] for row in self.db.conn.execute(
+                    'SELECT DISTINCT set_code FROM pokemon_cards WHERE set_code IS NOT NULL')}
+        return self._codes
+
     def _all_names(self):
         if self._names is None:
             with self.db._lock:
@@ -308,17 +338,24 @@ class Pokemon(Game):
         if PROMO_NUMBER.fullmatch(set_code) and not (key and total):
             key, total = parse_number(set_code)  # a promo code ("SM10") read as the set
             set_code = ''
-        if set_code.endswith('EN') and len(set_code) > 3 and not self._rows('set_code = ?', (set_code,)):
+        read_code = set_code
+        if set_code.endswith('EN') and len(set_code) > 3 and set_code not in self._set_codes():
             set_code = set_code[:-2]  # "PREN": the set and language codes read as one
 
-        # 1. Printed set abbreviation + number
+        # 1. Printed set abbreviation + number. A code no set has may be a misread one
+        # ("SYE" for SVE, "MEEE" for MEE + EN): the codes one letter away count if exactly one
+        # of them has a card of that name and number
         set_number_row = None
+        is_energy, energy_type = basic_energy(name)
+        if is_energy:
+            return self._identify_energy(key, {set_code, read_code}, energy_type)
         if set_code and key:
-            rows = self._rows('set_code = ? AND number_key = ?', (set_code, key))
-            for row in rows:
-                if names_match(name, row['name']):
-                    return self._card(row, 'set_number')
-            set_number_row = rows[0] if rows else None
+            codes = self._codes_like(set_code)
+            rows = [row for code in codes for row in self._rows('set_code = ? AND number_key = ?', (code, key))]
+            named = [row for row in rows if names_match(name, row['name'])]
+            if len(named) == 1:
+                return self._card(named[0], 'set_number')
+            set_number_row = rows[0] if len(codes) == 1 and rows else None
 
         # 2. Name + number, narrowed by the set total
         if key:
@@ -331,9 +368,11 @@ class Pokemon(Game):
                     # No set of that size: something else was read as the number (review)
                     return self._card(rows[0], 'name_number_other_total')
                 rows = same_total
-            if len(rows) == 1:
+            if len(rows) == 1 and not (rows[0]['category'] == 'Energy' and not total):
                 return self._card(rows[0], 'name_number')
             if rows:
+                # Several, or an Energy: basic Energy numbers have no set total and the same
+                # names recur in many sets, so a misread number would pick another Energy
                 return self._card(rows[0], 'name_number_ambiguous')
 
         # 3. Name only: the newest printing (for review)
@@ -348,6 +387,28 @@ class Pokemon(Game):
         if set_number_row:
             return self._card(set_number_row, 'set_number_unverified')
         return None
+
+    def _codes_like(self, set_code):
+        """The set code read, or the codes one letter away when no set has it"""
+        if set_code in self._set_codes():
+            return [set_code]
+        return [code for code in self._set_codes() if _edit_distance(code, set_code) == 1]
+
+    def _identify_energy(self, key, set_codes, energy_type):
+        """
+        A basic Energy: by set code + number (no set total is printed). Confirmed only when
+        the type read agrees - a misread number (011 read as 017) would otherwise add another
+        type; with the type missing the card is shown for review
+        """
+        codes = {code for read in set_codes if read for code in self._codes_like(read)}
+        if not (codes and key):
+            return None
+        rows = [row for code in codes
+                for row in self._rows("set_code = ? AND number_key = ? AND category = 'Energy'", (code, key))]
+        if len(rows) != 1:
+            return None
+        type_agrees = energy_type and energy_type in search_key(rows[0]['name'])
+        return self._card(rows[0], 'set_number' if type_agrees else 'set_number_energy')
 
     def find_printings(self, name, number=None, treatment=None, set_code=None):
         resolved, _how = self._resolve_name(name)
@@ -431,7 +492,8 @@ class Pokemon(Game):
             'colors': ', '.join(types),
             # Filterable like Magic's colors: the energy type, or Trainer / Energy
             'color_identity': types[0] if len(types) == 1 else 'Multicolor' if types else (card.get('category') or ''),
-            'price': float(prices.get(finish) or next(iter(prices.values()), 0.0)),
+            # A finish without a price: the first priced one, in finish order
+            'price': float(prices.get(finish) or next((prices[k] for k in self.finishes if prices.get(k)), 0.0)),
         }
 
     def export_formats(self):

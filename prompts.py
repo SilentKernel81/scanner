@@ -64,7 +64,7 @@ SET: <set code, or Unknown>""",
             # format hints) made qwen3.5:9b answer in Markdown sentences for 14-23 of 40 cards
             # and take 2-2.4 s on camera captures; this one ~0.9 s, 0-1 of 160 chatty
             'instructions': """This is a Pokémon card. Read three things:
-- NAME: the card name at the top, with its suffix if any (ex, V, VMAX, VSTAR, GX).
+- NAME: the card name at the top, with its suffix if any (ex, V, VMAX, VSTAR, GX). A basic Energy card is named by the type of its big symbol, like Water Energy or Psychic Energy - not "Basic Energy".
 - NUMBER: the card number at the bottom, like 012/193 (promo cards: a code like SWSH095).
 - SET: the set code of 2-4 letters next to the number, before EN. Older cards have none: Unknown.
 Copy exactly what is printed. If a value is unreadable, write Unknown.""",

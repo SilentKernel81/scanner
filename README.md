@@ -232,7 +232,7 @@ Pokémon support was tested on official card images; camera scans still need rea
 
 Open it from the inventory count in the top bar. You can filter, sort (newest / oldest, name,
 price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
-edit quantity / condition / finish (changing the finish of part of a stack splits it), delete, clear, import a CSV, and
+edit quantity / condition / finish (changing the finish of part of a stack splits it; the price follows the finish), delete, clear, import a CSV, and
 export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
 condition and finish increases its quantity instead of creating a duplicate.
 

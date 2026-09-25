@@ -385,7 +385,7 @@ cards (`PAL`); older cards only have a set symbol (Unknown). `Pokemon.identify` 
 
 | Step | Match | Tag |
 |---|---|---|
-| 1 | Set abbreviation + number, if the name matches (same, prefix "Charizard"/"Charizard ex", ≥ 80% similar, or the card's name inside a sentence answer) | `set_number` |
+| 1 | Set abbreviation + number, if the name matches (same, one plus a suffix - "Charizard"/"Charizard ex", only real suffixes: ex, V, VMAX, GX...; "Energy" must not match "Energy Retrieval" -, ≥ 80% similar, or the card's name inside a sentence answer). A code no set has may be a misread one ("SYE" for SVE, "PREN" for PRE + EN): the codes one letter away count if exactly one has a card of that name and number | `set_number` |
 | 2 | Name + number, narrowed by the set total (`/193` = the set's official card count); the exact name wins over longer ones (Charizard before Charizard δ). One card left → confirmed; several → first one for review; a total no set has → review | `name_number` / `name_number_ambiguous` / `name_number_other_total` |
 | 3 | Name only (exact or fuzzy): the newest printing, for review | `name` / `fuzzy` |
 | 4 | Name not recognized: the printed set + number | `set_number_unverified` |
@@ -399,6 +399,15 @@ The rest went to review - mostly basic Energy cards
 (read as "ENERGY"), promos without a readable code, and cards the same name + number/total
 exist in twice (Dugtrio 19/102 is in Base Set and Triumphant). An early version confirmed an
 Eevee promo from its Pokédex number ("133/189") - no set has 189 cards, which is now a review.
+
+**Basic Energy cards** print "Basic ⟨symbol⟩ Energy"; the data names them "Water Energy". The
+model mostly copies "Basic Energy", and when asked for the type it can misname the symbol (Metal
+read as Fairy), and it once read 011 as 017. So a basic Energy is matched by set code + number
+only (`_identify_energy`; misread codes are tried one letter away, with and without a trailing
+EN): confirmed when the type read agrees with the card, otherwise `set_number_energy` - shown
+for review - so a misread number can't add another type. In the first real session all 4
+Energies went wrong (a fuzzy "Basic Fire Energy", or "Energy Retrieval" by the prefix rule);
+with this, 3 of the 4 captures give the right card (the 4th, number misread, goes to review).
 
 **Finishes** (`normal`, `holo`, `reverse`, `first_edition`): the card panel only offers the
 finishes the printing exists in (TCGdex `variants`). With one, it is certain; otherwise the
@@ -463,7 +472,9 @@ number + condition + finish (`UNIQUE`); adding an existing combination increases
 Rows are addressed by `id` (edit, delete, undo). Also stores the printing id (`card_id`), set
 code, rarity, type, mana cost, colors, color identity, price and timestamp. `finish` is one of
 the game's finish keys (Magic: `regular`, `foil`, `surge`). Editing the finish of part of a stack
-splits the row; an edit that makes a row identical to another merges them.
+splits the row; an edit that makes a row identical to another merges them. A new finish takes
+the printing's price in that finish (`Game.get_card` + `inventory_fields`; Pokémon prices are
+refetched when older than a day); rows without a printing id (CSV imports) keep their price.
 
 Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt once on startup:
 the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the

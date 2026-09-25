@@ -253,18 +253,27 @@ class InventoryManager:
         self.log(f"Deleted from inventory: {row['card_name']}", level="success")
         return True
 
-    def _copy_with(self, row, quantity, condition, finish):
+    def get_entry(self, row_id):
+        with self._lock:
+            row = self._get_row(row_id)
+            return dict(row) if row else None
+
+    def _copy_with(self, row, quantity, condition, finish, price=None):
         """Add `quantity` copies of an entry under another condition/finish (merging)"""
         values = dict(row)
         values.update(quantity=quantity, condition=condition, finish=finish)
+        if price is not None:
+            values['price_usd'] = price
         values.pop('id')
         self.conn.execute(UPSERT, values)
 
-    def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None):
+    def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None,
+                    finish_price=None):
         """
         Change an entry's quantity, condition or finish. Changing the finish of an entry with
         several copies moves split_quantity of them (default 1) to the new finish. An entry
-        that ends up identical to another one is merged into it.
+        that ends up identical to another one is merged into it. finish_price: the printing's
+        price in the new finish (used when the finish changes; None keeps the price).
 
         Returns:
             dict: {'success': bool, 'split': bool, 'message': str}
@@ -276,6 +285,7 @@ class InventoryManager:
             new_quantity = int(quantity) if quantity is not None else row['quantity']
             new_condition = condition or row['condition']
             new_finish = finish or row['finish']
+            new_price = finish_price if finish_price is not None and new_finish != row['finish'] else row['price_usd']
             if new_quantity < 1:
                 return {'success': False, 'split': False, 'message': 'Quantity must be at least 1'}
 
@@ -289,7 +299,7 @@ class InventoryManager:
                     self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (remaining, row_id))
                 else:
                     self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
-                self._copy_with(row, moved, new_condition, new_finish)
+                self._copy_with(row, moved, new_condition, new_finish, new_price)
                 self.conn.commit()
                 self.log(f"{row['card_name']}: {moved} moved to {new_finish}"
                          + (f", {remaining} stay {row['finish']}" if remaining else ''), level="success")
@@ -304,8 +314,8 @@ class InventoryManager:
                 self.conn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', (new_quantity, twin['id']))
                 self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
             else:
-                self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ? WHERE id = ?',
-                                  (new_quantity, new_condition, new_finish, row_id))
+                self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ?, price_usd = ? WHERE id = ?',
+                                  (new_quantity, new_condition, new_finish, new_price, row_id))
             self.conn.commit()
         self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}", level="success")
         return {'success': True, 'split': False, 'message': 'Card updated'}
