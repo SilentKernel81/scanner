@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=23">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -18,9 +18,9 @@
         <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
         <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
         <symbol id="i-card" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6M9 17h6"/></symbol>
-        <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
         <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+        <symbol id="i-area" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1" stroke-dasharray="3 3"/></symbol>
         <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
     </svg>
 
@@ -49,7 +49,6 @@
                 <span class="stat-value" id="processing-queue">0</span>
             </div>
         </div>
-        <button class="icon-btn" onclick="showInventory()" title="Inventory"><svg class="icon"><use href="#i-box"/></svg></button>
         <button class="icon-btn" onclick="openSettings()" title="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
     </header>
 
@@ -93,18 +92,38 @@
                 <section class="panel video-section">
                     <div class="panel-header">
                         <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> Camera</h2>
-                        <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Find the sharpest focus and lock it (~7 s)">
-                            <svg class="icon"><use href="#i-focus"/></svg> Refocus
-                        </button>
+                        <div class="panel-actions">
+                            <label class="chip-toggle" title="Sleeved cards: judge cards by a fixed area of the image instead of their outline">
+                                <input type="checkbox" id="fixed-area-toggle">
+                                <span>Fixed area</span>
+                            </label>
+                            <button class="btn btn-small btn-ghost" onclick="startDrawArea()" id="draw-area-btn" title="Draw the capture area on the video">
+                                <svg class="icon"><use href="#i-area"/></svg> Area
+                            </button>
+                            <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Find the sharpest focus and lock it (~7 s)">
+                                <svg class="icon"><use href="#i-focus"/></svg> Refocus
+                            </button>
+                        </div>
                     </div>
                     <div class="video-container">
-                        <img src="{{ url_for('video_feed') }}" alt="Camera Feed">
+                        <img src="{{ url_for('video_feed') }}" alt="Camera Feed" id="video-feed">
+                        <!-- Drawing the fixed capture area (positioned over the image, see placeAreaLayer) -->
+                        <div class="area-layer" id="area-layer">
+                            <div class="area-rect" id="area-rect" hidden></div>
+                        </div>
                         <div class="detection-status" id="detection-status">
                             <div class="status-indicator" id="status-indicator">
                                 <span class="status-icon">⚪</span>
                                 <span class="status-text">Waiting for card...</span>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Shown while drawing the fixed area - below the video, so all of it can be drawn on -->
+                    <div class="area-hint" id="area-hint" hidden>
+                        <span>Drag on the video around the card to draw the capture area</span>
+                        <button class="btn btn-small" onclick="useDetectedArea()">Use detected card</button>
+                        <button class="btn btn-small btn-ghost" onclick="cancelDrawArea()">Cancel</button>
                     </div>
 
                     <div class="controls">
@@ -379,7 +398,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=20"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=20"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=23"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=23"></script>
 </body>
 </html>

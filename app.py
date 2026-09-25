@@ -1267,7 +1267,9 @@ def get_scan_settings():
     """Scanning preferences the page needs on load"""
     return jsonify({
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
-        'autofocus': scanner.focus_locked_value is None if scanner else True
+        'autofocus': scanner.focus_locked_value is None if scanner else True,
+        'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
+        'fixed_area': scanner.fixed_area if scanner else None
     })
 
 
@@ -1350,6 +1352,42 @@ def handle_set_autofocus(data):
         return
     if not scanner.set_continuous_autofocus(bool(data.get('enabled'))):
         emit('error', {'message': 'This camera has no manual focus control'})
+
+
+@socketio.on('set_fixed_area')
+def handle_set_fixed_area(data):
+    """
+    Fixed capture area (sleeved cards): {'enabled': bool} turns it on/off, {'area': [x1, y1, x2, y2]}
+    (fractions of the frame, drawn on the video) sets it, {'use_detected': true} takes the
+    detected card plus a margin. Sent back to every page as fixed_area_updated.
+    """
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    area = data.get('area')
+    if data.get('use_detected'):
+        area = scanner.detected_area()
+        if area is None:
+            emit('error', {'message': 'No card detected - put a card in the box, or draw the area'})
+            return
+    if area is not None:
+        try:
+            x1, y1, x2, y2 = (float(v) for v in area)
+        except (TypeError, ValueError):
+            emit('error', {'message': 'Invalid area'})
+            return
+        x1, y1, x2, y2 = max(0.0, x1), max(0.0, y1), min(1.0, x2), min(1.0, y2)
+        if x2 - x1 < 0.05 or y2 - y1 < 0.05:
+            emit('error', {'message': 'The area is too small - draw it around the card'})
+            return
+        area = [x1, y1, x2, y2]
+    enabled = data.get('enabled')
+    if enabled and area is None and scanner.fixed_area is None:
+        emit('error', {'message': 'Draw the capture area first'})
+        return
+    state = scanner.set_fixed_area(enabled=enabled, area=area)
+    logger.info(f"Fixed area: {'on' if state['enabled'] else 'off'} {state['area']}")
+    socketio.emit('fixed_area_updated', state)
 
 
 @socketio.on('set_ai_provider')

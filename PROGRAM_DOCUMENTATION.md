@@ -215,6 +215,39 @@ measured 2–5 frames without a card, jumps of 4.5–8.5% and image changes of 0
 
 Captures are also at least `auto_capture.delay` (1 s) apart.
 
+### Fixed area (sleeved cards)
+
+On a pile of sleeved cards the outline is unreliable: the top card's outline merges with the
+card underneath or the box's corner crease, or flips between the top card and the whole pile -
+cards waited seconds and some were captured twice. The **Fixed area** toggle in the camera panel
+(`set_fixed_area`, saved as `fixed_area_enabled` / `fixed_area` in `data/settings.json`) judges
+cards by the image inside an area instead (`CardScanner._fixed_area_step`). The area is drawn
+on the video (**Area**: drag around the card; saved as fractions of the frame) or taken from the
+detected card plus 5% (**Use detected card**).
+
+Per frame, a 48×64 grayscale thumbnail of the area with its mean brightness removed (so a
+shadow or exposure change is not a change) is compared with the previous frame's:
+
+| Measured on recorded sleeved piles | Thumbnail difference |
+|---|---|
+| Still card, frame to frame | ≤ 2.4 (≤ 5.4 over 1 s with the light changing) |
+| A hand's shadow | ≤ 0.6 |
+| A card falling in, frame to frame | 10-38, several frames in a row |
+| A card settling after its capture (sleeve slide) | 13 in a single frame |
+| A different card settled, compared with the last one | ~21 |
+
+- **card present:** area sharpness ≥ `min_sharpness` (empty box ~30, a card ~1,600);
+- **still:** change < 3 frame to frame and < 4 since the still streak began (a slow slide
+  drifts), for `stability_frames` frames;
+- **new card after a capture:** change > 8 in 2 frames in a row (a card falling in - also an
+  identical copy), or the settled area differs > 10 from the captured one.
+
+The outline detector still runs, only for the photo: an outline inside the area gives the
+flat, tight crop (and the ★/• check); otherwise the area itself is cropped. Replaying the five
+recorded pile moments: every card captured once (the outline mode duplicated one); simulator
+drops of identical copies, sleeve slides and focus probes: every card captured once, none
+mid-slide.
+
 ### Adding automatically vs. reviewing
 
 With **Add cards automatically** (default; internally `fast_scan_mode`, saved as `auto_add`):
@@ -432,7 +465,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `set_game` | `game_changed` (to every client; stops auto scanning) |

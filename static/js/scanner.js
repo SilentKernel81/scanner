@@ -529,8 +529,117 @@ function loadScanSettings() {
             fastScanMode = data.auto_add;
             document.getElementById('toggle-fast-scan').checked = data.auto_add;
             document.getElementById('toggle-autofocus').checked = data.autofocus;
+            applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
         })
         .catch(error => console.error('Error loading scan settings:', error));
+}
+
+// ============================================================================
+// Fixed capture area (sleeved cards): drawn on the video, judged by image changes
+// ============================================================================
+
+let fixedArea = {enabled: false, area: null};
+let areaDrag = null;
+
+function applyFixedArea(state) {
+    fixedArea = state;
+    document.getElementById('fixed-area-toggle').checked = Boolean(state.enabled);
+}
+
+socket.on('fixed_area_updated', function(state) {
+    const wasEnabled = fixedArea.enabled;
+    applyFixedArea(state);
+    if (state.enabled !== wasEnabled) {
+        notify(state.enabled ? 'Fixed area on - cards are judged by the drawn area' : 'Fixed area off - cards are found by their outline', 'info');
+    }
+});
+
+function imageContentRect() {
+    // Where the video is drawn inside its box (object-fit: contain may leave bars)
+    const img = document.getElementById('video-feed');
+    const box = img.getBoundingClientRect();
+    const ratio = (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : 16 / 9;
+    let width = box.width, height = box.width / ratio;
+    if (height > box.height) { height = box.height; width = height * ratio; }
+    const parent = img.parentElement.getBoundingClientRect();
+    return {left: box.left - parent.left + (box.width - width) / 2, top: box.top - parent.top + (box.height - height) / 2, width, height};
+}
+
+function placeAreaLayer() {
+    const rect = imageContentRect();
+    const layer = document.getElementById('area-layer');
+    Object.assign(layer.style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
+}
+
+function startDrawArea() {
+    placeAreaLayer();
+    document.getElementById('area-layer').classList.add('is-drawing');
+    document.getElementById('area-hint').hidden = false;
+}
+
+function cancelDrawArea() {
+    document.getElementById('area-layer').classList.remove('is-drawing');
+    document.getElementById('area-hint').hidden = true;
+    document.getElementById('area-rect').hidden = true;
+    areaDrag = null;
+    document.getElementById('fixed-area-toggle').checked = Boolean(fixedArea.enabled);
+}
+
+function useDetectedArea() {
+    socket.emit('set_fixed_area', {use_detected: true, enabled: true});
+    cancelDrawArea();
+}
+
+function areaPoint(event) {
+    const box = document.getElementById('area-layer').getBoundingClientRect();
+    return {x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
+            y: Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))};
+}
+
+function drawAreaRect(a, b) {
+    const rect = document.getElementById('area-rect');
+    Object.assign(rect.style, {
+        left: Math.min(a.x, b.x) * 100 + '%', top: Math.min(a.y, b.y) * 100 + '%',
+        width: Math.abs(a.x - b.x) * 100 + '%', height: Math.abs(a.y - b.y) * 100 + '%'
+    });
+    rect.hidden = false;
+}
+
+function setupAreaDrawing() {
+    const layer = document.getElementById('area-layer');
+    layer.addEventListener('pointerdown', event => {
+        areaDrag = areaPoint(event);
+        layer.setPointerCapture(event.pointerId);
+        drawAreaRect(areaDrag, areaDrag);
+    });
+    layer.addEventListener('pointermove', event => {
+        if (areaDrag) drawAreaRect(areaDrag, areaPoint(event));
+    });
+    layer.addEventListener('pointerup', event => {
+        if (!areaDrag) return;
+        const a = areaDrag, b = areaPoint(event);
+        areaDrag = null;
+        if (Math.abs(a.x - b.x) < 0.05 || Math.abs(a.y - b.y) < 0.05) {
+            notify('Drag a rectangle around the card', 'warning');
+            document.getElementById('area-rect').hidden = true;
+            return;
+        }
+        socket.emit('set_fixed_area', {
+            area: [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)],
+            enabled: true
+        });
+        cancelDrawArea();
+    });
+    document.getElementById('fixed-area-toggle').addEventListener('change', event => {
+        if (event.target.checked && !fixedArea.area) {
+            startDrawArea();  // nothing to turn on yet: draw the area first
+            return;
+        }
+        socket.emit('set_fixed_area', {enabled: event.target.checked});
+    });
+    window.addEventListener('resize', () => {
+        if (document.getElementById('area-layer').classList.contains('is-drawing')) placeAreaLayer();
+    });
 }
 
 function resetFocus() {
@@ -1447,6 +1556,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('prompt-text').addEventListener('input', onPromptInput);
 
     loadGames();
+    setupAreaDrawing();
     document.getElementById('game-select').addEventListener('change', function(e) {
         socket.emit('set_game', {game: e.target.value});
     });
@@ -1992,7 +2102,9 @@ function closeSettings() {
 // Close the topmost overlay with Escape
 document.addEventListener('keydown', function(event) {
     if (event.key !== 'Escape') return;
-    if (document.getElementById('dialog-modal').classList.contains('show')) {
+    if (document.getElementById('area-layer').classList.contains('is-drawing')) {
+        cancelDrawArea();
+    } else if (document.getElementById('dialog-modal').classList.contains('show')) {
         closeDialog(null);
     } else if (document.getElementById('edit-card-modal').classList.contains('show')) {
         closeEditCard();

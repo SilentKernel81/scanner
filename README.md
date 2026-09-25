@@ -185,6 +185,11 @@ when a new card has been dropped on top and has settled. The drop is recognized 
 (the card briefly vanishing or jumping, a hand) and by where the new card lands, so two
 identical copies in a row are both captured.
 
+**Sleeved cards:** turn on **Fixed area** in the camera panel. The first time, drag a rectangle
+on the video around where the cards land (or click **Use detected card**); **Area** redraws it.
+Cards are then judged by the image inside that area instead of their outline, which a pile of
+sleeves confuses. Turn it off again for cards without sleeves.
+
 By default (**Settings → Add cards automatically**) cards are identified in the background and
 added to the inventory without review, so you can keep dropping cards; the *Processing* counter
 in the top bar shows how many are still being identified. After each add the card panel shows

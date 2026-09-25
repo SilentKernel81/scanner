@@ -19,6 +19,8 @@ class Settings:
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
         'focus_value': None,  # Locked manual focus position (None = continuous autofocus)
         'detection_enabled': True,
+        'fixed_area_enabled': False,  # Judge cards by a fixed area instead of their outline (sleeves)
+        'fixed_area': None,  # [x1, y1, x2, y2] as fractions of the frame
     }
 
     def __init__(self):

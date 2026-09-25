@@ -210,6 +210,18 @@ class CardScanner:
         self.last_capture = None  # (card image RGB, is_warped) of the last capture - prompt editor tests
         self.capture_pending = False  # Auto-capture triggered, image / focus probe not done yet
 
+        # Fixed capture area (sleeved cards): stillness and new cards are judged by how the image
+        # inside a drawn area changes, not by the card's outline (on a sleeved pile the outline
+        # flips between the top card and the pile). Area = (x1, y1, x2, y2) as fractions of the frame
+        self.fixed_area_enabled = bool(self.settings.get('fixed_area_enabled', False))
+        self.fixed_area = self.settings.get('fixed_area')
+        self.area_thumb = None  # This frame's area thumbnail (brightness removed)
+        self.area_previous = None
+        self.area_anchor = None  # Thumbnail when the current still streak began
+        self.area_captured = None  # Thumbnail of the last captured card
+        self.area_metrics = (0.0, 0.0, 0.0)  # (change since previous frame, drift, sharpness)
+        self.area_big_changes = 0  # Frames in a row with a change > AREA_DROP
+
         self.initialize_camera()
     
     def log(self, message, level="info"):
@@ -424,6 +436,12 @@ class CardScanner:
         if now - self.waiting_since < 2.0 or now - self.last_wait_log < (1.0 if detected else 5.0):
             return
         self.last_wait_log = now
+        if self._fixed_area_active():
+            change, drift, sharpness = self.area_metrics
+            logger.info(f"Waiting {now - self.waiting_since:.0f} s: fixed area not ready ({self.stable_frames}/{self.required_stable_frames}) - "
+                        f"change {change:.1f} (still < {self.AREA_STILL}), drift {drift:.1f} (< {self.AREA_DRIFT}), "
+                        f"sharpness {sharpness:.0f} (card >= {Config.AUTO_CAPTURE_MIN_SHARPNESS})")
+            return
         if not detected:
             logger.info(f"Waiting {now - self.waiting_since:.0f} s: no card outline found")
             return
@@ -485,8 +503,155 @@ class CardScanner:
         elif now - self.out_of_focus_since > 3.0 and now - self.last_focus_sweep > 15.0:
             self.refocus("card out of focus")
 
+    def _trigger_auto_capture(self):
+        """Start an auto-capture (the callback takes the image and identifies the card)"""
+        # Double-check auto_capture_enabled before triggering (avoid race condition)
+        if self.auto_capture_enabled and self.auto_capture_callback:
+            self.log(f"Auto-capturing card (stable={self.stable_frames}/{self.required_stable_frames})", level="info")
+            self.last_auto_capture_time = time.time()
+            self.card_under_review = True  # Set flag to prevent further auto-captures
+            self._mark_captured()  # Next auto-capture needs a new card
+            self.capture_pending = True  # Until the image is taken (app.announce_capture)
+            threading.Thread(target=self.auto_capture_callback).start()
+
+    # ------------------------------------------------------------------------
+    # Fixed capture area
+    # ------------------------------------------------------------------------
+
+    # Mean difference of the area's 48x64 thumbnail (brightness removed), measured on recorded
+    # sleeved piles: still card <= 2.4 frame to frame (<= 5.4 over 1 s with the light changing),
+    # a hand's shadow <= 0.6, a card falling in 10-38 over several frames in a row, a different
+    # card settled ~21. A sleeved card settling after its capture jumped 13 in a single frame -
+    # so a drop needs AREA_DROP in 2 frames in a row.
+    AREA_STILL = 3.0
+    AREA_DRIFT = 4.0
+    AREA_DROP = 8.0
+    AREA_DIFFERENT = 10.0
+
+    def _fixed_area_active(self):
+        return self.fixed_area_enabled and self.fixed_area is not None and self.enable_detection
+
+    def set_fixed_area(self, enabled=None, area=None):
+        """Turn the fixed area on/off and/or set it (fractions of the frame); saved in settings"""
+        if area is not None:
+            self.fixed_area = [float(v) for v in area]
+            self.settings.set('fixed_area', self.fixed_area)
+        if enabled is not None:
+            self.fixed_area_enabled = bool(enabled)
+            self.settings.set('fixed_area_enabled', self.fixed_area_enabled)
+        # Start the area's judgement afresh; a card already captured stays captured
+        self.area_previous = self.area_anchor = None
+        self.area_captured = self.area_thumb if self.awaiting_new_card else None
+        self.stable_frames = 0
+        return {'enabled': self.fixed_area_enabled, 'area': self.fixed_area}
+
+    def detected_area(self, margin=0.05):
+        """The detected card's bounding box plus a margin, as fractions of the frame, or None"""
+        with self.frame_lock:
+            detected, frame = self.detected_card, self.current_frame
+        if detected is None or frame is None:
+            return None
+        height, width = frame.shape[:2]
+        x1, y1, x2, y2 = detected[1]
+        dx, dy = (x2 - x1) * margin, (y2 - y1) * margin
+        return [max(0.0, (x1 - dx) / width), max(0.0, (y1 - dy) / height),
+                min(1.0, (x2 + dx) / width), min(1.0, (y2 + dy) / height)]
+
+    @staticmethod
+    def _area_thumbnail(region):
+        gray = cv2.cvtColor(cv2.resize(region, (48, 64), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        return gray - gray.mean()  # a uniform brightness change (e.g. a shadow) is not a change
+
+    @staticmethod
+    def _area_difference(a, b):
+        return float(np.abs(a - b).mean()) if a is not None and b is not None else 0.0
+
+    def _fixed_area_step(self, frame, raw, annotated):
+        """
+        One frame in fixed-area mode: a card is present when the area is sharp (an empty box
+        measured ~30 against >= 250 for a card), still when its image hardly changes (frame to
+        frame and since the still streak began - a sliding card drifts), and new after a
+        capture when the area changed like a card falling in, or settled looking different.
+        The outline detector still runs, only to crop the photo: an outline inside the area is
+        used for a flat, tight crop; otherwise the area itself is cropped.
+        """
+        height, width = frame.shape[:2]
+        fx1, fy1, fx2, fy2 = self.fixed_area
+        x1, y1 = int(fx1 * width), int(fy1 * height)
+        x2, y2 = max(x1 + 8, int(fx2 * width)), max(y1 + 8, int(fy2 * height))
+        region = frame[y1:y2, x1:x2]
+        small = cv2.resize(region, (160, max(1, int(160 * region.shape[0] / region.shape[1]))), interpolation=cv2.INTER_AREA)
+        sharpness = cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var()
+        present = bool(sharpness >= Config.AUTO_CAPTURE_MIN_SHARPNESS)
+
+        self.area_thumb = thumb = self._area_thumbnail(region)
+        change = self._area_difference(thumb, self.area_previous) if self.area_previous is not None else 0.0
+        self.area_previous = thumb
+        if self.stable_frames == 0 or self.area_anchor is None:
+            self.area_anchor = thumb
+        drift = self._area_difference(thumb, self.area_anchor)
+        self.area_metrics = (change, drift, sharpness)
+
+        focus_moving = self._focus_moving()
+        settled = present and not focus_moving and change < self.AREA_STILL and drift < self.AREA_DRIFT
+        self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames) if settled else 0
+        if not settled:
+            self.area_anchor = thumb
+
+        self.area_big_changes = self.area_big_changes + 1 if change > self.AREA_DROP else 0
+        if self.awaiting_new_card and not focus_moving:
+            different = self.area_captured is not None and \
+                self._area_difference(thumb, self.area_captured) > self.AREA_DIFFERENT
+            if self.area_big_changes >= 2 or (settled and different):
+                self.awaiting_new_card = False
+                self.stable_frames = 0
+                if self.auto_capture_enabled:
+                    self.log(f"New card detected (area change {change:.1f})")
+
+        # Outline inside the area -> flat, tight crop for the photo
+        _, _, _, corners = self.object_detector.detect(
+            frame, conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD,
+            previous=self.tracked_outline if self.missing_frames <= 2 else None)
+        if corners is not None:
+            self.tracked_outline, self.missing_frames = corners, 0
+            cx1, cy1 = corners.min(axis=0)
+            cx2, cy2 = corners.max(axis=0)
+            if cx1 < x1 - 0.03 * width or cy1 < y1 - 0.03 * height or cx2 > x2 + 0.03 * width or cy2 > y2 + 0.03 * height:
+                corners = None  # an outline outside the area (e.g. the whole pile)
+        else:
+            self.missing_frames += 1
+        with self.frame_lock:
+            self.card_detected = present
+            self.card_in_focus = present
+            self.detected_card = (frame, (x1, y1, x2, y2), corners, raw) if present else None
+            self.detected_card_name = "Card" if present else ""
+
+        # Overlay: the area, and the outline used for the crop
+        if not present:
+            color, label = (160, 160, 160), "Fixed area - no card"
+        elif self.awaiting_new_card and self.auto_capture_enabled:
+            color, label = (100, 200, 255), "Fixed area [Captured - drop next card]"
+        elif self.stable_frames < self.required_stable_frames:
+            color, label = (255, 165, 0), f"Fixed area [Stabilizing {self.stable_frames}/{self.required_stable_frames}]"
+        else:
+            color, label = (0, 255, 0), "Fixed area [Ready]"
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        if corners is not None:
+            cv2.polylines(annotated, [corners.astype(np.int32)], True, (255, 255, 255), 1)
+        text_scale = max(0.7, width / 1280 * 0.7)
+        cv2.putText(annotated, label, (x1, max(int(30 * text_scale), y1 - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, text_scale, color, max(2, int(2 * text_scale)))
+
+        self._trace_waiting(detected=present)
+        if (self.auto_capture_enabled and present and not self.card_under_review and not self.awaiting_new_card
+                and not self.focus_sweep_running and not self.focus_probe_running
+                and self.stable_frames >= self.required_stable_frames
+                and time.time() - self.last_auto_capture_time >= self.auto_capture_delay):
+            self._trigger_auto_capture()
+
     def _mark_captured(self):
         """Remember the captured card; auto-capture waits for the next one"""
+        self.area_captured = self.area_thumb
         self.awaiting_new_card = True
         self.captured_thumbnail = self.previous_thumbnail
 
@@ -730,7 +895,10 @@ class CardScanner:
                 display_corners = None
                 is_cached_detection = False
 
-                if not self.enable_detection:
+                if self._fixed_area_active():
+                    self._fixed_area_step(frame, raw, annotated)
+
+                elif not self.enable_detection:
                     # Detection is disabled - clear all detection state
                     self.last_card_detection = None
                     self.stable_frames = 0
@@ -960,15 +1128,7 @@ class CardScanner:
                                     self.log(f"Auto-capture ready, waiting for cooldown: {remaining:.1f}s remaining", level="info")
 
                             if time_since_last_capture >= self.auto_capture_delay:
-                                # Double-check auto_capture_enabled before triggering (avoid race condition)
-                                if self.auto_capture_enabled and self.auto_capture_callback:
-                                    self.log(f"Auto-capturing card (stable={self.stable_frames}/{self.required_stable_frames}, cooldown={time_since_last_capture:.1f}s)", level="info")
-                                    self.last_auto_capture_time = time.time()
-                                    self.card_under_review = True  # Set flag to prevent further auto-captures
-                                    self._mark_captured()  # Next auto-capture needs a new card
-                                    self.capture_pending = True  # Until the image is taken (app.announce_capture)
-                                    # Call the callback in a non-blocking way
-                                    threading.Thread(target=self.auto_capture_callback).start()
+                                self._trigger_auto_capture()
 
                 if self.debug_trace_enabled:
                     self._record_debug_frame(frame)
