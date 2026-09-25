@@ -4,7 +4,7 @@ Card Scanner Web Application
 Main Flask application with SocketIO - COMPLETE VERSION
 """
 
-from flask import Flask, render_template, Response, jsonify, request, send_file
+from flask import Flask, render_template, Response, jsonify, request, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
 import cv2
 from datetime import datetime
@@ -202,6 +202,9 @@ scanner = None
 database = None
 inventory = None
 current_card_info = None
+# The capture being reviewed (image path): kept with the card added from it - also when the
+# card is found by a manual search after the AI couldn't identify it
+pending_capture = None
 auto_capture_counter = 1
 processing_queue_count = 0  # Track number of cards being processed by AI
 
@@ -262,7 +265,13 @@ def log_scanned_card(card_name, collector_number, ai_model, db_found, added_to_i
     scanned_cards_logger.info(log_entry)
 
 
-def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None):
+def set_pending_capture(image_path):
+    global pending_capture
+    pending_capture = str(image_path) if image_path else None
+
+
+def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
+                         image_path=None):
     """
     Search for card in database and emit results to client
 
@@ -308,6 +317,8 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     )
 
     if db_card_info:
+        if image_path:
+            db_card_info['capture'] = str(image_path)
         current_card_info = db_card_info
         socketio.emit('card_found', {
             'card': game.card_payload(db_card_info),
@@ -379,8 +390,10 @@ def ai_processing_worker():
             }, namespace='/')
 
             # Auto-search database if Vision AI identified the card
+            set_pending_capture(image_path)
             if card_name and card_name.strip():
-                search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode, set_code=set_code)
+                search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode,
+                                     set_code=set_code, image_path=image_path)
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -555,8 +568,10 @@ def initialize_components():
                 }, namespace='/')
 
                 # Auto-search database if Vision AI identified the card
+                set_pending_capture(image_path)
                 if card_name and card_name.strip():
-                    search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False, set_code=set_code)
+                    search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False,
+                                         set_code=set_code, image_path=image_path)
 
                 # Normal mode: card awaits user review (card_under_review stays True)
                 logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
@@ -614,6 +629,13 @@ def generate_frames():
             continue
         last_id = frame_id
         yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n'
+
+
+@app.route('/captures/<path:name>')
+def capture_thumbnail(name):
+    """Thumbnail of a capture kept with an inventory entry"""
+    from inventory import CAPTURES_DIR
+    return send_from_directory(CAPTURES_DIR, name, max_age=86400)
 
 
 @app.route('/video_feed')
@@ -1012,8 +1034,10 @@ def handle_capture(data):
         emit('card_captured', result)
 
         # Automatically search database if Vision AI identified the card
+        set_pending_capture(image_path)
         if card_name and card_name.strip():
-            search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False, set_code=set_code)
+            search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False,
+                                 set_code=set_code, image_path=image_path)
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")
@@ -1106,33 +1130,42 @@ def handle_add_inventory(data):
     try:
         game = games.active()
         condition = data.get('condition', 'Near Mint')
-        finish = data.get('finish') or game.default_finish
-        quantity = data.get('quantity', 1)
-        if finish not in game.finishes:
-            emit('error', {'message': f'Unknown finish: {finish}'})
-            return
+        # Several finishes of the card come in one event ("items") - separate events would
+        # be handled in parallel threads, in any order
+        items = data.get('items') or [{'finish': data.get('finish'), 'quantity': data.get('quantity', 1)}]
+        for item in items:
+            if (item.get('finish') or game.default_finish) not in game.finishes:
+                emit('error', {'message': f"Unknown finish: {item.get('finish')}"})
+                return
 
-        # Ensure quantity is a positive integer
-        try:
-            quantity = max(1, int(quantity))
-        except (ValueError, TypeError):
-            quantity = 1
+        # The card's own capture (automatic adds), else the one under review; it goes with
+        # the first finish added
+        capture = current_card_info.pop('capture', None) or pending_capture
+        if capture == pending_capture:
+            set_pending_capture(None)
 
-        logger.info(f"Adding card to inventory: {quantity}x {current_card_info['name']} ({condition}, {finish})")
-        inventory.add_card(game.inventory_fields(current_card_info, finish), game.id, finish, condition, quantity)
+        for item in items:
+            finish = item.get('finish') or game.default_finish
+            try:
+                quantity = max(1, int(item.get('quantity', 1)))
+            except (ValueError, TypeError):
+                quantity = 1
+            logger.info(f"Adding card to inventory: {quantity}x {current_card_info['name']} ({condition}, {finish})")
+            inventory.add_card(game.inventory_fields(current_card_info, finish), game.id, finish, condition, quantity,
+                               capture=capture)
+            capture = None
 
-        # Send updated stats and what was added (the page offers an Undo)
-        inv_stats = inventory.get_stats(game.id)
-        emit('inventory_updated', {
-            'stats': inv_stats,
-            'added': {
-                'name': current_card_info['name'],
-                'set': current_card_info['set'],
-                'number': current_card_info['number'],
-                'finish': game.finishes[finish],
-                'quantity': quantity
-            }
-        })
+            # Send updated stats and what was added (the page offers an Undo)
+            emit('inventory_updated', {
+                'stats': inventory.get_stats(game.id),
+                'added': {
+                    'name': current_card_info['name'],
+                    'set': current_card_info['set'],
+                    'number': current_card_info['number'],
+                    'finish': game.finishes[finish],
+                    'quantity': quantity
+                }
+            })
 
         logger.info("Card added to inventory successfully")
         current_card_info = None
@@ -1166,12 +1199,16 @@ def handle_undo_last_add():
 
 
 @socketio.on('dismiss_card')
-def handle_dismiss_card():
+def handle_dismiss_card(data=None):
     """Handle card dismissal - user cancels current card review"""
     global scanner, current_card_info
 
     logger.info("Card dismissed by user")
     current_card_info = None
+    # "Not found" dismisses itself to let auto scanning go on; the capture stays for a
+    # manual search. Skip drops it
+    if not (data or {}).get('keep_capture'):
+        set_pending_capture(None)
 
     # Clear the review flag to allow next auto-capture
     if scanner:

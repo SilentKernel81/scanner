@@ -476,6 +476,20 @@ splits the row; an edit that makes a row identical to another merges them. A new
 the printing's price in that finish (`Game.get_card` + `inventory_fields`; Pokémon prices are
 refetched when older than a day); rows without a printing id (CSV imports) keep their price.
 
+**`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
+`inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
+`scanned_cards/` are deleted after `cleanup.days`), `captured_at`. The capture follows the card
+from the AI worker to the add: `search_and_emit_card` puts it on the matched card
+(`card['capture']`, so a queued automatic add can't take another card's photo), and
+`pending_capture` keeps the one under review for a manual search (the automatic "not found"
+dismissal keeps it, Skip drops it). Several finishes added at once arrive as one
+`add_to_inventory` event (`items`) - separate events ran in parallel threads - and the photo
+goes with the first. The photos follow the copies: undo removes that add's photo; moving
+copies to another finish moves the newest photos with them; merging moves all; lowering a
+quantity drops the newest photos (the usual reason is a card captured twice); deleting or
+clearing entries deletes their files. Entries added before this, or imported, have none.
+`/api/inventory` returns each entry's `captures` (newest first, URLs under `/captures/`).
+
 Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt once on startup:
 the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the
 migration checks that the card count is unchanged, and it runs in one transaction.
@@ -577,13 +591,17 @@ Socket.IO events:
 
 | Client → server | Server → client |
 |---|---|
-| `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
+| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add`, `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
 
 HTTP endpoints are listed in the README.
+
+**Inventory captures.** Each entry shows its newest capture as a thumbnail. Hovering an entry
+(only on devices with a mouse) shows a grid of its captures - up to 8, then "+N more"; clicking
+the thumbnail (tapping, on a phone) opens all of them in a viewer.
 
 **Card games.** The page loads `/api/games` (games, their finishes and export formats) and
 builds the quantity grid, the edit dialog's finish choices and the export buttons from the
@@ -601,6 +619,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
+| `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`) and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |

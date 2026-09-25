@@ -48,7 +48,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Card data updates (staged import, update check) | `database.py`: `replace_table`, `card_data_info`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
 | Card search / printing match / confidence (Magic) | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add` |
-| Inventory add/merge/undo/split/export | `inventory.py` |
+| Inventory add/merge/undo/split/export, capture thumbnails | `inventory.py` (`inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 

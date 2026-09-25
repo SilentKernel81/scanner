@@ -130,9 +130,10 @@ socket.on('card_not_found', function(data) {
             <span class="hint">${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}</span>
         </div>
     `;
-    // Auto-dismiss after card not found to allow next auto-capture
+    // Auto-dismiss after card not found to allow next auto-capture; the capture is kept for
+    // a manual search
     setTimeout(function() {
-        socket.emit('dismiss_card');
+        socket.emit('dismiss_card', {keep_capture: true});
     }, 2000);
 });
 
@@ -871,10 +872,9 @@ function addToInventoryBoth() {
         return;
     }
 
-    // One entry per finish with a quantity
-    quantities.filter(([, quantity]) => quantity > 0).forEach(([finish, quantity]) => {
-        socket.emit('add_to_inventory', {quantity: quantity, condition: condition, finish: finish});
-    });
+    // One entry per finish with a quantity, sent together
+    const items = quantities.filter(([, quantity]) => quantity > 0).map(([finish, quantity]) => ({finish, quantity}));
+    socket.emit('add_to_inventory', {condition: condition, items: items});
 }
 
 function addToInventory(autoMode = false) {
@@ -1736,6 +1736,10 @@ function renderInventory() {
         return `
             <div class="inventory-card">
                 <div class="inventory-card-number">#${index + 1}</div>
+                ${card.captures && card.captures.length
+                    ? `<button class="inventory-thumb" data-id="${card.id}" title="${card.captures.length} capture${card.captures.length > 1 ? 's' : ''}">
+                           <img src="${escapeHtml(card.captures[0].url)}" alt="" loading="lazy"></button>`
+                    : '<div class="inventory-thumb empty" title="No capture"></div>'}
                 <div class="inventory-card-info">
                     <div class="inventory-card-name">
                         ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
@@ -2205,6 +2209,8 @@ document.addEventListener('keydown', function(event) {
     if (event.key !== 'Escape') return;
     if (document.getElementById('area-layer').classList.contains('is-drawing')) {
         cancelDrawArea();
+    } else if (document.getElementById('capture-modal').classList.contains('show')) {
+        closeCaptures();
     } else if (document.getElementById('dialog-modal').classList.contains('show')) {
         closeDialog(null);
     } else if (document.getElementById('edit-card-modal').classList.contains('show')) {
@@ -2229,6 +2235,9 @@ window.onclick = function(event) {
     if (event.target === document.getElementById('dialog-modal')) {
         closeDialog(null);
     }
+    if (event.target === document.getElementById('capture-modal')) {
+        closeCaptures();
+    }
     if (event.target === inventoryModal) {
         closeInventory();
     }
@@ -2248,17 +2257,87 @@ document.addEventListener('DOMContentLoaded', function() {
         inventoryList.addEventListener('click', function(event) {
             const target = event.target;
 
-            const button = target.closest('.btn-edit, .btn-delete');
+            const button = target.closest('.btn-edit, .btn-delete, button.inventory-thumb');
             if (!button) return;
             const card = currentInventory.find(entry => entry.id === parseInt(button.dataset.id));
             if (!card) return;
-            if (button.classList.contains('btn-delete')) {
+            if (button.classList.contains('inventory-thumb')) {
+                openCaptures(card);
+            } else if (button.classList.contains('btn-delete')) {
                 deleteCard(card.id, card.name);
             } else {
                 editCard(card);
             }
         });
     }
+});
+
+// ============================================================================
+// Captures behind inventory entries: a grid of the copies on hover, all of them on click
+// ============================================================================
+
+const POPOVER_MAX = 8;
+
+function captureGridHtml(card, max = Infinity) {
+    const shown = card.captures.slice(0, max);
+    const more = card.captures.length - shown.length;
+    return shown.map(capture => `
+        <figure>
+            <img src="${escapeHtml(capture.url)}" alt="${escapeHtml(card.name)}" loading="lazy">
+            <figcaption>${escapeHtml(capture.captured_at)}</figcaption>
+        </figure>`).join('')
+        + (more > 0 ? `<div class="capture-more">+${more} more<br><span>click to see all</span></div>` : '');
+}
+
+function showCapturePopover(card, row) {
+    const popover = document.getElementById('capture-popover');
+    popover.className = 'capture-popover capture-grid' + (card.captures.length === 1 ? ' single' : '');
+    popover.innerHTML = captureGridHtml(card, POPOVER_MAX);
+    popover.hidden = false;
+    // Beside the row's thumbnail; above the row when there is no room below
+    const rect = row.getBoundingClientRect();
+    const box = popover.getBoundingClientRect();
+    const left = Math.min(rect.left + 70, window.innerWidth - box.width - 16);
+    const below = rect.bottom + 6;
+    popover.style.left = `${Math.max(16, left)}px`;
+    popover.style.top = `${below + box.height < window.innerHeight - 8 ? below : Math.max(8, rect.top - box.height - 6)}px`;
+}
+
+function hideCapturePopover() {
+    document.getElementById('capture-popover').hidden = true;
+}
+
+function openCaptures(card) {
+    hideCapturePopover();
+    const count = card.captures.length;
+    document.getElementById('capture-title').textContent =
+        `${card.name} - ${count} capture${count > 1 ? 's' : ''} of ${card.quantity} ${card.quantity > 1 ? 'copies' : 'copy'}`;
+    document.getElementById('capture-grid').innerHTML = captureGridHtml(card);
+    document.getElementById('capture-modal').classList.add('show');
+}
+
+function closeCaptures() {
+    document.getElementById('capture-modal').classList.remove('show');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Hover preview only where there is a mouse; touch screens tap the thumbnail
+    if (!window.matchMedia('(hover: hover)').matches) return;
+    const list = document.getElementById('inventory-list');
+    let hovered = null;
+    list.addEventListener('mouseover', function(event) {
+        const row = event.target.closest('.inventory-card');
+        if (row === hovered) return;
+        hovered = row;
+        const thumb = row && row.querySelector('button.inventory-thumb');
+        const card = thumb && currentInventory.find(entry => entry.id === parseInt(thumb.dataset.id));
+        if (card && card.captures.length) showCapturePopover(card, row); else hideCapturePopover();
+    });
+    list.addEventListener('mouseleave', function() {
+        hovered = null;
+        hideCapturePopover();
+    });
+    list.addEventListener('scroll', hideCapturePopover, {passive: true});
 });
 
 // Banner removed - using simple flash feedback only

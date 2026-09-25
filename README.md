@@ -230,7 +230,9 @@ Pokémon support was tested on official card images; camera scans still need rea
 
 ### Inventory
 
-Open it from the inventory count in the top bar. You can filter, sort (newest / oldest, name,
+Open it from the inventory count in the top bar. Each entry shows a thumbnail of what was
+captured: hover over an entry to see all its captured copies side by side, or click (tap) the
+thumbnail to open them larger - handy to check what a scan actually added. You can filter, sort (newest / oldest, name,
 price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
 edit quantity / condition / finish (changing the finish of part of a stack splits it; the price follows the finish), delete, clear, import a CSV, and
 export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
@@ -376,7 +378,8 @@ The web interface uses these endpoints, which you can also call directly:
 | `GET /api/stats` | Database and inventory statistics |
 | `GET /api/detection_status` | Whether a card is detected and how stable it is |
 | `GET /api/games` | Supported card games (finishes, export formats) and the active one |
-| `GET /api/inventory` | The active game's inventory (each entry has an `id`) |
+| `GET /api/inventory` | The active game's inventory (each entry has an `id` and its `captures`) |
+| `GET /captures/<file>` | Thumbnail of a capture kept with an inventory entry |
 | `POST /api/inventory/update/<id>` | Update quantity, condition or finish (JSON: `quantity`, `condition`, `finish`, `split_quantity`) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |

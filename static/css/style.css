@@ -1123,7 +1123,7 @@ input[type="radio"] {
 
 .inventory-card {
     display: grid;
-    grid-template-columns: 40px 1fr auto auto;
+    grid-template-columns: 40px 40px 1fr auto auto;
     gap: 14px;
     align-items: center;
     padding: 10px 14px;
@@ -1135,6 +1135,115 @@ input[type="radio"] {
 .inventory-card:hover {
     border-color: var(--surface-3);
     background: var(--surface-2);
+}
+
+/* Thumbnail of the entry's newest capture (hover: all copies; click: viewer) */
+.inventory-thumb {
+    width: 40px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--surface-2);
+    cursor: zoom-in;
+}
+
+.inventory-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.inventory-thumb.empty {
+    border-style: dashed;
+    opacity: 0.5;
+    cursor: default;
+}
+
+.capture-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 130px);
+    gap: 8px;
+}
+
+.capture-grid figure {
+    margin: 0;
+}
+
+.capture-grid img {
+    display: block;
+    width: 130px;
+    height: 182px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: var(--surface-2);
+}
+
+.capture-grid figcaption {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.capture-more {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 130px;
+    height: 182px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    font-weight: 600;
+    text-align: center;
+}
+
+.capture-more span {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.capture-popover {
+    position: fixed;
+    z-index: 200;
+    pointer-events: none;
+    max-width: min(574px, calc(100vw - 32px));
+    padding: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.capture-popover[hidden] {
+    display: none;
+}
+
+.capture-popover.single {
+    grid-template-columns: 220px;
+}
+
+.capture-popover.single img {
+    width: 220px;
+    height: 308px;
+}
+
+.capture-modal {
+    max-width: 960px;
+}
+
+.capture-grid.large {
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+}
+
+.capture-grid.large img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 63 / 88;
 }
 
 .inventory-card-number {
@@ -1631,7 +1740,7 @@ input[type="radio"] {
     }
 
     .inventory-card {
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 40px 1fr auto;
     }
 
     .inventory-card-number,
