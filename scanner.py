@@ -356,6 +356,7 @@ class CardScanner:
         # (measured on a card lying still: movement <= 0.4%, image change <= 0.07)
         self.card_disturbed = movement > 0.03 or image_change > 0.3
         self.last_frame_change = (movement, image_change)
+        self.settle_metrics = (movement, drift, sharpness_change, sharpness)
         settled = movement < 0.01 and drift < 0.01 and sharpness_change < 0.2 and self.card_in_focus
         if not settled:
             self.settle_anchor = points
@@ -392,6 +393,33 @@ class CardScanner:
         if gap >= 1 and movement > 0.008:
             return True
         return self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3
+
+    def _trace_waiting(self, detected):
+        """
+        Log file only: while auto scanning waits for a card to become ready for more than 2 s,
+        say why once a second - not detected, or which stillness / sharpness test fails
+        (limits: movement 1%, drift 1%, sharpness change 20%, sharpness min_sharpness)
+        """
+        waiting = (self.auto_capture_enabled and not self.awaiting_new_card and not self.card_under_review
+                   and not self.capture_pending and not self._focus_moving()
+                   and self.stable_frames < self.required_stable_frames)
+        now = time.time()
+        if not waiting:
+            self.waiting_since = None
+            return
+        if getattr(self, 'waiting_since', None) is None:
+            self.waiting_since, self.last_wait_log = now, now
+            return
+        if now - self.waiting_since < 2.0 or now - self.last_wait_log < (1.0 if detected else 5.0):
+            return
+        self.last_wait_log = now
+        if not detected:
+            logger.info(f"Waiting {now - self.waiting_since:.0f} s: no card outline found")
+            return
+        movement, drift, change, sharpness = getattr(self, 'settle_metrics', (0, 0, 0, 0))
+        logger.info(f"Waiting {now - self.waiting_since:.0f} s: card not ready ({self.stable_frames}/{self.required_stable_frames}) - "
+                    f"movement {movement:.1%}, drift {drift:.1%}, sharpness change {change:.0%}, "
+                    f"sharpness {sharpness:.0f} (min {Config.AUTO_CAPTURE_MIN_SHARPNESS})")
 
     def _focus_moving(self):
         """A focus sweep or probe is running, or ended less than 0.6 s ago"""
@@ -718,6 +746,7 @@ class CardScanner:
                                     self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
                                 else:
                                     self.stable_frames = 0
+                                self._trace_waiting(detected=True)
 
                                 self._check_focus_drift()
 
@@ -772,6 +801,8 @@ class CardScanner:
                         # A cached (held) detection is not a still card: the next card
                         # must settle from scratch
                         self.stable_frames = 0
+
+                        self._trace_waiting(detected=False)
 
                         # Card gone for more than a detector hiccup: treat as a change of card
                         # (not while the lens moves - the blur can hide the card)

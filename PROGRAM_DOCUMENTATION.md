@@ -161,6 +161,11 @@ slide through. The status
 pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the beep*, or
 *Captured - drop the next card*.
 
+**Why is it waiting?** When auto scanning waits more than 2 s for a card to become ready,
+`scanner.log` says why, once a second (`_trace_waiting`): *no card outline found* (every 5 s), or
+*card not ready (n/N)* with the frame's movement, drift, sharpness change and sharpness against
+their limits (1%, 1%, 20%, `min_sharpness`).
+
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) is sent by `app.handle_auto_capture` once the image is taken and a focus probe started by
 that capture is done (`announce_capture`; `scanner.capture_pending` / status `capturing` until
