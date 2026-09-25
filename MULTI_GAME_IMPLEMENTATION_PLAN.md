@@ -1,6 +1,6 @@
 # Multi-Game Support - Implementation Plan
 
-**Status:** phases 1-2 done, phases 3-5 planned (2026-09-24). Replaces the 2025-11 plan, which predated the current
+**Status:** phases 1-3 done (Pokémon 2026-09-25), phases 4-5 planned. Replaces the 2025-11 plan, which predated the current
 architecture (online API lookup per scan, YOLO-first detection).
 
 ## Goals
@@ -126,7 +126,10 @@ documented (PROGRAM_DOCUMENTATION.md, README.md, CLAUDE.md), and is committed se
    inventory `game` + `finish` columns (rebuild + backup), per-game `CONFIRMED_MATCHES`. No
    visible change (the game selector only shows with two or more games). **Done** - inventory
    rows are now addressed by id; `/api/games` drives the finishes and export buttons.
-3. **Pokémon**: TCGdex import, lazy details/prices, prompt, matching, finishes, export.
+3. **Pokémon**: TCGdex import, lazy details/prices, prompt, matching, finishes, export. **Done** -
+   one GraphQL request returns every card (no per-set card requests); older cards are matched by
+   name + number + set total. The finish is suggested from the printing's variants only (normal
+   first); reverse holo detection from the image is not done.
 4. **Lorcana**: Lorcast import, prompt, matching, foil, export.
 5. **Yu-Gi-Oh**: YGOPRODeck bulk import into printings, set-code matching, rarity picker, export.
 

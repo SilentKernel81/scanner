@@ -57,6 +57,20 @@ SET: <set code, or Unknown>""",
             'answer_format': "Answer with one word: star, dot, or unclear.",
         },
     },
+    'pokemon': {
+        'identify': {
+            'label': 'Card identification',
+            'instructions': """This is a Pokémon trading card. Read three things:
+- NAME: the card name at the top, with its suffix if it has one (ex, V, VMAX, VSTAR, GX, EX). Not the evolution line ("Evolves from") and not the HP.
+- NUMBER: the card number at the bottom-left or bottom-right corner, with the set total after the slash - give it as printed, with leading zeros and letters (like the format ###/###, TG##/TG##). Promo cards print a code instead (like SWSH###, SM##). Not the Pokédex number.
+- SET: the set abbreviation of 2-4 letters or digits printed at the bottom next to the number, before the language code (EN). Older cards only have a set symbol - then write Unknown.
+Copy exactly what is printed. If a value is blurry or unreadable, write Unknown - do not guess.""",
+            'answer_format': """Always answer with all three lines, each with its label:
+NAME: <card name>
+NUMBER: <card number as printed, or Unknown>
+SET: <set abbreviation, or Unknown>""",
+        },
+    },
 }
 
 _lock = threading.RLock()

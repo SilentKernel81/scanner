@@ -38,6 +38,21 @@ def _is_inner_frame(gray, corners, band=4):
     return cv2.mean(gray, outside)[0] < cv2.mean(gray, inside)[0]
 
 
+def _is_rectangular(corners, side_tolerance=0.08, angle_tolerance=8):
+    """Opposite sides about equally long and corners about square (camera looking down)"""
+    tl, tr, br, bl = corners
+    for first, second in ((tr - tl, br - bl), (bl - tl, br - tr)):
+        a, b = np.linalg.norm(first), np.linalg.norm(second)
+        if abs(a - b) > side_tolerance * max(a, b):
+            return False
+    for corner, before, after in ((tl, bl, tr), (tr, tl, br), (br, tr, bl), (bl, br, tl)):
+        u, v = before - corner, after - corner
+        cos = np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v) + 1e-9)
+        if abs(np.degrees(np.arccos(np.clip(cos, -1, 1))) - 90) > angle_tolerance:
+            return False
+    return True
+
+
 def _perimeter_coverage(edges, corners, samples=240, reach=3):
     """Fraction of points along a rectangle's sides that lie on (or within `reach` of) an edge"""
     near = cv2.dilate(edges, np.ones((2 * reach + 1, 2 * reach + 1), np.uint8))
@@ -225,9 +240,13 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
             continue
         best = (area, corners, fill)
 
+    # Outlines assembled from edge pieces or fitted lines can come out skewed (a holo streak
+    # taken for the top edge); seen from above a card is a rectangle
     if best is None:
         best = _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance)
-    if best is None:
+        if best is not None and not _is_rectangular(best[1]):
+            best = None
+    if best is None and tracked is not None and _is_rectangular(tracked[1]):
         best = tracked
     if best is None:
         return None, 0

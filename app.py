@@ -351,7 +351,7 @@ def ai_processing_worker():
 
             # Run AI identification (this is the slow part - 13-36 seconds)
             start_time = time.time()
-            card_info = scanner.identify_card_from_image(card_image_rgb, detect_foil=item['is_warped'])
+            card_info = scanner.identify_card_from_image(card_image_rgb, item['foil_image'])
             processing_time = time.time() - start_time
 
             # Extract card info
@@ -488,7 +488,7 @@ def initialize_components():
             # ========================================================================
             if was_fast_scan_mode:
                 # Capture image ONLY (no AI processing) - fast!
-                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number, settle=0)
+                image_path, card_image_rgb, foil_image = scanner.capture_card_image_only(current_capture_number, settle=0)
                 announce_capture(taken=bool(image_path))
 
                 if not image_path:
@@ -504,7 +504,7 @@ def initialize_components():
                     'card_number': current_capture_number,
                     'card_image': card_image_rgb,
                     'image_path': image_path,
-                    'is_warped': is_warped,
+                    'foil_image': foil_image,
                     'fast_scan_mode': True
                 })
 
@@ -518,9 +518,9 @@ def initialize_components():
             # ========================================================================
             else:
                 # Synchronous capture with AI processing (blocks until AI completes)
-                image_path, card_image_rgb, is_warped = scanner.capture_card_image_only(current_capture_number, settle=0)
+                image_path, card_image_rgb, foil_image = scanner.capture_card_image_only(current_capture_number, settle=0)
                 announce_capture(taken=bool(image_path))
-                vision_ai_result = scanner.identify_card_from_image(card_image_rgb, detect_foil=is_warped) if image_path else None
+                vision_ai_result = scanner.identify_card_from_image(card_image_rgb, foil_image) if image_path else None
 
                 if not image_path:
                     logger.error("Normal Mode: Failed to capture image")
@@ -631,7 +631,8 @@ def get_stats():
     if database and inventory:
         game = games.active()
         return jsonify({
-            'database': {'total_cards': game.card_count()},
+            'database': {'total_cards': game.card_count(), 'update': data_update_notices.get(game.id),
+                         'updating': game.id in data_updates_running},
             'inventory': inventory.get_stats(game.id)
         })
 
@@ -1192,6 +1193,10 @@ def game_info(game):
     return {
         'id': game.id,
         'label': game.label,
+        'source': game.source,
+        'has_treatments': game.has_treatments,
+        'set_example': game.set_example,
+        'number_example': game.number_example,
         'finishes': [[key, label] for key, label in game.finishes.items()],
         'exports': [[key, label] for key, (label, _prefix, _writer) in game.export_formats().items()],
     }
@@ -1220,7 +1225,12 @@ def handle_set_game(data):
         socketio.emit('auto_capture_toggled', {'enabled': False})
     game = games.active()
     logger.info(f"Game switched to {game.label}")
-    socketio.emit('game_changed', {**game_info(game), 'card_count': game.card_count()})
+    card_count = game.card_count()
+    socketio.emit('game_changed', {**game_info(game), 'card_count': card_count})
+    if not card_count:
+        # First time: fetch its card data right away
+        log_to_client(f"Downloading the {game.label} card data from {game.source}...")
+        start_card_data_update(game)
 
 
 @socketio.on('toggle_auto_capture')
@@ -1528,8 +1538,8 @@ def handle_test_prompt(data):
     if not text:
         reply(error='The prompt is empty')
         return
-    image, is_warped = scanner.last_capture
-    if kind == 'foil' and not is_warped:
+    image, foil_image = scanner.last_capture
+    if kind == 'foil' and foil_image is None:
         reply(error='The last capture has no detected card outline, so the foil corner cannot be located')
         return
 
@@ -1538,7 +1548,7 @@ def handle_test_prompt(data):
         start = time.time()
         try:
             if kind == 'foil':
-                raw, foil = identifier.read_foil_symbol_verbose(image, text)
+                raw, foil = identifier.read_foil_symbol_verbose(foil_image, text)
                 reply(raw=raw, result={'foil': foil}, seconds=round(time.time() - start, 2))
                 return
             raw, card = identifier.identify_card_verbose(image, text)
@@ -1560,46 +1570,77 @@ def handle_test_prompt(data):
     socketio.start_background_task(run)
 
 
+# Newer card data found by the update check: game id -> message (shown on the page)
+data_update_notices = {}
+data_updates_running = set()
+
+
+def start_card_data_update(game):
+    """Download a game's card data in the background (progress/complete/error events)"""
+    if game.id in data_updates_running:
+        return False
+    data_updates_running.add(game.id)
+
+    def progress_callback(message):
+        socketio.emit('database_update_progress', {'message': message})
+        logger.info(f"Database update: {message}")
+
+    def update_task():
+        try:
+            logger.info(f"Updating {game.label} card data from {game.source}")
+            game.download(progress_callback)
+            total = game.card_count()
+            data_update_notices.pop(game.id, None)
+            socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
+            logger.info(f"{game.label} card data updated: {total} cards")
+        except Exception as e:
+            logger.exception(f"Database update failed: {e}")
+            socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
+        finally:
+            data_updates_running.discard(game.id)
+
+    threading.Thread(target=update_task, daemon=True).start()
+    return True
+
+
+def check_card_data_updates():
+    """Ask each game's source whether newer card data exists (games with data only)"""
+    for game in games.all_games():
+        try:
+            if not game.card_count() or game.id in data_updates_running:
+                continue
+            message = game.check_for_update()
+        except Exception as e:
+            logger.warning(f"{game.label} update check failed: {e}")
+            continue
+        if message:
+            data_update_notices[game.id] = message
+            logger.info(f"{game.label} card data update available: {message}")
+            socketio.emit('database_update_available', {'game': game.id, 'label': game.label, 'message': message})
+        else:
+            data_update_notices.pop(game.id, None)
+
+
+def run_update_checks():
+    """Check for newer card data shortly after startup, then once a day"""
+    def loop():
+        time.sleep(10)
+        while True:
+            check_card_data_updates()
+            time.sleep(24 * 3600)
+    threading.Thread(target=loop, daemon=True, name='update-check').start()
+
+
 @socketio.on('update_database')
 def handle_update_database():
-    """Handle database update request"""
-    global database
-
+    """Download the active game's card data again"""
     logger.info("Database update request received")
-
     if not database:
         logger.error("Database update requested but database not initialized")
         emit('error', {'message': 'Database not initialized'})
         return
-
-    def progress_callback(message):
-        """Send progress updates to the client"""
-        socketio.emit('database_update_progress', {'message': message})
-        logger.info(f"Database update: {message}")
-
-    game = games.active()
-
-    def update_task():
-        """Run database update in background thread"""
-        try:
-            logger.info("Starting database update in background thread")
-
-            game.download(progress_callback)
-            total = game.card_count()
-            socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
-            logger.info(f"{game.label} card data updated: {total} cards")
-
-        except Exception as e:
-            logger.exception(f"Database update failed: {e}")
-            socketio.emit('database_update_error', {
-                'message': str(e)
-            })
-
-    # Run update in background thread
-    update_thread = threading.Thread(target=update_task, daemon=True)
-    update_thread.start()
-
-    logger.info("Database update thread started")
+    if not start_card_data_update(games.active()):
+        emit('error', {'message': 'An update of this card data is already running'})
 
 
 @socketio.on('rebuild_database')
@@ -1717,6 +1758,7 @@ def main():
 
     # Start background cleanup
     run_cleanup_background()
+    run_update_checks()
 
     game = games.active()
     logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")

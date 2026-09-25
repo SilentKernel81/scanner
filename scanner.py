@@ -207,7 +207,7 @@ class CardScanner:
         self.last_auto_capture_time = 0
         self.auto_capture_callback = None
         self.card_under_review = False  # Prevent auto-capture while card is being reviewed
-        self.last_capture = None  # (card image RGB, is_warped) of the last capture - prompt editor tests
+        self.last_capture = None  # (card image RGB, foil image or None) of the last capture - prompt editor tests
         self.capture_pending = False  # Auto-capture triggered, image / focus probe not done yet
         # Image rotation (degrees clockwise), applied as each frame is decoded - live and full size
         self.rotation = int(self.settings.get('camera_rotation', Config.CAMERA_ROTATE) or 0)
@@ -636,8 +636,8 @@ class CardScanner:
         measured ~30 against >= 250 for a card), still when its image hardly changes (frame to
         frame and since the still streak began - a sliding card drifts), and new after a
         capture when the area changed like a card falling in, or settled looking different.
-        The outline detector still runs, only to crop the photo: an outline inside the area is
-        used for a flat, tight crop; otherwise the area itself is cropped.
+        The photo is the area as drawn. The outline detector still runs: an outline inside the
+        area gives the flat card for the ★/• foil check (get_detected_card).
         """
         height, width = frame.shape[:2]
         fx1, fy1, fx2, fy2 = self.fixed_area
@@ -701,7 +701,7 @@ class CardScanner:
             self.detected_card = (frame, (x1, y1, x2, y2), corners, raw) if present else None
             self.detected_card_name = "Card" if present else ""
 
-        # Overlay: the area, and the outline used for the crop
+        # Overlay: the area (the photo); the outline, used only for the foil check, isn't drawn
         if not present:
             color, label = (160, 160, 160), "Fixed area - no card"
         elif self.awaiting_new_card and self.auto_capture_enabled:
@@ -711,8 +711,6 @@ class CardScanner:
         else:
             color, label = (0, 255, 0), "Fixed area [Ready]"
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        if corners is not None:
-            cv2.polylines(annotated, [corners.astype(np.int32)], True, (255, 255, 255), 1)
         text_scale = max(0.7, width / 1280 * 0.7)
         cv2.putText(annotated, label, (x1, max(int(30 * text_scale), y1 - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, text_scale, color, max(2, int(2 * text_scale)))
@@ -1275,13 +1273,16 @@ class CardScanner:
         Get the currently detected card image
 
         Returns:
-            tuple: (image, card_name, is_warped) - is_warped is True when the image is a
-            perspective-corrected card from outline detection; (None, "", False) if no card
+            tuple: (image, card_name, foil_image) - foil_image is the perspective-corrected card
+            from outline detection, where the ★/• corner is at a known position (None without an
+            outline); (None, "", None) if no card. In fixed area mode the image is always the
+            area as drawn (an outline can cut the card - a holo streak once passed for its top
+            edge); the outline only serves the foil check.
         """
         with self.frame_lock:
             detected, card_name = self.detected_card, self.detected_card_name
         if detected is None:
-            return None, "", False
+            return None, "", None
 
         # Frames are never modified after capture, so cropping outside the lock is safe
         frame, bbox, corners, raw = detected
@@ -1293,10 +1294,11 @@ class CardScanner:
             if corners is not None:
                 corners = corners * np.array([scale_x, scale_y], dtype=np.float32)
             bbox = (int(bbox[0] * scale_x), int(bbox[1] * scale_y), int(bbox[2] * scale_x), int(bbox[3] * scale_y))
-        if corners is not None:
-            return warp_card(frame, corners), card_name, True
+        warped = warp_card(frame, corners) if corners is not None else None
+        if warped is not None and not self._fixed_area_active():
+            return warped, card_name, warped
         x1, y1, x2, y2 = bbox
-        return frame[y1:y2, x1:x2].copy(), card_name, False
+        return frame[y1:y2, x1:x2].copy(), card_name, warped
     
     def is_card_detected(self):
         """Check if a card is currently detected"""
@@ -1322,15 +1324,15 @@ class CardScanner:
         Capture and save a card image WITHOUT AI processing.
         settle: wait before taking the image - auto-captures pass 0 (the card has already been
             still for stability_frames)
-        Returns: (image_path, card_image_rgb, is_warped) or (None, None, False) on failure
+        Returns: (image_path, card_image_rgb, foil_image) or (None, None, None) on failure
         """
         self.log(f"Capturing card #{card_number}...")
         if settle:
             time.sleep(settle)  # Let the image steady (manual captures)
 
-        card_image, card_name, is_warped = self.get_detected_card()
+        card_image, card_name, foil_image = self.get_detected_card()
         self._mark_captured()  # don't auto-capture this card again
-        if is_warped:
+        if card_image is not None:
             self._count_capture()
 
         if card_image is None:
@@ -1339,7 +1341,7 @@ class CardScanner:
             frame = self.get_full_frame()
             if frame is None:
                 self.log("Failed to capture frame", level="error")
-                return None, None, False
+                return None, None, None
             card_image = frame
         else:
             self.log(f"Using detected card crop ({card_image.shape[1]}x{card_image.shape[0]}px)", level="info")
@@ -1358,15 +1360,15 @@ class CardScanner:
         card_bgr = cv2.cvtColor(card_image_final, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(image_path), card_bgr)
 
-        self.last_capture = (card_image_final, is_warped)
+        self.last_capture = (card_image_final, foil_image)
         self.log(f"Card captured: {image_path.name}")
-        return image_path, card_image_final, is_warped
+        return image_path, card_image_final, foil_image
 
-    def identify_card_from_image(self, card_image_rgb, detect_foil=False):
+    def identify_card_from_image(self, card_image_rgb, foil_image=None):
         """
         Identify a card using Vision AI from a preprocessed RGB image.
-        detect_foil: also read the star/dot foil marker - only reliable for
-        perspective-corrected captures, where the corner is at a known position.
+        foil_image: perspective-corrected card to read the star/dot foil marker from (its
+        corner is at a known position); no foil check without it.
         Returns: card_info dict with name, collector_number, foil ('foil'|'non-foil'|'unknown')
         This is used for async AI processing.
         """
@@ -1377,9 +1379,9 @@ class CardScanner:
             # Ollama, more with cloud providers that serve requests in parallel)
             foil_result = {}
             foil_thread = None
-            if detect_foil and Config.VISION_AI_DETECT_FOIL and prompts.has('foil', games.active_id()):
+            if foil_image is not None and Config.VISION_AI_DETECT_FOIL and prompts.has('foil', games.active_id()):
                 foil_thread = threading.Thread(
-                    target=lambda: foil_result.update(foil=self.card_identifier.read_foil_symbol(card_image_rgb)),
+                    target=lambda: foil_result.update(foil=self.card_identifier.read_foil_symbol(foil_image)),
                     daemon=True)
                 foil_thread.start()
             card_info = self.card_identifier.identify_card(card_image_rgb)
@@ -1408,11 +1410,11 @@ class CardScanner:
         This is the original method used for manual capture and Normal Auto-Scan Mode.
         Returns: (image_path, card_info)
         """
-        image_path, card_image, is_warped = self.capture_card_image_only(card_number)
+        image_path, card_image, foil_image = self.capture_card_image_only(card_number)
         if image_path is None:
             return None, None
 
-        card_info = self.identify_card_from_image(card_image, detect_foil=is_warped)
+        card_info = self.identify_card_from_image(card_image, foil_image)
         return image_path, card_info
 
     def _run_v4l2_command(self, *args):

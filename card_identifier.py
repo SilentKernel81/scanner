@@ -215,27 +215,37 @@ class CardIdentifier:
         Returns:
             dict: {'name': str, 'collector_number': str, 'set_code': str} or None if no name found
         """
-        name_match = re.search(r'NAME:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-        number_match = re.search(r'NUMBER:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
-        # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"); anything else (e.g. "Unknown") is ignored
-        set_match = re.search(r'SET:\s*([A-Za-z0-9]{2,5})\s*(?:\n|$)', response_text, re.IGNORECASE)
-        set_code = set_match.group(1).upper() if set_match else ""
+        # Some models answer in Markdown with comments: "- **NAME**: Riolu (The card is ...)"
+        text = response_text.replace('**', '').replace('__', '')
+        values = {}
+        for label in ('NAME', 'NUMBER', 'SET'):
+            match = re.search(rf'{label}:\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+            if match:
+                values[label] = self._clean_value(match.group(1))
 
         # Some models drop the labels (all of them, or only the first one), and sometimes a
         # line: "Mirkwood / 0188 / HOB", "Mirkwood / NUMBER: 0188 / SET: HOB", "Mirkwood / HOB"
-        if not name_match:
-            lines = [line.strip() for line in response_text.splitlines() if line.strip()]
+        if 'NAME' not in values:
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
             bare = [line for line in lines if not re.match(r'(NAME|NUMBER|SET)\s*:', line, re.IGNORECASE)]
             if bare and len(lines) <= 3:
-                name_match = re.match(r'(.+)', bare[0])
+                values['NAME'] = self._clean_value(bare[0])
                 for line in bare[1:]:
-                    if not number_match and self._looks_like_number(line):
-                        number_match = re.match(r'(.+)', line)
-                    elif not set_code and re.fullmatch(r'[A-Za-z0-9]{2,5}', line):
-                        set_code = line.upper()
+                    line = self._clean_value(line)
+                    if 'NUMBER' not in values and self._looks_like_number(line):
+                        values['NUMBER'] = line
+                    elif 'SET' not in values and re.fullmatch(r'[A-Za-z0-9]{2,5}', line):
+                        values['SET'] = line
 
-        card_name = name_match.group(1).strip() if name_match else ""
-        collector_number = self._clean_number(number_match.group(1).strip()) if number_match else ""
+        card_name = values.get('NAME', '')
+        number = values.get('NUMBER', '')
+        # A number with the set total ("016/131", Pokémon) anywhere in the value
+        with_total = re.search(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', number)
+        collector_number = self._clean_number(with_total.group().replace(' ', '') if with_total else number)
+        # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"), maybe followed by the language
+        # code ("PAL EN"); anything else (e.g. "Unknown") is ignored
+        set_match = re.fullmatch(r'([A-Za-z0-9]{2,5})(?:\s+[A-Za-z]{2})?', values.get('SET', ''))
+        set_code = set_match.group(1).upper() if set_match else ""
 
         # Clean up "Unknown" responses
         if card_name.lower() == "unknown":
@@ -257,9 +267,19 @@ class CardIdentifier:
     # Letters a model reads for digits in small print: "018B" is 0188
     DIGIT_LOOKALIKES = str.maketrans('OoDBIlSZ', '00081152')
 
+    @staticmethod
+    def _clean_value(value):
+        """An answer value without a trailing comment or symbols: 'Riolu (The card ...)' -> 'Riolu',
+        '103/202 ★' -> '103/202'"""
+        value = re.sub(r'\s+\(.*$', '', value.strip())
+        return value.strip(' \t"\'.*★•☆')
+
     @classmethod
     def _looks_like_number(cls, text):
-        """A collector number, maybe with its rarity letter and misread digits ("L 018B", "0186")"""
+        """A collector number, maybe with its rarity letter and misread digits ("L 018B", "0186"),
+        or a number with the set total ("016/131")"""
+        if re.fullmatch(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', text.strip()):
+            return True
         match = re.fullmatch(r'(?:[A-Za-z]\s+)?([0-9OoDBIlSZ]{1,4})[a-z]?', text.strip())
         if not match:
             return False

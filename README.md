@@ -4,6 +4,9 @@ A camera-based scanner for Magic: The Gathering cards. Put a card under the came
 scanner finds it in the video feed, identifies the exact printing with a vision AI, tells you
 whether it's foil, and adds it to a local inventory you can export to CSV or Moxfield.
 
+It also scans **Pokémon** cards (one game at a time - pick it in the top bar); see
+[Pokémon](#pokémon) below.
+
 It runs as a small web app (Flask + Socket.IO) on a Raspberry Pi or any Linux machine with a
 USB webcam or Raspberry Pi camera, and is used from a browser on the same network.
 
@@ -47,8 +50,9 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
   [Moxfield](https://moxfield.com).
 - **Anti-glare** preprocessing option for reflective cards, sound effects, and a
   dark/light interface that follows your system theme.
-- **Housekeeping** - scanned images older than 7 days are cleaned up automatically, and the
-  card database can be updated from the UI.
+- **Housekeeping** - scanned images older than 7 days are cleaned up automatically. The app
+  checks for newer card data when it starts (and daily) and marks the Database counter with
+  a dot; click it to update.
 
 ## Requirements
 
@@ -188,7 +192,8 @@ identical copies in a row are both captured.
 **Sleeved cards:** turn on **Fixed area** in the camera panel. The first time, drag a rectangle
 on the video around where the cards land (or click **Use detected card**); **Area** redraws it.
 Cards are then judged by the image inside that area instead of their outline, which a pile of
-sleeves confuses. Turn it off again for cards without sleeves.
+sleeves confuses, and the photo sent to the AI is exactly that area - draw it around the whole
+card. Turn it off again for cards without sleeves.
 
 By default (**Settings → Add cards automatically**) cards are identified in the background and
 added to the inventory without review, so you can keep dropping cards; the *Processing* counter
@@ -208,6 +213,20 @@ bottom-left corner (e.g. `HOB` and `14`) - together they go straight to the exac
 and a **Treatment** (e.g. Borderless). If more than one printing matches, choose yours from
 the thumbnail grid. After a capture, the fields are filled with what the AI read, so you can
 correct a misread and search again. Press Enter in any field to search.
+
+### Pokémon
+
+Choose **Pokémon** in the game selector in the top bar. The first time, its card data
+(~21,000 cards from [TCGdex](https://tcgdex.dev)) is downloaded automatically in a few seconds.
+Scanning works the same way: the AI reads the name, the number with the set total
+(`012/193`) and, on Scarlet & Violet era cards, the set abbreviation (`PAL`). A card is added
+automatically when set + number, or name + number + set total, identify exactly one printing;
+otherwise it waits for review. In manual search, type the number as printed (`012/193`).
+
+The card panel only offers the finishes the printing exists in (normal, holo, reverse holo,
+1st edition). **Reverse holos are not recognized from the image** - the suggestion is the
+normal print, so change it before adding. Prices are TCGplayer market prices per finish.
+Pokémon support was tested on official card images; camera scans still need real-world tuning.
 
 ### Inventory
 
@@ -268,13 +287,15 @@ settings.
 
 | Task | How |
 |---|---|
-| Update card data and prices | **Settings → Update card database**, or `python3 setup_database.py` |
+| Update card data and prices | Click the Database counter when it shows a dot, **Settings → Update card database** (the game being scanned), or `python3 setup_database.py` (Magic) |
 | Scanned image statistics | `python3 cleanup.py --stats` |
 | Delete old scanned images | `python3 cleanup.py --days 30` (add `--dry-run` to preview, `--all` for everything) |
 | Back up database, inventory, settings, images and `.env` | `scripts/backup.sh` (set `SCANNER_DIR` at the top first) |
 
 Your inventory lives in the same SQLite file as the card data (`data/cards_database.db`,
-table `inventory`); updating the card database does not touch it.
+table `inventory`); updating the card database does not touch it, and scanning keeps working
+during an update (the new data replaces the old in one step at the end). How old Magic data may
+get before the update notice shows is `database.update_after_days` in `config.yaml` (7).
 
 Logs are written to `data/logs/`:
 
@@ -327,7 +348,7 @@ object_detector.py   Card outline detection + perspective correction (YOLO fallb
 card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings
-games/               Card games: base.py (interface), mtg.py (Magic)
+games/               Card games: base.py (interface), mtg.py (Magic), pokemon.py (Pokémon)
 card_search.py       Magic search helpers
 inventory.py         Inventory storage, stats, import/export
 anti_glare.py        Glare reduction for reflective cards
@@ -360,7 +381,7 @@ The web interface uses these endpoints, which you can also call directly:
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
-| `GET /api/export_inventory/<format>` | Download the inventory: `csv`, `moxfield` |
+| `GET /api/export_inventory/<format>` | Download the inventory: `csv` (both games), `moxfield` (Magic) |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |
 | `GET /api/local_ai_models` | Models installed on the local AI server |
@@ -376,7 +397,7 @@ of this repository and is licensed separately under AGPL-3.0.
 
 ## Acknowledgments
 
-- Card data, prices and images: [Scryfall](https://scryfall.com)
+- Card data, prices and images: [Scryfall](https://scryfall.com) (Magic), [TCGdex](https://tcgdex.dev) (Pokémon)
 - Computer vision: [OpenCV](https://opencv.org); optional detection fallback:
   [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
 - Web: [Flask](https://flask.palletsprojects.com) and

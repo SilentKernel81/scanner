@@ -10,6 +10,11 @@ class Game:
 
     id = None          # stored in inventory rows, settings and data/prompts.json
     label = None
+    source = None      # where the card data comes from ("Scryfall")
+    # Manual search: whether the treatment filter applies, and example set code / number
+    has_treatments = False
+    set_example = ''
+    number_example = ''
     card_ratio = 88 / 63   # height / width of the card (outline detection)
     # Finish key -> label, in display order; the first one is the default
     finishes = {}
@@ -41,6 +46,13 @@ class Game:
     def download(self, progress_callback=None):
         """Download / refresh the card data; returns the number of cards imported"""
         raise NotImplementedError
+
+    def check_for_update(self):
+        """
+        Whether newer card data is available (a network request): a short message saying
+        why, or None when the local data is current
+        """
+        return None
 
     # -- Matching and search -------------------------------------------------
 

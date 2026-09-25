@@ -87,10 +87,15 @@ flask:
 # API URLs
 api:
   scryfall_bulk: https://api.scryfall.com/bulk-data/default-cards
+  tcgdex: https://api.tcgdex.net/v2/en
 
 # Database
 database:
   file: cards_database.db
+  # At startup (and once a day) the app checks whether newer card data is available and
+  # shows a notice. Scryfall republishes its data every day (prices), so Magic only counts
+  # as outdated once the local copy is this many days older than Scryfall's
+  update_after_days: 7
 
 # Cleanup Settings
 cleanup:

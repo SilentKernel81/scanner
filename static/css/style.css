@@ -160,6 +160,22 @@ body {
     background: var(--accent-soft);
 }
 
+/* Newer card data available: a small dot, the counter offers the update */
+.stat-box.has-update {
+    position: relative;
+}
+
+.stat-box.has-update::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
 .stat-box.is-busy {
     border-color: var(--warning);
     background: var(--warning-soft);

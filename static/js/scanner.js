@@ -700,7 +700,12 @@ function suggestedFinish(card) {
     // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
     // Printings that only exist in one finish are certain; otherwise use the ★/• marker
     // the AI read next to the set code on the last capture.
-    if (!gameInfo || gameInfo.id !== 'mtg') return {finish: defaultFinish(), reason: null};
+    if (!gameInfo || gameInfo.id !== 'mtg') {
+        // Other games list the finishes the printing exists in; the plain one is the likely one
+        const options = card.finish_options || [defaultFinish()];
+        if (options.length === 1) return {finish: options[0], reason: `only printed as ${finishLabel(options[0]).toLowerCase()}`};
+        return {finish: options.includes(defaultFinish()) ? defaultFinish() : options[0], reason: null};
+    }
     const finishes = card.finishes || [];
     const hasFoil = finishes.includes('foil') || finishes.includes('etched');
     const hasNonfoil = finishes.includes('nonfoil');
@@ -730,11 +735,17 @@ function displayCard(card) {
     const suggestion = suggestedFinish(card);
     // Only show prices that exist (e.g. foil-only printings have no regular price)
     const prices = [];
-    if (card.price > 0) {
-        prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
-    }
-    if (card.price_foil > 0) {
-        prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
+    if (card.prices) {
+        // [[finish label, price]] (games other than Magic)
+        card.prices.forEach(([label, price]) => prices.push(
+            `<span class="price-label">${escapeHtml(label.toLowerCase())}</span> <span class="price">$${price.toFixed(2)}</span>`));
+    } else {
+        if (card.price > 0) {
+            prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
+        }
+        if (card.price_foil > 0) {
+            prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
+        }
     }
     if (prices.length === 0) {
         prices.push('<span class="price-label">No price data</span>');
@@ -768,7 +779,7 @@ function displayCard(card) {
         <div class="input-group">
             <span class="field-label">Quantity</span>
             <div class="qty-grid">
-                ${gameInfo.finishes.map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
+                ${cardFinishes(card).map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
             </div>
             ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
         </div>
@@ -780,6 +791,11 @@ function displayCard(card) {
     `;
 
     document.getElementById('card-display').innerHTML = html;
+}
+
+function cardFinishes(card) {
+    // The game's finishes, only those the printing exists in when the game says (Pokémon)
+    return card.finish_options ? gameInfo.finishes.filter(([key]) => card.finish_options.includes(key)) : gameInfo.finishes;
 }
 
 function treatmentTagsHtml(treatments) {
@@ -794,7 +810,7 @@ function displayPrintings(cardName, cards) {
 
     cards.forEach(card => {
         // Scryfall's "small" image size keeps the grid light
-        const thumb = card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '';
+        const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
         const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
         html += `
             <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
@@ -849,7 +865,7 @@ function addToInventoryBoth() {
     }
 
     const condition = document.getElementById('condition').value;
-    const quantities = gameInfo.finishes.map(([key]) => [key, parseInt(document.getElementById(`qty-${key}`).value) || 0]);
+    const quantities = cardFinishes(currentCard).map(([key]) => [key, parseInt(document.getElementById(`qty-${key}`).value) || 0]);
     if (quantities.every(([, quantity]) => quantity === 0)) {
         addLog(timeNow(), 'warning', 'Please set at least one quantity');
         return;
@@ -923,6 +939,7 @@ function loadStats() {
             if (data.database) {
                 document.getElementById('db-cards').textContent =
                     data.database.total_cards.toLocaleString();
+                showDataUpdate(data.database.update);
             }
             if (data.inventory) {
                 document.getElementById('inv-cards').textContent =
@@ -936,6 +953,36 @@ function loadStats() {
             // Don't log stats error - expected when server is down
         });
 }
+
+let dataUpdateNotified = false;
+
+function showDataUpdate(message) {
+    // Newer card data available (checked at startup and daily): a dot on the Database
+    // counter, which then offers the update; one notification per page load
+    const box = document.getElementById('db-stat');
+    box.classList.toggle('has-update', !!message);
+    box.classList.toggle('clickable', !!message);
+    box.title = message ? `${message} - click to update` : '';
+    if (message && !dataUpdateNotified) {
+        dataUpdateNotified = true;
+        notify(`Card data update available: ${message}`, 'info');
+    }
+}
+
+async function offerDataUpdate() {
+    const box = document.getElementById('db-stat');
+    if (!box.classList.contains('has-update')) return;
+    const ok = await confirmDialog({
+        title: `Update the ${gameInfo.label} card data?`,
+        message: `${box.title.replace(/ - click to update$/, '')}. Scanning keeps working while it downloads.`,
+        confirmText: 'Update'
+    });
+    if (ok) updateDatabase();
+}
+
+socket.on('database_update_available', function(data) {
+    if (gameInfo && data.game === gameInfo.id) showDataUpdate(data.message);
+});
 
 function loadAIModels() {
     fetch('/api/ai_models')
@@ -1392,6 +1439,17 @@ function finishLabel(key) {
     return finish ? finish[1] : key;
 }
 
+function applyGameFields() {
+    // Manual search fields and the card data hint follow the game being scanned
+    document.querySelector('.search-treatment').style.display = gameInfo.has_treatments ? '' : 'none';
+    if (!gameInfo.has_treatments) document.getElementById('card-treatment').value = '';
+    document.getElementById('set-code').placeholder = `e.g. ${gameInfo.set_example}`;
+    document.getElementById('collector-number').placeholder = `e.g. ${gameInfo.number_example}`;
+    document.getElementById('database-source-hint').textContent =
+        `Downloads the latest ${gameInfo.label} card data${gameInfo.id === 'mtg' ? ' and prices' : ''} from ${gameInfo.source}`
+        + (gameInfo.id === 'mtg' ? ' (a few minutes)' : ' (a few seconds)');
+}
+
 function loadGames() {
     return fetch('/api/games')
         .then(response => response.json())
@@ -1402,6 +1460,7 @@ function loadGames() {
                 `<option value="${escapeHtml(game.id)}">${escapeHtml(game.label)}</option>`).join('');
             select.value = data.active;
             select.hidden = data.games.length < 2;
+            applyGameFields();
             renderExportButtons();
         })
         .catch(error => console.error('Error loading games:', error));
@@ -1410,6 +1469,7 @@ function loadGames() {
 socket.on('game_changed', function(data) {
     gameInfo = data;
     document.getElementById('game-select').value = data.id;
+    applyGameFields();
     renderExportButtons();
     currentCard = null;
     document.getElementById('card-display').innerHTML =
@@ -1418,7 +1478,7 @@ socket.on('game_changed', function(data) {
     loadPrompts();
     notify(data.card_count
         ? `Scanning ${data.label}`
-        : `Scanning ${data.label} - download its card database in Settings first`, data.card_count ? 'success' : 'warning');
+        : `Scanning ${data.label} - downloading its card data`, data.card_count ? 'success' : 'info');
 });
 
 function escapeHtml(text) {
@@ -1782,8 +1842,7 @@ function updateDatabase() {
     updateBtn.disabled = true;
     updateBtn.textContent = 'Updating...';
 
-    addLog(timeNow(), 'info', 'Starting database update from Scryfall...');
-    addLog(timeNow(), 'warning', 'This will take 5-10 minutes. Please do not close the browser.');
+    addLog(timeNow(), 'info', `Starting the ${gameInfo.label} card data update from ${gameInfo.source}...`);
 
     // Emit the update request
     socket.emit('update_database');

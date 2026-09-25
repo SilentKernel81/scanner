@@ -1,4 +1,4 @@
-# MTG Card Scanner - Technical Documentation
+# Card Scanner - Technical Documentation
 
 How the scanner works inside. For installing and using it see [README.md](README.md); for
 deployment see [INSTALL.md](INSTALL.md).
@@ -49,7 +49,7 @@ Design choices:
 | `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
-| `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports); `games.active()` is the game being scanned |
+| `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports), `pokemon.Pokemon` (TCGdex data, matching, prices, finishes, export); `games.active()` is the game being scanned |
 | `card_search.py` | Magic search helpers combining name, number, set and treatment |
 | `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, delete, stats, CSV import/export |
 | `anti_glare.py` | Optional glare reduction applied to captures (CLAHE, bilateral filter, inpainting) |
@@ -67,7 +67,7 @@ Design choices:
 | Capture (`scanner._capture_frames`) | Reads frames, detects the card, tracks stability, draws the overlay, triggers auto-captures |
 | Auto-capture callback | One short-lived thread per auto-capture: crops, saves and (in review mode) identifies the card |
 | AI worker (`ai_processing_worker`) | Identifies queued captures one by one when cards are added automatically |
-| Background tasks | Card database update/rebuild, startup image cleanup, model warm-up |
+| Background tasks | Card database update/rebuild, startup image cleanup, model warm-up, card data update check (10 s after startup, then daily) |
 
 Frames and detection state are shared under `scanner.frame_lock`; the card database and
 inventory use a re-entrant lock each around a shared SQLite connection (WAL mode).
@@ -151,6 +151,12 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    portrait and inner-frame checks, the hull fills ≥ 90% of it, and edges run along ≥ 80% of
    its perimeter. On 100 recorded frames it found only that card (no false detection on empty
    boxes, piles or screenshots); it costs ~5 ms more on frames where it runs.
+6. **Rectangle check** for the outlines of steps 0 and 5, which are built from edge pieces or
+   fitted lines: opposite sides within 8% of each other and corners within 8° of square (the
+   camera looks straight down). A holo Pokémon card (N's Zoroark ex) once gave a skewed outline
+   whose "top edge" was a streak of the holo art running from the name to the top-right corner,
+   and the photo lost the card name. Rejected outlines leave the photo to the other steps or,
+   in fixed area mode, to the area itself. On 1,825 recorded frames the check changed nothing.
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
@@ -262,8 +268,11 @@ shadow or exposure change is not a change) is compared with the previous frame's
 - **new card after a capture:** change > 8 in 2 frames in a row (a card falling in - also an
   identical copy), or the settled area differs > 10 from the captured one.
 
-The outline detector still runs, only for the photo: an outline inside the area gives the
-flat, tight crop (and the ★/• check); otherwise the area itself is cropped. Replaying the five
+**The photo is the area as drawn.** The outline detector still runs, only for the ★/• foil
+check: an outline inside the area gives the flat card whose corner is read (no outline, no foil
+check). The photo used to be cut along that outline, but a holo Pokémon card's streak passed for
+its top edge and the photo lost the card name - the area is what the user chose, so nothing
+inside it is cut off. The outline is not drawn on the video in this mode. Replaying the five
 recorded pile moments: every card captured once (the outline mode duplicated one); simulator
 drops of identical copies, sleeve slides and focus probes: every card captured once, none
 mid-slide.
@@ -295,7 +304,10 @@ The answer format asks for all three lines with their labels ("…, or Unknown")
 "exactly three lines" qwen3.5:9b often dropped the labels and sometimes the number line
 ("Mirkwood / HOB"), which lost 4 of 25 cards in one session; with the labels it answered 25/25.
 The parser still accepts answers without labels, or with only some of them, and places bare
-lines by their shape (number or set code). Letters read for digits in a mostly-digit number are
+lines by their shape (number or set code). It also copes with chatty answers - Markdown
+(`- **NAME**: Riolu (The card is ...)`), a comment in parentheses, a trailing ★, a number buried
+in a sentence (`The number at the bottom left is "84/145"`), a language code after the set
+(`PAL EN`). Letters read for digits in a mostly-digit number are
 corrected (`018B` → `0188`: O/D→0, B→8, I/l→1, S→5, Z→2). Ollama
 answers are capped (`num_predict`), so a model that starts reasoning aloud can't take seconds.
 
@@ -364,6 +376,36 @@ otherwise all printings of the name (optionally filtered by a treatment: regular
 showcase, extended art, full art, retro frame, etched, surge foil) are listed newest first and
 shown as a picker when there's more than one.
 
+### Pokémon
+
+`games/pokemon.py` reads the same three values with its own prompt: the name with its suffix
+(ex, V, VMAX, GX...), the number as printed with the set total (`012/193`, `TG05/TG30`, promo
+codes like `SWSH095`), and the set abbreviation printed next to it on Scarlet & Violet era
+cards (`PAL`); older cards only have a set symbol (Unknown). `Pokemon.identify` tries:
+
+| Step | Match | Tag |
+|---|---|---|
+| 1 | Set abbreviation + number, if the name matches (same, prefix "Charizard"/"Charizard ex", ≥ 80% similar, or the card's name inside a sentence answer) | `set_number` |
+| 2 | Name + number, narrowed by the set total (`/193` = the set's official card count); the exact name wins over longer ones (Charizard before Charizard δ). One card left → confirmed; several → first one for review; a total no set has → review | `name_number` / `name_number_ambiguous` / `name_number_other_total` |
+| 3 | Name only (exact or fuzzy): the newest printing, for review | `name` / `fuzzy` |
+| 4 | Name not recognized: the printed set + number | `set_number_unverified` |
+
+Confirmed: `set_number`, `name_number`. Measured with qwen3.5:9b on official card images
+(160 cards from Base Set to Mega Evolution, 4 random samples): 35-38 of 40 confirmed correctly
+per sample, **no confirmed wrong card**; the rest went to review - mostly basic Energy cards
+(read as "ENERGY"), promos without a readable code, and cards the same name + number/total
+exist in twice (Dugtrio 19/102 is in Base Set and Triumphant). An early version confirmed an
+Eevee promo from its Pokédex number ("133/189") - no set has 189 cards, which is now a review.
+
+**Finishes** (`normal`, `holo`, `reverse`, `first_edition`): the card panel only offers the
+finishes the printing exists in (TCGdex `variants`). With one, it is certain; otherwise the
+suggestion is Normal (Holo when there is no normal print) - reverse holos are not recognized
+from the image and must be set by hand before adding.
+
+**Prices** are TCGplayer market prices (USD) per finish from the TCGdex card details, which the
+bulk data doesn't include: fetched when a card is matched or picked (~0.2 s) and cached in the
+table for a day.
+
 ## Foil and finish
 
 Modern cards print a star instead of a dot between set code and language on foil copies
@@ -424,8 +466,38 @@ Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt on
 the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the
 migration checks that the card count is unchanged, and it runs in one transaction.
 
-Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV);
-CSV import reads the `Finish` column or the older `Foil`/`Surge` columns and merges duplicates.
+Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV;
+Pokémon: CSV with a `Finish` column); CSV import reads the `Finish` column or the older
+`Foil`/`Surge` columns and merges duplicates.
+
+**`pokemon_cards`** / **`pokemon_sets`** (created by `games/pokemon.py`) - TCGdex data: one
+GraphQL request returns every card (~21k paper cards, a few MB); the printed set abbreviations
+come from the REST set details (8 requests in parallel). Pokémon TCG Pocket (digital) is left
+out. A download takes about 4 s; it happens automatically the first time Pokémon is selected.
+Columns: identity (`id` "sv02-001", `name`, `set_id`, `set_code` "PAL", `set_name`,
+`set_total`, `serie`, `released_at`, `number` as printed, `number_key` for comparing "012" /
+"12" / "TG05"), card data (`rarity`, `category`, `types`, `stage`, `hp`, `trainer_type`,
+`energy_type`), `finishes` (JSON), `image_url` (+ `/high.webp`, `/low.webp`), and the cached
+`prices` / `prices_updated`. `pokemon_sets` lists every set of the last download, for the update
+check.
+
+**Imports never leave a half-filled table.** Both games fill a staging table (`cards_import`,
+`pokemon_cards_import`), committing every 5,000 rows so the inventory can still write, and swap
+it in at the end in one step (`CardDatabase.replace_table`, under the database lock, then the
+indexes are rebuilt) - scanning keeps using the old data while an update runs.
+
+**`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`; for Pokémon
+the newest set's release date), when it was downloaded, and the card count.
+
+**Update check.** 10 s after startup and then once a day, `Game.check_for_update()` runs for
+each game with data. Magic: Scryfall's bulk data description (one small request) - since
+Scryfall republishes every day for prices, the data only counts as outdated once it is
+`database.update_after_days` (7) older than Scryfall's, or when its date is not recorded (data
+downloaded before this check existed). Pokémon: any TCGdex set not in `pokemon_sets`. A result
+is kept in `data_update_notices`, sent as `database_update_available`, and returned by
+`/api/stats`; the page puts a dot on the Database counter (click → confirm → update) and shows
+one notification per page load. Updates are never started without the user, except the first
+Pokémon download.
 
 ## Focus
 
@@ -493,15 +565,18 @@ Socket.IO events:
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory`, `undo_last_add`, `dismiss_card` | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
-| `set_ai_provider`, `save_ai_credential`, `update_database`, `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_*`, `database_rebuild_*`, `log`, `error` |
+| `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
-| `set_game` | `game_changed` (to every client; stops auto scanning) |
+| `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
 
 HTTP endpoints are listed in the README.
 
 **Card games.** The page loads `/api/games` (games, their finishes and export formats) and
 builds the quantity grid, the edit dialog's finish choices and the export buttons from the
-active game. The game selector in the top bar only appears when more than one game exists.
+active game; the manual search's Treatment filter (Magic only), the set / number examples and
+the card data hint follow it too. The game selector in the top bar only appears when more than
+one game exists. Card payloads may carry `finish_options` (only those finishes are offered),
+`prices` (`[[finish label, USD]]`) and `thumb_uri` (printing picker).
 
 ## Configuration and files
 
@@ -512,7 +587,7 @@ active game. The game selector in the top bar only appears when more than one ga
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
-| `data/cards_database.db` | Card data and inventory |
+| `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`) and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |
 
@@ -548,5 +623,7 @@ The 9B doesn't fit in a 6 GB GPU (it would be split with the CPU); the 4B is a u
 - **An identical copy landing within ~0.7 mm of the previous card** without the fall hiding the
   card for 6 frames isn't recognized as new - press Capture.
 - **Cards without the ★/• marker** (older printings) get their finish from printing data only.
+- **Pokémon reverse holos** are not recognized from the image: set the finish by hand. Pokémon
+  support was tested on official card images, not yet on camera captures.
 - **Undo** takes back only the most recent add; older adds are edited in the inventory.
 - **One camera, one instance**: the camera can only be opened by one process.

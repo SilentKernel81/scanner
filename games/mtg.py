@@ -4,8 +4,10 @@ collector number matching (card_search.CardSearcher), regular / foil / surge foi
 CSV and Moxfield exports.
 """
 import csv
+from datetime import datetime
 
 from card_search import CardSearcher
+from config import Config
 from database import CONFIRMED_MATCHES
 from games.base import Game
 
@@ -52,6 +54,10 @@ def write_moxfield(rows, file):
 class Magic(Game):
     id = 'mtg'
     label = 'Magic: The Gathering'
+    source = 'Scryfall'
+    has_treatments = True
+    set_example = 'HOB'
+    number_example = '123'
     finishes = {'regular': 'Regular', 'foil': 'Foil', 'surge': 'Surge foil'}
     confirmed_matches = CONFIRMED_MATCHES
 
@@ -65,6 +71,18 @@ class Magic(Game):
     def download(self, progress_callback=None):
         cards_data = self.db.download_scryfall_data(progress_callback)
         return self.db.populate_database(cards_data, progress_callback)
+
+    def check_for_update(self):
+        # Scryfall republishes every day (prices); new sets are what matters, so the local
+        # copy only counts as outdated after update_after_days
+        remote = self.db.fetch_scryfall_info().get('updated_at') or ''
+        local = (self.db.get_data_info(self.id) or {}).get('source_updated')
+        if not local:
+            return f"Scryfall has card data from {remote[:10]}; when yours was downloaded is not recorded"
+        age = (datetime.fromisoformat(remote) - datetime.fromisoformat(local)).days
+        if age >= Config.DATABASE_UPDATE_AFTER_DAYS:
+            return f"Scryfall has card data from {remote[:10]}; yours is from {local[:10]}"
+        return None
 
     def identify(self, name, number=None, set_code=None, ai_model=None):
         return self.searcher.search_by_name(name, number, ai_model=ai_model, set_code=set_code)

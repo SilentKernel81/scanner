@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=26">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=27">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -32,7 +32,7 @@
         <!-- Shown only when more than one game is supported -->
         <select id="game-select" class="select game-select" title="Card game being scanned" hidden></select>
         <div class="stats">
-            <div class="stat-box">
+            <div class="stat-box" id="db-stat" onclick="offerDataUpdate()">
                 <span class="stat-label">Database</span>
                 <span class="stat-value" id="db-cards">0</span>
             </div>
@@ -274,7 +274,7 @@
                 <div class="settings-section">
                     <h3>Card database</h3>
                     <button id="update-database-btn" onclick="updateDatabase()" class="btn btn-block">Update card database</button>
-                    <div class="hint">Downloads the latest card data and prices from Scryfall (a few minutes)</div>
+                    <div class="hint" id="database-source-hint">Downloads the latest card data and prices from Scryfall (a few minutes)</div>
                     <button id="rebuild-database-btn" onclick="rebuildDatabase()" class="btn btn-block">Rebuild database schema</button>
                     <div class="hint">Reorders columns and rebuilds indexes (~30 sec)</div>
                 </div>
@@ -419,7 +419,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=26"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=26"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=27"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=27"></script>
 </body>
 </html>

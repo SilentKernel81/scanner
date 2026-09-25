@@ -9,12 +9,16 @@ import json
 import logging
 import requests
 import threading
+from datetime import datetime
 from difflib import SequenceMatcher, get_close_matches
 from config import Config
 from utils import normalize_text
 
 # Create database logger
 logger = logging.getLogger('database')
+
+# Scryfall asks API clients to send a User-Agent and Accept header
+SCRYFALL_HEADERS = {'User-Agent': 'CardScanner/1.0', 'Accept': 'application/json'}
 
 # Cards table columns in canonical order (name, SQL type)
 CARD_COLUMNS = [
@@ -200,6 +204,16 @@ class CardDatabase:
 
         self._create_card_indexes(cursor)
 
+        # When each game's card data was downloaded, and the source's own date (update check)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS card_data_info (
+                game TEXT PRIMARY KEY,
+                source_updated TEXT,
+                downloaded_at TEXT NOT NULL,
+                card_count INTEGER
+            )
+        ''')
+
         # The inventory table (same file) is created and migrated by inventory.InventoryManager
         self.conn.commit()
         logger.info("Database tables and indexes initialized successfully")
@@ -224,18 +238,47 @@ class CardDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_rarity ON cards(rarity)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_type ON cards(type_line)')
 
+    def get_data_info(self, game):
+        """{'source_updated', 'downloaded_at', 'card_count'} of a game's card data, or None"""
+        with self._lock:
+            row = self.conn.execute('SELECT * FROM card_data_info WHERE game = ?', (game,)).fetchone()
+            return dict(row) if row else None
+
+    def set_data_info(self, game, source_updated, card_count):
+        with self._lock:
+            self.conn.execute('INSERT OR REPLACE INTO card_data_info VALUES (?, ?, ?, ?)',
+                              (game, source_updated, datetime.now().isoformat(timespec='seconds'), card_count))
+            self.conn.commit()
+
+    def replace_table(self, staging, table, create_indexes=None):
+        """
+        Put a freshly filled staging table in place of a card table in one step, so searches
+        never see a half-imported table (imports fill `staging`, committing as they go)
+        """
+        with self._lock:
+            self.conn.commit()
+            cursor = self.conn.cursor()
+            cursor.execute(f'DROP TABLE IF EXISTS {table}')
+            cursor.execute(f'ALTER TABLE {staging} RENAME TO {table}')
+            if create_indexes:
+                create_indexes(cursor)
+            self.conn.commit()
+
+    def fetch_scryfall_info(self):
+        """Scryfall's bulk data description: download URL, size and updated_at"""
+        response = requests.get(Config.SCRYFALL_BULK_URL, headers=SCRYFALL_HEADERS, timeout=30)
+        if response.status_code != 200:
+            raise Exception("Failed to fetch bulk data info")
+        return response.json()
+
     def download_scryfall_data(self, progress_callback=None):
         """Download latest Scryfall bulk data"""
         if progress_callback:
             progress_callback("Fetching Scryfall bulk data information...")
         
-        # Scryfall asks API clients to send a User-Agent and Accept header
-        headers = {'User-Agent': 'CardScanner/1.0', 'Accept': 'application/json'}
-        response = requests.get(Config.SCRYFALL_BULK_URL, headers=headers, timeout=30)
-        if response.status_code != 200:
-            raise Exception("Failed to fetch bulk data info")
-
-        bulk_info = response.json()
+        headers = SCRYFALL_HEADERS
+        bulk_info = self.fetch_scryfall_info()
+        self.last_download_source = bulk_info.get('updated_at')
         # Scryfall now publishes gzipped JSON Lines (jsonl_download_uri); older API used a JSON array (download_uri)
         download_url = bulk_info.get('jsonl_download_uri') or bulk_info.get('download_uri')
         if not download_url:
@@ -282,9 +325,14 @@ class CardDatabase:
         if progress_callback:
             progress_callback(f"Populating database with {len(cards_data)} cards...")
         
-        cursor = self.conn.cursor()
-        cursor.execute('DELETE FROM cards')
-        
+        # Filled beside the current table and swapped in at the end (replace_table): scanning
+        # keeps working on the old data meanwhile
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute('DROP TABLE IF EXISTS cards_import')
+            self._create_cards_table(cursor, table='cards_import')
+            self.conn.commit()
+
         inserted = 0
         for card in cards_data:
             try:
@@ -300,7 +348,7 @@ class CardDatabase:
                 image_uri = image_uris.get('normal', '')
 
                 cursor.execute(f'''
-                    INSERT OR REPLACE INTO cards ({', '.join(CARD_COLUMN_NAMES)})
+                    INSERT OR REPLACE INTO cards_import ({', '.join(CARD_COLUMN_NAMES)})
                     VALUES ({', '.join('?' * len(CARD_COLUMN_NAMES))})
                 ''', (
                     card.get('id'),
@@ -329,15 +377,19 @@ class CardDatabase:
                 ))
                 
                 inserted += 1
-                if inserted % 1000 == 0 and progress_callback:
-                    progress_callback(f"Inserted {inserted} cards...")
+                if inserted % 5000 == 0:
+                    # Short transactions: the inventory (own connection) can still write
+                    self.conn.commit()
+                    if progress_callback:
+                        progress_callback(f"Inserted {inserted} cards...")
             
             except Exception as e:
                 if progress_callback:
                     progress_callback(f"Error inserting card {card.get('name')}: {e}")
                 continue
         
-        self.conn.commit()
+        self.replace_table('cards_import', 'cards', self._create_card_indexes)
+        self.set_data_info('mtg', getattr(self, 'last_download_source', None), inserted)
         if progress_callback:
             progress_callback(f"Database populated with {inserted} cards!")
         
