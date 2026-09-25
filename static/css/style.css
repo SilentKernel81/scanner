@@ -1062,6 +1062,12 @@ input[type="radio"] {
     font: inherit;
 }
 
+.inventory-controls .select {
+    width: auto;
+    flex: 0 1 220px;
+    padding: 7px 12px;
+}
+
 .inventory-controls input[type="text"]:focus {
     outline: none;
     border-color: var(--accent);

@@ -43,7 +43,7 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
   retro frame, etched, surge foil. When several printings match, pick the one you have from
   a grid of thumbnails.
 - **Inventory** with automatic duplicate merging, condition, regular / foil / surge foil,
-  prices, filtering, editing, CSV import, and export to CSV or
+  prices, filtering, sorting, editing, CSV import, and export to CSV or
   [Moxfield](https://moxfield.com).
 - **Anti-glare** preprocessing option for reflective cards, sound effects, and a
   dark/light interface that follows your system theme.
@@ -211,8 +211,9 @@ correct a misread and search again. Press Enter in any field to search.
 
 ### Inventory
 
-Open it from the inventory count in the top bar. You can filter, edit quantity / condition /
-finish (changing the finish of part of a stack splits it), delete, clear, import a CSV, and
+Open it from the inventory count in the top bar. You can filter, sort (newest / oldest, name,
+price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
+edit quantity / condition / finish (changing the finish of part of a stack splits it), delete, clear, import a CSV, and
 export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
 condition and finish increases its quantity instead of creating a duplicate.
 

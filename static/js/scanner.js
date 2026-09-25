@@ -1621,8 +1621,7 @@ function loadInventory() {
         .then(data => {
             if (data.success) {
                 currentInventory = data.cards;
-                filteredInventory = data.cards;
-                renderInventory();
+                filterInventory();
             } else {
                 document.getElementById('inventory-list').innerHTML =
                     '<div class="empty-state is-error">Error loading inventory</div>';
@@ -1710,11 +1709,44 @@ function renderInventory() {
     }).join('');
 }
 
+// Inventory sort, remembered in this browser (the server sends rows newest first)
+const INVENTORY_SORT_KEY = 'inventorySort';
+const RARITY_ORDER = {special: 0, bonus: 0, mythic: 1, rare: 2, uncommon: 3, common: 4};
+const byText = (a, b) => (a || '').localeCompare(b || '', undefined, {numeric: true, sensitivity: 'base'});
+const INVENTORY_SORTS = {
+    newest: null,
+    oldest: (a, b) => byText(a.timestamp, b.timestamp) || a.id - b.id,
+    name: (a, b) => byText(a.name, b.name),
+    price_desc: (a, b) => (b.price || 0) - (a.price || 0),
+    price_asc: (a, b) => (a.price || 0) - (b.price || 0),
+    value_desc: (a, b) => (b.price || 0) * b.quantity - (a.price || 0) * a.quantity,
+    quantity_desc: (a, b) => b.quantity - a.quantity,
+    rarity: (a, b) => (RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9),
+    set: (a, b) => byText(a.set_name, b.set_name) || byText(a.number, b.number),
+};
+
+function inventorySort() {
+    try {
+        const saved = localStorage.getItem(INVENTORY_SORT_KEY);
+        if (saved in INVENTORY_SORTS) return saved;
+    } catch (e) { /* storage blocked */ }
+    return 'newest';
+}
+
+function setInventorySort(value) {
+    try { localStorage.setItem(INVENTORY_SORT_KEY, value); } catch (e) { /* storage blocked */ }
+    filterInventory();
+}
+
 function filterInventory() {
     const searchTerm = document.getElementById('inventory-search').value.toLowerCase();
-    filteredInventory = !searchTerm ? currentInventory : currentInventory.filter(card =>
+    const rows = !searchTerm ? currentInventory : currentInventory.filter(card =>
         [card.name, card.set_name, card.rarity, card.color_identity, card.type_line]
             .some(value => (value || '').toLowerCase().includes(searchTerm)));
+    const sort = inventorySort();
+    document.getElementById('inventory-sort').value = sort;
+    // Array.sort is stable: ties keep the server's newest-first order
+    filteredInventory = INVENTORY_SORTS[sort] ? [...rows].sort(INVENTORY_SORTS[sort]) : rows;
     renderInventory();
 }
 

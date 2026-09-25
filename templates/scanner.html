@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=25">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=26">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -292,6 +292,17 @@
             <div class="modal-body">
                 <div class="inventory-controls">
                     <input type="text" id="inventory-search" placeholder="Filter by name, set, or rarity..." oninput="filterInventory()">
+                    <select id="inventory-sort" class="select" onchange="setInventorySort(this.value)" title="Sort">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="name">Name A–Z</option>
+                        <option value="price_desc">Price: high to low</option>
+                        <option value="price_asc">Price: low to high</option>
+                        <option value="value_desc">Total value (price × qty)</option>
+                        <option value="quantity_desc">Quantity: most first</option>
+                        <option value="rarity">Rarity: mythic first</option>
+                        <option value="set">Set and number</option>
+                    </select>
                     <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
                     <span id="export-buttons" class="export-buttons"></span>
                     <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
@@ -408,7 +419,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=25"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=25"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=26"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=26"></script>
 </body>
 </html>
