@@ -164,7 +164,11 @@ pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the bee
 **Why is it waiting?** When auto scanning waits more than 2 s for a card to become ready,
 `scanner.log` says why, once a second (`_trace_waiting`): *no card outline found* (every 5 s), or
 *card not ready (n/N)* with the frame's movement, drift, sharpness change and sharpness against
-their limits (1%, 1%, 20%, `min_sharpness`).
+their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Debug trace** on, the scanner also
+keeps the last 3 s of frames (640 px wide - what the outline detector works on) and saves them,
+plus the next second, to `data/debug_frames/<time>_<reason>/` when a card waits over 2 s or a
+new card is detected less than 2 s after a capture (a likely duplicate); the newest 20 dumps
+are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) is sent by `app.handle_auto_capture` once the image is taken and a focus probe started by

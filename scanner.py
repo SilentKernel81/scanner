@@ -9,6 +9,8 @@ import numpy as np
 import time
 import threading
 import subprocess
+import shutil
+from collections import deque
 import logging
 import re
 from datetime import datetime
@@ -148,6 +150,11 @@ class CardScanner:
         self.enable_detection = True  # Toggle auto-detection
         self.anti_glare_enabled = Config.ANTI_GLARE_ENABLED  # Toggle anti-glare preprocessing
         self.debug_trace_enabled = False  # Toggle debug trace logging
+        # Debug trace also records problem moments: the last 3 s of frames (640 px, what the
+        # outline detector works on) are saved to data/debug_frames/ when a card waits > 2 s
+        # or a "new card" shows up < 2 s after a capture
+        self.debug_frames = deque(maxlen=60)
+        self.debug_dump = None  # (folder, frames still to save after the trigger)
 
         # Card size detection - keep box visible longer for card-sized objects
         self.last_card_detection = None  # Store last valid card detection (bbox, time)
@@ -408,8 +415,11 @@ class CardScanner:
             self.waiting_since = None
             return
         if getattr(self, 'waiting_since', None) is None:
-            self.waiting_since, self.last_wait_log = now, now
+            self.waiting_since, self.last_wait_log, self.wait_dumped = now, now, False
             return
+        if now - self.waiting_since >= 2.0 and not self.wait_dumped:
+            self.wait_dumped = True
+            self._start_debug_dump('waiting')
         if now - self.waiting_since < 2.0 or now - self.last_wait_log < (1.0 if detected else 5.0):
             return
         self.last_wait_log = now
@@ -420,6 +430,38 @@ class CardScanner:
         logger.info(f"Waiting {now - self.waiting_since:.0f} s: card not ready ({self.stable_frames}/{self.required_stable_frames}) - "
                     f"movement {movement:.1%}, drift {drift:.1%}, sharpness change {change:.0%}, "
                     f"sharpness {sharpness:.0f} (min {Config.AUTO_CAPTURE_MIN_SHARPNESS})")
+
+    def _record_debug_frame(self, frame):
+        """Keep the frame (640 px wide, as the outline detector sees it); continue a dump"""
+        small = cv2.resize(frame, (640, int(640 * frame.shape[0] / frame.shape[1])), interpolation=cv2.INTER_AREA)
+        self.debug_frames.append((time.time(), small, self.stable_frames))
+        if self.debug_dump:
+            folder, remaining = self.debug_dump
+            self._save_debug_frame(folder, self.debug_frames[-1])
+            self.debug_dump = (folder, remaining - 1) if remaining > 1 else None
+
+    def _start_debug_dump(self, reason, after=20, keep=20):
+        """Save the buffered frames and the next `after` ones; keep the newest `keep` dumps"""
+        if not self.debug_trace_enabled or self.debug_dump:
+            return
+        root = Config.DATA_DIR / 'debug_frames'
+        folder = root / f"{time.strftime('%Y%m%d_%H%M%S')}_{reason}"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            for item in list(self.debug_frames):
+                self._save_debug_frame(folder, item)
+            self.debug_dump = (folder, after)
+            for old in sorted(p for p in root.iterdir() if p.is_dir())[:-keep]:
+                shutil.rmtree(old, ignore_errors=True)
+            logger.info(f"Debug frames saved to {folder}")
+        except OSError as e:
+            logger.warning(f"Could not save debug frames: {e}")
+
+    @staticmethod
+    def _save_debug_frame(folder, item):
+        stamp, small, stable = item
+        cv2.imwrite(str(folder / f"{stamp:.3f}_s{stable}.jpg"), cv2.cvtColor(small, cv2.COLOR_RGB2BGR),
+                    [cv2.IMWRITE_JPEG_QUALITY, 95])
 
     def _focus_moving(self):
         """A focus sweep or probe is running, or ended less than 0.6 s ago"""
@@ -771,6 +813,8 @@ class CardScanner:
                                     if self.auto_capture_enabled:
                                         movement, image_change = getattr(self, 'last_frame_change', (0, 0))
                                         self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
+                                        if time.time() - self.last_auto_capture_time < 2.0:
+                                            self._start_debug_dump('new_card_soon_after_capture')
                             else:
                                 # Not card-sized - ignore this detection
                                 # Log occasionally for debugging (throttled to avoid spam, controlled by UI toggle)
@@ -920,6 +964,9 @@ class CardScanner:
                                     self.capture_pending = True  # Until the image is taken (app.announce_capture)
                                     # Call the callback in a non-blocking way
                                     threading.Thread(target=self.auto_capture_callback).start()
+
+                if self.debug_trace_enabled:
+                    self._record_debug_frame(frame)
 
                 with self.frame_lock:
                     self.current_frame = frame
