@@ -101,7 +101,22 @@ scales the card's corners up (`get_detected_card`, `get_full_frame`). OpenCV run
 working. The preview stream encodes each new frame once, shared by all browser tabs
 (`get_stream_jpeg`).
 
-`object_detector.find_card_outline(frame)` runs on every frame (~3 ms):
+`object_detector.find_card_outline(frame, previous=...)` runs on every frame (~3 ms):
+
+0. **Follow the previous card** (`_track_outline`, when the scanner passes the last outline -
+   across detector gaps of up to 2 frames): fit a line to the edges along each side of the
+   previous outline (within 6 px at 640 px, corner zones left out) and intersect them. The
+   result is kept if it is card-shaped, within 15% of the previous size, has edges along ≥ 80%
+   of its perimeter and moved ≤ 2% (more means it was fitted to another edge, e.g. the inner
+   frame of a blurry card - taking it made the outline flip); otherwise it is only a last
+   resort after steps 1-5. On a sleeved pile the top card's outline often merges with the
+   edge of a card underneath or with the box's corner crease once the pile is high - then no
+   closed contour exists (in recorded pile frames the detector found nothing in most frames
+   of a still card), or the largest outline flips between the top card and the whole pile.
+   Both made cards wait 8-19 s and caused duplicate captures (the flip looks like a drop).
+   Replaying 5 recorded pile moments through `CardScanner`: a card the current detector never
+   captured in its 4 s recording was captured 1.3 s after landing, and a duplicate case gave
+   one capture.
 
 1. Downscale to 640 px on the long side, grayscale, Gaussian blur.
 2. Canny edges with thresholds derived from the median brightness, dilated to close gaps.

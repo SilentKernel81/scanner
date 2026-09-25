@@ -86,7 +86,77 @@ def _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tole
     return best
 
 
-def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640):
+def _fit_side(points, start, end, band):
+    """
+    Line through the edge points along one side of a rectangle (within `band` of it), leaving
+    out the corner zones - where other outlines touch (the box's corner crease, the pile)
+    Returns (point, direction) or None
+    """
+    side = end - start
+    length = np.linalg.norm(side)
+    if length == 0:
+        return None
+    along = side / length
+    normal = np.array([-along[1], along[0]])
+    rel = points - start
+    t, offset = rel @ along, rel @ normal
+    keep = (np.abs(offset) <= band) & (t > 0.15 * length) & (t < 0.85 * length)
+    if keep.sum() < 10:
+        return None
+    vx, vy, x0, y0 = cv2.fitLine(points[keep], cv2.DIST_HUBER, 0, 0.01, 0.01).ravel()
+    return np.array([x0, y0]), np.array([vx, vy])
+
+
+def _line_intersection(first, second):
+    (p, r), (q, s) = first, second
+    matrix = np.array([r, -s]).T
+    if abs(np.linalg.det(matrix)) < 1e-6:
+        return None
+    t, _ = np.linalg.solve(matrix, q - p)
+    return p + t * r
+
+
+def _track_outline(raw_edges, edges, gray, previous, allow_landscape, ratio_tolerance, band=6):
+    """
+    Follow the card found in the previous frame: fit a line to the edges along each of its
+    sides (within `band` px) and intersect them. On a pile the card's outline often merges
+    with the edge of a card underneath or the box's corner crease, and then no closed contour
+    exists; tracking also keeps the choice between nested outlines (top card / whole pile)
+    from flipping between frames. The result must still be card-shaped, about the same size,
+    with edges along >= 80% of its perimeter.
+
+    Returns:
+        tuple: (area, corners, fill) or None
+    """
+    band_mask = np.zeros(raw_edges.shape, np.uint8)
+    cv2.polylines(band_mask, [previous.astype(np.int32)], True, 255, 2 * band + 1)
+    ys, xs = np.nonzero(raw_edges & band_mask)
+    if len(xs) < 50:
+        return None
+    points = np.column_stack([xs, ys]).astype(np.float32)
+    lines = [_fit_side(points, previous[i], previous[(i + 1) % 4], band) for i in range(4)]
+    if any(line is None for line in lines):
+        return None
+    corners = [_line_intersection(lines[i - 1], lines[i]) for i in range(4)]
+    if any(corner is None for corner in corners):
+        return None
+    corners = _order_corners(np.array(corners))
+    side_w = np.linalg.norm(corners[1] - corners[0])
+    side_h = np.linalg.norm(corners[3] - corners[0])
+    if min(side_w, side_h) == 0 or (side_w > side_h and not allow_landscape):
+        return None
+    if abs(max(side_w, side_h) / min(side_w, side_h) - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance:
+        return None
+    area = side_w * side_h
+    previous_area = np.linalg.norm(previous[1] - previous[0]) * np.linalg.norm(previous[3] - previous[0])
+    if not 0.85 <= area / previous_area <= 1.15:
+        return None
+    if _perimeter_coverage(edges & band_mask, corners) < 0.8 or _is_inner_frame(gray, corners):
+        return None
+    return area, corners, 1.0
+
+
+def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640, previous=None):
     """
     Find a card by its outline: the largest 4-sided contour with a card's aspect ratio.
 
@@ -100,6 +170,8 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
             card's (landscape) art box has nearly the same aspect ratio as a card.
         ratio_tolerance: Allowed relative deviation from the card aspect ratio
         work_size: Longest side of the downscaled image used for detection
+        previous: The card's corners in the previous frame (frame coordinates), if any - the
+            card is then followed along its sides first (see _track_outline)
 
     Returns:
         tuple: (corners, score) - corners is a 4x2 float array (tl, tr, br, bl)
@@ -112,8 +184,20 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
 
     gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), (5, 5), 0)
     median = np.median(gray)
-    edges = cv2.Canny(gray, int(max(0, 0.5 * median)), int(min(255, 1.3 * median)))
-    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+    raw_edges = cv2.Canny(gray, int(max(0, 0.5 * median)), int(min(255, 1.3 * median)))
+    edges = cv2.dilate(raw_edges, np.ones((3, 3), np.uint8), iterations=2)
+
+    # Follow the previous card - as a small refinement only: an outline more than 2% away was
+    # fitted to another edge (e.g. the card's inner frame on a blurry image), and taking it
+    # would make the result flip between two outlines. Then it is only a last resort.
+    tracked = None
+    if previous is not None:
+        previous = np.asarray(previous, np.float32) * scale
+        tracked = _track_outline(raw_edges, edges, gray, previous, allow_landscape, ratio_tolerance)
+        if tracked is not None:
+            shift = np.linalg.norm(tracked[1] - previous, axis=1).max() / np.linalg.norm(previous[2] - previous[0])
+            if shift <= 0.02:
+                return tracked[1] / scale, float(tracked[2])
 
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     min_area = 0.02 * small.shape[0] * small.shape[1]  # card must cover at least 2% of the frame
@@ -143,6 +227,8 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
 
     if best is None:
         best = _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance)
+    if best is None:
+        best = tracked
     if best is None:
         return None, 0
     return best[1] / scale, float(best[2])
@@ -196,9 +282,10 @@ class ObjectDetector:
             self.model = YOLO(model_path)
             self.names = self.model.names
 
-    def detect(self, frame, conf_threshold=0.1):
+    def detect(self, frame, conf_threshold=0.1, previous=None):
         """
-        Detect a card in an RGB frame.
+        Detect a card in an RGB frame. previous: the card's corners in the previous frame
+        (outline detection follows it first)
 
         Returns:
             tuple: (bounding_box, label, confidence, corners) - corners is None
@@ -208,7 +295,7 @@ class ObjectDetector:
             return None, "", 0, None
 
         if self.method in ('auto', 'contour'):
-            corners, score = find_card_outline(frame, allow_landscape=self.allow_landscape)
+            corners, score = find_card_outline(frame, allow_landscape=self.allow_landscape, previous=previous)
             if corners is not None:
                 height, width = frame.shape[:2]
                 x1, y1 = np.floor(corners.min(axis=0)).astype(int)

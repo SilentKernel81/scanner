@@ -106,6 +106,7 @@ class CardScanner:
         self.required_stable_frames = 5  # Require 5 stable frames before capture
         self.frames_since_card_lost = 0  # Track frames without card detection
         self.previous_card_points = None  # Card corners in the previous frame (stillness check)
+        self.tracked_outline = None  # Corners of the last outline detection, followed by the detector
         self.previous_sharpness = None  # Card sharpness in the previous frame (autofocus check)
         self.card_in_focus = False  # Card sharpness above auto_capture.min_sharpness
         self.previous_thumbnail = None  # Tiny normalized card image of the previous frame
@@ -741,10 +742,14 @@ class CardScanner:
                 elif self.enable_detection:
                     # Run detection on raw frame for better performance
                     # Anti-glare is only applied during capture if enabled
+                    # Follow the card of the previous frame (or of the last one, across a detector
+                    # hiccup of up to 2 frames)
                     bounding_box, card_name, confidence, corners = self.object_detector.detect(
                         frame,
-                        conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD
+                        conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD,
+                        previous=self.tracked_outline if self.missing_frames <= 2 else None
                     )
+                    self.tracked_outline = corners if bounding_box else self.tracked_outline
 
                     if bounding_box:
                         gap = self.missing_frames  # frames without a card just before this one
