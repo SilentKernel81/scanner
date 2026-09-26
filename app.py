@@ -14,6 +14,7 @@ import time
 import logging
 import threading
 import queue
+import uuid
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -176,6 +177,7 @@ scanned_cards_logger = logging.getLogger('scanned_cards')
 from config import Config
 from database import CardDatabase
 from inventory import InventoryManager
+from review import REVIEW_DIR, ReviewQueue
 import games
 from cleanup import cleanup_old_images, get_images_stats
 
@@ -202,6 +204,9 @@ scanner = None
 database = None
 inventory = None
 current_card_info = None
+auto_cards = {}           # token -> card being added automatically (see search_and_emit_card)
+current_review_id = None  # review queue item open on the page
+review = None             # review.ReviewQueue
 # The capture being reviewed (image path): kept with the card added from it - also when the
 # card is found by a manual search after the AI couldn't identify it
 pending_capture = None
@@ -270,8 +275,16 @@ def set_pending_capture(image_path):
     pending_capture = str(image_path) if image_path else None
 
 
+def queue_for_review(game, image_path, name='', number='', set_code='', foil='unknown', card=None):
+    """A capture that wasn't added automatically goes to the review queue; scanning goes on"""
+    review.add(game.id, image_path, name, number, set_code, foil, card)
+    what = f"{card['name']} (printing not confirmed)" if card else (f"'{name}' (not found)" if name else "a card the AI couldn't read")
+    log_to_client(f"Queued for review: {what}", level="warning")
+    socketio.emit('review_queue_update', {'count': review.count(game.id)}, namespace='/')
+
+
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
-                         image_path=None):
+                         image_path=None, foil='unknown'):
     """
     Search for card in database and emit results to client
 
@@ -297,14 +310,11 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     game = games.active()
     db_card_info = game.identify(card_name, collector_number, set_code, ai_model=get_ai_model_info())
 
-    # Fast Scan only adds cards whose exact printing was confirmed (Game.confirmed_matches,
-    # e.g. set + number); anything less certain pauses auto scanning for a review
+    # Adding automatically, only cards whose exact printing was confirmed are added
+    # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review
+    # queue and scanning goes on
     confirmed = game.is_confirmed(db_card_info)
     auto_add = was_fast_scan_mode and confirmed
-    if was_fast_scan_mode and not confirmed and scanner:
-        scanner.card_under_review = True
-        what = f"the exact printing of {db_card_info['name']}" if db_card_info else f"'{card_name}'"
-        log_to_client(f"Couldn't confirm {what} - please review (auto scanning paused)", level="warning")
 
     # Log scanned card
     log_scanned_card(
@@ -316,13 +326,27 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         processing_time=processing_time
     )
 
-    if db_card_info:
+    if was_fast_scan_mode and not confirmed:
+        queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info)
+    elif auto_add:
+        # The page adds it by its token: an open review keeps the current card
+        if image_path:
+            db_card_info['capture'] = str(image_path)
+        token = uuid.uuid4().hex
+        auto_cards[token] = db_card_info
+        socketio.emit('card_found', {
+            'card': game.card_payload(db_card_info),
+            'auto_add': True,
+            'token': token,
+            'foil': foil,
+        }, namespace='/')
+    elif db_card_info:
         if image_path:
             db_card_info['capture'] = str(image_path)
         current_card_info = db_card_info
         socketio.emit('card_found', {
             'card': game.card_payload(db_card_info),
-            'auto_add': auto_add
+            'auto_add': False
         }, namespace='/')
     else:
         # Try to find similar cards
@@ -390,10 +414,13 @@ def ai_processing_worker():
             }, namespace='/')
 
             # Auto-search database if Vision AI identified the card
-            set_pending_capture(image_path)
+            if not was_fast_scan_mode:
+                set_pending_capture(image_path)
             if card_name and card_name.strip():
                 search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode,
-                                     set_code=set_code, image_path=image_path)
+                                     set_code=set_code, image_path=image_path, foil=foil_status)
+            elif was_fast_scan_mode:
+                queue_for_review(games.active(), image_path, foil=foil_status)
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -422,7 +449,7 @@ def ai_processing_worker():
 
 def initialize_components():
     """Initialize all components"""
-    global scanner, database, inventory
+    global scanner, database, inventory, review
 
     logger.info("Initializing components...")
 
@@ -448,6 +475,7 @@ def initialize_components():
     # Initialize inventory manager
     logger.info("Initializing inventory...")
     inventory = InventoryManager(log_callback=log_to_client)
+    review = ReviewQueue()
 
     # Set up auto-capture callback
     def handle_auto_capture():
@@ -655,6 +683,7 @@ def get_stats():
         return jsonify({
             'database': {'total_cards': game.card_count(), 'update': data_update_notices.get(game.id),
                          'updating': game.id in data_updates_running},
+            'review': review.count(game.id) if review else 0,
             'inventory': inventory.get_stats(game.id)
         })
 
@@ -1120,9 +1149,12 @@ def handle_select_printing(data):
 @socketio.on('add_to_inventory')
 def handle_add_inventory(data):
     """Handle add to inventory request"""
-    global inventory, current_card_info, scanner
+    global inventory, current_card_info, scanner, current_review_id
 
-    if not inventory or not current_card_info:
+    # An automatic add names its card by token; otherwise the card on the page
+    token = data.get('token')
+    card = auto_cards.pop(token, None) if token else current_card_info
+    if not inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
         emit('error', {'message': 'No card selected'})
         return
@@ -1140,8 +1172,8 @@ def handle_add_inventory(data):
 
         # The card's own capture (automatic adds), else the one under review; it goes with
         # the first finish added
-        capture = current_card_info.pop('capture', None) or pending_capture
-        if capture == pending_capture:
+        capture = card.pop('capture', None) or (None if token else pending_capture)
+        if not token and capture == pending_capture:
             set_pending_capture(None)
 
         for item in items:
@@ -1150,25 +1182,34 @@ def handle_add_inventory(data):
                 quantity = max(1, int(item.get('quantity', 1)))
             except (ValueError, TypeError):
                 quantity = 1
-            logger.info(f"Adding card to inventory: {quantity}x {current_card_info['name']} ({condition}, {finish})")
-            inventory.add_card(game.inventory_fields(current_card_info, finish), game.id, finish, condition, quantity,
+            logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
+            inventory.add_card(game.inventory_fields(card, finish), game.id, finish, condition, quantity,
                                capture=capture)
             capture = None
 
             # Send updated stats and what was added (the page offers an Undo)
             emit('inventory_updated', {
+                'auto': bool(token),
                 'stats': inventory.get_stats(game.id),
                 'added': {
-                    'name': current_card_info['name'],
-                    'set': current_card_info['set'],
-                    'number': current_card_info['number'],
+                    'name': card['name'],
+                    'set': card['set'],
+                    'number': card['number'],
                     'finish': game.finishes[finish],
                     'quantity': quantity
                 }
             })
 
         logger.info("Card added to inventory successfully")
+        if token:
+            return
         current_card_info = None
+        if current_review_id is not None:
+            # Reviewed: resolve the item and open the next one
+            review.remove(current_review_id)
+            current_review_id = None
+            emit('review_queue_update', {'count': review.count(game.id)}, broadcast=True)
+            handle_review_open()
 
         # Clear the review flag to allow next auto-capture
         if scanner:
@@ -1182,6 +1223,59 @@ def handle_add_inventory(data):
         # Clear flag even on error to prevent getting stuck
         if scanner:
             scanner.card_under_review = False
+
+
+@socketio.on('review_open')
+def handle_review_open(data=None):
+    """Open the oldest item of the review queue (or say it is empty)"""
+    global current_card_info, current_review_id
+    game = games.active()
+    item, total = review.first(game.id)
+    current_review_id = item['id'] if item else None
+    if not item:
+        current_card_info = None
+        set_pending_capture(None)
+        emit('review_item', {'id': None, 'total': 0})
+        return
+    card = game.get_card(item['card_id']) if item['card_id'] else None
+    if card:
+        card['match'] = item['match']
+    current_card_info = card
+    set_pending_capture(review.image_path(item))  # goes with whatever card is added for this item
+    emit('review_item', {
+        'id': item['id'],
+        'total': total,
+        'image_url': f"/review_images/{item['file']}" if item['file'] else None,
+        'ai': {'name': item['ai_name'], 'number': item['ai_number'], 'set': item['ai_set'], 'foil': item['foil']},
+        'captured_at': item['created_at'],
+        'card': game.card_payload(card) if card else None,
+    })
+
+
+@socketio.on('review_skip')
+def handle_review_skip(data=None):
+    """Drop the open review item without adding anything"""
+    global current_card_info, current_review_id
+    if current_review_id is not None:
+        review.remove(current_review_id)
+    current_review_id = current_card_info = None
+    set_pending_capture(None)
+    emit('review_queue_update', {'count': review.count(games.active_id())}, broadcast=True)
+    handle_review_open()  # the next one
+
+
+@socketio.on('review_close')
+def handle_review_close(data=None):
+    """Leave the review; the open item stays in the queue"""
+    global current_card_info, current_review_id
+    current_review_id = current_card_info = None
+    set_pending_capture(None)
+
+
+@app.route('/review_images/<path:name>')
+def review_image(name):
+    """Capture of a review queue item"""
+    return send_from_directory(REVIEW_DIR, name)
 
 
 @socketio.on('undo_last_add')
@@ -1258,14 +1352,14 @@ def get_games():
 @socketio.on('set_game')
 def handle_set_game(data):
     """Switch the game being scanned (stops auto scanning; the current card is dropped)"""
-    global current_card_info
+    global current_card_info, current_review_id
     game_id = data.get('game')
     try:
         games.set_active(game_id)
     except ValueError as e:
         emit('error', {'message': str(e)})
         return
-    current_card_info = None
+    current_card_info = current_review_id = None
     if scanner and scanner.auto_capture_enabled:
         scanner.auto_capture_enabled = False
         scanner.card_under_review = False

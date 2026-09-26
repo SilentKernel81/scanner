@@ -199,8 +199,13 @@ By default (**Settings → Add cards automatically**) cards are identified in th
 added to the inventory without review, so you can keep dropping cards; the *Processing* counter
 in the top bar shows how many are still being identified. After each add the card panel shows
 what was added (name, set, finish) with an **Undo** button. Only cards whose exact printing is
-confirmed (set code + number, or name + number) are added automatically - anything less certain
-pauses auto scanning so you can review it.
+confirmed (set code + number, or name + number) are added automatically. Anything less certain
+(printing not confirmed, name not found, nothing readable) goes to the **Review** queue and
+scanning goes on: the *Review* counter in the top bar shows how many are waiting. Click it when
+you're done to go through them one by one - each shows the capture next to the suggested card
+and what the AI read, with a search to correct it; **Add** adds the card shown (and opens the
+next), **Skip** drops the capture, **Close** keeps the rest for later (the queue is kept across
+restarts).
 
 Turn the switch off to confirm each card with **Add** / **Skip** instead; auto scanning then
 waits for you before the next capture (a card dropped before you click Add is captured right
@@ -380,6 +385,7 @@ The web interface uses these endpoints, which you can also call directly:
 | `GET /api/games` | Supported card games (finishes, export formats) and the active one |
 | `GET /api/inventory` | The active game's inventory (each entry has an `id` and its `captures`) |
 | `GET /captures/<file>` | Thumbnail of a capture kept with an inventory entry |
+| `GET /review_images/<file>` | Capture of a review queue item |
 | `POST /api/inventory/update/<id>` | Update quantity, condition or finish (JSON: `quantity`, `condition`, `finish`, `split_quantity`) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |

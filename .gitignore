@@ -67,6 +67,10 @@ data/cards_database.db
 data/cards_database.db-journal
 
 # Inventory (user data - don't commit)
+data/captures/
+data/review/
+data/backups/
+data/uploads/
 data/card_inventory.csv
 data/card_inventory_export_*.csv
 data/moxfield_export_*.csv

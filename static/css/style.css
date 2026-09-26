@@ -176,6 +176,11 @@ body {
     background: var(--accent);
 }
 
+.stat-box.has-items {
+    border-color: var(--warning);
+    background: var(--warning-soft);
+}
+
 .stat-box.is-busy {
     border-color: var(--warning);
     background: var(--warning-soft);
@@ -1719,6 +1724,12 @@ input[type="radio"] {
     .stat-box {
         flex: 1;
         min-width: 0;
+        padding: 6px 8px;
+    }
+
+    .stat-label {
+        font-size: 9px;
+        letter-spacing: 0;
     }
 
     .form-row {
@@ -1746,5 +1757,92 @@ input[type="radio"] {
     .inventory-card-number,
     .inventory-card-price {
         display: none;
+    }
+}
+
+/* ============================================================================
+   Review queue item (card panel)
+   ============================================================================ */
+
+.review-panel {
+    margin-bottom: 16px;
+    padding: 12px;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius);
+    background: var(--warning-soft);
+}
+
+.review-panel[hidden] {
+    display: none;
+}
+
+.review-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.review-header .btn {
+    margin-left: auto;
+}
+
+.review-body {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    align-items: start;
+}
+
+.review-capture {
+    width: 200px;
+    aspect-ratio: 63 / 88;
+    object-fit: contain;
+    border-radius: 6px;
+    background: var(--surface-2);
+    cursor: zoom-in;
+}
+
+.review-capture.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    cursor: default;
+}
+
+.review-read {
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.review-search {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.review-search #review-name {
+    grid-column: 1 / -1;
+}
+
+.review-search input {
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+}
+
+@media (max-width: 600px) {
+    .review-body {
+        grid-template-columns: 1fr;
+    }
+
+    .review-capture {
+        width: min(240px, 100%);
     }
 }

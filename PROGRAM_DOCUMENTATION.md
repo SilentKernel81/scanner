@@ -281,9 +281,20 @@ mid-slide.
 
 With **Add cards automatically** (default; internally `fast_scan_mode`, saved as `auto_add`):
 the capture is queued, the AI worker identifies it in the background, and a confirmed printing
-is added immediately (one Near Mint copy in the suggested finish). Anything uncertain sets
-`card_under_review`, which pauses auto scanning until the card is added or skipped. The web page
-shows each added card with an **Undo** button (`undo_last_add`).
+is added immediately (one Near Mint copy in the suggested finish). The page adds it by a token
+(`auto_cards`), not through the server's current card, so it can't replace a card being reviewed
+(the "current card" once changed under a pending review 2 s later). The web page shows each
+added card with an **Undo** button (`undo_last_add`).
+
+Anything uncertain - printing not confirmed, name not found, no name read - goes to the
+**review queue** (`review.py`, table `review_queue`, a copy of the capture in `data/review/`)
+and scanning goes on (it used to pause until the card was reviewed). Items keep what the AI
+read, the ★/• result and the best match. The *Review* counter opens them oldest first
+(`review_open` → `review_item`): the capture beside the suggested card, the AI read, and a
+search prefilled with it (without a match kept, the search runs at once). Add resolves the item
+- the capture becomes the entry's thumbnail - and the server sends the next; Skip drops it
+(`review_skip`); Close leaves the rest (`review_close`). Cards added automatically meanwhile
+don't disturb the open item. Per game; kept across restarts.
 
 With the switch off, each capture is identified synchronously and waits for **Add** / **Skip**;
 a card dropped meanwhile is captured right after.
@@ -595,6 +606,7 @@ Socket.IO events:
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
+| `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count) |
 | `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
 
 HTTP endpoints are listed in the README.
@@ -619,6 +631,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
+| `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`) and inventory |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |

@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=28">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=29">
 </head>
 <body>
     <!-- Icon sprite -->
@@ -47,6 +47,10 @@
             <div class="stat-box" id="processing-queue-box" title="Cards waiting to be identified">
                 <span class="stat-label">Processing</span>
                 <span class="stat-value" id="processing-queue">0</span>
+            </div>
+            <div class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
+                <span class="stat-label">Review</span>
+                <span class="stat-value" id="review-count">0</span>
             </div>
         </div>
         <button class="icon-btn" onclick="openSettings()" title="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
@@ -142,6 +146,8 @@
                 <div class="panel-header">
                     <h2 class="section-title"><svg class="icon"><use href="#i-card"/></svg> Card</h2>
                 </div>
+                <!-- Review queue item: the capture, what the AI read, a manual search (renderReview) -->
+                <div id="review-panel" class="review-panel" hidden></div>
                 <div id="card-display">
                     <div class="empty-state">
                         <svg class="icon"><use href="#i-card"/></svg>
@@ -433,7 +439,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=28"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=28"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=29"></script>
 </body>
 </html>

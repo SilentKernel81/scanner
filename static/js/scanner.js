@@ -65,6 +65,9 @@ socket.on('card_captured', function(data) {
 
     // Don't play sound here - it's played at capture time, not after AI processing
 
+    // Scanning goes on during a review: leave the review's fields alone
+    if (reviewItem) return;
+
     // Store AI-detected foil status
     detectedFoilStatus = data.foil || 'unknown';
     console.log('AI detected foil status:', detectedFoilStatus);
@@ -98,22 +101,19 @@ socket.on('card_found', function(data) {
         audioManager.playSuccess();
     }
 
+    if (data.auto_add) {
+        // Added by its token, so it can't take the place of a card under review; during a
+        // review it is added without being shown
+        if (!reviewItem) {
+            currentCard = data.card;
+            displayCard(data.card);
+        }
+        const finish = suggestedFinish(data.card, data.foil).finish;
+        setTimeout(() => socket.emit('add_to_inventory', {quantity: 1, condition: 'Near Mint', finish: finish, token: data.token}), 500);
+        return;
+    }
     currentCard = data.card;
     displayCard(data.card);
-
-    // Check auto_add flag from server (set at capture time, not current mode state)
-    // This allows queued cards to complete even if fast scan mode is disabled
-    if (data.auto_add) {
-        setTimeout(function() {
-            if (currentCard) {  // Verify card still loaded
-                addToInventory(true);  // Pass true for autoMode
-            } else {
-                console.warn('Auto-add: currentCard is null, skipping');
-            }
-        }, 500);  // 0.5 second delay
-    } else {
-        console.log('⏸️ Auto-add disabled - waiting for manual confirmation');
-    }
 });
 
 socket.on('card_not_found', function(data) {
@@ -161,6 +161,15 @@ socket.on('similar_cards', function(data) {
 
 socket.on('inventory_updated', function(data) {
     console.log('Inventory updated:', data.stats);
+
+    if (reviewItem) {
+        // An automatic add while reviewing, or the reviewed card (the next item follows)
+        loadStats();
+        const added = data.added;
+        if (added) addLog(timeNow(), 'success', `Added ${added.quantity}× ${added.name} (${added.finish})`);
+        if (!data.auto) audioManager.playSuccess();
+        return;
+    }
 
     // The drop signal is the capture beep; adding (1-2 s later, after the AI) just dings
     audioManager.playSuccess();
@@ -220,6 +229,116 @@ socket.on('auto_capture_triggered', function(data) {
 
     addLog(timeNow(), 'info', `📸 Card #${data.counter} captured${fastScanMode ? ' - drop the next card' : ''}`);
 });
+
+// ============================================================================
+// Review queue: cards not added automatically, reviewed one by one at the end
+// ============================================================================
+
+let reviewItem = null;  // the item open in the card panel
+
+function setReviewCount(count) {
+    document.getElementById('review-count').textContent = count;
+    document.getElementById('review-box').classList.toggle('has-items', count > 0);
+}
+
+function openReview() {
+    socket.emit('review_open');
+}
+
+socket.on('review_queue_update', data => setReviewCount(data.count));
+
+socket.on('review_item', function(data) {
+    if (!data.id) {
+        const wasReviewing = !!reviewItem;
+        hideReviewPanel();
+        if (wasReviewing) {
+            document.getElementById('card-display').innerHTML =
+                '<div class="empty-state is-success">✓ Review queue done.<br><span class="hint">Every card was added or skipped.</span></div>';
+        } else {
+            notify('Nothing to review', 'info');
+        }
+        setReviewCount(0);
+        return;
+    }
+    renderReview(data);
+});
+
+function renderReview(item) {
+    reviewItem = item;
+    setReviewCount(item.total);
+    const ai = item.ai;
+    const read = [ai.name || 'no name', ai.number ? '#' + ai.number : '', ai.set,
+                  ai.foil === 'foil' ? '★' : ai.foil === 'non-foil' ? '•' : ''].filter(Boolean).join(' · ');
+    const panel = document.getElementById('review-panel');
+    panel.innerHTML = `
+        <div class="review-header">
+            <strong>Review</strong> <span class="hint">1 of ${item.total}</span>
+            <button class="btn btn-small" onclick="closeReview()" title="Keep the rest for later">Close</button>
+        </div>
+        <div class="review-body">
+            ${item.image_url ? `<img class="review-capture" src="${escapeHtml(item.image_url)}" alt="Capture" onclick="zoomReviewCapture()">`
+                             : '<div class="review-capture empty">No image</div>'}
+            <div class="review-side">
+                <div class="field-label">AI read</div>
+                <div class="review-read">${escapeHtml(read)}</div>
+                <div class="hint">${escapeHtml(item.captured_at)}</div>
+                <div class="review-search">
+                    <input type="text" id="review-name" placeholder="Card name" value="${escapeHtml(ai.name || '')}">
+                    <input type="text" id="review-set" placeholder="Set" value="${escapeHtml(ai.set || '')}" maxlength="5">
+                    <input type="text" id="review-number" placeholder="Number" value="${escapeHtml(ai.number || '')}">
+                    <button class="btn btn-small" onclick="reviewSearch()">Search</button>
+                </div>
+            </div>
+        </div>`;
+    panel.hidden = false;
+    panel.querySelectorAll('input').forEach(input =>
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') reviewSearch(); }));
+
+    detectedFoilStatus = ai.foil || 'unknown';
+    if (item.card) {
+        currentCard = item.card;
+        displayCard(item.card);
+    } else if (ai.name) {
+        reviewSearch();  // no match kept: show what a search finds (printings / similar)
+    } else {
+        currentCard = null;
+        document.getElementById('card-display').innerHTML =
+            '<div class="empty-state">The AI couldn\'t read this card - search for it above, or Skip.' +
+            '<div class="card-actions"><button class="btn" onclick="dismissCard()">Skip</button></div></div>';
+    }
+}
+
+function reviewSearch() {
+    const name = document.getElementById('review-name').value.trim();
+    if (!name) return;
+    socket.emit('search_card', {
+        card_name: name,
+        set_code: document.getElementById('review-set').value.trim().toUpperCase() || null,
+        collector_number: document.getElementById('review-number').value.trim() || null,
+    });
+}
+
+function zoomReviewCapture() {
+    document.getElementById('capture-title').textContent = 'Capture';
+    document.getElementById('capture-grid').innerHTML =
+        `<figure><img src="${escapeHtml(reviewItem.image_url)}" alt="Capture"><figcaption>${escapeHtml(reviewItem.captured_at)}</figcaption></figure>`;
+    document.getElementById('capture-modal').classList.add('show');
+}
+
+function hideReviewPanel() {
+    reviewItem = null;
+    const panel = document.getElementById('review-panel');
+    panel.hidden = true;
+    panel.innerHTML = '';
+}
+
+function closeReview() {
+    socket.emit('review_close');
+    hideReviewPanel();
+    currentCard = null;
+    document.getElementById('card-display').innerHTML =
+        '<div class="empty-state">Review closed - the rest stays in the queue.</div>';
+}
 
 socket.on('processing_queue_update', function(data) {
     const queueCount = data.queue_count || 0;
@@ -693,11 +812,16 @@ function toggleAutoScanning() {
 
 function selectSimilarCard(cardName) {
     console.log("Similar card selected:", cardName);
+    if (reviewItem) {
+        document.getElementById('review-name').value = cardName;
+        reviewSearch();
+        return;
+    }
     document.getElementById('card-name').value = cardName;
     searchCard();
 }
 
-function suggestedFinish(card) {
+function suggestedFinish(card, foilStatus = detectedFoilStatus) {
     // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
     // Printings that only exist in one finish are certain; otherwise use the ★/• marker
     // the AI read next to the set code on the last capture.
@@ -714,8 +838,8 @@ function suggestedFinish(card) {
 
     if (hasFoil && !hasNonfoil) return {finish: foilKind, reason: 'only printed in foil'};
     if (hasNonfoil && !hasFoil) return {finish: 'regular', reason: 'only printed non-foil'};
-    if (detectedFoilStatus === 'foil') return {finish: foilKind, reason: '★ next to the set code'};
-    if (detectedFoilStatus === 'non-foil') return {finish: 'regular', reason: '• next to the set code'};
+    if (foilStatus === 'foil') return {finish: foilKind, reason: '★ next to the set code'};
+    if (foilStatus === 'non-foil') return {finish: 'regular', reason: '• next to the set code'};
     return {finish: 'regular', reason: null};
 }
 
@@ -877,26 +1001,11 @@ function addToInventoryBoth() {
     socket.emit('add_to_inventory', {condition: condition, items: items});
 }
 
-function addToInventory(autoMode = false) {
-    // Automatic add: one Near Mint copy in the suggested finish
-    console.log(`addToInventory called with autoMode=${autoMode}, currentCard:`, currentCard);
-
-    if (!currentCard) {
-        console.error('addToInventory: No card selected!');
-        addLog(timeNow(), 'error', 'No card selected');
+function dismissCard() {
+    if (reviewItem) {
+        socket.emit('review_skip');  // drops the item; the next one follows
         return;
     }
-
-    const data = {
-        quantity: 1,
-        condition: 'Near Mint',
-        finish: suggestedFinish(currentCard).finish
-    };
-    console.log('Emitting add_to_inventory event with:', data);
-    socket.emit('add_to_inventory', data);
-}
-
-function dismissCard() {
     console.log('Card dismissed by user');
     currentCard = null;
     detectedFoilStatus = 'unknown';
@@ -941,6 +1050,7 @@ function loadStats() {
                     data.database.total_cards.toLocaleString();
                 showDataUpdate(data.database.update);
             }
+            setReviewCount(data.review || 0);
             if (data.inventory) {
                 document.getElementById('inv-cards').textContent =
                     data.inventory.total_cards.toLocaleString();
@@ -1469,6 +1579,7 @@ function loadGames() {
 socket.on('game_changed', function(data) {
     gameInfo = data;
     document.getElementById('game-select').value = data.id;
+    hideReviewPanel();
     applyGameFields();
     renderExportButtons();
     currentCard = null;
