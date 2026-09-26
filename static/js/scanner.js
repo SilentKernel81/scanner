@@ -96,24 +96,9 @@ socket.on('card_found', function(data) {
     console.log('CARD FOUND EVENT RECEIVED');
     console.log(logSeparator());
     console.log('Card data:', data.card);
-    console.log('🔍 Auto-add flag:', data.auto_add);
 
-    // Play success sound (skip if auto-adding to avoid too many sounds)
-    if (!data.auto_add) {
-        audioManager.playSuccess();
-    }
-
-    if (data.auto_add) {
-        // Added by its token, so it can't take the place of a card under review; during a
-        // review it is added without being shown
-        if (!reviewItem) {
-            currentCard = data.card;
-            displayCard(data.card);
-        }
-        const finish = suggestedFinish(data.card, data.foil).finish;
-        setTimeout(() => socket.emit('add_to_inventory', {quantity: 1, condition: 'Near Mint', finish: finish, token: data.token}), 500);
-        return;
-    }
+    // Cards added automatically don't come here: the server adds them (inventory_updated)
+    audioManager.playSuccess();
     currentCard = data.card;
     displayCard(data.card);
 });
@@ -281,7 +266,10 @@ function renderReview(item) {
     panel.innerHTML = `
         <div class="review-header">
             <strong>Review</strong> <span class="hint">1 of ${item.total}</span>
-            <button class="btn btn-small" onclick="closeReview()" title="Keep the rest for later">Close</button>
+            <div class="review-actions">
+                <button class="btn btn-small btn-danger" onclick="deleteReviewItem()" title="Remove this card from the queue without adding it">Delete</button>
+                <button class="btn btn-small" onclick="closeReview()" title="Keep the rest for later">Close</button>
+            </div>
         </div>
         <div class="review-body">
             ${item.image_url ? `<img class="review-capture" src="${escapeHtml(item.image_url)}" alt="Capture" onclick="zoomReviewCapture()">`
@@ -317,13 +305,20 @@ function renderReview(item) {
 }
 
 function reviewSearch() {
+    // A name, or only the set + number (a name the AI can't read: runes, another language)
     const name = document.getElementById('review-name').value.trim();
-    if (!name) return;
-    socket.emit('search_card', {
-        card_name: name,
-        set_code: document.getElementById('review-set').value.trim().toUpperCase() || null,
-        collector_number: document.getElementById('review-number').value.trim() || null,
-    });
+    const setCode = document.getElementById('review-set').value.trim().toUpperCase();
+    const number = document.getElementById('review-number').value.trim();
+    if (!name && !(number && (setCode || number.includes('/')))) {
+        notify('Enter a name, or the set and number', 'info');
+        return;
+    }
+    socket.emit('search_card', {card_name: name, set_code: setCode || null, collector_number: number || null});
+}
+
+function deleteReviewItem() {
+    // Drops the item and its capture, then the next one opens (same as Skip)
+    socket.emit('review_skip');
 }
 
 function zoomReviewCapture() {
@@ -612,7 +607,7 @@ function searchCard() {
     console.log("Card name from input:", cardName);
     console.log("Collector number from input:", collectorNumber);
 
-    if (cardName) {
+    if (cardName || (collectorNumber && (setCode || collectorNumber.includes('/')))) {
         const data = {
             card_name: cardName,
             collector_number: collectorNumber || null,
@@ -627,8 +622,7 @@ function searchCard() {
 
         socket.emit('search_card', data);
     } else {
-        console.warn("No card name entered");
-        addLog(timeNow(), 'warning', 'Please enter a card name');
+        addLog(timeNow(), 'warning', 'Enter a card name, or the set and number');
     }
     console.log(logSeparator());
 }
@@ -830,6 +824,7 @@ function selectSimilarCard(cardName) {
 }
 
 function suggestedFinish(card, foilStatus = detectedFoilStatus) {
+    // Same rule as Game.suggested_finish on the server (automatic adds)
     // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
     // Printings that only exist in one finish are certain; otherwise use the ★/• marker
     // the AI read next to the set code on the last capture.
@@ -1641,11 +1636,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Enable search button when user types in card name field
-    document.getElementById('card-name').addEventListener('input', function(e) {
-        const searchBtn = document.getElementById('search-btn');
-        searchBtn.disabled = !this.value.trim();
-    });
+    // Search needs a name, or the set + number
+    ['card-name', 'set-code', 'collector-number'].forEach(id => document.getElementById(id).addEventListener('input', function() {
+        const filled = field => document.getElementById(field).value.trim();
+        const number = filled('collector-number');
+        document.getElementById('search-btn').disabled = !(filled('card-name') || (number && (filled('set-code') || number.includes('/'))));
+    }));
     
     // Toggle detection
     document.getElementById('toggle-detection').addEventListener('change', function(e) {

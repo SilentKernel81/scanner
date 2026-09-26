@@ -204,8 +204,9 @@ confirmed (set code + number, or name + number) are added automatically. Anythin
 scanning goes on: the *Review* counter in the top bar shows how many are waiting. Click it when
 you're done to go through them one by one - each shows the capture next to the suggested card
 and what the AI read, with a search to correct it; **Add** adds the card shown (and opens the
-next), **Skip** drops the capture, **Close** keeps the rest for later (the queue is kept across
-restarts).
+next), **Skip** / **Delete** drop the capture, **Close** keeps the rest for later (the queue is
+kept across restarts). A card whose name can't be read (runes, another language) is found by
+its set code + number alone - leave the name empty.
 
 Turn the switch off to confirm each card with **Add** / **Skip** instead; auto scanning then
 waits for you before the next capture (a card dropped before you click Add is captured right
@@ -226,7 +227,8 @@ Choose **Pokémon** in the game selector in the top bar. The first time, its car
 Scanning works the same way: the AI reads the name, the number with the set total
 (`012/193`) and, on Scarlet & Violet era cards, the set abbreviation (`PAL`). A card is added
 automatically when set + number, or name + number + set total, identify exactly one printing;
-otherwise it waits for review. In manual search, type the number as printed (`012/193`).
+otherwise it waits for review. In manual search, type the number as printed (`012/193`); with
+the set total, or with the set code, the name can be left empty.
 
 The card panel only offers the finishes the printing exists in (normal, holo, reverse holo,
 1st edition). **Reverse holos are not recognized from the image** - the suggestion is the

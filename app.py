@@ -14,7 +14,6 @@ import time
 import logging
 import threading
 import queue
-import uuid
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -204,8 +203,6 @@ scanner = None
 database = None
 inventory = None
 current_card_info = None
-auto_cards = {}           # token -> card being added automatically (see search_and_emit_card)
-AUTO_ADD_TIMEOUT = 15     # s: a card no page added (none open, phone asleep) goes to the review queue
 current_review_id = None  # review queue item open on the page
 review_sid = None         # Socket.IO session of the page reviewing it (a reload / disconnect closes it)
 review = None             # review.ReviewQueue
@@ -308,12 +305,24 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
         queue_for_review(games.active(), image_path, foil=foil)
 
 
-def unclaimed_auto_card(token, game, card_name, collector_number, set_code, foil):
-    """No page added a confirmed card (none open, or it was asleep): keep it in the review queue"""
-    card = auto_cards.pop(token, None)
-    if card:
-        queue_for_review(game, card.pop('capture', None), card_name, collector_number, set_code, foil, card,
-                         why='not added - no page open')
+def added_payload(game, card, finish, quantity):
+    """What an inventory_updated event says was added (the page shows it with an Undo)"""
+    return {'name': card['name'], 'set': card['set'], 'number': card['number'],
+            'finish': game.finishes[finish], 'quantity': quantity}
+
+
+def add_automatically(game, card, image_path, foil):
+    """
+    A confirmed card goes straight into the inventory: one Near Mint copy in the likely finish.
+    Done here rather than by the page, so it doesn't depend on a page being open (or running
+    the current script - an old tab once sent every add without its card)
+    """
+    finish = game.suggested_finish(card, foil)
+    row_id = inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', 1,
+                                capture=image_path)
+    socketio.emit('inventory_updated', {'auto': True, 'stats': inventory.get_stats(game.id),
+                                        'added': added_payload(game, card, finish, 1)}, namespace='/')
+    start_price_update(game, card, [row_id])
 
 
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
@@ -363,21 +372,8 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info,
                          why=None if was_fast_scan_mode else 'captured during a review')
     elif auto_add:
-        # The page adds it by its token: an open review keeps the current card
-        if image_path:
-            db_card_info['capture'] = str(image_path)
-        token = uuid.uuid4().hex
-        auto_cards[token] = db_card_info
-        timer = threading.Timer(AUTO_ADD_TIMEOUT, unclaimed_auto_card,
-                                (token, game, card_name, collector_number, set_code, foil))
-        timer.daemon = True
-        timer.start()
-        socketio.emit('card_found', {
-            'card': game.card_payload(db_card_info),
-            'auto_add': True,
-            'token': token,
-            'foil': foil,
-        }, namespace='/')
+        # Added here, not through the current card: an open review keeps its card
+        add_automatically(game, db_card_info, image_path, foil)
     elif db_card_info:
         # Waiting for Add / Skip anyway: show the current prices
         db_card_info = game.with_prices(db_card_info)
@@ -1117,9 +1113,9 @@ def handle_search(data):
     set_code = (data.get('set_code') or '').strip() or None
     treatment = (data.get('treatment') or '').strip() or None
 
-    if not card_name:
-        logger.warning("No card name provided in search request")
-        emit('error', {'message': 'No card name provided'})
+    # Without a name: set code + number, or a number with the set total ("199/165", Pokémon)
+    if not card_name and not (collector_number and (set_code or '/' in collector_number)):
+        emit('error', {'message': 'Enter a card name, or the set code and number'})
         return
 
     try:
@@ -1144,11 +1140,11 @@ def handle_search(data):
             })
         else:
             logger.info(f"No match for '{card_name}', searching for similar cards...")
-            similar = game.similar(card_name, limit=5)
+            similar = game.similar(card_name, limit=5) if card_name else []
             if similar:
                 emit('similar_cards', {'cards': similar})
             else:
-                emit('card_not_found', {'card_name': card_name})
+                emit('card_not_found', {'card_name': card_name or f"{(set_code or '').upper()} #{collector_number}".strip()})
 
     except Exception as e:
         logger.exception(f"Exception in handle_search: {e}")
@@ -1177,13 +1173,7 @@ def handle_add_inventory(data):
     """Handle add to inventory request"""
     global inventory, current_card_info, scanner, current_review_id
 
-    # An automatic add names its card by token; otherwise the card on the page
-    token = data.get('token')
-    card = auto_cards.pop(token, None) if token else current_card_info
-    if token and not card:
-        # Another open page added it already, or it went to the review queue (AUTO_ADD_TIMEOUT)
-        logger.info("Automatic add: card already claimed")
-        return
+    card = current_card_info
     if not inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
         emit('error', {'message': 'No card selected'})
@@ -1200,10 +1190,9 @@ def handle_add_inventory(data):
                 emit('error', {'message': f"Unknown finish: {item.get('finish')}"})
                 return
 
-        # The card's own capture (automatic adds), else the one under review; it goes with
-        # the first finish added
-        capture = card.pop('capture', None) or (None if token else pending_capture)
-        if not token and capture == pending_capture:
+        # The card's own capture, else the one under review; it goes with the first finish added
+        capture = card.pop('capture', None) or pending_capture
+        if capture == pending_capture:
             set_pending_capture(None)
         added_rows = []
 
@@ -1219,24 +1208,11 @@ def handle_add_inventory(data):
             capture = None
 
             # Send updated stats and what was added (the page offers an Undo)
-            emit('inventory_updated', {
-                'auto': bool(token),
-                'stats': inventory.get_stats(game.id),
-                'added': {
-                    'name': card['name'],
-                    'set': card['set'],
-                    'number': card['number'],
-                    'finish': game.finishes[finish],
-                    'quantity': quantity
-                }
-            })
+            emit('inventory_updated', {'auto': False, 'stats': inventory.get_stats(game.id),
+                                       'added': added_payload(game, card, finish, quantity)})
 
         logger.info("Card added to inventory successfully")
-        if game.fetches_prices:
-            threading.Thread(target=update_added_prices, args=(game, card, added_rows), daemon=True,
-                             name='prices').start()
-        if token:
-            return
+        start_price_update(game, card, added_rows)
         current_card_info = None
         if current_review_id is not None:
             # Reviewed: resolve the item and open the next one
@@ -1257,6 +1233,12 @@ def handle_add_inventory(data):
         # Clear flag even on error to prevent getting stuck
         if scanner:
             scanner.card_under_review = False
+
+
+def start_price_update(game, card, row_ids):
+    """Update the prices of entries just added, in the background (games that fetch prices)"""
+    if game.fetches_prices:
+        threading.Thread(target=update_added_prices, args=(game, card, row_ids), daemon=True, name='prices').start()
 
 
 def update_added_prices(game, card, row_ids):

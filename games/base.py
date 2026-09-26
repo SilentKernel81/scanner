@@ -76,6 +76,13 @@ class Game:
     def get_card(self, card_id):
         raise NotImplementedError
 
+    def suggested_finish(self, card, foil='unknown'):
+        """
+        Finish key the copy in hand most likely has (automatic adds; the page shows the same
+        suggestion - scanner.js suggestedFinish). foil: the ★/• marker the AI read
+        """
+        return self.default_finish
+
     def with_prices(self, card):
         """The card with current prices (fetches_prices games: may make a network request)"""
         return card

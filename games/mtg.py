@@ -116,6 +116,18 @@ class Magic(Game):
             'confirmed': self.is_confirmed(card) if card.get('match') else None,
         }
 
+    def suggested_finish(self, card, foil='unknown'):
+        # Printings that only exist in one finish are certain; otherwise the ★/• marker
+        finishes = card.get('finishes') or []
+        has_foil = 'foil' in finishes or 'etched' in finishes
+        has_nonfoil = 'nonfoil' in finishes
+        foil_kind = 'surge' if 'Surge Foil' in (card.get('treatments') or []) else 'foil'
+        if has_foil and not has_nonfoil:
+            return foil_kind
+        if has_nonfoil and not has_foil:
+            return 'regular'
+        return foil_kind if foil == 'foil' else 'regular'
+
     def inventory_fields(self, card, finish):
         colors = card.get('colors') or []
         # Foil and surge foil copies are priced as foils; fall back to the other price if missing

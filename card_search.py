@@ -71,13 +71,17 @@ class CardSearcher:
         self.log(f"Searching printings for: '{card_name}'{set_info}{number_info}{filter_info}")
 
         # Set code + collector number identify one printing exactly
-        if set_code and collector_number:
-            card = self.db.get_card_by_set_number(set_code, collector_number)
-            if card and names_match(card_name, {'name': card['name'], 'flavor_name': card['flavor_name']}):
-                self.log(f"Found {card['name']} ({card['set']} #{card['number']})")
-                return card['name'], [card]
+        at_number = self.db.get_card_by_set_number(set_code, collector_number) if set_code and collector_number else None
+        if at_number and (not card_name or names_match(card_name, {'name': at_number['name'],
+                                                                    'flavor_name': at_number['flavor_name']})):
+            self.log(f"Found {at_number['name']} ({at_number['set']} #{at_number['number']})")
+            return at_number['name'], [at_number]
 
-        resolved_name, printings = self.db.find_printings(card_name, treatment=treatment)
+        resolved_name, printings = self.db.find_printings(card_name, treatment=treatment) if card_name else (None, [])
+        if resolved_name is None and at_number:
+            # A name no card has (runes, another language, misread): the printing at that set + number
+            self.log(f"No card named '{card_name}' - {at_number['name']} is {set_code.upper()} #{collector_number}")
+            return at_number['name'], [at_number]
 
         if set_code and printings:
             in_set = [card for card in printings if card['set_code'] == set_code.lower()]

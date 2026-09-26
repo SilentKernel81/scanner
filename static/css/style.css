@@ -1783,8 +1783,10 @@ input[type="radio"] {
     margin-bottom: 10px;
 }
 
-.review-header .btn {
+.review-header .review-actions {
     margin-left: auto;
+    display: flex;
+    gap: 6px;
 }
 
 .review-body {

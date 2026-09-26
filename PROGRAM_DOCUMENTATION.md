@@ -281,12 +281,13 @@ mid-slide.
 
 With **Add cards automatically** (default; internally `fast_scan_mode`, saved as `auto_add`):
 the capture is queued, the AI worker identifies it in the background, and a confirmed printing
-is added immediately (one Near Mint copy in the suggested finish). The page adds it by a token
-(`auto_cards`), not through the server's current card, so it can't replace a card being reviewed
-(the "current card" once changed under a pending review 2 s later). The web page shows each
-added card with an **Undo** button (`undo_last_add`). A token no page claims within
-`AUTO_ADD_TIMEOUT` (15 s - no page open, phone asleep) puts the card in the review queue instead
-of losing it; with two pages open the first add wins and the other is ignored.
+is added immediately by the server (`add_automatically`: one Near Mint copy in
+`Game.suggested_finish` - the same rule as the page's `suggestedFinish`), never through the
+current card, so it can't replace a card being reviewed. It used to be the page that sent the
+add; a tab still running an older script then sent every add without its card and all confirmed
+cards ended in the review queue - and with no page open (phone asleep) nothing was added. Every
+page is told (`inventory_updated` with `auto: true`) and shows the card with an **Undo** button
+(`undo_last_add`).
 
 Anything uncertain - printing not confirmed, name not found, no name read - goes to the
 **review queue** (`review.py`, table `review_queue`, a copy of the capture in `data/review/`)
@@ -295,7 +296,8 @@ read, the ★/• result and the best match. The *Review* counter opens them old
 (`review_open` → `review_item`): the capture beside the suggested card, the AI read, and a
 search prefilled with it (without a match kept, the search runs at once). Add resolves the item
 - the capture becomes the entry's thumbnail - and the server sends the next; Skip drops it
-(`review_skip`); Close leaves the rest (`review_close`). Cards added automatically meanwhile
+(`review_skip`; the review's **Delete** button does the same when the card can't be found);
+Close leaves the rest (`review_close`). Cards added automatically meanwhile
 don't disturb the open item, and a card captured during a review in any other way (manual
 capture, auto scanning without automatic adds) goes to the queue too (`route_identified`)
 instead of taking the reviewed card's place and capture. The review belongs to the page that
@@ -388,8 +390,9 @@ compared through `name_search` / `flavor_search` columns - lowercase, accent-fre
 Only `CONFIRMED_MATCHES` (`set_number`, `name_number`, `name_set_digit`) are added automatically; the card panel
 warns "Printing not confirmed" for the others.
 
-**Manual search** (`CardSearcher.find_printings`): set + number go straight to the printing;
-otherwise all printings of the name (optionally filtered by a treatment: regular, borderless,
+**Manual search** (`CardSearcher.find_printings`): set + number go straight to the printing -
+also without a name, or with a name no card has (runes, another language, a misread name: the
+AI read the Dwarvish-rune Arcane Signet as "Nthryx-Cipher"); otherwise all printings of the name (optionally filtered by a treatment: regular, borderless,
 showcase, extended art, full art, retro frame, etched, surge foil) are listed newest first and
 shown as a picker when there's more than one.
 

@@ -427,12 +427,25 @@ class Pokemon(Game):
         return self._card(rows[0], 'set_number' if type_agrees else 'set_number_energy')
 
     def find_printings(self, name, number=None, treatment=None, set_code=None):
-        resolved, _how = self._resolve_name(name)
-        if not resolved:
-            return None, []
-        rows = self._rows('name = ?', (resolved,))
         key, total = parse_number(number)
         set_code = (set_code or '').strip().upper()
+        resolved = self._resolve_name(name)[0] if name else None
+        if not resolved:
+            # No name, or none that exists: the printing at that set + number (or number/total)
+            if set_code and key:
+                rows = [row for code in self._codes_like(set_code)
+                        for row in self._rows('set_code = ? AND number_key = ?', (code, key))]
+            elif key and total:
+                rows = self._rows('number_key = ? AND set_total = ?', (key, total))
+            else:
+                rows = []
+            if not rows:
+                return None, []
+            cards = [self._card(row) for row in rows[:200]]
+            if len(cards) == 1:
+                cards[0] = self.with_prices(cards[0])
+            return cards[0]['name'], cards
+        rows = self._rows('name = ?', (resolved,))
         # Narrow by what was given, as long as something is left
         for keep in (lambda row: not set_code or row['set_code'] == set_code,
                      lambda row: not key or row['number_key'] == key,
@@ -493,6 +506,11 @@ class Pokemon(Game):
         }
 
     # -- Inventory -----------------------------------------------------------
+
+    def suggested_finish(self, card, foil='unknown'):
+        # The finishes the printing exists in; the plain one is the likely one
+        options = [key for key in self.finishes if key in card['finishes']] or [self.default_finish]
+        return self.default_finish if self.default_finish in options else options[0]
 
     def inventory_fields(self, card, finish):
         prices = card.get('prices') or {}
