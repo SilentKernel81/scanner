@@ -1112,6 +1112,10 @@ class CardScanner:
                             self.awaiting_new_card = False
                             if self.auto_capture_enabled:
                                 self.log("Card gone - ready for the next card")
+                                # A foil Gwen Stacy vanished right after its capture and came back
+                                # as "new" (2026-09-25): keep the frames of such cases (debug trace)
+                                if time.time() - self.last_auto_capture_time < 2.0:
+                                    self._start_debug_dump('card_gone_soon_after_capture')
 
                         # Check if we have a recent cached card detection
                         if self.last_card_detection:

@@ -201,7 +201,9 @@ pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the bee
 their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Debug trace** on, the scanner also
 keeps the last 3 s of frames (640 px wide - what the outline detector works on) and saves them,
 plus the next second, to `data/debug_frames/<time>_<reason>/` when a card waits over 2 s or a
-new card is detected less than 2 s after a capture (a likely duplicate); the newest 20 dumps
+new card is detected, or the card is "gone", less than 2 s after a capture (a likely duplicate:
+a foil Gwen Stacy lost its outline right after its capture and was captured again - by its
+look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 20 dumps
 are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
