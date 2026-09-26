@@ -727,6 +727,10 @@ class CardScanner:
         self.area_captured = self.area_thumb
         self.awaiting_new_card = True
         self.captured_thumbnail = self.previous_thumbnail
+        # A drop seen during an earlier focus move was this card's: when it was taken as new by
+        # another sign ("Card gone"), the flag used to survive and made this very card "new"
+        # right after its capture (Arwen captured twice, 2026-09-25; also 2026-09-24 19:09)
+        self.disturbed_during_focus = False
 
     def detect_camera_type(self):
         """Auto-detect available camera"""

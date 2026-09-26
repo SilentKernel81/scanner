@@ -602,6 +602,13 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   becomes the reference for "looks different from the captured one": after a probe a foil's
   glare and outline changed enough (thumbnail 0.34, other cards 0.39-0.62) that a foil was
   captured twice. In fixed-area mode only when the area is still within 10 of the capture.
+  The "dropped during the probe" flag is cleared at every capture: when the dropped card was
+  taken as new another way ("card gone"), the flag used to survive and made the *next* card
+  "new" right after its own capture - that card was captured twice (seen 2026-09-24 and 09-25).
+  Still open: a probe itself sometimes reads as a drop right after a capture ("card dropped
+  meanwhile" with the same card, 2 of ~630 captures), and a card that shifts ~2% right after
+  its capture (image change 0.34) can't be told from a real drop - real drops of other cards
+  often measure 0.30-0.42 with jumps under 3% - so that threshold stays.
   Simulated with 30 drops every 1.5 s and a peak 35 away: every card captured once, focus at
   the peak after 9 cards.
 - **Automatic refocus** (`_check_focus_drift`): with a locked focus, a card that stays still but
