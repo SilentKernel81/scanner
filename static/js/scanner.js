@@ -40,6 +40,8 @@ socket.on('connect', function() {
     });
 
     loadStats();
+    // The server closes a review when its page disconnects: open it again
+    if (reviewItem) openReview();
     // Connection message sent from server
     startDetectionPolling();
     loadScanSettings();

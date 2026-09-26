@@ -29,6 +29,7 @@ from games.base import Game
 
 HEADERS = {'User-Agent': 'CardScanner/1.0', 'Accept': 'application/json'}
 PRICE_MAX_AGE = timedelta(days=1)
+PRICE_RETRY_OFFLINE = timedelta(minutes=5)  # no price requests after a failed connection
 
 # TCGdex variant flag -> finish key
 VARIANT_FINISHES = {'normal': 'normal', 'holo': 'holo', 'reverse': 'reverse', 'firstEdition': 'first_edition'}
@@ -153,6 +154,7 @@ class Pokemon(Game):
         super().__init__(database, log_callback)
         self._names = None  # distinct card names, for fuzzy matching
         self._price_lock = threading.Lock()
+        self._prices_offline_until = datetime.min
         with self.db._lock:
             cursor = self.db.conn.cursor()
             self._create_table(cursor, 'pokemon_cards', if_not_exists=True)
@@ -281,8 +283,17 @@ class Pokemon(Game):
         if updated and datetime.now() - datetime.fromisoformat(updated) < PRICE_MAX_AGE:
             return card
         with self._price_lock:
+            # Offline, every card would wait for the timeout: after a failed connection the
+            # cached prices (or none) are used for a while
+            if datetime.now() < self._prices_offline_until:
+                return card
             try:
                 details = requests.get(f"{Config.TCGDEX_URL}/cards/{card['id']}", headers=HEADERS, timeout=5).json()
+            except (requests.ConnectionError, requests.Timeout) as e:
+                self._prices_offline_until = datetime.now() + PRICE_RETRY_OFFLINE
+                self.log(f"TCGdex unreachable - no price updates for {PRICE_RETRY_OFFLINE.seconds // 60} min ({e})",
+                         level='warning')
+                return card
             except (requests.RequestException, ValueError) as e:
                 self.log(f"Could not fetch prices for {card['name']}: {e}", level='warning')
                 return card
@@ -348,8 +359,11 @@ class Pokemon(Game):
         set_number_row = None
         is_energy, energy_type = basic_energy(name)
         if is_energy:
-            return self._identify_energy(key, {set_code, read_code}, energy_type)
-        if set_code and key:
+            card = self._identify_energy(key, {set_code, read_code}, energy_type)
+            if card:
+                return card
+            # No set code / number read (older Energy prints none): the name only, for review
+        if set_code and key and not is_energy:
             codes = self._codes_like(set_code)
             rows = [row for code in codes for row in self._rows('set_code = ? AND number_key = ?', (code, key))]
             named = [row for row in rows if names_match(name, row['name'])]
@@ -358,7 +372,7 @@ class Pokemon(Game):
             set_number_row = rows[0] if len(codes) == 1 and rows else None
 
         # 2. Name + number, narrowed by the set total
-        if key:
+        if key and not is_energy:
             rows = [row for row in self._rows('number_key = ?', (key,)) if names_match(name, row['name'])]
             # "Charizard" read: Charizard before Charizard δ / Charizard ex
             rows = [row for row in rows if row['name_search'] == search_key(name)] or rows

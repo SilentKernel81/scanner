@@ -205,7 +205,9 @@ database = None
 inventory = None
 current_card_info = None
 auto_cards = {}           # token -> card being added automatically (see search_and_emit_card)
+AUTO_ADD_TIMEOUT = 15     # s: a card no page added (none open, phone asleep) goes to the review queue
 current_review_id = None  # review queue item open on the page
+review_sid = None         # Socket.IO session of the page reviewing it (a reload / disconnect closes it)
 review = None             # review.ReviewQueue
 # The capture being reviewed (image path): kept with the card added from it - also when the
 # card is found by a manual search after the AI couldn't identify it
@@ -275,12 +277,43 @@ def set_pending_capture(image_path):
     pending_capture = str(image_path) if image_path else None
 
 
-def queue_for_review(game, image_path, name='', number='', set_code='', foil='unknown', card=None):
+def queue_for_review(game, image_path, name='', number='', set_code='', foil='unknown', card=None, why=None):
     """A capture that wasn't added automatically goes to the review queue; scanning goes on"""
     review.add(game.id, image_path, name, number, set_code, foil, card)
-    what = f"{card['name']} (printing not confirmed)" if card else (f"'{name}' (not found)" if name else "a card the AI couldn't read")
+    if card:
+        what = f"{card['name']} ({why or 'printing not confirmed'})"
+    else:
+        what = f"'{name}' (not found)" if name else "a card the AI couldn't read"
     log_to_client(f"Queued for review: {what}", level="warning")
     socketio.emit('review_queue_update', {'count': review.count(game.id)}, namespace='/')
+    # Nothing waits on the page for this card (normal mode blocks auto-capture until Add / Skip)
+    if scanner:
+        scanner.card_under_review = False
+
+
+def route_identified(image_path, card_name, collector_number, set_code, processing_time=None, foil='unknown',
+                     fast=False):
+    """
+    After the AI: look the card up and add it automatically, show it, or queue it for review.
+    While a review is open, a card captured meanwhile (manual capture, auto scanning without
+    automatic adds) waits in the queue instead of taking the reviewed card's place and capture.
+    """
+    reviewing = current_review_id is not None
+    if not fast and not reviewing:
+        set_pending_capture(image_path)
+    if card_name and card_name.strip():
+        search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=fast,
+                             set_code=set_code, image_path=image_path, foil=foil)
+    elif fast or reviewing:
+        queue_for_review(games.active(), image_path, foil=foil)
+
+
+def unclaimed_auto_card(token, game, card_name, collector_number, set_code, foil):
+    """No page added a confirmed card (none open, or it was asleep): keep it in the review queue"""
+    card = auto_cards.pop(token, None)
+    if card:
+        queue_for_review(game, card.pop('capture', None), card_name, collector_number, set_code, foil, card,
+                         why='not added - no page open')
 
 
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
@@ -326,14 +359,19 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         processing_time=processing_time
     )
 
-    if was_fast_scan_mode and not confirmed:
-        queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info)
+    if not auto_add and (was_fast_scan_mode or current_review_id is not None):
+        queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info,
+                         why=None if was_fast_scan_mode else 'captured during a review')
     elif auto_add:
         # The page adds it by its token: an open review keeps the current card
         if image_path:
             db_card_info['capture'] = str(image_path)
         token = uuid.uuid4().hex
         auto_cards[token] = db_card_info
+        timer = threading.Timer(AUTO_ADD_TIMEOUT, unclaimed_auto_card,
+                                (token, game, card_name, collector_number, set_code, foil))
+        timer.daemon = True
+        timer.start()
         socketio.emit('card_found', {
             'card': game.card_payload(db_card_info),
             'auto_add': True,
@@ -413,14 +451,8 @@ def ai_processing_worker():
                 'foil': foil_status
             }, namespace='/')
 
-            # Auto-search database if Vision AI identified the card
-            if not was_fast_scan_mode:
-                set_pending_capture(image_path)
-            if card_name and card_name.strip():
-                search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=was_fast_scan_mode,
-                                     set_code=set_code, image_path=image_path, foil=foil_status)
-            elif was_fast_scan_mode:
-                queue_for_review(games.active(), image_path, foil=foil_status)
+            route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
+                             fast=was_fast_scan_mode)
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -595,11 +627,7 @@ def initialize_components():
                     'foil': foil_status
                 }, namespace='/')
 
-                # Auto-search database if Vision AI identified the card
-                set_pending_capture(image_path)
-                if card_name and card_name.strip():
-                    search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False,
-                                         set_code=set_code, image_path=image_path)
+                route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status)
 
                 # Normal mode: card awaits user review (card_under_review stays True)
                 logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
@@ -1062,11 +1090,7 @@ def handle_capture(data):
         }
         emit('card_captured', result)
 
-        # Automatically search database if Vision AI identified the card
-        set_pending_capture(image_path)
-        if card_name and card_name.strip():
-            search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=False,
-                                 set_code=set_code, image_path=image_path)
+        route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status)
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")
@@ -1154,6 +1178,10 @@ def handle_add_inventory(data):
     # An automatic add names its card by token; otherwise the card on the page
     token = data.get('token')
     card = auto_cards.pop(token, None) if token else current_card_info
+    if token and not card:
+        # Another open page added it already, or it went to the review queue (AUTO_ADD_TIMEOUT)
+        logger.info("Automatic add: card already claimed")
+        return
     if not inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
         emit('error', {'message': 'No card selected'})
@@ -1228,10 +1256,11 @@ def handle_add_inventory(data):
 @socketio.on('review_open')
 def handle_review_open(data=None):
     """Open the oldest item of the review queue (or say it is empty)"""
-    global current_card_info, current_review_id
+    global current_card_info, current_review_id, review_sid
     game = games.active()
     item, total = review.first(game.id)
     current_review_id = item['id'] if item else None
+    review_sid = request.sid if item else None
     if not item:
         current_card_info = None
         set_pending_capture(None)
@@ -1255,10 +1284,10 @@ def handle_review_open(data=None):
 @socketio.on('review_skip')
 def handle_review_skip(data=None):
     """Drop the open review item without adding anything"""
-    global current_card_info, current_review_id
+    global current_card_info, current_review_id, review_sid
     if current_review_id is not None:
         review.remove(current_review_id)
-    current_review_id = current_card_info = None
+    current_review_id = current_card_info = review_sid = None
     set_pending_capture(None)
     emit('review_queue_update', {'count': review.count(games.active_id())}, broadcast=True)
     handle_review_open()  # the next one
@@ -1267,9 +1296,19 @@ def handle_review_skip(data=None):
 @socketio.on('review_close')
 def handle_review_close(data=None):
     """Leave the review; the open item stays in the queue"""
-    global current_card_info, current_review_id
-    current_review_id = current_card_info = None
+    global current_card_info, current_review_id, review_sid
+    current_review_id = current_card_info = review_sid = None
     set_pending_capture(None)
+
+
+@socketio.on('disconnect')
+def handle_disconnect(*_args):
+    """The reviewing page went away (reload, closed, asleep): the review is closed, so later
+    captures aren't sent to the queue and an Add can't resolve the item unseen (the page
+    opens it again when it reconnects)"""
+    if review_sid is not None and request.sid == review_sid:
+        logger.info("Reviewing page disconnected - review closed")
+        handle_review_close()
 
 
 @app.route('/review_images/<path:name>')
@@ -1352,14 +1391,15 @@ def get_games():
 @socketio.on('set_game')
 def handle_set_game(data):
     """Switch the game being scanned (stops auto scanning; the current card is dropped)"""
-    global current_card_info, current_review_id
+    global current_card_info, current_review_id, review_sid
     game_id = data.get('game')
     try:
         games.set_active(game_id)
     except ValueError as e:
         emit('error', {'message': str(e)})
         return
-    current_card_info = current_review_id = None
+    current_card_info = current_review_id = review_sid = None
+    set_pending_capture(None)
     if scanner and scanner.auto_capture_enabled:
         scanner.auto_capture_enabled = False
         scanner.card_under_review = False

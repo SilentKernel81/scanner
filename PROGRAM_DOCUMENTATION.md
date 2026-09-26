@@ -284,7 +284,9 @@ the capture is queued, the AI worker identifies it in the background, and a conf
 is added immediately (one Near Mint copy in the suggested finish). The page adds it by a token
 (`auto_cards`), not through the server's current card, so it can't replace a card being reviewed
 (the "current card" once changed under a pending review 2 s later). The web page shows each
-added card with an **Undo** button (`undo_last_add`).
+added card with an **Undo** button (`undo_last_add`). A token no page claims within
+`AUTO_ADD_TIMEOUT` (15 s - no page open, phone asleep) puts the card in the review queue instead
+of losing it; with two pages open the first add wins and the other is ignored.
 
 Anything uncertain - printing not confirmed, name not found, no name read - goes to the
 **review queue** (`review.py`, table `review_queue`, a copy of the capture in `data/review/`)
@@ -294,7 +296,11 @@ read, the ★/• result and the best match. The *Review* counter opens them old
 search prefilled with it (without a match kept, the search runs at once). Add resolves the item
 - the capture becomes the entry's thumbnail - and the server sends the next; Skip drops it
 (`review_skip`); Close leaves the rest (`review_close`). Cards added automatically meanwhile
-don't disturb the open item. Per game; kept across restarts.
+don't disturb the open item, and a card captured during a review in any other way (manual
+capture, auto scanning without automatic adds) goes to the queue too (`route_identified`)
+instead of taking the reviewed card's place and capture. The review belongs to the page that
+opened it (`review_sid`): when that page disconnects the server closes it, and the page opens
+it again when it reconnects. Per game; kept across restarts.
 
 With the switch off, each capture is identified synchronously and waits for **Add** / **Skip**;
 a card dropped meanwhile is captured right after.
@@ -416,7 +422,9 @@ model mostly copies "Basic Energy", and when asked for the type it can misname t
 read as Fairy), and it once read 011 as 017. So a basic Energy is matched by set code + number
 only (`_identify_energy`; misread codes are tried one letter away, with and without a trailing
 EN): confirmed when the type read agrees with the card, otherwise `set_number_energy` - shown
-for review - so a misread number can't add another type. In the first real session all 4
+for review - so a misread number can't add another type. Without a set code + number that
+finds exactly one Energy (older Energies print none) only the name is used: the newest
+printing, for review. In the first real session all 4
 Energies went wrong (a fuzzy "Basic Fire Energy", or "Energy Retrieval" by the prefix rule);
 with this, 3 of the 4 captures give the right card (the 4th, number misread, goes to review).
 
@@ -518,7 +526,15 @@ Columns: identity (`id` "sv02-001", `name`, `set_id`, `set_code` "PAL", `set_nam
 "12" / "TG05"), card data (`rarity`, `category`, `types`, `stage`, `hp`, `trainer_type`,
 `energy_type`), `finishes` (JSON), `image_url` (+ `/high.webp`, `/low.webp`), and the cached
 `prices` / `prices_updated`. `pokemon_sets` lists every set of the last download, for the update
-check.
+check. Prices are fetched per card when older than a day (5 s timeout); after a failed
+connection no price is requested for 5 minutes (`PRICE_RETRY_OFFLINE`), so scanning offline
+doesn't wait 5 s per card - the cached prices, or none, are used.
+
+~21k cards is the whole paper catalogue on TCGdex (checked 2026-09-25: every set within a few
+cards of its total, newest set 9 days old). Pokémon prints far fewer cards than Magic (~112k
+Scryfall printings), and holo / reverse holo are finishes of one row, not separate cards. What
+TCGdex lacks: Jumbo cards (160), Radiant Collection as its own set (25), a few sample / promo
+cards.
 
 **Imports never leave a half-filled table.** Both games fill a staging table (`cards_import`,
 `pokemon_cards_import`), committing every 5,000 rows so the inventory can still write, and swap
