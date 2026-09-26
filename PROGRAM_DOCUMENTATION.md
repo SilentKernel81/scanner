@@ -526,7 +526,11 @@ Columns: identity (`id` "sv02-001", `name`, `set_id`, `set_code` "PAL", `set_nam
 "12" / "TG05"), card data (`rarity`, `category`, `types`, `stage`, `hp`, `trainer_type`,
 `energy_type`), `finishes` (JSON), `image_url` (+ `/high.webp`, `/low.webp`), and the cached
 `prices` / `prices_updated`. `pokemon_sets` lists every set of the last download, for the update
-check. Prices are fetched per card when older than a day (5 s timeout); after a failed
+check. Prices are fetched per card when older than a day (5 s timeout) - never while matching
+(`identify`), so scanning doesn't wait for them: a card shown for Add / Skip gets them before it
+is shown, a review item when it is opened, and every add updates its entries' prices in the
+background afterwards (`update_added_prices`, `Game.fetches_prices` / `with_prices`; the page
+reloads the totals on `inventory_prices_updated`). After a failed
 connection no price is requested for 5 minutes (`PRICE_RETRY_OFFLINE`), so scanning offline
 doesn't wait 5 s per card - the cached prices, or none, are used.
 
@@ -618,7 +622,7 @@ Socket.IO events:
 
 | Client → server | Server → client |
 |---|---|
-| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add`, `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_undone`, `card_dismissed` |
+| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add`, `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |

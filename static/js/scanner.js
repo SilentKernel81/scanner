@@ -145,6 +145,12 @@ socket.on('card_printings', function(data) {
     displayPrintings(data.name, data.cards);
 });
 
+// Prices fetched after an add (Pokémon): new totals, and the list if it is open
+socket.on('inventory_prices_updated', function() {
+    loadStats();
+    if (document.getElementById('inventory-modal').classList.contains('show')) loadInventory();
+});
+
 socket.on('inventory_undone', function(data) {
     loadStats();
     addLog(timeNow(), 'warning', `Removed ${data.name} from the inventory (undo)`);

@@ -21,6 +21,8 @@ class Game:
     # Match tags (card['match']) that identify the exact printing - only these are added
     # to the inventory without review
     confirmed_matches = set()
+    # Prices fetched per card (a network request, with_prices) instead of coming with the data
+    fetches_prices = False
 
     def __init__(self, database, log_callback=None):
         self.db = database
@@ -73,6 +75,10 @@ class Game:
 
     def get_card(self, card_id):
         raise NotImplementedError
+
+    def with_prices(self, card):
+        """The card with current prices (fetches_prices games: may make a network request)"""
+        return card
 
     def card_payload(self, card):
         """Card fields sent to the web page"""

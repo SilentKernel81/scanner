@@ -272,6 +272,12 @@ class InventoryManager:
             self.last_added = (row['id'], quantity, capture_id)
         self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
                  f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
+        return row['id']
+
+    def set_price(self, row_id, price):
+        with self._lock:
+            self.conn.execute('UPDATE inventory SET price_usd = ? WHERE id = ?', (float(price), row_id))
+            self.conn.commit()
 
     def undo_last_add(self):
         """

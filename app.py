@@ -379,6 +379,8 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
             'foil': foil,
         }, namespace='/')
     elif db_card_info:
+        # Waiting for Add / Skip anyway: show the current prices
+        db_card_info = game.with_prices(db_card_info)
         if image_path:
             db_card_info['capture'] = str(image_path)
         current_card_info = db_card_info
@@ -1203,6 +1205,7 @@ def handle_add_inventory(data):
         capture = card.pop('capture', None) or (None if token else pending_capture)
         if not token and capture == pending_capture:
             set_pending_capture(None)
+        added_rows = []
 
         for item in items:
             finish = item.get('finish') or game.default_finish
@@ -1211,8 +1214,8 @@ def handle_add_inventory(data):
             except (ValueError, TypeError):
                 quantity = 1
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
-            inventory.add_card(game.inventory_fields(card, finish), game.id, finish, condition, quantity,
-                               capture=capture)
+            added_rows.append(inventory.add_card(game.inventory_fields(card, finish), game.id, finish, condition,
+                                                 quantity, capture=capture))
             capture = None
 
             # Send updated stats and what was added (the page offers an Undo)
@@ -1229,6 +1232,9 @@ def handle_add_inventory(data):
             })
 
         logger.info("Card added to inventory successfully")
+        if game.fetches_prices:
+            threading.Thread(target=update_added_prices, args=(game, card, added_rows), daemon=True,
+                             name='prices').start()
         if token:
             return
         current_card_info = None
@@ -1251,6 +1257,28 @@ def handle_add_inventory(data):
         # Clear flag even on error to prevent getting stuck
         if scanner:
             scanner.card_under_review = False
+
+
+def update_added_prices(game, card, row_ids):
+    """
+    After an add: fetch the card's current prices (games that fetch them per card) and update
+    the entries - scanning never waits for the price request
+    """
+    try:
+        card = game.with_prices(dict(card))
+        changed = False
+        for row_id in row_ids:
+            entry = inventory.get_entry(row_id)
+            if not entry or entry['card_id'] != card['id']:
+                continue  # deleted or merged meanwhile
+            price = game.inventory_fields(card, entry['finish'])['price']
+            if price != entry['price_usd']:
+                inventory.set_price(row_id, price)
+                changed = True
+        if changed:
+            socketio.emit('inventory_prices_updated', {'stats': inventory.get_stats(game.id)}, namespace='/')
+    except Exception as e:
+        logger.warning(f"Price update for {card.get('name')} failed: {e}")
 
 
 @socketio.on('review_open')

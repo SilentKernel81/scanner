@@ -5,7 +5,8 @@ in the card database file.
 Download: one GraphQL request for every card (~24k, a few MB) and the set details (printed set
 abbreviation, official card count) from the REST API. Pokémon TCG Pocket (digital) is left out.
 Prices (TCGplayer, USD, per finish) are not in the bulk data: they are fetched for a card when
-it is matched or picked, and cached for a day.
+it is shown or picked, and after it is added (in the background, so scanning never waits for
+them), and cached for a day.
 
 Matching what the AI read (name, number "012/193", set abbreviation "PAL" - printed on cards
 since Scarlet & Violet; older cards only have a set symbol):
@@ -149,6 +150,8 @@ class Pokemon(Game):
     number_example = '012/193'
     finishes = {'normal': 'Normal', 'holo': 'Holo', 'reverse': 'Reverse holo', 'first_edition': '1st edition'}
     confirmed_matches = {'set_number', 'name_number'}
+    fetches_prices = True
+    fetches_prices = True
 
     def __init__(self, database, log_callback=None):
         super().__init__(database, log_callback)
@@ -277,7 +280,7 @@ class Pokemon(Game):
             card['match'] = match
         return card
 
-    def _with_prices(self, card):
+    def with_prices(self, card):
         """The card with its TCGplayer prices, fetched when missing or older than a day"""
         updated = card.get('prices_updated')
         if updated and datetime.now() - datetime.fromisoformat(updated) < PRICE_MAX_AGE:
@@ -341,7 +344,6 @@ class Pokemon(Game):
         card = self._identify(name, number, (set_code or '').strip().upper())
         if card:
             self.log(f"Matched {card['name']} ({card['set']} #{card['number']}) by {card['match']}")
-            card = self._with_prices(card)
         return card
 
     def _identify(self, name, number, set_code):
@@ -438,7 +440,7 @@ class Pokemon(Game):
             rows = [row for row in rows if keep(row)] or rows
         cards = [self._card(row) for row in rows[:200]]
         if len(cards) == 1:
-            cards[0] = self._with_prices(cards[0])
+            cards[0] = self.with_prices(cards[0])
         return resolved, cards
 
     def similar(self, name, limit=5):
@@ -451,7 +453,7 @@ class Pokemon(Game):
 
     def get_card(self, card_id):
         rows = self._rows('id = ?', (card_id,))
-        return self._with_prices(self._card(rows[0])) if rows else None
+        return self.with_prices(self._card(rows[0])) if rows else None
 
     @staticmethod
     def _type_line(card):
