@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +57,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -88,13 +92,16 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-    // At most 60% of the height, so the controls and results stay visible on wide screens
-    val cameraWidth = minOf(maxWidth, maxHeight * 0.6f * 3f / 4f)
+    // The camera frames are 3:4, or 4:3 when turned a quarter; at most half the height, so the
+    // controls and results stay visible
+    val sideways = settings.rotation % 180 != 0
+    val aspect = if (sideways) 4f / 3f else 3f / 4f
+    val cameraWidth = minOf(maxWidth, maxHeight * 0.5f * aspect)
     Column(Modifier.fillMaxSize()) {
         // Camera view with the detected outline: 3:4 like the (portrait) camera frames, so frame
         // coordinates map linearly onto it
-        Box(Modifier.width(cameraWidth).aspectRatio(3f / 4f).align(Alignment.CenterHorizontally).background(Color.Black)) {
-            CameraPreview(viewModel, torch)
+        Box(Modifier.width(cameraWidth).aspectRatio(aspect).align(Alignment.CenterHorizontally).clipToBounds().background(Color.Black)) {
+            CameraPreview(viewModel, torch, settings.rotation)
             OutlineOverlay(detection)
             StatusChip(detection, auto, Modifier.align(Alignment.TopStart).padding(8.dp))
         }
@@ -107,6 +114,7 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
             Text("Auto", Modifier.padding(start = 8.dp))
             Spacer(Modifier.weight(1f))
             Button(onClick = viewModel::manualCapture) { Text("Capture") }
+            IconButton(onClick = viewModel::rotate) { Icon(Icons.Default.RotateRight, "Rotate image") }
             IconButton(onClick = { torch = !torch }) {
                 Icon(if (torch) Icons.Default.FlashlightOn else Icons.Default.FlashlightOff, "Light")
             }
@@ -133,11 +141,15 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun CameraPreview(viewModel: ScannerViewModel, torch: Boolean) {
+private fun CameraPreview(viewModel: ScannerViewModel, torch: Boolean, rotation: Int) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember {
-        PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER }
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FIT_CENTER
+            // TextureView: a SurfaceView ignores the rotation applied to the view
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
     }
     var camera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
 
@@ -177,7 +189,14 @@ private fun CameraPreview(viewModel: ScannerViewModel, torch: Boolean) {
     }
     LaunchedEffect(camera, torch) { camera?.cameraControl?.enableTorch(torch) }
 
-    AndroidView({ previewView }, Modifier.fillMaxSize())
+    // The preview is upright for the phone (3:4); turned like the analysis frames, so the outline
+    // (in frame coordinates) lies on the card
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sideways = rotation % 180 != 0
+        AndroidView({ previewView }, Modifier.align(Alignment.Center)
+            .requiredSize(if (sideways) maxHeight else maxWidth, if (sideways) maxWidth else maxHeight)
+            .rotate(rotation.toFloat()))
+    }
 }
 
 private fun statusColor(status: CardTracker.Status?) = when (status) {

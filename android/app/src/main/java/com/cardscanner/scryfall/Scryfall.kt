@@ -74,7 +74,7 @@ class Scryfall(private val http: OkHttpClient) {
     private fun get(path: String, vararg query: Pair<String, String>): JSONObject? {
         val url = "$API$path".toHttpUrl().newBuilder().apply { query.forEach { addQueryParameter(it.first, it.second) } }.build()
         // Scryfall asks for a User-Agent and an Accept header on every request
-        val request = Request.Builder().url(url).header("User-Agent", "CardScanner-Android/0.1").header("Accept", "application/json").build()
+        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).header("Accept", "application/json").build()
         http.newCall(request).execute().use { response ->
             if (response.code == 404) return null
             if (!response.isSuccessful) throw IOException("Scryfall: HTTP ${response.code}")
@@ -109,6 +109,7 @@ class Scryfall(private val http: OkHttpClient) {
     companion object {
         private const val TAG = "Scryfall"
         private const val API = "https://api.scryfall.com"
+        const val USER_AGENT = "CardScanner-Android/0.1"
 
         /** Matches that identify the printing for sure (database.py:CONFIRMED_MATCHES) */
         val CONFIRMED = setOf("set_number", "name_number", "name_set_digit")

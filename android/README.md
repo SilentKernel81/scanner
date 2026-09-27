@@ -43,6 +43,6 @@ key, or the local server address (`http://<host>:11434` for Ollama; "Test / list
 
 - Thresholds (sharpness 250, movement 1%, ...) were measured on the Pi webcam; re-measure on
   phones (live values are shown under the camera; min sharpness and still frames are in Settings).
-- Tested on the emulator only (virtual camera) - not yet with a real phone over a box of cards.
+- Tested on a Pixel 10 over the box (manual captures identified right); auto mode not measured yet.
 - Inventory, CSV/Moxfield export, local card database (offline), Pokémon, prompt editor,
   fixed area (sleeves), API keys in the Android Keystore, per-ABI APKs (debug APK is ~110 MB).

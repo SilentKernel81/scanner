@@ -36,6 +36,11 @@ import androidx.core.content.ContextCompat
 import com.cardscanner.ui.ScannerScreen
 import com.cardscanner.ui.SettingsScreen
 import org.opencv.android.OpenCVLoader
+import coil3.ImageLoader
+import coil3.compose.setSingletonImageLoaderFactory
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import com.cardscanner.scryfall.Scryfall
+import okhttp3.OkHttpClient
 
 class MainActivity : ComponentActivity() {
     private val viewModel: ScannerViewModel by viewModels()
@@ -47,6 +52,16 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         setContent {
+            // Scryfall's image CDN rejects OkHttp's default User-Agent (HTTP 400)
+            setSingletonImageLoaderFactory { context ->
+                ImageLoader.Builder(context).components {
+                    add(OkHttpNetworkFetcherFactory(callFactory = {
+                        OkHttpClient.Builder().addInterceptor { chain ->
+                            chain.proceed(chain.request().newBuilder().header("User-Agent", Scryfall.USER_AGENT).build())
+                        }.build()
+                    }))
+                }.build()
+            }
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) { App(viewModel) }
             }

@@ -14,6 +14,8 @@ data class AppSettings(
     val minSharpness: Int = 250,
     /** Consecutive still, in-focus frames before an auto-capture */
     val stableFrames: Int = 5,
+    /** Extra clockwise rotation of the camera image (0/90/180/270): cards must look upright */
+    val rotation: Int = 0,
 ) {
     fun model(provider: Provider = this.provider) = models[provider]?.takeIf { it.isNotBlank() } ?: provider.models.first()
     fun apiKey(provider: Provider = this.provider) = apiKeys[provider].orEmpty()
@@ -31,6 +33,7 @@ data class AppSettings(
                 detectFoil = prefs.getBoolean("detect_foil", true),
                 minSharpness = prefs.getInt("min_sharpness", 250),
                 stableFrames = prefs.getInt("stable_frames", 5),
+                rotation = prefs.getInt("rotation", 0),
             )
         }
     }
@@ -46,6 +49,7 @@ data class AppSettings(
             putBoolean("detect_foil", detectFoil)
             putInt("min_sharpness", minSharpness)
             putInt("stable_frames", stableFrames)
+            putInt("rotation", rotation)
         }.apply()
     }
 }

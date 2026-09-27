@@ -83,11 +83,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     var imageCapture: ImageCapture? = null
 
     fun updateSettings(settings: AppSettings) {
+        if (settings.rotation != _settings.value.rotation) pendingReset = true  // outlines of the old orientation
         _settings.value = settings
         settings.save(getApplication())
         tracker.requiredStableFrames = settings.stableFrames
         tracker.minSharpness = settings.minSharpness.toDouble()
     }
+
+    /** Turn the camera image a quarter turn clockwise (like the Python scanner's rotate button) */
+    fun rotate() = updateSettings(_settings.value.let { it.copy(rotation = (it.rotation + 90) % 360) })
 
     fun setAutoCapture(enabled: Boolean) {
         _autoCapture.value = enabled
@@ -115,7 +119,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private fun analyze(image: ImageProxy) {
         try {
             if (pendingReset) { pendingReset = false; tracker.reset() }
-            val frame = image.toRgbaMat()
+            val frame = image.toRgbaMat(_settings.value.rotation)
             val (state, trigger) = tracker.process(frame, _autoCapture.value, capturing.get())
             frame.release()
             _detection.value = state
@@ -172,7 +176,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     private fun cutOutCard(image: ImageProxy, corners: Corners, frameWidth: Int, frameHeight: Int): Bitmap {
         var bitmap = image.toBitmap()
-        val rotation = image.imageInfo.rotationDegrees
+        val rotation = (image.imageInfo.rotationDegrees + _settings.value.rotation) % 360
         if (rotation != 0) {
             bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
         }
@@ -256,8 +260,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 }
 
-/** RGBA_8888 analysis frame as an upright RGBA Mat */
-private fun ImageProxy.toRgbaMat(): Mat {
+/** RGBA_8888 analysis frame as an upright RGBA Mat, turned `extraRotation` degrees further clockwise */
+private fun ImageProxy.toRgbaMat(extraRotation: Int): Mat {
     val plane = planes[0]
     val buffer = plane.buffer.apply { rewind() }
     val mat = Mat(height, width, CvType.CV_8UC4)
@@ -275,7 +279,7 @@ private fun ImageProxy.toRgbaMat(): Mat {
             mat.put(y, 0, row)
         }
     }
-    val code = when (imageInfo.rotationDegrees) {
+    val code = when ((imageInfo.rotationDegrees + extraRotation) % 360) {
         90 -> Core.ROTATE_90_CLOCKWISE
         180 -> Core.ROTATE_180
         270 -> Core.ROTATE_90_COUNTERCLOCKWISE
