@@ -7,8 +7,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Sound effects, the web UI's (static/js/audio.js): beeps with a 10 ms attack, decay to 30% and
- * release, at 30% volume. Generated once as PCM and played from memory.
+ * Sound effects, the web UI's (static/js/audio.js: playCapture, playSuccess, playQueueAlert):
+ * beeps with a 10 ms attack, decay to 30% and release, at 30% volume. Generated once as PCM and
+ * played from memory.
  */
 object Sounds {
     private const val RATE = 44100
@@ -19,7 +20,15 @@ object Sounds {
     /** playCapture: 1200 Hz then 1000 Hz, square - a camera shutter click */
     private val capture by lazy { render(listOf(Beep(0, 1200.0, 100, true), Beep(100, 1000.0, 80, true))) }
 
+    /** playSuccess: C5 then E5, sine - a card went into the inventory */
+    private val added by lazy { render(listOf(Beep(0, 523.0, 120, false), Beep(100, 659.0, 200, false))) }
+
+    /** playQueueAlert: three 880 Hz beeps - a card went to the review queue */
+    private val review by lazy { render((0 until 3).map { Beep(it * 150, 880.0, 100, false) }) }
+
     fun capture() = play(capture)
+    fun added() = play(added)
+    fun review() = play(review)
 
     private fun render(beeps: List<Beep>): ShortArray {
         val totalMs = beeps.maxOf { it.startMs + it.durationMs }

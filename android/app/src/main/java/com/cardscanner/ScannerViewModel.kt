@@ -230,6 +230,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             reading?.setCode.orEmpty(), marker, printing?.id, reason)
         _scans.update { list -> list.map { if (it.id == scanId) it.copy(reviewId = reviewId) else it } }
         _review.value = reviewQueue.all()
+        if (_settings.value.sounds) Sounds.review()
         Log.i(TAG, "Review queue: #$scanId ($reason)")
     }
 
@@ -256,6 +257,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     fun addFromReview(item: ReviewItem, printing: Printing, finish: Finish) {
         viewModelScope.launch(Dispatchers.IO) {
             val entryId = inventory.add(printing, finish)
+            if (_settings.value.sounds) Sounds.added()
             reviewQueue.remove(item.id)
             _scans.update { list -> list.map { if (it.reviewId == item.id) it.copy(reviewId = null, inventoryId = entryId, printing = printing) else it } }
             _inventoryEntries.value = inventory.all()
@@ -279,6 +281,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         if (scan.inventoryId != null) return
         viewModelScope.launch(Dispatchers.IO) {
             val entryId = inventory.add(printing, scan.finish)
+            if (_settings.value.sounds) Sounds.added()
             _scans.update { list -> list.map { if (it.id == scanId) it.copy(inventoryId = entryId) else it } }
             _inventoryEntries.value = inventory.all()
         }
@@ -552,7 +555,10 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             // adds off, every card waits for Add in the list.
             val added = if (settings.autoAdd && result.printing?.confirmed == true) inventory.add(result.printing, result.finish) else null
             _scans.update { list -> list.map { if (it.id == id) result.copy(inventoryId = added) else it } }
-            if (added != null) _inventoryEntries.value = inventory.all()
+            if (added != null) {
+                _inventoryEntries.value = inventory.all()
+                if (settings.sounds) Sounds.added()
+            }
             if (settings.autoAdd && added == null) {
                 val why = result.printing?.let { "Check: matched by ${it.match.replace('_', ' ')}" } ?: "Not found on Scryfall"
                 queueForReview(id, card, reading, marker, result.printing, why)

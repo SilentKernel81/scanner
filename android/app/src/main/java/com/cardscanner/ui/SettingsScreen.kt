@@ -160,7 +160,11 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
             Switch(settings.autoAdd, { viewModel.updateSettings(settings.copy(autoAdd = it)) })
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Capture sound", Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("Sounds")
+                Text("Click on capture, ding when a card is added, three beeps when it goes to the review queue",
+                    style = MaterialTheme.typography.bodySmall)
+            }
             Switch(settings.sounds, { viewModel.updateSettings(settings.copy(sounds = it)) })
         }
         NumberField("Minimum sharpness", settings.minSharpness,

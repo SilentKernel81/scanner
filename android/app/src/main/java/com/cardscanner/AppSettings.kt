@@ -22,7 +22,7 @@ data class AppSettings(
     val fixedArea: List<Double>? = null,
     /** Add confirmed cards (set + number match) to the inventory without asking */
     val autoAdd: Boolean = true,
-    /** Sound effects (a click on each capture) */
+    /** Sound effects: capture, added to the inventory, sent to the review queue */
     val sounds: Boolean = true,
 ) {
     /** The fixed area in use, or null (outline mode) */
