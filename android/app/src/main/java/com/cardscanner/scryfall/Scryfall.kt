@@ -79,6 +79,30 @@ class Scryfall(private val http: OkHttpClient) {
         return printing(named, "name")
     }
 
+    /** A printing by its Scryfall id (a review item's suggestion) */
+    fun byId(id: String): Printing? = get("/cards/$id")?.let { printing(it, "chosen") }
+
+    /**
+     * Printings to choose from in a review: set + number gives that printing; otherwise all
+     * printings of the name (Scryfall's fuzzy match for a misread name), newest first, those of
+     * the set (if given) first.
+     */
+    fun printings(name: String, setCode: String = "", number: String = ""): List<Printing> {
+        val set = setCode.trim().lowercase()
+        val numbers = numberVariants(number)
+        if (set.isNotEmpty() && numbers.isNotEmpty()) {
+            numbers.firstNotNullOfOrNull { get("/cards/$set/$it") }?.let { card ->
+                if (name.isBlank() || namesMatch(name, card)) return listOf(printing(card, "chosen"))
+            }
+        }
+        if (name.isBlank()) return emptyList()
+        val exactName = get("/cards/named", "fuzzy" to name)?.getString("name") ?: return emptyList()
+        val found = get("/cards/search", "q" to "!\"$exactName\"", "unique" to "prints", "include_extras" to "true", "order" to "released")
+            ?.optJSONArray("data") ?: return emptyList()
+        val all = (0 until found.length()).map { printing(found.getJSONObject(it), "chosen") }
+        return all.sortedBy { if (set.isNotEmpty() && it.setCode.equals(set, ignoreCase = true)) 0 else 1 }
+    }
+
     private fun get(path: String, vararg query: Pair<String, String>): JSONObject? {
         val url = "$API$path".toHttpUrl().newBuilder().apply { query.forEach { addQueryParameter(it.first, it.second) } }.build()
         // Scryfall asks for a User-Agent and an Accept header on every request

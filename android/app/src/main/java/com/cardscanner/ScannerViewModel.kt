@@ -19,6 +19,8 @@ import com.cardscanner.inventory.ExportFormat
 import com.cardscanner.inventory.Finish
 import com.cardscanner.inventory.Inventory
 import com.cardscanner.inventory.InventoryEntry
+import com.cardscanner.inventory.ReviewItem
+import com.cardscanner.inventory.ReviewQueue
 import com.cardscanner.detection.CardTracker
 import com.cardscanner.detection.findCardOutline
 import com.cardscanner.detection.scaled
@@ -55,6 +57,8 @@ data class ScanResult(
     val usage: Usage? = null,
     /** The inventory entry this card was added to (null: not added) */
     val inventoryId: Long? = null,
+    /** The review queue item it went to (uncertain while adding automatically), or null */
+    val reviewId: Long? = null,
 ) {
     /** The finish it is added as: surge foil printings' foils are surge foils */
     val finish get() = when {
@@ -71,6 +75,10 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private val scryfall = Scryfall(http)
     private val nextId = AtomicLong()
     private val inventory = Inventory(application)
+    private val reviewQueue = ReviewQueue(application)
+
+    private val _review = MutableStateFlow<List<ReviewItem>>(emptyList())
+    val review: StateFlow<List<ReviewItem>> = _review.asStateFlow()
 
     private val _inventoryEntries = MutableStateFlow<List<InventoryEntry>>(emptyList())
     val inventoryEntries: StateFlow<List<InventoryEntry>> = _inventoryEntries.asStateFlow()
@@ -164,7 +172,62 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ------------------------------------------------------------------------
 
     private fun refreshInventory() {
-        viewModelScope.launch(Dispatchers.IO) { _inventoryEntries.value = inventory.all() }
+        viewModelScope.launch(Dispatchers.IO) {
+            _inventoryEntries.value = inventory.all()
+            _review.value = reviewQueue.all()
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Review queue
+    // ------------------------------------------------------------------------
+
+    /** Queue an uncertain card with its photo; scanning goes on */
+    private fun queueForReview(scanId: Long, photo: Bitmap, reading: CardReading?, marker: Foil, printing: Printing?, reason: String) {
+        val reviewId = reviewQueue.add(photo, reading?.name.orEmpty(), reading?.collectorNumber.orEmpty(),
+            reading?.setCode.orEmpty(), marker, printing?.id, reason)
+        _scans.update { list -> list.map { if (it.id == scanId) it.copy(reviewId = reviewId) else it } }
+        _review.value = reviewQueue.all()
+        Log.i(TAG, "Review queue: #$scanId ($reason)")
+    }
+
+    /** The suggested printing of a review item (fetched again: only its id is kept) */
+    suspend fun suggestion(item: ReviewItem): Printing? = item.suggestedId?.let { id ->
+        kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { scryfall.byId(id) }.getOrNull() }
+    }
+
+    /** Ask the AI again about a review item's photo (it failed, e.g. no network): what it read, or null */
+    suspend fun identifyAgain(item: ReviewItem): CardReading? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val photo = item.image() ?: return@withContext null
+        identifier().identify(photo).second
+    }
+
+    /** Printings to choose from in a review (Scryfall search) */
+    suspend fun searchPrintings(name: String, setCode: String, number: String): List<Printing> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) { scryfall.printings(name, setCode, number) }
+
+    /** The finish a printing is suggested in, from its finishes and the ★/• marker */
+    fun suggestedFinish(printing: Printing, marker: Foil): Finish =
+        ScanResult(0, emptyBitmap, printing = printing, foil = finish(printing, marker).first).finish
+
+    /** Add a reviewed card and resolve the item */
+    fun addFromReview(item: ReviewItem, printing: Printing, finish: Finish) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val entryId = inventory.add(printing, finish)
+            reviewQueue.remove(item.id)
+            _scans.update { list -> list.map { if (it.reviewId == item.id) it.copy(reviewId = null, inventoryId = entryId, printing = printing) else it } }
+            _inventoryEntries.value = inventory.all()
+            _review.value = reviewQueue.all()
+        }
+    }
+
+    /** Drop a review item (the card is not added) */
+    fun skipReview(item: ReviewItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            reviewQueue.remove(item.id)
+            _scans.update { list -> list.map { if (it.reviewId == item.id) it.copy(reviewId = null) else it } }
+            _review.value = reviewQueue.all()
+        }
     }
 
     /** Add a scanned card to the inventory (unconfirmed cards: after the user checked it) */
@@ -357,17 +420,20 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch(aiDispatcher) {
             val start = System.nanoTime()
             lateinit var reading: CardReading
+            var marker = Foil.UNKNOWN
             val settings = _settings.value
             val result = try {
                 val identifier = identifier()
                 val (answer, read) = identifier.identify(card)
                 if (read == null) {
-                    fail(id, "The AI could not read the card" + (if (answer.isNotBlank()) ": \"${answer.take(120)}\"" else ""))
+                    val error = "The AI could not read the card" + (if (answer.isNotBlank()) ": \"${answer.take(120)}\"" else "")
+                    fail(id, error)
+                    if (settings.autoAdd) queueForReview(id, card, null, Foil.UNKNOWN, null, "The AI could not read the card")
                     return@launch
                 }
                 reading = read
                 // The ★/• corner is only at a known place on the flat, tightly cropped card
-                val marker = if (settings.detectFoil && foilCard != null) identifier.readFoilSymbol(foilCard) else Foil.UNKNOWN
+                marker = if (settings.detectFoil && foilCard != null) identifier.readFoilSymbol(foilCard) else Foil.UNKNOWN
                 val printing = scryfall.find(reading.name, reading.collectorNumber, reading.setCode)
                 val (foil, reason) = finish(printing, marker)
                 ScanResult(id, thumbnail, ScanResult.Status.DONE, reading, printing, foil, reason,
@@ -376,6 +442,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: Exception) {
                 Log.e(TAG, "Identification failed", e)
                 fail(id, e.message ?: e.toString())
+                // Not lost: the photo waits in the queue (a network or quota error, say)
+                if (settings.autoAdd) queueForReview(id, card, null, marker, null, "Identification failed: ${e.message?.take(80)}")
                 return@launch
             }
             Log.i(TAG, "Identified #$id: ${reading.name} #${reading.collectorNumber} [${reading.setCode}] -> " +
@@ -383,10 +451,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 " foil=${result.foil} in %.1f s".format(result.seconds) +
                 " - ${settings.provider.id}/${settings.model()} tokens ${result.usage}")
             // Confirmed printings go into the inventory right away (the Python scanner's auto_add);
-            // the others wait for the user to check them
+            // anything uncertain goes to the review queue and scanning goes on. With automatic
+            // adds off, every card waits for Add in the list.
             val added = if (settings.autoAdd && result.printing?.confirmed == true) inventory.add(result.printing, result.finish) else null
             _scans.update { list -> list.map { if (it.id == id) result.copy(inventoryId = added) else it } }
             if (added != null) _inventoryEntries.value = inventory.all()
+            if (settings.autoAdd && added == null) {
+                val why = result.printing?.let { "Check: matched by ${it.match.replace('_', ' ')}" } ?: "Not found on Scryfall"
+                queueForReview(id, card, reading, marker, result.printing, why)
+            }
         }
     }
 
@@ -417,6 +490,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     companion object {
+        private val emptyBitmap: Bitmap by lazy { Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888) }
         private const val TAG = "Scanner"
         private const val MAX_SCANS = 100
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -56,7 +57,9 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text("Settings", style = MaterialTheme.typography.titleLarge)
+            Text("Settings", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            // Every change is saved as it is made; Save just closes the page
+            Button(onClick = onBack) { Text("Save") }
         }
 
         Text("Vision AI", style = MaterialTheme.typography.titleMedium)
@@ -149,7 +152,7 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Add confirmed cards automatically")
-                Text("Cards matched by set + number go into the inventory right away (Undo in the list); the others wait for Add",
+                Text("Cards matched by set + number go into the inventory right away (Undo in the list); uncertain ones go to the review queue and scanning goes on. Off: every card waits for Add",
                     style = MaterialTheme.typography.bodySmall)
             }
             Switch(settings.autoAdd, { viewModel.updateSettings(settings.copy(autoAdd = it)) })
@@ -161,6 +164,7 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         NumberField("Still frames before capture", settings.stableFrames, "Consecutive still, sharp frames.") {
             viewModel.updateSettings(settings.copy(stableFrames = it.coerceIn(1, 60)))
         }
+        Button(onClick = onBack, Modifier.fillMaxWidth()) { Text("Save") }
     }
 }
 

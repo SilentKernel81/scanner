@@ -96,7 +96,7 @@ import com.cardscanner.detection.CardTracker
 import android.widget.Toast
 
 @Composable
-fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit, onInventory: () -> Unit) {
+fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit, onInventory: () -> Unit, onReview: () -> Unit) {
     val detection by viewModel.detection.collectAsStateWithLifecycle()
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val auto by viewModel.autoCapture.collectAsStateWithLifecycle()
@@ -108,6 +108,7 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit, onInvento
     val areaOn = settings.activeArea != null
 
     val entries by viewModel.inventoryEntries.collectAsStateWithLifecycle()
+    val review by viewModel.review.collectAsStateWithLifecycle()
     LaunchedEffect(message) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); viewModel.clearMessage() }
     }
@@ -160,21 +161,20 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit, onInvento
             IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings") }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (areaOn) {
-                Text("Fixed area", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary)
-                TextButton(onClick = { drawingArea = true }) { Text("Redraw") }
-            }
+            // Compact: the area's own switch is the highlighted crop icon above
+            if (areaOn) TextButton(onClick = { drawingArea = true }) { Text("Redraw area") }
             Spacer(Modifier.weight(1f))
             if (scans.isNotEmpty()) {
-                TextButton(onClick = viewModel::clearScans) {
-                    Icon(Icons.Default.DeleteSweep, null, Modifier.size(18.dp))
-                    Text("Clear", Modifier.padding(start = 4.dp))
+                IconButton(onClick = viewModel::clearScans) { Icon(Icons.Default.DeleteSweep, "Clear the list") }
+            }
+            if (review.isNotEmpty()) {
+                TextButton(onClick = onReview) {
+                    Text("Review ${review.size}", color = MaterialTheme.colorScheme.tertiary, maxLines = 1)
                 }
             }
             TextButton(onClick = onInventory) {
                 Icon(Icons.Default.Inventory2, null, Modifier.size(18.dp))
-                Text("Inventory (${entries.sumOf { it.quantity }})", Modifier.padding(start = 4.dp))
+                Text("${entries.sumOf { it.quantity }}", Modifier.padding(start = 4.dp), maxLines = 1)
             }
         }
         detection?.metrics?.let {
@@ -328,7 +328,11 @@ private fun ScanRow(scan: ScanResult, onAdd: () -> Unit, onUndo: () -> Unit) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Text("Identifying…", Modifier.padding(start = 8.dp))
                 }
-                ScanResult.Status.FAILED -> Text(scan.error ?: "Failed", color = MaterialTheme.colorScheme.error)
+                ScanResult.Status.FAILED -> {
+                    Text(scan.error ?: "Failed", color = MaterialTheme.colorScheme.error)
+                    if (scan.reviewId != null) Text("In the review queue", color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.bodySmall)
+                }
                 ScanResult.Status.DONE -> {
                     Text(printing?.name ?: scan.reading?.name.orEmpty(), fontWeight = FontWeight.SemiBold)
                     if (printing != null) {
@@ -347,7 +351,9 @@ private fun ScanRow(scan: ScanResult, onAdd: () -> Unit, onUndo: () -> Unit) {
                     scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (printing != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (scan.inventoryId != null) {
+                            if (scan.reviewId != null) {
+                                Text("In the review queue", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
+                            } else if (scan.inventoryId != null) {
                                 Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = Color(0xFF00C853))
                                 Text("In inventory (${scan.finish.label.lowercase()})", Modifier.padding(start = 4.dp),
                                     style = MaterialTheme.typography.bodySmall)

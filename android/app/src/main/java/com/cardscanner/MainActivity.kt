@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat
 import com.cardscanner.ui.ScannerScreen
 import com.cardscanner.ui.SettingsScreen
 import com.cardscanner.ui.InventoryScreen
+import com.cardscanner.ui.ReviewScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.opencv.android.OpenCVLoader
@@ -81,6 +82,7 @@ private fun App(viewModel: ScannerViewModel) {
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasCamera = it }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showInventory by rememberSaveable { mutableStateOf(false) }
+    var showReview by rememberSaveable { mutableStateOf(false) }
     // An export is ready: open the share sheet
     val share by viewModel.share.collectAsStateWithLifecycle()
     LaunchedEffect(share) {
@@ -92,11 +94,16 @@ private fun App(viewModel: ScannerViewModel) {
             BackHandler { showSettings = false }
             SettingsScreen(viewModel, onBack = { showSettings = false })
         }
+        showReview -> {
+            BackHandler { showReview = false }
+            ReviewScreen(viewModel, onClose = { showReview = false })
+        }
         showInventory -> {
             BackHandler { showInventory = false }
             InventoryScreen(viewModel, onBack = { showInventory = false })
         }
-        hasCamera -> ScannerScreen(viewModel, onSettings = { showSettings = true }, onInventory = { showInventory = true })
+        hasCamera -> ScannerScreen(viewModel, onSettings = { showSettings = true }, onInventory = { showInventory = true },
+            onReview = { showReview = true })
         else -> Column(
             Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.Center,

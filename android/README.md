@@ -12,6 +12,7 @@ Ported from the Python scanner - keep both in step:
 | `detection/CardTracker.kt` | `scanner.py` (`_is_card_settled`, `_new_card_arrived`, `_outline_flicker`; fixed area: `_fixed_area_step`, same thresholds) - no focus sweep: the phone's continuous autofocus |
 | `ai/CardIdentifier.kt`, `ai/Prompts.kt` | `card_identifier.py`, `prompts.py` (`BUILT_IN['mtg']`) |
 | `scryfall/Scryfall.kt` | `database.py:search_card_exact` (online, same `match` tags) |
+| `inventory/ReviewQueue.kt`, `ui/ReviewScreen.kt` | `review.py` + the web review: uncertain cards (not confirmed, not found, nothing read, AI errors) queued with their photo while adding automatically; review with suggestion, printing search, Identify again |
 | `inventory/Inventory.kt`, `inventory/Export.kt` | `inventory.py` (same table and merge key; confirmed cards added automatically like `auto_add`), `games/mtg.py` (`write_csv` - byte-identical, `ExportParityTest`; Moxfield) |
 
 ## Build and install
@@ -49,4 +50,4 @@ key, or the local server address (`http://<host>:11434` for Ollama; "Test / list
   captured once, all 13 matched by set + number or name + number. Outline mode not measured in auto yet.
 - Moxfield export writes the set code as Edition (Moxfield matches it; the Python export writes
   the set name, which Moxfield doesn't recognize).
-- Correcting a wrong printing (search / printing picker), CSV import, local card database (offline), Pokémon, prompt editor, API keys in the Android Keystore, per-ABI APKs (debug APK is ~110 MB).
+- Correcting a printing already added (the review only covers queued cards), CSV import, local card database (offline), Pokémon, prompt editor, API keys in the Android Keystore, per-ABI APKs (debug APK is ~110 MB).
