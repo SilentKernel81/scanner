@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -57,9 +58,7 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text("Settings", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            // Every change is saved as it is made; Save just closes the page
-            Button(onClick = onBack) { Text("Save") }
+            Text("Settings", style = MaterialTheme.typography.titleLarge)
         }
 
         Text("Vision AI", style = MaterialTheme.typography.titleMedium)
@@ -141,6 +140,9 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         }
 
         HorizontalDivider()
+        CardDataSection(viewModel)
+
+        HorizontalDivider()
         Text("Scanning", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -157,6 +159,10 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
             }
             Switch(settings.autoAdd, { viewModel.updateSettings(settings.copy(autoAdd = it)) })
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Capture sound", Modifier.weight(1f))
+            Switch(settings.sounds, { viewModel.updateSettings(settings.copy(sounds = it)) })
+        }
         NumberField("Minimum sharpness", settings.minSharpness,
             "Cards below it are not auto-captured. Lower it if cards never become Ready (see the live value under the camera).") {
             viewModel.updateSettings(settings.copy(minSharpness = it))
@@ -164,6 +170,7 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
         NumberField("Still frames before capture", settings.stableFrames, "Consecutive still, sharp frames.") {
             viewModel.updateSettings(settings.copy(stableFrames = it.coerceIn(1, 60)))
         }
+        // Every change is saved as it is made; Save just closes the page
         Button(onClick = onBack, Modifier.fillMaxWidth()) { Text("Save") }
     }
 }
@@ -198,4 +205,27 @@ private fun NumberField(label: String, value: Int, help: String, onChange: (Int)
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/** Offline card data: download / update / delete Scryfall's card list */
+@Composable
+private fun CardDataSection(viewModel: ScannerViewModel) {
+    val state by viewModel.cardDataState.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(state.printings) { if (state.printings != null) viewModel.checkCardDataUpdate() }
+    Text("Card data (offline)", style = MaterialTheme.typography.titleMedium)
+    Text(
+        if (state.printings != null) "%,d printings from Scryfall, %s".format(state.printings, state.updatedAt?.take(10).orEmpty()) +
+            (if (state.updateAvailable == true) " - newer data available" else "")
+        else "Not downloaded: cards are looked up on Scryfall's website. With the data (~80 MB download) lookups work offline and faster; card images and new cards still need the internet.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = viewModel::downloadCardData, enabled = !state.busy) {
+            Text(if (state.printings == null) "Download" else "Update")
+        }
+        if (state.printings != null) OutlinedButton(onClick = viewModel::deleteCardData, enabled = !state.busy) { Text("Delete") }
+        if (state.busy) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+    }
+    if (state.busy) Text("Keep the app open until it is done.", style = MaterialTheme.typography.bodySmall)
 }

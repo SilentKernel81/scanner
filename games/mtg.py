@@ -41,14 +41,20 @@ def write_csv(rows, file):
 
 
 def write_moxfield(rows, file):
-    """Moxfield collection import: Count,Name,Edition,Condition,Language,Foil,Collector Number,..."""
+    """
+    Moxfield collection import: Count,Name,Edition,Condition,Language,Foil,Collector Number,...
+    Edition is the set code: Moxfield matches it against its sets and, for a value it doesn't
+    know (the set name used to be written), takes the alphabetically first set of the card.
+    Rows without a set code (old CSV imports) fall back to the set name.
+    """
     writer = csv.writer(file)
     writer.writerow(['Count', 'Name', 'Edition', 'Condition', 'Language', 'Foil',
                      'Collector Number', 'Purchase Price', 'Tag'])
     for row in rows:
-        foil = {'foil': 'foil', 'surge': 'surge'}.get(row['finish'], '')
-        writer.writerow([row['quantity'], row['name'], row['set_name'], row['condition'], 'English',
-                         foil, row['number'], '0', ''])
+        # A surge foil is the foil finish of a surge foil printing (Moxfield's finishes: foil, etched)
+        foil = 'foil' if row['finish'] in ('foil', 'surge') else ''
+        writer.writerow([row['quantity'], row['name'], (row.get('set_code') or '').lower() or row['set_name'],
+                         row['condition'], 'English', foil, row['number'], '0', ''])
 
 
 class Magic(Game):

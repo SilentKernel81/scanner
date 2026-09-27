@@ -3,7 +3,9 @@ package com.cardscanner.scryfall
 import android.util.Log
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
 import java.text.Normalizer
@@ -43,9 +45,44 @@ data class Printing(
  * Order: set code + collector number (checked against the name), name + collector number,
  * name + set, name only. Results are tagged like the Python search (`match`).
  */
-class Scryfall(private val http: OkHttpClient) {
+class Scryfall(private val http: OkHttpClient, private val local: CardDatabase? = null) {
 
+    private val offline get() = local?.takeIf { it.ready }
+
+    /**
+     * The printing of a card read by the AI: from the offline card data when downloaded (a card
+     * missing there - newer than the data - is looked up online), else online
+     */
     fun find(name: String, collectorNumber: String, setCode: String): Printing? {
+        offline?.let { db -> findOffline(db, name, collectorNumber, setCode)?.let { return it } }
+        return findOnline(name, collectorNumber, setCode)
+    }
+
+    /** find() on the offline data: the same steps and match tags as online */
+    private fun findOffline(db: CardDatabase, name: String, collectorNumber: String, setCode: String): Printing? {
+        val numbers = numberVariants(collectorNumber)
+        var setNumber: Printing? = null
+        if (setCode.isNotEmpty() && numbers.isNotEmpty()) {
+            setNumber = db.bySetNumber(setCode, numbers)
+            if (setNumber != null && namesMatch(name, listOf(setNumber.name))) return setNumber.copy(match = "set_number")
+        }
+        val exactName = db.exactName(name) ?: return setNumber?.copy(match = "set_number_unverified")
+        val all = db.printingsOf(exactName)
+        if (numbers.isNotEmpty()) {
+            all.firstOrNull { it.collectorNumber in numbers }?.let { return it.copy(match = "name_number") }
+        }
+        if (setCode.isNotEmpty()) {
+            val inSet = all.filter { it.setCode.equals(setCode, true) }
+            if (inSet.isNotEmpty()) {
+                val wanted = numbers.firstOrNull()?.toIntOrNull()
+                val oneOff = wanted?.let { w -> inSet.firstOrNull { p -> leadingNumber(p.collectorNumber)?.let { it != w && digitsDifferByOne(w, it) } == true } }
+                return oneOff?.copy(match = "name_set_digit") ?: inSet.first().copy(match = "name_set")
+            }
+        }
+        return all.firstOrNull()?.copy(match = "name")
+    }
+
+    private fun findOnline(name: String, collectorNumber: String, setCode: String): Printing? {
         val numbers = numberVariants(collectorNumber)
         val set = setCode.lowercase()
 
@@ -80,7 +117,8 @@ class Scryfall(private val http: OkHttpClient) {
     }
 
     /** A printing by its Scryfall id (a review item's suggestion) */
-    fun byId(id: String): Printing? = get("/cards/$id")?.let { printing(it, "chosen") }
+    fun byId(id: String): Printing? =
+        offline?.byId(id)?.copy(match = "chosen") ?: get("/cards/$id")?.let { printing(it, "chosen") }
 
     /**
      * Printings to choose from in a review: set + number gives that printing; otherwise all
@@ -90,6 +128,14 @@ class Scryfall(private val http: OkHttpClient) {
     fun printings(name: String, setCode: String = "", number: String = ""): List<Printing> {
         val set = setCode.trim().lowercase()
         val numbers = numberVariants(number)
+        offline?.let { db ->
+            if (set.isNotEmpty() && numbers.isNotEmpty()) {
+                db.bySetNumber(set, numbers)?.takeIf { name.isBlank() || namesMatch(name, listOf(it.name)) }?.let { return listOf(it.copy(match = "chosen")) }
+            }
+            val all = db.exactName(name)?.let { db.printingsOf(it) }.orEmpty()
+            if (all.isNotEmpty()) return all.map { it.copy(match = "chosen") }
+                .sortedBy { if (set.isNotEmpty() && it.setCode.equals(set, ignoreCase = true)) 0 else 1 }
+        }
         if (set.isNotEmpty() && numbers.isNotEmpty()) {
             numbers.firstNotNullOfOrNull { get("/cards/$set/$it") }?.let { card ->
                 if (name.isBlank() || namesMatch(name, card)) return listOf(printing(card, "chosen"))
@@ -101,6 +147,87 @@ class Scryfall(private val http: OkHttpClient) {
             ?.optJSONArray("data") ?: return emptyList()
         val all = (0 until found.length()).map { printing(found.getJSONObject(it), "chosen") }
         return all.sortedBy { if (set.isNotEmpty() && it.setCode.equals(set, ignoreCase = true)) 0 else 1 }
+    }
+
+    private var sets: Pair<Set<String>, Map<String, String>>? = null
+
+    /**
+     * The set code for a file's set column: a set code as is ("hob", "PW26"), or a set name's
+     * code ("The Hobbit" -> "HOB"), from Scryfall's list of sets (read once); null if unknown.
+     */
+    fun resolveSet(value: String): String? {
+        if (value.isBlank()) return null
+        offline?.resolveSet(value)?.let { return it }
+        val (codes, names) = sets ?: run {
+            val data = get("/sets")?.optJSONArray("data") ?: return null
+            val all = (0 until data.length()).map { data.getJSONObject(it) }
+            (all.map { it.getString("code").uppercase() }.toSet() to
+                all.associate { searchKey(it.getString("name"))!! to it.getString("code").uppercase() }).also { sets = it }
+        }
+        return value.trim().uppercase().takeIf { it in codes } ?: names[searchKey(value)]
+    }
+
+    /** What to look up in `collection`: a printing by set + number, or a card by name (+ set) */
+    data class Identifier(val setCode: String = "", val number: String = "", val name: String = "")
+
+    /**
+     * Look up many cards at once (POST /cards/collection, 75 per request): the printing for each
+     * identifier, or null when Scryfall doesn't know it. Results are tagged "imported".
+     */
+    fun collection(identifiers: List<Identifier>): List<Printing?> {
+        val results = arrayOfNulls<Printing>(identifiers.size)
+        // Offline data first; what it lacks goes online
+        offline?.let { db ->
+            identifiers.forEachIndexed { i, id ->
+                results[i] = if (id.setCode.isNotEmpty() && id.number.isNotEmpty()) db.bySetNumber(id.setCode, numberVariants(id.number))
+                else db.exactName(id.name)?.let { exact -> db.printingsOf(exact).let { all ->
+                    all.firstOrNull { id.setCode.isNotEmpty() && it.setCode.equals(id.setCode, true) } ?: all.firstOrNull() } }
+                results[i] = results[i]?.copy(match = "imported")
+            }
+            val missing = identifiers.indices.filter { results[it] == null }
+            if (missing.isEmpty()) return results.toList()
+            val online = runCatching { collectionOnline(missing.map { identifiers[it] }) }.getOrNull() ?: return results.toList()
+            missing.forEachIndexed { k, i -> results[i] = online[k] }
+            return results.toList()
+        }
+        return collectionOnline(identifiers)
+    }
+
+    private fun collectionOnline(identifiers: List<Identifier>): List<Printing?> {
+        val results = arrayOfNulls<Printing>(identifiers.size)
+        identifiers.withIndex().chunked(75).forEachIndexed { batch, chunk ->
+            if (batch > 0) Thread.sleep(100)  // Scryfall asks for 50-100 ms between requests
+            val body = JSONObject().put("identifiers", org.json.JSONArray().apply {
+                chunk.forEach { (_, id) ->
+                    put(JSONObject().apply {
+                        if (id.setCode.isNotEmpty() && id.number.isNotEmpty()) {
+                            put("set", id.setCode.lowercase()); put("collector_number", id.number)
+                        } else {
+                            put("name", id.name)
+                            if (id.setCode.isNotEmpty()) put("set", id.setCode.lowercase())
+                        }
+                    })
+                }
+            })
+            val request = Request.Builder().url("$API/cards/collection")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", USER_AGENT).header("Accept", "application/json").build()
+            val found = http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Scryfall: HTTP ${response.code}")
+                JSONObject(response.body.string()).optJSONArray("data") ?: org.json.JSONArray()
+            }
+            // Results come back in request order, without the ones not found: match them up
+            val cards = (0 until found.length()).map { found.getJSONObject(it) }
+            for ((index, id) in chunk) {
+                val card = cards.firstOrNull { c ->
+                    if (id.setCode.isNotEmpty() && id.number.isNotEmpty())
+                        c.optString("set").equals(id.setCode, true) && numberVariants(id.number).contains(c.optString("collector_number"))
+                    else namesMatch(id.name, c) && (id.setCode.isEmpty() || c.optString("set").equals(id.setCode, true))
+                }
+                results[index] = card?.let { printing(it, "imported") }
+            }
+        }
+        return results.toList()
     }
 
     private fun get(path: String, vararg query: Pair<String, String>): JSONObject? {
@@ -118,36 +245,39 @@ class Scryfall(private val http: OkHttpClient) {
         get("/cards/search", "q" to query, "unique" to "prints", "include_extras" to "true")
             ?.optJSONArray("data")?.optJSONObject(0)
 
-    private fun printing(card: JSONObject, match: String): Printing {
-        val images = card.optJSONObject("image_uris")
-            ?: card.optJSONArray("card_faces")?.optJSONObject(0)?.optJSONObject("image_uris")
-        val prices = card.optJSONObject("prices")
-        val finishes = card.optJSONArray("finishes")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
-        fun price(key: String) = prices?.optString(key)?.takeIf { it.isNotEmpty() && it != "null" }
-        fun strings(array: org.json.JSONArray?) = array?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
-        val faces = card.optJSONArray("card_faces")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } }.orEmpty()
-        // Double-faced cards keep mana cost and colors on their faces
-        fun faced(key: String) = card.optString(key).ifEmpty { faces.map { it.optString(key) }.filter { it.isNotEmpty() }.joinToString(" // ") }
-        return Printing(
-            id = card.optString("id"),
-            name = card.getString("name"),
-            setCode = card.optString("set").uppercase(),
-            setName = card.optString("set_name"),
-            collectorNumber = card.optString("collector_number"),
-            rarity = card.optString("rarity"),
-            typeLine = faced("type_line"),
-            manaCost = faced("mana_cost"),
-            colors = if (card.has("colors")) strings(card.optJSONArray("colors")) else strings(faces.firstOrNull()?.optJSONArray("colors")),
-            finishes = finishes,
-            surgeFoil = "surgefoil" in strings(card.optJSONArray("promo_types")),
-            imageUrl = images?.optString("normal"),
-            scryfallUrl = card.optString("scryfall_uri"),
-            usd = price("usd"), usdFoil = price("usd_foil"), eur = price("eur"), eurFoil = price("eur_foil"),
-            match = match,
-        )
-    }
+    private fun printing(card: JSONObject, match: String): Printing = printingOf(card, match)
 
     companion object {
+        /** A printing from Scryfall's card JSON (API answers and the bulk data file) */
+        fun printingOf(card: JSONObject, match: String): Printing {
+            val images = card.optJSONObject("image_uris")
+                ?: card.optJSONArray("card_faces")?.optJSONObject(0)?.optJSONObject("image_uris")
+            val prices = card.optJSONObject("prices")
+            val finishes = card.optJSONArray("finishes")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
+            fun price(key: String) = prices?.optString(key)?.takeIf { it.isNotEmpty() && it != "null" }
+            fun strings(array: org.json.JSONArray?) = array?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
+            val faces = card.optJSONArray("card_faces")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } }.orEmpty()
+            // Double-faced cards keep mana cost and colors on their faces
+            fun faced(key: String) = card.optString(key).ifEmpty { faces.map { it.optString(key) }.filter { it.isNotEmpty() }.joinToString(" // ") }
+            return Printing(
+                id = card.optString("id"),
+                name = card.getString("name"),
+                setCode = card.optString("set").uppercase(),
+                setName = card.optString("set_name"),
+                collectorNumber = card.optString("collector_number"),
+                rarity = card.optString("rarity"),
+                typeLine = faced("type_line"),
+                manaCost = faced("mana_cost"),
+                colors = if (card.has("colors")) strings(card.optJSONArray("colors")) else strings(faces.firstOrNull()?.optJSONArray("colors")),
+                finishes = finishes,
+                surgeFoil = "surgefoil" in strings(card.optJSONArray("promo_types")),
+                imageUrl = images?.optString("normal"),
+                scryfallUrl = card.optString("scryfall_uri"),
+                usd = price("usd"), usdFoil = price("usd_foil"), eur = price("eur"), eurFoil = price("eur_foil"),
+                match = match,
+            )
+        }
+
         private const val TAG = "Scryfall"
         private const val API = "https://api.scryfall.com"
         const val USER_AGENT = "CardScanner-Android/0.1"
@@ -181,9 +311,13 @@ class Scryfall(private val http: OkHttpClient) {
          * legendary name ("Thanos" / "Thanos, the Mad Titan"), a double-faced card's front face,
          * or a close spelling. Checks the flavor name too. (database.py:names_match)
          */
-        fun namesMatch(query: String, card: JSONObject): Boolean {
+        fun namesMatch(query: String, card: JSONObject): Boolean =
+            namesMatch(query, listOf(card.optString("name"), card.optString("flavor_name")))
+
+        /** namesMatch against a card's name(s) - e.g. its name and flavor name */
+        fun namesMatch(query: String, names: List<String>): Boolean {
             val queryKey = searchKey(query) ?: return false
-            for (fullName in listOf(card.optString("name"), card.optString("flavor_name"))) {
+            for (fullName in names) {
                 for (face in fullName.split(" // ")) {
                     val key = searchKey(face) ?: continue
                     if (key == queryKey || key.startsWith(queryKey) || queryKey.startsWith(key)) return true

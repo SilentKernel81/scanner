@@ -518,8 +518,9 @@ Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt on
 the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the
 migration checks that the card count is unchanged, and it runs in one transaction.
 
-Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV;
-Pokémon: CSV with a `Finish` column); CSV import reads the `Finish` column or the older
+Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV -
+`Edition` is the set code, which Moxfield matches; with the set name it took the alphabetically
+first set of the card; surge foils go out as `foil`; Pokémon: CSV with a `Finish` column); CSV import reads the `Finish` column or the older
 `Foil`/`Surge` columns and merges duplicates.
 
 **`pokemon_cards`** / **`pokemon_sets`** (created by `games/pokemon.py`) - TCGdex data: one

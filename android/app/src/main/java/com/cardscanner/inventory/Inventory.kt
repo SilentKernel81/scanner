@@ -80,7 +80,7 @@ class Inventory(context: Context) : SQLiteOpenHelper(context, "inventory.db", nu
      * condition and finish. Returns the entry's id.
      */
     @Synchronized
-    fun add(printing: Printing, finish: Finish, condition: String = "Near Mint", quantity: Int = 1): Long {
+    fun add(printing: Printing, finish: Finish, condition: String = "Near Mint", quantity: Int = 1, timestamp: String = now()): Long {
         // Foil and surge foil copies are priced as foils; fall back to the other price if missing
         val prices = if (finish == Finish.REGULAR) listOf(printing.usd, printing.usdFoil) else listOf(printing.usdFoil, printing.usd)
         val price = prices.firstNotNullOfOrNull { it?.toDoubleOrNull() } ?: 0.0
@@ -90,10 +90,10 @@ class Inventory(context: Context) : SQLiteOpenHelper(context, "inventory.db", nu
         try {
             val existing = findId(db, printing.name, printing.setName, printing.collectorNumber, condition, finish.key)
             val id = if (existing != null) {
-                db.execSQL("""UPDATE inventory SET quantity = quantity + ?, timestamp = ?, price_usd = ?,
+                db.execSQL("""UPDATE inventory SET quantity = quantity + ?, timestamp = MAX(timestamp, ?), price_usd = ?,
                               card_id = COALESCE(?, card_id), set_code = COALESCE(?, set_code),
                               image_url = COALESCE(?, image_url) WHERE id = ?""",
-                    arrayOf<Any?>(quantity, now(), price, printing.id, printing.setCode, printing.imageUrl, existing))
+                    arrayOf<Any?>(quantity, timestamp, price, printing.id, printing.setCode, printing.imageUrl, existing))
                 existing
             } else {
                 db.insertOrThrow("inventory", null, ContentValues().apply {
@@ -112,7 +112,7 @@ class Inventory(context: Context) : SQLiteOpenHelper(context, "inventory.db", nu
                     put("quantity", quantity)
                     put("condition", condition)
                     put("finish", finish.key)
-                    put("timestamp", now())
+                    put("timestamp", timestamp)
                     put("image_url", printing.imageUrl)
                 })
             }
@@ -159,6 +159,49 @@ class Inventory(context: Context) : SQLiteOpenHelper(context, "inventory.db", nu
                 }, "id = ?", arrayOf(id.toString()))
             }
             db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /**
+     * Correct an entry's printing (a misread card): its card fields become the printing's, priced
+     * for its finish. If that makes it the same card + condition + finish as another entry, the two
+     * are merged. Returns the id the copies ended up in.
+     */
+    @Synchronized
+    fun changePrinting(id: Long, printing: Printing): Long? {
+        val entry = get(id) ?: return null
+        val prices = if (entry.finish == Finish.REGULAR) listOf(printing.usd, printing.usdFoil) else listOf(printing.usdFoil, printing.usd)
+        val price = prices.firstNotNullOfOrNull { it?.toDoubleOrNull() } ?: 0.0
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val other = findId(db, printing.name, printing.setName, printing.collectorNumber, entry.condition, entry.finish.key)
+            val result = if (other != null && other != id) {
+                // Already have that printing (same condition and finish): the copies join it
+                db.execSQL("UPDATE inventory SET quantity = quantity + ?, timestamp = ? WHERE id = ?", arrayOf<Any?>(entry.quantity, now(), other))
+                db.execSQL("DELETE FROM inventory WHERE id = ?", arrayOf<Any?>(id))
+                other
+            } else {
+                db.update("inventory", ContentValues().apply {
+                    put("card_id", printing.id)
+                    put("card_name", printing.name)
+                    put("set_name", printing.setName)
+                    put("set_code", printing.setCode)
+                    put("card_number", printing.collectorNumber)
+                    put("rarity", printing.rarity)
+                    put("type_line", printing.typeLine)
+                    put("mana_cost", printing.manaCost)
+                    put("colors", printing.colors.joinToString(", ").ifEmpty { "Colorless" })
+                    put("color_identity", colorIdentity(printing.colors))
+                    put("price_usd", price)
+                    put("image_url", printing.imageUrl)
+                }, "id = ?", arrayOf(id.toString()))
+                id
+            }
+            db.setTransactionSuccessful()
+            return result
         } finally {
             db.endTransaction()
         }

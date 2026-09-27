@@ -119,7 +119,7 @@ keys saved in the web interface take precedence.
 
 | Provider | Setting | Key / endpoint |
 |---|---|---|
-| Google Gemini | `gemini` | `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/app/apikey)) |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/app/apikey)) - default model Flash-Lite: same reads as Flash on a test of 10 cards at ~1/4 of the cost (~$0.79 per 1000 cards, Sept 2026) |
 | OpenAI | `openai` | `OPENAI_API_KEY` |
 | Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` |
 | Local (Ollama, vLLM, LM Studio) | `local` | `vision_ai.local.endpoint` in `config.yaml`, or `LOCAL_AI_ENDPOINT` |

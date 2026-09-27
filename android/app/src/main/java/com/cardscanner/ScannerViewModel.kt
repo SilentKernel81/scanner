@@ -19,6 +19,7 @@ import com.cardscanner.inventory.ExportFormat
 import com.cardscanner.inventory.Finish
 import com.cardscanner.inventory.Inventory
 import com.cardscanner.inventory.InventoryEntry
+import com.cardscanner.inventory.parseInventoryCsv
 import com.cardscanner.inventory.ReviewItem
 import com.cardscanner.inventory.ReviewQueue
 import com.cardscanner.detection.CardTracker
@@ -72,7 +73,47 @@ data class ScanResult(
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
     private val http = CardIdentifier.httpClient()
-    private val scryfall = Scryfall(http)
+    private val cardData = com.cardscanner.scryfall.CardDatabase(application, http)
+    private val scryfall = Scryfall(http, cardData)
+
+    /** Offline card data: what is downloaded, or the download's progress / error */
+    data class CardDataState(val printings: Int? = null, val updatedAt: String? = null, val busy: Boolean = false,
+                             val message: String? = null, val updateAvailable: Boolean? = null)
+
+    private val _cardDataState = MutableStateFlow(CardDataState())
+    val cardDataState: StateFlow<CardDataState> = _cardDataState.asStateFlow()
+
+    private fun refreshCardData(message: String? = null) {
+        val info = cardData.info()
+        _cardDataState.value = CardDataState(info?.first, info?.second, message = message)
+    }
+
+    /** Check Scryfall for newer card data (Settings) */
+    fun checkCardDataUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _cardDataState.update { it.copy(updateAvailable = cardData.updateAvailable()) }
+        }
+    }
+
+    /** Download (or update) the offline card data - a few minutes, ~80 MB */
+    fun downloadCardData() {
+        if (_cardDataState.value.busy) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _cardDataState.update { it.copy(busy = true, message = "Downloading card data from Scryfall…") }
+            val started = System.currentTimeMillis()
+            try {
+                cardData.download { progress -> _cardDataState.update { it.copy(message = progress) } }
+                refreshCardData("Done in ${(System.currentTimeMillis() - started) / 1000} s")
+            } catch (e: Exception) {
+                Log.e(TAG, "Card data download failed", e)
+                refreshCardData("Download failed: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteCardData() {
+        viewModelScope.launch(Dispatchers.IO) { cardData.delete(); refreshCardData() }
+    }
     private val nextId = AtomicLong()
     private val inventory = Inventory(application)
     private val reviewQueue = ReviewQueue(application)
@@ -89,6 +130,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         refreshInventory()
+        viewModelScope.launch(Dispatchers.IO) { refreshCardData() }
     }
 
     private val _settings = MutableStateFlow(AppSettings.load(application))
@@ -267,6 +309,60 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Correct the printing of an inventory entry (search in the inventory's edit dialog) */
+    fun changePrinting(id: Long, printing: Printing) {
+        viewModelScope.launch(Dispatchers.IO) {
+            inventory.changePrinting(id, printing)
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    /** Progress / result of a CSV import, shown on the inventory screen */
+    private val _importStatus = MutableStateFlow<String?>(null)
+    val importStatus: StateFlow<String?> = _importStatus.asStateFlow()
+
+    fun clearImportStatus() { _importStatus.value = null }
+
+    /**
+     * Import an inventory CSV (this app's / the Python scanner's export, or Moxfield's): every row
+     * is looked up on Scryfall by set + number (then by name) and merged into the inventory with
+     * its quantity, condition and finish, at today's price.
+     */
+    fun importCsv(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _importStatus.value = "Reading the file…"
+                val text = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                val rows = parseInventoryCsv(text)
+                if (rows.isEmpty()) { _importStatus.value = "No cards in the file"; return@launch }
+                _importStatus.value = "Looking up ${rows.size} cards on Scryfall…"
+                val identifiers = rows.map { Scryfall.Identifier(scryfall.resolveSet(it.set).orEmpty(), it.number, it.name) }
+                val found = scryfall.collection(identifiers).toMutableList()
+                // Not found by set + number (a number typed differently, an unknown set): by name
+                val retry = found.indices.filter { found[it] == null }
+                if (retry.isNotEmpty()) {
+                    val byName = scryfall.collection(retry.map { identifiers[it].copy(number = "") })
+                    retry.forEachIndexed { i, index -> found[index] = byName[i]?.copy(match = "imported_by_name") }
+                }
+                var cards = 0
+                val missing = ArrayList<String>()
+                rows.forEachIndexed { i, row ->
+                    val printing = found[i]
+                    if (printing == null) missing.add(row.name)
+                    else { inventory.add(printing, row.finish, row.condition, row.quantity, row.timestamp ?: Inventory.now()); cards += row.quantity }
+                }
+                _inventoryEntries.value = inventory.all()
+                val byName = found.count { it?.match == "imported_by_name" }
+                _importStatus.value = "Imported $cards cards (${rows.size - missing.size} of ${rows.size} rows)" +
+                    (if (byName > 0) ". $byName found by name only - check their printing" else "") +
+                    (if (missing.isNotEmpty()) ". Not found: ${missing.take(10).joinToString(", ")}" + (if (missing.size > 10) ", …" else "") else "")
+            } catch (e: Exception) {
+                Log.e(TAG, "Import failed", e)
+                _importStatus.value = "Import failed: ${e.message}"
+            }
+        }
+    }
+
     fun clearInventory() {
         viewModelScope.launch(Dispatchers.IO) {
             inventory.clear()
@@ -349,6 +445,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private fun capture(state: CardTracker.State) {
         val capture = imageCapture ?: return
         if (!capturing.compareAndSet(false, true)) return
+        if (_settings.value.sounds) Sounds.capture()
         capture.takePicture(captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 val card = try {

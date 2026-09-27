@@ -22,6 +22,8 @@ data class AppSettings(
     val fixedArea: List<Double>? = null,
     /** Add confirmed cards (set + number match) to the inventory without asking */
     val autoAdd: Boolean = true,
+    /** Sound effects (a click on each capture) */
+    val sounds: Boolean = true,
 ) {
     /** The fixed area in use, or null (outline mode) */
     val activeArea get() = fixedArea?.takeIf { fixedAreaEnabled }
@@ -45,6 +47,7 @@ data class AppSettings(
                 rotation = prefs.getInt("rotation", 0),
                 fixedAreaEnabled = prefs.getBoolean("fixed_area_enabled", false),
                 autoAdd = prefs.getBoolean("auto_add", true),
+                sounds = prefs.getBoolean("sounds", true),
                 fixedArea = prefs.getString("fixed_area", null)?.split(",")?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 4 },
             )
         }
@@ -64,6 +67,7 @@ data class AppSettings(
             putInt("rotation", rotation)
             putBoolean("fixed_area_enabled", fixedAreaEnabled)
             putBoolean("auto_add", autoAdd)
+            putBoolean("sounds", sounds)
             putString("fixed_area", fixedArea?.joinToString(","))
         }.apply()
     }

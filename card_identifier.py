@@ -28,9 +28,11 @@ class CardIdentifier:
 
     # Available models for each provider (first entry is the default)
     AVAILABLE_MODELS = {
+        # Flash-Lite first: on 10 cards it read the same as Flash for ~1/4 of the cost in half the
+        # time (Flash spends ~90% of its output thinking; 2026-09-26: $0.79 vs $3.22 per 1000 cards)
         'gemini': [
-            'gemini-flash-latest',
             'gemini-flash-lite-latest',
+            'gemini-flash-latest',
             'gemini-pro-latest',
             'gemini-2.5-flash',
             'gemini-2.5-flash-lite',
