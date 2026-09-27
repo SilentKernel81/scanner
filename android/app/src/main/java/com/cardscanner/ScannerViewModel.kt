@@ -1,6 +1,7 @@
 package com.cardscanner
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.util.Log
@@ -13,6 +14,11 @@ import androidx.lifecycle.viewModelScope
 import com.cardscanner.ai.CardIdentifier
 import com.cardscanner.ai.CardReading
 import com.cardscanner.ai.Foil
+import com.cardscanner.ai.Usage
+import com.cardscanner.inventory.ExportFormat
+import com.cardscanner.inventory.Finish
+import com.cardscanner.inventory.Inventory
+import com.cardscanner.inventory.InventoryEntry
 import com.cardscanner.detection.CardTracker
 import com.cardscanner.detection.findCardOutline
 import com.cardscanner.detection.scaled
@@ -45,7 +51,18 @@ data class ScanResult(
     val foilReason: String? = null,
     val seconds: Double? = null,
     val error: String? = null,
+    /** Tokens used by the AI requests for this card */
+    val usage: Usage? = null,
+    /** The inventory entry this card was added to (null: not added) */
+    val inventoryId: Long? = null,
 ) {
+    /** The finish it is added as: surge foil printings' foils are surge foils */
+    val finish get() = when {
+        foil != true -> Finish.REGULAR
+        printing?.surgeFoil == true -> Finish.SURGE
+        else -> Finish.FOIL
+    }
+
     enum class Status { IDENTIFYING, DONE, FAILED }
 }
 
@@ -53,6 +70,18 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private val http = CardIdentifier.httpClient()
     private val scryfall = Scryfall(http)
     private val nextId = AtomicLong()
+    private val inventory = Inventory(application)
+
+    private val _inventoryEntries = MutableStateFlow<List<InventoryEntry>>(emptyList())
+    val inventoryEntries: StateFlow<List<InventoryEntry>> = _inventoryEntries.asStateFlow()
+
+    /** Files to share (an export): the screen opens the share sheet */
+    private val _share = MutableStateFlow<Intent?>(null)
+    val share: StateFlow<Intent?> = _share.asStateFlow()
+
+    init {
+        refreshInventory()
+    }
 
     private val _settings = MutableStateFlow(AppSettings.load(application))
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
@@ -129,6 +158,84 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     fun clearMessage() { _message.value = null }
 
     fun clearScans() { _scans.value = emptyList() }
+
+    // ------------------------------------------------------------------------
+    // Inventory
+    // ------------------------------------------------------------------------
+
+    private fun refreshInventory() {
+        viewModelScope.launch(Dispatchers.IO) { _inventoryEntries.value = inventory.all() }
+    }
+
+    /** Add a scanned card to the inventory (unconfirmed cards: after the user checked it) */
+    fun addScan(scanId: Long) {
+        val scan = _scans.value.firstOrNull { it.id == scanId } ?: return
+        val printing = scan.printing ?: return
+        if (scan.inventoryId != null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val entryId = inventory.add(printing, scan.finish)
+            _scans.update { list -> list.map { if (it.id == scanId) it.copy(inventoryId = entryId) else it } }
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    /** Take a scanned card back out of the inventory */
+    fun undoScan(scanId: Long) {
+        val entryId = _scans.value.firstOrNull { it.id == scanId }?.inventoryId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            inventory.remove(entryId)
+            _scans.update { list -> list.map { if (it.id == scanId) it.copy(inventoryId = null) else it } }
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    fun updateEntry(id: Long, quantity: Int, condition: String, finish: Finish) {
+        viewModelScope.launch(Dispatchers.IO) {
+            inventory.update(id, quantity, condition, finish)
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    fun deleteEntry(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            inventory.delete(id)
+            _scans.update { list -> list.map { if (it.inventoryId == id) it.copy(inventoryId = null) else it } }
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    fun clearInventory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            inventory.clear()
+            _scans.update { list -> list.map { it.copy(inventoryId = null) } }
+            _inventoryEntries.value = inventory.all()
+        }
+    }
+
+    /**
+     * Write the inventory in an export format to the app's cache and hand it to the share sheet
+     * (save to Files / Drive, e-mail, ...)
+     */
+    fun export(format: ExportFormat) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val dir = java.io.File(app.cacheDir, "exports").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }  // only the latest export is kept
+            val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            val file = java.io.File(dir, "${format.filePrefix}_$stamp.csv")
+            file.writeText(format.write(inventory.all()))
+            val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, file.name)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            _share.value = Intent.createChooser(send, "Export ${format.label}")
+        }
+    }
+
+    fun shareHandled() { _share.value = null }
 
     private fun identifier() = _settings.value.let {
         CardIdentifier(it.provider, it.model(), it.apiKey(), it.localUrl, http)
@@ -250,8 +357,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch(aiDispatcher) {
             val start = System.nanoTime()
             lateinit var reading: CardReading
+            val settings = _settings.value
             val result = try {
-                val settings = _settings.value
                 val identifier = identifier()
                 val (answer, read) = identifier.identify(card)
                 if (read == null) {
@@ -264,7 +371,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 val printing = scryfall.find(reading.name, reading.collectorNumber, reading.setCode)
                 val (foil, reason) = finish(printing, marker)
                 ScanResult(id, thumbnail, ScanResult.Status.DONE, reading, printing, foil, reason,
-                    seconds = (System.nanoTime() - start) / 1e9,
+                    seconds = (System.nanoTime() - start) / 1e9, usage = identifier.usage,
                     error = if (printing == null) "Not found on Scryfall" else null)
             } catch (e: Exception) {
                 Log.e(TAG, "Identification failed", e)
@@ -273,8 +380,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             }
             Log.i(TAG, "Identified #$id: ${reading.name} #${reading.collectorNumber} [${reading.setCode}] -> " +
                 (result.printing?.let { "${it.name} ${it.setCode} #${it.collectorNumber} (${it.match})" } ?: "not found") +
-                " foil=${result.foil} in %.1f s".format(result.seconds))
-            _scans.update { list -> list.map { if (it.id == id) result else it } }
+                " foil=${result.foil} in %.1f s".format(result.seconds) +
+                " - ${settings.provider.id}/${settings.model()} tokens ${result.usage}")
+            // Confirmed printings go into the inventory right away (the Python scanner's auto_add);
+            // the others wait for the user to check them
+            val added = if (settings.autoAdd && result.printing?.confirmed == true) inventory.add(result.printing, result.finish) else null
+            _scans.update { list -> list.map { if (it.id == id) result.copy(inventoryId = added) else it } }
+            if (added != null) _inventoryEntries.value = inventory.all()
         }
     }
 

@@ -20,6 +20,8 @@ data class AppSettings(
     val fixedAreaEnabled: Boolean = false,
     /** The area: x1, y1, x2, y2 as fractions of the (turned) camera frame */
     val fixedArea: List<Double>? = null,
+    /** Add confirmed cards (set + number match) to the inventory without asking */
+    val autoAdd: Boolean = true,
 ) {
     /** The fixed area in use, or null (outline mode) */
     val activeArea get() = fixedArea?.takeIf { fixedAreaEnabled }
@@ -42,6 +44,7 @@ data class AppSettings(
                 stableFrames = prefs.getInt("stable_frames", 5),
                 rotation = prefs.getInt("rotation", 0),
                 fixedAreaEnabled = prefs.getBoolean("fixed_area_enabled", false),
+                autoAdd = prefs.getBoolean("auto_add", true),
                 fixedArea = prefs.getString("fixed_area", null)?.split(",")?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 4 },
             )
         }
@@ -60,6 +63,7 @@ data class AppSettings(
             putInt("stable_frames", stableFrames)
             putInt("rotation", rotation)
             putBoolean("fixed_area_enabled", fixedAreaEnabled)
+            putBoolean("auto_add", autoAdd)
             putString("fixed_area", fixedArea?.joinToString(","))
         }.apply()
     }

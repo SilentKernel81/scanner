@@ -18,13 +18,28 @@ data class CardReading(val name: String, val collectorNumber: String, val setCod
 
 enum class Foil { FOIL, NON_FOIL, UNKNOWN }
 
+/**
+ * Tokens used by the requests for one card, as the providers report them. `thinking` is part of
+ * `output` (billed as output). `cost` in USD when the provider reports it (OpenRouter).
+ */
+data class Usage(val input: Int = 0, val output: Int = 0, val thinking: Int = 0, val cost: Double? = null) {
+    operator fun plus(o: Usage) = Usage(input + o.input, output + o.output, thinking + o.thinking,
+        if (cost == null && o.cost == null) null else (cost ?: 0.0) + (o.cost ?: 0.0))
+}
+
 enum class Provider(val id: String, val label: String, val needsKey: Boolean, val models: List<String>) {
-    // First model of each list is the default (same lists as card_identifier.py)
+    // First model of each list is the default (lists from card_identifier.py; Gemini's default differs)
+    // Flash-Lite first: on 10 cards it read the same as Flash for ~1/4 of the cost in half the
+    // time (Flash spends ~90% of its output thinking; 2026-09-26: $0.79 vs $3.22 per 1000 cards)
     GEMINI("gemini", "Google Gemini", true, listOf(
-        "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest",
+        "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest",
         "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro")),
     OPENAI("openai", "OpenAI", true, listOf("gpt-4.1-mini", "gpt-4.1", "gpt-4o", "gpt-4o-mini")),
     ANTHROPIC("anthropic", "Anthropic Claude", true, listOf("claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-5-5")),
+    // OpenRouter: one key for many providers' models; ":free" models cost nothing (rate limited)
+    OPENROUTER("openrouter", "OpenRouter", true, listOf(
+        "qwen/qwen3.8-27b:free", "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free",
+        "google/gemini-flash-latest", "openai/gpt-4.1-mini")),
     LOCAL("local", "Local server (Ollama)", false, listOf("qwen3-vl:4b", "qwen3-vl:8b", "llava:7b", "moondream"));
 
     companion object {
@@ -43,6 +58,10 @@ class CardIdentifier(
     localUrl: String,
     private val http: OkHttpClient,
 ) {
+    /** Tokens used by this identifier's requests so far (one identifier serves one card) */
+    var usage = Usage()
+        private set
+
     private val localBase = localUrl.trim().trimEnd('/').removeSuffix("/v1/chat/completions").trimEnd('/')
 
     /** Identify a card from its perspective-corrected image; returns (raw answer, reading) */
@@ -95,7 +114,16 @@ class CardIdentifier(
         Provider.GEMINI -> askGemini(image, prompt)
         Provider.OPENAI -> askOpenAi(image, prompt, maxTokens)
         Provider.ANTHROPIC -> askAnthropic(image, prompt, maxTokens)
+        Provider.OPENROUTER -> askOpenRouter(image, prompt, maxTokens)
         Provider.LOCAL -> askLocal(image, prompt, maxTokens)
+    }
+
+    /** Add the token counts of an OpenAI-style response (OpenAI, OpenRouter, OpenAI-compatible servers) */
+    private fun countOpenAiUsage(json: JSONObject) {
+        val u = json.optJSONObject("usage") ?: return
+        usage += Usage(u.optInt("prompt_tokens"), u.optInt("completion_tokens"),
+            u.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens") ?: 0,
+            if (u.has("cost")) u.optDouble("cost") else null)
     }
 
     private fun post(url: String, body: JSONObject, headers: Map<String, String> = emptyMap()): JSONObject {
@@ -117,6 +145,11 @@ class CardIdentifier(
             .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", image))))))
         val json = post("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent", body,
             mapOf("x-goog-api-key" to requireKey()))
+        json.optJSONObject("usageMetadata")?.let { u ->
+            // candidatesTokenCount excludes the thinking; both are billed as output
+            val thoughts = u.optInt("thoughtsTokenCount")
+            usage += Usage(u.optInt("promptTokenCount"), u.optInt("candidatesTokenCount") + thoughts, thoughts)
+        }
         val parts = json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
         return (0 until parts.length()).joinToString("") { parts.getJSONObject(it).optString("text") }.trim()
     }
@@ -130,6 +163,7 @@ class CardIdentifier(
     private fun askOpenAi(image: String, prompt: String, maxTokens: Int): String {
         val body = JSONObject().put("model", model).put("messages", openAiMessages(image, prompt)).put("max_tokens", maxTokens)
         val json = post("https://api.openai.com/v1/chat/completions", body, mapOf("Authorization" to "Bearer ${requireKey()}"))
+        countOpenAiUsage(json)
         return json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim()
     }
 
@@ -142,7 +176,27 @@ class CardIdentifier(
                 .put(JSONObject().put("type", "text").put("text", prompt)))))
         val json = post("https://api.anthropic.com/v1/messages", body,
             mapOf("x-api-key" to requireKey(), "anthropic-version" to "2023-06-01"))
+        json.optJSONObject("usage")?.let { usage += Usage(it.optInt("input_tokens"), it.optInt("output_tokens")) }
         return json.getJSONArray("content").getJSONObject(0).getString("text").trim()
+    }
+
+    /**
+     * OpenRouter (OpenAI-compatible). Reasoning off: reasoning tokens count against max_tokens
+     * and would leave an empty answer; the budget still leaves room for models that reason anyway.
+     */
+    private fun askOpenRouter(image: String, prompt: String, maxTokens: Int): String {
+        val body = JSONObject().put("model", model).put("messages", openAiMessages(image, prompt))
+            .put("max_tokens", maxOf(maxTokens, 1000))
+            .put("temperature", 0)
+            .put("reasoning", JSONObject().put("effort", "none"))
+            .put("usage", JSONObject().put("include", true))  // report the cost
+        val json = post("https://openrouter.ai/api/v1/chat/completions", body, mapOf(
+            "Authorization" to "Bearer ${requireKey()}",
+            "X-Title" to "Card Scanner",  // app name in OpenRouter's activity list
+        ))
+        json.optJSONObject("error")?.let { throw IOException("OpenRouter: ${it.optString("message")}") }
+        countOpenAiUsage(json)
+        return json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
     }
 
     /** Local server: Ollama's native /api/chat first, then the OpenAI-compatible endpoint (vLLM, LM Studio) */
@@ -158,7 +212,9 @@ class CardIdentifier(
                 .put("keep_alive", OLLAMA_KEEP_ALIVE)
                 // num_predict caps the answer: a model reasoning aloud would write hundreds of tokens
                 .put("options", JSONObject().put("temperature", 0).put("num_predict", maxOf(maxTokens, 50)))
-            post("$localBase/api/chat", body).getJSONObject("message").getString("content").trim()
+            val json = post("$localBase/api/chat", body)
+            usage += Usage(json.optInt("prompt_eval_count"), json.optInt("eval_count"))
+            json.getJSONObject("message").getString("content").trim()
         } catch (e: Exception) {
             Log.w(TAG, "Ollama native API failed, trying the OpenAI-compatible endpoint: $e")
             null
@@ -166,7 +222,7 @@ class CardIdentifier(
         if (!native.isNullOrBlank()) return native
         val body = JSONObject().put("model", model).put("messages", openAiMessages(image, prompt))
             .put("max_tokens", maxOf(maxTokens, 150)).put("temperature", 0.1)
-        return post("$localBase/v1/chat/completions", body)
+        return post("$localBase/v1/chat/completions", body).also { countOpenAiUsage(it) }
             .getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim()
     }
 
@@ -191,6 +247,22 @@ class CardIdentifier(
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
+
+        /** OpenRouter models that read images (public list), free ones first */
+        fun openRouterModels(http: OkHttpClient): List<String> {
+            http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/models").build()).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+                val data = JSONObject(response.body.string()).getJSONArray("data")
+                val models = (0 until data.length()).map { data.getJSONObject(it) }.filter { m ->
+                    val inputs = m.optJSONObject("architecture")?.optJSONArray("input_modalities")
+                    inputs != null && (0 until inputs.length()).any { inputs.getString(it) == "image" }
+                }
+                fun free(m: JSONObject) = m.optJSONObject("pricing")?.let {
+                    it.optString("prompt").toDoubleOrNull() == 0.0 && it.optString("completion").toDoubleOrNull() == 0.0
+                } ?: false
+                return models.sortedWith(compareBy({ !free(it) }, { it.getString("id") })).map { it.getString("id") }
+            }
+        }
 
         /** Models installed on a local Ollama server (GET /api/tags) */
         fun localModels(localUrl: String, http: OkHttpClient): List<String> {

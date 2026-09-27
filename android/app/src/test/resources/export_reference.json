@@ -1,0 +1,50 @@
+{
+ "rows": [
+  {
+   "name": "Thorin, King of Durin's Folk",
+   "set_name": "The Hobbit Eternal",
+   "number": "3",
+   "rarity": "rare",
+   "type_line": "Legendary Creature — Dwarf Noble",
+   "mana_cost": "{3}{R}{W}",
+   "colors": "R, W",
+   "color_identity": "Multicolor",
+   "price": 6.07,
+   "quantity": 1,
+   "condition": "Near Mint",
+   "finish": "regular",
+   "timestamp": "2026-09-25 21:24:47"
+  },
+  {
+   "name": "The \"Quoted\" Card",
+   "set_name": "Test",
+   "number": "12a",
+   "rarity": "common",
+   "type_line": "Instant",
+   "mana_cost": "{U}",
+   "colors": "U",
+   "color_identity": "Blue",
+   "price": 0.5,
+   "quantity": 3,
+   "condition": "Lightly Played",
+   "finish": "foil",
+   "timestamp": "2026-09-26 10:00:00"
+  },
+  {
+   "name": "Smaug",
+   "set_name": "The Hobbit",
+   "number": "109",
+   "rarity": "common",
+   "type_line": "Legendary Creature — Dragon",
+   "mana_cost": "{5}{R}{R}",
+   "colors": "R",
+   "color_identity": "Red",
+   "price": 0.0,
+   "quantity": 2,
+   "condition": "Near Mint",
+   "finish": "surge",
+   "timestamp": "2026-09-26 11:00:00"
+  }
+ ],
+ "csv": "Card Name,Set,Card Number,Rarity,Type,Mana Cost,Colors,Color Identity,Price (USD),Quantity,Condition,Foil,Surge,Timestamp\r\n\"Thorin, King of Durin's Folk\",The Hobbit Eternal,3,rare,Legendary Creature — Dwarf Noble,{3}{R}{W},\"R, W\",Multicolor,$6.07,1,Near Mint,No,No,2026-09-25 21:24:47\r\n\"The \"\"Quoted\"\" Card\",Test,12a,common,Instant,{U},U,Blue,$0.50,3,Lightly Played,Yes,No,2026-09-26 10:00:00\r\nSmaug,The Hobbit,109,common,Legendary Creature — Dragon,{5}{R}{R},R,Red,$0.00,2,Near Mint,No,Yes,2026-09-26 11:00:00\r\n"
+}

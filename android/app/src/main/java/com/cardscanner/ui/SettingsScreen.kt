@@ -64,7 +64,12 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
             viewModel.updateSettings(settings.copy(provider = Provider.entries[it]))
         }
 
-        val modelChoices = if (provider == Provider.LOCAL && localModels.isNotEmpty()) localModels else provider.models
+        var listedModels by remember(provider) { mutableStateOf<List<String>>(emptyList()) }
+        val modelChoices = when {
+            provider == Provider.LOCAL && localModels.isNotEmpty() -> localModels
+            listedModels.isNotEmpty() -> listedModels
+            else -> provider.models
+        }
         Dropdown("Model", settings.model(), modelChoices) {
             viewModel.updateSettings(settings.copy(models = settings.models + (provider to modelChoices[it])))
         }
@@ -87,6 +92,25 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (provider == Provider.OPENROUTER) {
+                var listStatus by remember { mutableStateOf<String?>(null) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = {
+                        listStatus = "Loading…"
+                        scope.launch {
+                            listStatus = try {
+                                listedModels = withContext(Dispatchers.IO) { CardIdentifier.openRouterModels(CardIdentifier.httpClient()) }
+                                "${listedModels.size} models read images (free ones first)"
+                            } catch (e: Exception) {
+                                "Could not load the list: ${e.message}"
+                            }
+                        }
+                    }) { Text("List models") }
+                    listStatus?.let { Text(it, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodySmall) }
+                }
+                Text("Models ending in :free cost nothing: 20 requests a minute, 50 a day (1,000 a day once you have bought \$10 of credits). A card takes 2 requests with the foil check.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
         } else {
             OutlinedTextField(
                 value = settings.localUrl,
@@ -121,6 +145,14 @@ fun SettingsScreen(viewModel: ScannerViewModel, onBack: () -> Unit) {
                 Text("A second, small AI request per card", style = MaterialTheme.typography.bodySmall)
             }
             Switch(settings.detectFoil, { viewModel.updateSettings(settings.copy(detectFoil = it)) })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Add confirmed cards automatically")
+                Text("Cards matched by set + number go into the inventory right away (Undo in the list); the others wait for Add",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(settings.autoAdd, { viewModel.updateSettings(settings.copy(autoAdd = it)) })
         }
         NumberField("Minimum sharpness", settings.minSharpness,
             "Cards below it are not auto-captured. Lower it if cards never become Ready (see the live value under the camera).") {

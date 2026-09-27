@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
@@ -93,7 +96,7 @@ import com.cardscanner.detection.CardTracker
 import android.widget.Toast
 
 @Composable
-fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
+fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit, onInventory: () -> Unit) {
     val detection by viewModel.detection.collectAsStateWithLifecycle()
     val scans by viewModel.scans.collectAsStateWithLifecycle()
     val auto by viewModel.autoCapture.collectAsStateWithLifecycle()
@@ -104,6 +107,7 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
     val context = LocalContext.current
     val areaOn = settings.activeArea != null
 
+    val entries by viewModel.inventoryEntries.collectAsStateWithLifecycle()
     LaunchedEffect(message) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); viewModel.clearMessage() }
     }
@@ -165,8 +169,12 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
             if (scans.isNotEmpty()) {
                 TextButton(onClick = viewModel::clearScans) {
                     Icon(Icons.Default.DeleteSweep, null, Modifier.size(18.dp))
-                    Text("Clear list", Modifier.padding(start = 4.dp))
+                    Text("Clear", Modifier.padding(start = 4.dp))
                 }
+            }
+            TextButton(onClick = onInventory) {
+                Icon(Icons.Default.Inventory2, null, Modifier.size(18.dp))
+                Text("Inventory (${entries.sumOf { it.quantity }})", Modifier.padding(start = 4.dp))
             }
         }
         detection?.metrics?.let {
@@ -186,7 +194,7 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
         val listState = rememberLazyListState()
         LaunchedEffect(scans.firstOrNull()?.id) { if (scans.isNotEmpty()) listState.animateScrollToItem(0) }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp), state = listState) {
-            items(scans, key = { it.id }) { ScanRow(it) }
+            items(scans, key = { it.id }) { ScanRow(it, onAdd = { viewModel.addScan(it.id) }, onUndo = { viewModel.undoScan(it.id) }) }
         }
     }
     }
@@ -299,7 +307,7 @@ private fun StatusChip(state: CardTracker.State?, auto: Boolean, modifier: Modif
 }
 
 @Composable
-private fun ScanRow(scan: ScanResult) {
+private fun ScanRow(scan: ScanResult, onAdd: () -> Unit, onUndo: () -> Unit) {
     val context = LocalContext.current
     val printing = scan.printing
     Row(
@@ -337,10 +345,29 @@ private fun ScanRow(scan: ScanResult) {
                             color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
                     }
                     scan.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    if (printing != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (scan.inventoryId != null) {
+                                Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = Color(0xFF00C853))
+                                Text("In inventory (${scan.finish.label.lowercase()})", Modifier.padding(start = 4.dp),
+                                    style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = onUndo) { Text("Undo") }
+                            } else {
+                                FilledTonalButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                                    Text("Add as ${scan.finish.label.lowercase()}")
+                                }
+                            }
+                        }
+                    }
                     val read = scan.reading
                     Text(
                         "AI read: ${read?.name} #${read?.collectorNumber?.ifEmpty { "?" }} [${read?.setCode?.ifEmpty { "?" }}]" +
-                            (scan.seconds?.let { " · %.1f s".format(it) } ?: ""),
+                            (scan.seconds?.let { " · %.1f s".format(it) } ?: "") +
+                            (scan.usage?.let { u ->
+                                " · ${u.input} in / ${u.output} out tokens" +
+                                    (if (u.thinking > 0) " (${u.thinking} thinking)" else "") +
+                                    (u.cost?.let { " · $%.5f".format(it) } ?: "")
+                            } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

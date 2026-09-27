@@ -10,12 +10,20 @@ import java.text.Normalizer
 
 /** One printing of a card, as Scryfall describes it */
 data class Printing(
+    /** Scryfall's id of the printing */
+    val id: String,
     val name: String,
     val setCode: String,
     val setName: String,
     val collectorNumber: String,
     val rarity: String,
+    val typeLine: String,
+    val manaCost: String,
+    /** Color letters (W, U, B, R, G); empty for colorless */
+    val colors: List<String>,
     val finishes: List<String>,
+    /** Surge foil printings (promo_types "surgefoil"): their foil finish is a surge foil */
+    val surgeFoil: Boolean,
     val imageUrl: String?,
     val scryfallUrl: String,
     val usd: String?,
@@ -92,13 +100,22 @@ class Scryfall(private val http: OkHttpClient) {
         val prices = card.optJSONObject("prices")
         val finishes = card.optJSONArray("finishes")?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
         fun price(key: String) = prices?.optString(key)?.takeIf { it.isNotEmpty() && it != "null" }
+        fun strings(array: org.json.JSONArray?) = array?.let { list -> (0 until list.length()).map { list.getString(it) } }.orEmpty()
+        val faces = card.optJSONArray("card_faces")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } }.orEmpty()
+        // Double-faced cards keep mana cost and colors on their faces
+        fun faced(key: String) = card.optString(key).ifEmpty { faces.map { it.optString(key) }.filter { it.isNotEmpty() }.joinToString(" // ") }
         return Printing(
+            id = card.optString("id"),
             name = card.getString("name"),
             setCode = card.optString("set").uppercase(),
             setName = card.optString("set_name"),
             collectorNumber = card.optString("collector_number"),
             rarity = card.optString("rarity"),
+            typeLine = faced("type_line"),
+            manaCost = faced("mana_cost"),
+            colors = if (card.has("colors")) strings(card.optJSONArray("colors")) else strings(faces.firstOrNull()?.optJSONArray("colors")),
             finishes = finishes,
+            surgeFoil = "surgefoil" in strings(card.optJSONArray("promo_types")),
             imageUrl = images?.optString("normal"),
             scryfallUrl = card.optString("scryfall_uri"),
             usd = price("usd"), usdFoil = price("usd_foil"), eur = price("eur"), eurFoil = price("eur_foil"),
