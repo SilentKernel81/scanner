@@ -2,7 +2,7 @@ package com.cardscanner.ui
 
 import android.content.Intent
 import android.net.Uri
-import android.util.Size
+
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -13,6 +13,19 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.magnifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +39,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -33,6 +47,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -85,7 +100,9 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
     val message by viewModel.message.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     var torch by remember { mutableStateOf(false) }
+    var drawingArea by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val areaOn = settings.activeArea != null
 
     LaunchedEffect(message) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); viewModel.clearMessage() }
@@ -102,8 +119,20 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
         // coordinates map linearly onto it
         Box(Modifier.width(cameraWidth).aspectRatio(aspect).align(Alignment.CenterHorizontally).clipToBounds().background(Color.Black)) {
             CameraPreview(viewModel, torch, settings.rotation)
-            OutlineOverlay(detection)
-            StatusChip(detection, auto, Modifier.align(Alignment.TopStart).padding(8.dp))
+            if (drawingArea) {
+                AreaDrawer(
+                    initial = settings.fixedArea,
+                    onDrawn = { viewModel.setFixedArea(it); drawingArea = false },
+                    onUseDetected = {
+                        if (viewModel.useDetectedCard()) drawingArea = false
+                        else Toast.makeText(context, "No card detected", Toast.LENGTH_SHORT).show()
+                    },
+                    onCancel = { drawingArea = false },
+                )
+            } else {
+                OutlineOverlay(detection)
+                StatusChip(detection, auto, Modifier.align(Alignment.TopStart).padding(8.dp))
+            }
         }
 
         Row(
@@ -114,18 +143,37 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
             Text("Auto", Modifier.padding(start = 8.dp))
             Spacer(Modifier.weight(1f))
             Button(onClick = viewModel::manualCapture) { Text("Capture") }
+            // Fixed area: draw it the first time, then switch between area and outline
+            IconButton(onClick = {
+                if (settings.fixedArea == null) drawingArea = true else viewModel.setFixedAreaEnabled(!settings.fixedAreaEnabled)
+            }) {
+                Icon(Icons.Default.Crop, "Fixed area", tint = if (areaOn) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+            }
             IconButton(onClick = viewModel::rotate) { Icon(Icons.Default.RotateRight, "Rotate image") }
             IconButton(onClick = { torch = !torch }) {
                 Icon(if (torch) Icons.Default.FlashlightOn else Icons.Default.FlashlightOff, "Light")
             }
-            IconButton(onClick = viewModel::clearScans, enabled = scans.isNotEmpty()) {
-                Icon(Icons.Default.DeleteSweep, "Clear list")
-            }
             IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings") }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (areaOn) {
+                Text("Fixed area", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = { drawingArea = true }) { Text("Redraw") }
+            }
+            Spacer(Modifier.weight(1f))
+            if (scans.isNotEmpty()) {
+                TextButton(onClick = viewModel::clearScans) {
+                    Icon(Icons.Default.DeleteSweep, null, Modifier.size(18.dp))
+                    Text("Clear list", Modifier.padding(start = 4.dp))
+                }
+            }
         }
         detection?.metrics?.let {
             Text(
-                "movement %.1f%% · drift %.1f%% · sharpness %.0f (min %d)".format(
+                if (detection?.area != null) "change %.1f · drift %.1f · sharpness %.0f (min %d)".format(
+                    it.movement, it.drift, it.sharpness, settings.minSharpness)
+                else "movement %.1f%% · drift %.1f%% · sharpness %.0f (min %d)".format(
                     it.movement * 100, it.drift * 100, it.sharpness, settings.minSharpness),
                 Modifier.padding(horizontal = 12.dp),
                 style = MaterialTheme.typography.labelSmall,
@@ -133,7 +181,11 @@ fun ScannerScreen(viewModel: ScannerViewModel, onSettings: () -> Unit) {
             )
         }
 
-        LazyColumn(Modifier.fillMaxSize().padding(top = 4.dp)) {
+        // Newest card first: show it when it arrives (a LazyColumn otherwise keeps the item that
+        // was on top in view, and new cards pile up hidden above it)
+        val listState = rememberLazyListState()
+        LaunchedEffect(scans.firstOrNull()?.id) { if (scans.isNotEmpty()) listState.animateScrollToItem(0) }
+        LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp), state = listState) {
             items(scans, key = { it.id }) { ScanRow(it) }
         }
     }
@@ -166,7 +218,7 @@ private fun CameraPreview(viewModel: ScannerViewModel, torch: Boolean, rotation:
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder()
                     .setAspectRatioStrategy(fourByThree)
-                    .setResolutionStrategy(ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    .setResolutionStrategy(ResolutionStrategy(android.util.Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build())
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
@@ -174,7 +226,7 @@ private fun CameraPreview(viewModel: ScannerViewModel, torch: Boolean, rotation:
             val still = ImageCapture.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder()
                     .setAspectRatioStrategy(fourByThree)
-                    .setResolutionStrategy(ResolutionStrategy(Size(3264, 2448), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                    .setResolutionStrategy(ResolutionStrategy(android.util.Size(3264, 2448), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
                     .build())
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
@@ -209,9 +261,16 @@ private fun statusColor(status: CardTracker.Status?) = when (status) {
 @Composable
 private fun OutlineOverlay(state: CardTracker.State?) {
     Canvas(Modifier.fillMaxSize()) {
-        val corners = state?.corners ?: return@Canvas
+        if (state == null) return@Canvas
         val sx = size.width / state.frameWidth
         val sy = size.height / state.frameHeight
+        // Fixed area: the area is the photo; the outline (only for the foil check) isn't drawn
+        state.area?.let { (x1, y1, x2, y2) ->
+            drawRect(statusColor(state.status), Offset(x1 * sx, y1 * sy), Size((x2 - x1) * sx, (y2 - y1) * sy),
+                style = Stroke(width = 3.dp.toPx()))
+            return@Canvas
+        }
+        val corners = state.corners ?: return@Canvas
         val path = Path().apply {
             moveTo(corners[0].x.toFloat() * sx, corners[0].y.toFloat() * sy)
             corners.drop(1).forEach { lineTo(it.x.toFloat() * sx, it.y.toFloat() * sy) }
@@ -224,7 +283,7 @@ private fun OutlineOverlay(state: CardTracker.State?) {
 
 @Composable
 private fun StatusChip(state: CardTracker.State?, auto: Boolean, modifier: Modifier) {
-    val text = when (state?.status) {
+    val text = (if (state?.area != null) "Area · " else "") + when (state?.status) {
         null, CardTracker.Status.NO_CARD -> "No card"
         CardTracker.Status.STABILIZING -> "Stabilizing ${state.stableFrames}/${state.requiredFrames}" +
             if (!state.inFocus) " · blurry" else ""
@@ -287,6 +346,109 @@ private fun ScanRow(scan: ScanResult) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Drag a rectangle around where the cards land, then drag its corners to adjust them; a loupe
+ * above the finger shows the corner being placed. Starts from `initial` (the current area, as
+ * fractions of the camera view) and reports the area as fractions on Done.
+ */
+@Composable
+private fun AreaDrawer(initial: List<Double>?, onDrawn: (List<Double>) -> Unit, onUseDetected: () -> Unit, onCancel: () -> Unit) {
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    // Two opposite corners of the rectangle, in px; `moving` is the one under the finger
+    var anchor by remember { mutableStateOf<Offset?>(null) }
+    var moving by remember { mutableStateOf<Offset?>(null) }
+    var dragging by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val loupeLift = with(density) { 90.dp.toPx() }
+    val grab = with(density) { 48.dp.toPx() }
+
+    LaunchedEffect(viewSize) {
+        if (viewSize != IntSize.Zero && anchor == null && initial != null) {
+            anchor = Offset((initial[0] * viewSize.width).toFloat(), (initial[1] * viewSize.height).toFloat())
+            moving = Offset((initial[2] * viewSize.width).toFloat(), (initial[3] * viewSize.height).toFloat())
+        }
+    }
+    fun corners(): List<Offset>? {
+        val a = anchor ?: return null; val b = moving ?: return null
+        val left = minOf(a.x, b.x); val right = maxOf(a.x, b.x); val top = minOf(a.y, b.y); val bottom = maxOf(a.y, b.y)
+        return listOf(Offset(left, top), Offset(right, top), Offset(right, bottom), Offset(left, bottom))
+    }
+
+    Box(Modifier.fillMaxSize().onSizeChanged { viewSize = it }) {
+        Canvas(Modifier.fillMaxSize()
+            .magnifier(
+                sourceCenter = { moving?.takeIf { dragging } ?: Offset.Unspecified },
+                magnifierCenter = { moving?.takeIf { dragging }?.let { it - Offset(0f, loupeLift) } ?: Offset.Unspecified },
+                zoom = 3f,
+                size = DpSize(120.dp, 120.dp),
+                cornerRadius = 60.dp,
+            )
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { touch ->
+                        val current = corners()
+                        val index = current?.indices?.minByOrNull { (current[it] - touch).getDistance() }
+                        if (current != null && index != null && (current[index] - touch).getDistance() < grab) {
+                            // Move that corner; the opposite one stays
+                            anchor = current[(index + 2) % 4]
+                            moving = current[index]
+                        } else {
+                            anchor = touch
+                            moving = touch
+                        }
+                        dragging = true
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        moving = moving?.let {
+                            Offset((it.x + amount.x).coerceIn(0f, size.width.toFloat()), (it.y + amount.y).coerceIn(0f, size.height.toFloat()))
+                        }
+                    },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false },
+                )
+            }) {
+            drawRect(Color.Black.copy(alpha = 0.25f))
+            val current = corners() ?: return@Canvas
+            val topLeft = current[0]
+            val rectSize = Size(current[2].x - current[0].x, current[2].y - current[0].y)
+            drawRect(Color.White.copy(alpha = 0.12f), topLeft, rectSize)
+            drawRect(Color(0xFF00E676), topLeft, rectSize, style = Stroke(width = 2.dp.toPx()))
+            // Corner handles to grab
+            current.forEach { drawCircle(Color(0xFF00E676), 7.dp.toPx(), it, style = Stroke(width = 2.dp.toPx())) }
+            // Crosshair on the corner under the finger (seen in the loupe)
+            moving?.takeIf { dragging }?.let { b ->
+                val arm = 10.dp.toPx(); val stroke = 1.dp.toPx()
+                drawLine(Color.Red, b - Offset(arm, 0f), b + Offset(arm, 0f), stroke)
+                drawLine(Color.Red, b - Offset(0f, arm), b + Offset(0f, arm), stroke)
+            }
+        }
+        // Hint at the bottom, buttons at the top: cards land low in the box, and the buttons
+        // must not cover the area's bottom corners
+        Text(
+            if (anchor == null) "Drag around the spot where the cards land" else "Drag the corners to adjust",
+            Modifier.align(Alignment.BottomCenter).padding(8.dp).clip(RoundedCornerShape(6.dp))
+                .background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 8.dp, vertical = 4.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        // Compact buttons: the camera view is only ~300 dp wide
+        val compact = PaddingValues(horizontal = 12.dp)
+        val dark = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.55f))
+        Row(Modifier.align(Alignment.TopCenter).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = onUseDetected, colors = dark, contentPadding = compact) { Text("Detected", color = Color.White, maxLines = 1) }
+            OutlinedButton(onClick = onCancel, colors = dark, contentPadding = compact) { Text("Cancel", color = Color.White, maxLines = 1) }
+            val current = corners()
+            val big = current != null && current[2].x - current[0].x > 20 && current[2].y - current[0].y > 20
+            Button(onClick = {
+                val c = corners()!!
+                val w = viewSize.width.toDouble(); val h = viewSize.height.toDouble()
+                onDrawn(listOf(c[0].x / w, c[0].y / h, c[2].x / w, c[2].y / h))
+            }, enabled = big, contentPadding = compact) { Text("Done", maxLines = 1) }
         }
     }
 }

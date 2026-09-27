@@ -14,7 +14,6 @@ import com.cardscanner.ai.CardIdentifier
 import com.cardscanner.ai.CardReading
 import com.cardscanner.ai.Foil
 import com.cardscanner.detection.CardTracker
-import com.cardscanner.detection.Corners
 import com.cardscanner.detection.findCardOutline
 import com.cardscanner.detection.scaled
 import com.cardscanner.detection.warpCard
@@ -82,8 +81,16 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     var imageCapture: ImageCapture? = null
 
-    fun updateSettings(settings: AppSettings) {
-        if (settings.rotation != _settings.value.rotation) pendingReset = true  // outlines of the old orientation
+    fun updateSettings(newSettings: AppSettings) {
+        var settings = newSettings
+        if (settings.rotation != _settings.value.rotation) {
+            pendingReset = true  // outlines of the old orientation
+            if (settings.fixedAreaEnabled) {
+                // An area drawn for the old orientation no longer fits: draw it again
+                settings = settings.copy(fixedAreaEnabled = false, fixedArea = null)
+                _message.value = "Fixed area off - draw it again"
+            }
+        }
         _settings.value = settings
         settings.save(getApplication())
         tracker.requiredStableFrames = settings.stableFrames
@@ -92,6 +99,24 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     /** Turn the camera image a quarter turn clockwise (like the Python scanner's rotate button) */
     fun rotate() = updateSettings(_settings.value.let { it.copy(rotation = (it.rotation + 90) % 360) })
+
+    /** Draw a fixed area (fractions of the frame) and switch to it */
+    fun setFixedArea(area: List<Double>) =
+        updateSettings(_settings.value.copy(fixedArea = area.map { it.coerceIn(0.0, 1.0) }, fixedAreaEnabled = true))
+
+    fun setFixedAreaEnabled(enabled: Boolean) = updateSettings(_settings.value.copy(fixedAreaEnabled = enabled))
+
+    /** The detected card plus 5% as the fixed area (scanner.py:detected_area); false without a card */
+    fun useDetectedCard(margin: Double = 0.05): Boolean {
+        val state = _detection.value
+        val corners = state?.corners ?: return false
+        val x1 = corners.minOf { it.x }; val x2 = corners.maxOf { it.x }
+        val y1 = corners.minOf { it.y }; val y2 = corners.maxOf { it.y }
+        val dx = (x2 - x1) * margin; val dy = (y2 - y1) * margin
+        setFixedArea(listOf((x1 - dx) / state.frameWidth, (y1 - dy) / state.frameHeight,
+            (x2 + dx) / state.frameWidth, (y2 + dy) / state.frameHeight))
+        return true
+    }
 
     fun setAutoCapture(enabled: Boolean) {
         _autoCapture.value = enabled
@@ -119,12 +144,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private fun analyze(image: ImageProxy) {
         try {
             if (pendingReset) { pendingReset = false; tracker.reset() }
+            tracker.setArea(_settings.value.activeArea)
             val frame = image.toRgbaMat(_settings.value.rotation)
             val (state, trigger) = tracker.process(frame, _autoCapture.value, capturing.get())
             frame.release()
             _detection.value = state
             state.message?.let { Log.i(TAG, it) }
-            if (trigger && state.corners != null) capture(state.corners, state.frameWidth, state.frameHeight)
+            if (trigger) capture(state)
         } catch (e: Exception) {
             Log.e(TAG, "Frame analysis failed", e)
         } finally {
@@ -135,13 +161,14 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     /** Capture button: the card detected now */
     fun manualCapture() {
         val state = _detection.value
-        if (state?.corners == null) {
+        // Fixed area: the photo is the area, whatever the detector sees
+        if (state == null || (state.corners == null && state.area == null)) {
             _message.value = "No card detected"
             return
         }
         if (!capturing.get()) {
             analysisExecutor.execute { tracker.markCaptured() }
-            capture(state.corners, state.frameWidth, state.frameHeight)
+            capture(state)
         }
     }
 
@@ -149,13 +176,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
      * Take a full-resolution still, find the card in it again (starting from the outline in the
      * analysis frame) and identify it in the background.
      */
-    private fun capture(corners: Corners, frameWidth: Int, frameHeight: Int) {
+    private fun capture(state: CardTracker.State) {
         val capture = imageCapture ?: return
         if (!capturing.compareAndSet(false, true)) return
         capture.takePicture(captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 val card = try {
-                    cutOutCard(image, corners, frameWidth, frameHeight)
+                    cutOutCard(image, state)
                 } catch (e: Exception) {
                     Log.e(TAG, "Capture failed", e)
                     null
@@ -163,7 +190,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     image.close()
                     capturing.set(false)
                 }
-                if (card == null) _message.value = "Capture failed" else identify(card)
+                if (card == null) _message.value = "Capture failed" else identify(card.first, card.second)
             }
 
             override fun onError(exception: ImageCaptureException) {
@@ -174,7 +201,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         })
     }
 
-    private fun cutOutCard(image: ImageProxy, corners: Corners, frameWidth: Int, frameHeight: Int): Bitmap {
+    /**
+     * The photo (the flat card; in fixed-area mode the area as drawn) and the flat card for the
+     * ★/• check (null in fixed-area mode without an outline inside the area)
+     */
+    private fun cutOutCard(image: ImageProxy, state: CardTracker.State): Pair<Bitmap, Bitmap?> {
         var bitmap = image.toBitmap()
         val rotation = (image.imageInfo.rotationDegrees + _settings.value.rotation) % 360
         if (rotation != 0) {
@@ -182,38 +213,54 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
         val full = Mat()
         Utils.bitmapToMat(bitmap, full)  // RGBA
-        // Same 4:3 view as the analysis frame, so its outline only needs scaling; the still is
-        // searched again for the exact edges (the card may have shifted a pixel or two)
-        val guess = corners.scaled(full.cols().toDouble() / frameWidth, full.rows().toDouble() / frameHeight)
-        val outline = findCardOutline(full, previous = guess)?.corners ?: guess
-        val warped = warpCard(full, outline)
-        val card = Bitmap.createBitmap(warped.cols(), warped.rows(), Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(warped, card)
-        full.release(); warped.release()
-        return card
+        // Same 4:3 view as the analysis frame, so its outline and area only need scaling; the
+        // still is searched again for the exact edges (the card may have shifted a pixel or two)
+        val scaleX = full.cols().toDouble() / state.frameWidth
+        val scaleY = full.rows().toDouble() / state.frameHeight
+        val flat = state.corners?.let { corners ->
+            val guess = corners.scaled(scaleX, scaleY)
+            val warped = warpCard(full, findCardOutline(full, previous = guess)?.corners ?: guess)
+            warped.toBitmap().also { warped.release() }
+        }
+        val photo = state.area?.let { (x1, y1, x2, y2) ->
+            // The photo is the area as drawn: nothing inside it is cut off (a holo streak once
+            // passed for a card's top edge and the outline cut off the name)
+            val left = (x1 * scaleX).toInt().coerceIn(0, full.cols() - 1)
+            val top = (y1 * scaleY).toInt().coerceIn(0, full.rows() - 1)
+            val right = (x2 * scaleX).toInt().coerceIn(left + 1, full.cols())
+            val bottom = (y2 * scaleY).toInt().coerceIn(top + 1, full.rows())
+            val region = full.submat(org.opencv.core.Rect(left, top, right - left, bottom - top))
+            region.toBitmap()
+        } ?: flat ?: throw IllegalStateException("No card outline")
+        full.release()
+        return photo to flat
     }
 
     // ------------------------------------------------------------------------
     // Identification
     // ------------------------------------------------------------------------
 
-    private fun identify(card: Bitmap) {
+    private fun identify(card: Bitmap, foilCard: Bitmap?) {
         val thumbHeight = 280
         val thumbnail = Bitmap.createScaledBitmap(card, thumbHeight * card.width / card.height, thumbHeight, true)
         val id = nextId.incrementAndGet()
         _scans.update { (listOf(ScanResult(id, thumbnail)) + it).take(MAX_SCANS) }
+        Log.i(TAG, "Capture #$id: ${card.width}x${card.height}" + if (foilCard == null) " (no outline: no foil check)" else "")
 
         viewModelScope.launch(aiDispatcher) {
             val start = System.nanoTime()
+            lateinit var reading: CardReading
             val result = try {
                 val settings = _settings.value
                 val identifier = identifier()
-                val (answer, reading) = identifier.identify(card)
-                if (reading == null) {
+                val (answer, read) = identifier.identify(card)
+                if (read == null) {
                     fail(id, "The AI could not read the card" + (if (answer.isNotBlank()) ": \"${answer.take(120)}\"" else ""))
                     return@launch
                 }
-                val marker = if (settings.detectFoil) identifier.readFoilSymbol(card) else Foil.UNKNOWN
+                reading = read
+                // The ★/• corner is only at a known place on the flat, tightly cropped card
+                val marker = if (settings.detectFoil && foilCard != null) identifier.readFoilSymbol(foilCard) else Foil.UNKNOWN
                 val printing = scryfall.find(reading.name, reading.collectorNumber, reading.setCode)
                 val (foil, reason) = finish(printing, marker)
                 ScanResult(id, thumbnail, ScanResult.Status.DONE, reading, printing, foil, reason,
@@ -224,6 +271,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 fail(id, e.message ?: e.toString())
                 return@launch
             }
+            Log.i(TAG, "Identified #$id: ${reading.name} #${reading.collectorNumber} [${reading.setCode}] -> " +
+                (result.printing?.let { "${it.name} ${it.setCode} #${it.collectorNumber} (${it.match})" } ?: "not found") +
+                " foil=${result.foil} in %.1f s".format(result.seconds))
             _scans.update { list -> list.map { if (it.id == id) result else it } }
         }
     }
@@ -259,6 +309,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         private const val MAX_SCANS = 100
     }
 }
+
+private fun Mat.toBitmap(): Bitmap =
+    Bitmap.createBitmap(cols(), rows(), Bitmap.Config.ARGB_8888).also { Utils.matToBitmap(this, it) }
 
 /** RGBA_8888 analysis frame as an upright RGBA Mat, turned `extraRotation` degrees further clockwise */
 private fun ImageProxy.toRgbaMat(extraRotation: Int): Mat {

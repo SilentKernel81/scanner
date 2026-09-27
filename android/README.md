@@ -9,7 +9,7 @@ Ported from the Python scanner - keep both in step:
 | Android | Python |
 |---|---|
 | `detection/CardOutline.kt` | `object_detector.py` (`find_card_outline`, `warp_card`) |
-| `detection/CardTracker.kt` | `scanner.py` (`_is_card_settled`, `_new_card_arrived`, `_outline_flicker`) - no focus sweep: the phone's continuous autofocus |
+| `detection/CardTracker.kt` | `scanner.py` (`_is_card_settled`, `_new_card_arrived`, `_outline_flicker`; fixed area: `_fixed_area_step`, same thresholds) - no focus sweep: the phone's continuous autofocus |
 | `ai/CardIdentifier.kt`, `ai/Prompts.kt` | `card_identifier.py`, `prompts.py` (`BUILT_IN['mtg']`) |
 | `scryfall/Scryfall.kt` | `database.py:search_card_exact` (online, same `match` tags) |
 
@@ -43,6 +43,6 @@ key, or the local server address (`http://<host>:11434` for Ollama; "Test / list
 
 - Thresholds (sharpness 250, movement 1%, ...) were measured on the Pi webcam; re-measure on
   phones (live values are shown under the camera; min sharpness and still frames are in Settings).
-- Tested on a Pixel 10 over the box (manual captures identified right); auto mode not measured yet.
-- Inventory, CSV/Moxfield export, local card database (offline), Pokémon, prompt editor,
-  fixed area (sleeves), API keys in the Android Keystore, per-ABI APKs (debug APK is ~110 MB).
+- Tested on a Pixel 10 over the box. Auto + fixed area, 2026-09-26: 13 cards dropped in 33 s, each
+  captured once, all 13 matched by set + number or name + number. Outline mode not measured in auto yet.
+- Inventory, CSV/Moxfield export, local card database (offline), Pokémon, prompt editor, API keys in the Android Keystore, per-ABI APKs (debug APK is ~110 MB).
