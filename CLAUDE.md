@@ -51,6 +51,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Inventory add/merge/undo/split/export, capture thumbnails | `inventory.py` (`inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
+| Android app (Magic only: scan + AI + Scryfall) | `android/` - Kotlin port of detection, auto-capture, AI and matching; see `android/README.md` (keep in step with the Python code) |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
