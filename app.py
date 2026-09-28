@@ -282,7 +282,8 @@ def queue_for_review(game, image_path, name='', number='', set_code='', foil='un
     else:
         what = f"'{name}' (not found)" if name else "a card the AI couldn't read"
     log_to_client(f"Queued for review: {what}", level="warning")
-    socketio.emit('review_queue_update', {'count': review.count(game.id)}, namespace='/')
+    # queued: a card was just added to the queue (the page plays the queue alert)
+    socketio.emit('review_queue_update', {'count': review.count(game.id), 'queued': True}, namespace='/')
     # Nothing waits on the page for this card (normal mode blocks auto-capture until Add / Skip)
     if scanner:
         scanner.card_under_review = False

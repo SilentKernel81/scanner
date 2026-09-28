@@ -238,7 +238,11 @@ function openReview() {
     socket.emit('review_open');
 }
 
-socket.on('review_queue_update', data => setReviewCount(data.count));
+socket.on('review_queue_update', function(data) {
+    setReviewCount(data.count);
+    // A card just went to the review queue (not a review resolved): three beeps, as in the Android app
+    if (data.queued) audioManager.playQueueAlert();
+});
 
 socket.on('review_item', function(data) {
     if (!data.id) {

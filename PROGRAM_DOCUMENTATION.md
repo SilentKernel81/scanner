@@ -639,7 +639,7 @@ Socket.IO events:
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
-| `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count) |
+| `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
 | `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
 
 HTTP endpoints are listed in the README.
