@@ -10,6 +10,11 @@ identified by a vision AI (Gemini / OpenAI / Anthropic / local Ollama: name, col
 set code, ★/• foil marker), matched to the exact printing in a local Scryfall SQLite database,
 and added to an inventory. Runs on a Raspberry Pi or any Linux PC (USB webcam or Pi camera).
 
+The Android app (a Kotlin port of detection, auto-capture, AI, matching and the inventory) lives
+in its own repository, [SilentKernel81/mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android)
+(checked out beside this one, `../mtg-scanner-android`); its README maps each Kotlin file to the
+Python code here - keep both in step when changing that logic.
+
 **How everything works is documented in [PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md)**
 (detection, auto-capture rules, matching, foil logic, schema, events, measured thresholds) -
 read the relevant section before changing behavior, and keep it up to date.
@@ -51,7 +56,6 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Inventory add/merge/undo/split/export, capture thumbnails | `inventory.py` (`inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| Android app (Magic only: scan + AI + Scryfall) | `android/` - Kotlin port of detection, auto-capture, AI and matching; see `android/README.md` (keep in step with the Python code) |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
