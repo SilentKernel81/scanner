@@ -38,6 +38,16 @@ def _is_inner_frame(gray, corners, band=4):
     return cv2.mean(gray, outside)[0] < cv2.mean(gray, inside)[0]
 
 
+def side_area(corners):
+    """Area of an outline's rectangle (width x height of its sides)"""
+    return float(np.linalg.norm(corners[1] - corners[0]) * np.linalg.norm(corners[3] - corners[0]))
+
+
+def side_middles(corners):
+    """Middle of each side of an outline (top, right, bottom, left)"""
+    return (corners + np.roll(corners, -1, axis=0)) / 2
+
+
 def _is_rectangular(corners, side_tolerance=0.08, angle_tolerance=8):
     """Opposite sides about equally long and corners about square (camera looking down)"""
     tl, tr, br, bl = corners
@@ -98,6 +108,62 @@ def _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tole
         if _is_inner_frame(gray, corners):
             continue
         best = (area, corners, fill)
+    return best
+
+
+def _border_brightness(gray, corners, band=4):
+    """Mean brightness of the bands just outside and just inside an outline: (outside, inside)"""
+    polygon = np.zeros(gray.shape, np.uint8)
+    cv2.fillPoly(polygon, [corners.astype(np.int32)], 255)
+    kernel = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
+    outside = cv2.dilate(polygon, kernel) & ~polygon
+    inside = polygon & ~cv2.erode(polygon, kernel)
+    if not outside.any() or not inside.any():
+        return None
+    return cv2.mean(gray, outside)[0], cv2.mean(gray, inside)[0]
+
+
+def _card_inside_box(contours, edges, gray, box, min_area, allow_landscape, ratio_tolerance):
+    """
+    The card lying inside an outline that is the scanning box itself. With the whole box in
+    view, the box floor is a closed, card-shaped outline (a card box is made for cards), while
+    a card pushed into its corner shares two sides with it and has no closed contour of its
+    own - the largest outline was then the box, and the photo had the box floor around the
+    card. The box is told from a card by its edge: about as bright inside as outside (white
+    floor, white wall), where a card's dark border is far darker than the floor around it.
+
+    Returns:
+        tuple: (area, corners, fill) of the dark-bordered card inside, or None (the outline
+        is a card, or holds none)
+    """
+    brightness = _border_brightness(gray, box[1])
+    if brightness is None or brightness[1] < 0.75 * brightness[0]:
+        return None  # a dark edge: this is a card (or a pile of them)
+    box_polygon = box[1].astype(np.float32)
+    box_long_side = max(np.linalg.norm(box[1][1] - box[1][0]), np.linalg.norm(box[1][3] - box[1][0]))
+    best = None
+    for contour in contours:
+        # An open outline encloses little area: judged by its rectangle instead
+        corners = _order_corners(cv2.boxPoints(cv2.minAreaRect(contour)))
+        side_w = np.linalg.norm(corners[1] - corners[0])
+        side_h = np.linalg.norm(corners[3] - corners[0])
+        area = side_w * side_h
+        if area < max(min_area, 0.5 * box[0]) or area >= box[0] or (side_w > side_h and not allow_landscape):
+            continue
+        if abs(max(side_w, side_h) / min(side_w, side_h) - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance:
+            continue
+        if any(cv2.pointPolygonTest(box_polygon, (float(x), float(y)), True) < -4 for x, y in corners):
+            continue
+        # A clear sleeve's edge is such an outline too, 1-2% outside its card on every side:
+        # left alone (taking the card there would make the outline flip between the two)
+        if max(np.linalg.norm(side_middles(corners) - side_middles(box[1]), axis=1)) < 0.04 * box_long_side:
+            continue
+        if (best is not None and area <= best[0]) or _perimeter_coverage(edges, corners) < 0.8:
+            continue
+        brightness = _border_brightness(gray, corners)
+        if brightness is None or brightness[1] > 0.5 * brightness[0]:
+            continue  # not a dark border on a light floor (e.g. the frame inside a white-bordered card)
+        best = (area, corners, _perimeter_coverage(edges, corners))
     return best
 
 
@@ -239,6 +305,10 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
         if _is_inner_frame(gray, corners):
             continue
         best = (area, corners, fill)
+
+    if best is not None:
+        best = _card_inside_box(contours, edges, gray, (side_area(best[1]), best[1], best[2]), min_area,
+                                allow_landscape, ratio_tolerance) or best
 
     # Outlines assembled from edge pieces or fitted lines can come out skewed (a holo streak
     # taken for the top edge); seen from above a card is a rectangle

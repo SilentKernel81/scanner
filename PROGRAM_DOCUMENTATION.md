@@ -146,6 +146,16 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
      must not be darker than the band just inside (this happens when the card's outer edge
      is cut off by the image border).
 4. The largest remaining rectangle is the card; its four corners are returned.
+   - **Unless it is the box** (`_card_inside_box`): with the whole scanning box in view, its
+     floor is a closed, card-shaped outline, while a card pushed into the box's corner shares
+     two sides with it and has no closed contour of its own - the outline was then the box,
+     and the photo had the floor around the card. If the largest rectangle's edge is about as
+     bright inside as outside (inside ≥ 75% of outside: white floor, white wall), a
+     card-shaped rectangle inside it with a dark border (inside ≤ 50% of outside), edges along
+     ≥ 80% of its perimeter and at least half its area is taken instead. A side must lie ≥ 4%
+     of the box's length away: a clear sleeve's edge is such a pale outline too, 1-2% outside
+     its card, and is left alone (on 400 recorded frames, 15 of a sleeved card would otherwise
+     have changed; with the 4% rule none do).
 5. **Broken outline fallback** (only when step 3 finds nothing): where a card's edge is as
    bright as the background - a borderless foil's silver frame against the white box - the
    outline has a gap and no closed contour exists (a Gwen Stacy borderless: the right edge

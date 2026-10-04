@@ -44,7 +44,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 
 | Area | Code |
 |---|---|
-| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline` (+ `_track_outline` following the previous card, `_outline_from_edge_groups` for broken outlines), `warp_card`, `ObjectDetector.detect` |
+| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline` (+ `_track_outline` following the previous card, `_outline_from_edge_groups` for broken outlines, `_card_inside_box` when the largest outline is the box itself), `warp_card`, `ObjectDetector.detect` |
 | Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured`; fixed area (sleeves): `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe` (drift tracking between drops), `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | OCR first (light-ocr reader process, parsers, AI fallback) | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `scanner.py`: `identify_card_from_image`; `Game.confirmed_read` |
