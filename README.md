@@ -34,6 +34,9 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
 - **Manual or automatic capture** - capture on demand, or start auto scanning and just drop
   cards into the box: each one is identified in the background and added to the inventory
   automatically, with a one-click Undo.
+- **OCR first** - with Node.js installed, [light-ocr](https://github.com/arcships/light-ocr)
+  reads each Magic card on your computer in a fraction of a second; the vision AI is asked only
+  for the cards OCR can't match with certainty (about one in eight in our tests).
 - **Vision AI providers** - Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model
   via Ollama (or another OpenAI-compatible server). Switch provider and model from the UI.
 - **Exact printing identification** from the set code and collector number, with name
@@ -62,6 +65,7 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
 - **Disk**: ~300 MB for dependencies, ~75 MB for the card database
 - **AI**: an API key for Gemini, OpenAI or Anthropic, **or** a local Ollama server with a
   vision model
+- **Node.js** (optional): 22 or newer, with npm, to read cards with OCR before the AI
 - **Internet**: to download the card database, show card images, and reach cloud AI providers
 
 ## Installation
@@ -284,6 +288,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `camera.rotate` | `0` | Rotate the image (0/90/180/270) for a camera mounted sideways - also in Settings |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |
+| `ocr.provider` | `auto` | Where light-ocr runs: `auto` (GPU when available), `cpu`, `webgpu`. Switch OCR on/off in Settings |
 | `vision_ai.image_size` | `1024` | Longest side of the card image sent for identification (larger = slower, not more accurate) |
 | `vision_ai.local.endpoint` | | Local AI server (the model is chosen in Settings) |
 | `flask.host` / `port` | `0.0.0.0` / `5000` | Web server address |
@@ -354,6 +359,7 @@ card database is missing or another program has the camera).
 app.py               Flask + Socket.IO web app, routes and event handlers
 scanner.py           Camera capture thread, detection, stability, auto-capture
 object_detector.py   Card outline detection + perspective correction (YOLO fallback)
+card_ocr.py, ocr/    OCR first: light-ocr reader (Node.js) and the parser for what it reads
 card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings

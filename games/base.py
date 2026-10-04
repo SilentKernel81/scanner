@@ -65,6 +65,14 @@ class Game:
         """
         raise NotImplementedError
 
+    def confirmed_read(self, name, number=None, set_code=None):
+        """
+        Whether a read identifies an exact printing (is_confirmed) - asked about the OCR read
+        to decide if the vision AI is needed. Games override it to look the card up without
+        the log lines of identify, which follows for the read that is used
+        """
+        return self.is_confirmed(self.identify(name, number, set_code))
+
     def find_printings(self, name, number=None, treatment=None, set_code=None):
         """Manual search: (resolved name or None, list of printings)"""
         raise NotImplementedError

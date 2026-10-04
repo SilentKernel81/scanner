@@ -182,6 +182,7 @@ from cleanup import cleanup_old_images, get_images_stats
 
 # Import scanner
 from scanner import CardScanner
+from card_ocr import CardOcr
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -290,9 +291,9 @@ def queue_for_review(game, image_path, name='', number='', set_code='', foil='un
 
 
 def route_identified(image_path, card_name, collector_number, set_code, processing_time=None, foil='unknown',
-                     fast=False):
+                     fast=False, reader=None):
     """
-    After the AI: look the card up and add it automatically, show it, or queue it for review.
+    After the AI (or OCR - reader says which read the card): look the card up and add it automatically, show it, or queue it for review.
     While a review is open, a card captured meanwhile (manual capture, auto scanning without
     automatic adds) waits in the queue instead of taking the reviewed card's place and capture.
     """
@@ -301,7 +302,7 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
         set_pending_capture(image_path)
     if card_name and card_name.strip():
         search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=fast,
-                             set_code=set_code, image_path=image_path, foil=foil)
+                             set_code=set_code, image_path=image_path, foil=foil, reader=reader)
     elif fast or reviewing:
         queue_for_review(games.active(), image_path, foil=foil)
 
@@ -327,7 +328,7 @@ def add_automatically(game, card, image_path, foil):
 
 
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
-                         image_path=None, foil='unknown'):
+                         image_path=None, foil='unknown', reader=None):
     """
     Search for card in database and emit results to client
 
@@ -337,6 +338,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         set_code: Set code from AI (e.g. "HOB")
         processing_time: AI processing time in seconds
         was_fast_scan_mode: Whether this was a fast scan auto-add
+        reader: what read the card when it wasn't the vision AI ("light-ocr")
 
     Returns:
         tuple: (db_card_info, was_logged) - db result and whether it was logged
@@ -351,7 +353,8 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
 
     # Search database
     game = games.active()
-    db_card_info = game.identify(card_name, collector_number, set_code, ai_model=get_ai_model_info())
+    read_by = reader or get_ai_model_info()
+    db_card_info = game.identify(card_name, collector_number, set_code, ai_model=read_by)
 
     # Adding automatically, only cards whose exact printing was confirmed are added
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review
@@ -363,7 +366,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     log_scanned_card(
         card_name=card_name,
         collector_number=collector_number,
-        ai_model=get_ai_model_info(),
+        ai_model=read_by,
         db_found=(db_card_info is not None),
         added_to_inventory=auto_add,
         processing_time=processing_time
@@ -451,7 +454,7 @@ def ai_processing_worker():
             }, namespace='/')
 
             route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
-                             fast=was_fast_scan_mode)
+                             fast=was_fast_scan_mode, reader=(card_info or {}).get('reader'))
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -626,7 +629,8 @@ def initialize_components():
                     'foil': foil_status
                 }, namespace='/')
 
-                route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status)
+                route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
+                                 reader=(vision_ai_result or {}).get('reader'))
 
                 # Normal mode: card awaits user review (card_under_review stays True)
                 logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
@@ -1089,7 +1093,8 @@ def handle_capture(data):
         }
         emit('card_captured', result)
 
-        route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status)
+        route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
+                         reader=(vision_ai_result or {}).get('reader'))
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")
@@ -1469,6 +1474,8 @@ def get_scan_settings():
     """Scanning preferences the page needs on load"""
     return jsonify({
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
+        'ocr_first': bool(scanner.ocr_enabled) if scanner else True,
+        'ocr_installed': CardOcr.installed(),
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
@@ -1492,6 +1499,16 @@ def handle_toggle_fast_scan(data):
     emit('fast_scan_toggled', {'enabled': enabled})
     logger.info(f"Auto-add toggled: {enabled} (required frames: {scanner.required_stable_frames})")
     log_to_client(f"Add cards automatically: {'on' if enabled else 'off - review each card'}", level="info")
+
+
+@socketio.on('toggle_ocr')
+def handle_toggle_ocr(data):
+    """Read cards with light-ocr first, the vision AI only when needed (remembered)"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    scanner.set_ocr_enabled(bool(data.get('enabled', False)))
+    emit('ocr_toggled', {'enabled': scanner.ocr_enabled, 'installed': CardOcr.installed()})
 
 
 @socketio.on('toggle_anti_glare')

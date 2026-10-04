@@ -259,3 +259,6 @@ data/.ultralytics/
 
 # API keys entered in the web interface
 data/api_keys.env
+
+# light-ocr reader (npm install in ocr/)
+node_modules/

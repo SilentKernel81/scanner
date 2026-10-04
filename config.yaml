@@ -97,6 +97,12 @@ database:
   # as outdated once the local copy is this many days older than Scryfall's
   update_after_days: 7
 
+# light-ocr (offline text recognition) reads each card before the vision AI, which is then
+# asked only when OCR's read isn't a confirmed match. Needs Node.js 22+ and `npm install` in
+# ocr/ (scripts/deploy.sh does it); switched on/off in Settings
+ocr:
+  provider: auto  # auto (GPU through WebGPU/Vulkan when available, else CPU), cpu, webgpu
+
 # Cleanup Settings
 cleanup:
   enabled: true

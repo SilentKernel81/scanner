@@ -46,6 +46,7 @@ Design choices:
 | `app.py` | Flask + Socket.IO server: routes, events, capture orchestration, AI worker queue |
 | `scanner.py` | Camera (USB via OpenCV/V4L2 or Pi camera), capture thread, detection state, stability, auto-capture |
 | `object_detector.py` | Outline detection (`find_card_outline`), perspective warp (`warp_card`), optional YOLO fallback |
+| `card_ocr.py`, `ocr/server.mjs` | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
 | `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
@@ -79,7 +80,9 @@ camera frame ──> outline detection ──> settled? ──> new card? ──
                                                                      │
       flat, perspective-corrected card image <───────────────────────┘
                  │
-                 ├──> vision AI: name, collector number, set code
+                 ├──> light-ocr: name, collector number, set code, foil marker
+                 │      confirmed printing? done (vision AI only for a missed foil marker)
+                 ├──> otherwise vision AI: name, collector number, set code
                  └──> vision AI: foil marker (zoomed bottom-left corner)
                                     │
                     database: set + number (checked against the name)
@@ -311,6 +314,45 @@ a card dropped meanwhile is captured right after.
 
 ## Identification (vision AI)
 
+### OCR first
+
+With *Read with OCR first* on (Settings; `ocr_first` in `data/settings.json`, on by default),
+`scanner.identify_card_from_image()` reads the card with
+[light-ocr](https://github.com/arcships/light-ocr) (PP-OCRv6, offline) before any AI request:
+
+1. `CardOcr.read_card()` sends the card image to the reader process and gets every text line
+   with its confidence and corner coordinates. `parse_magic()` takes the name from the title
+   bar (first line in the top 16%, left of the mana cost), and from the bottom-left (below 84%
+   of the height) the collector line (`U 0172`, `M0128`, `M.0010`; or `123/281` on older cards)
+   and the set line (`HOB·EN`), including the symbol between set and language code.
+2. `Game.confirmed_read()` looks the read up. If it identifies the exact printing (a confirmed
+   match - for set + number that includes the name agreeing), the card is done without the AI.
+   Only when OCR read no `★`/`•` is the AI's foil check still asked.
+3. Otherwise the vision AI identifies the card as before. If the AI fails too, or none is
+   configured, what OCR read is used (it usually still finds the card by name for review).
+
+Measured on 747 saved scans (Magic, mostly *The Hobbit* and *Spider-Man*, with a few Pokémon
+cards and unreadable test captures among them), against qwen3.5:9b-q8_0 on the same images:
+
+| | Confirmed match | Time per card |
+|---|---|---|
+| light-ocr | 658 (88.1%) | 0.17 s (GPU through WebGPU/Vulkan; 0.77 s on the CPU) |
+| Vision AI | 708 (94.8%) | 1.04 s + 0.62 s foil check |
+| OCR first, then AI | 710 (95.0%) | |
+
+Where both were confirmed (656 cards) they chose the same printing every time. The collector
+number pattern is strict on purpose: with a looser one, a `202米` read from a mana/level symbol
+above the collector line matched another printing of the same card. What OCR doesn't confirm
+is mostly a collector line too soft to read, which the AI still manages.
+
+The reader is `ocr/server.mjs`, started by `CardOcr` when the app starts (the models take
+1-2 s to load) and restarted after a failure (at most once a minute); its errors go to
+`data/logs/ocr.log`. It needs Node.js 22+ and `npm install` in `ocr/` (`deploy.sh` does it);
+without them the switch is disabled and cards go to the AI. `ocr.provider` in `config.yaml`
+chooses GPU or CPU. Only Magic has a parser (`card_ocr.PARSERS`); other games are read by the AI.
+
+### The vision AI request
+
 `CardIdentifier.identify_card()` sends the flat card image (JPEG, longest side
 `vision_ai.image_size`, 1024 px) with a prompt asking for three values from fixed places on the
 card:
@@ -459,6 +501,12 @@ star has five sharp points") fixed that on the same set - checked by eye: 84/84 
 and a foil went in as regular; with the sentence that crop gives *unknown*, and 160/160
 readable cards (the set above plus later captures) stay right. The taller crop keeps the set line in
 view when the detected outline also takes in the edge of the card underneath in the pile.
+
+With *OCR first*, a marker light-ocr read is used instead: a `*`/`★` is foil, a `·`/`•`
+regular. On the 747 scans that agreed with the AI on 524 of the 526 OCR-confirmed cards where
+OCR read a marker, and on the two others the corner crops show a star (the AI said dot). OCR
+reads no symbol on about a third of the foils (and some regular cards), so a missing one
+counts as unknown and the AI is asked as above.
 
 The web page combines this with the printing's `finishes` in `suggestedFinish()`:
 
@@ -636,7 +684,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add`, `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_anti_glare`, `toggle_debug_trace`, `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -662,12 +710,12 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `config.yaml` | Camera, detection, auto-capture, vision AI defaults, web server, cleanup |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
-| `data/settings.json` | Choices made in the UI: AI provider/model, add automatically, locked focus position |
+| `data/settings.json` | Choices made in the UI: AI provider/model, OCR first, add automatically, locked focus position |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`) and inventory |
-| `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card) |
+| `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |
 
 ## Performance
@@ -682,6 +730,7 @@ Measured on an x86-64 laptop with an Anker PowerConf C200 at 2560 × 1440 and a 
 | App CPU while scanning | ~20–25% of one core - was ~120% (full-size decode, 8 OpenCV threads) |
 | Outline detection | ~3 ms per frame (YOLO on CPU: ~550 ms) |
 | Card landed → capture | ~0.15–0.5 s (settling) |
+| OCR identification | ~0.17 s (light-ocr on the GPU; ~0.8 s on the CPU) - 88% of cards need nothing more |
 | AI identification | ~0.9 s (qwen3.5:9b, 1024 px image); the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
 | Set + number lookup | 0.1 ms; fuzzy name search ~90 ms |
 

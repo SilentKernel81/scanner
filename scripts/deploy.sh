@@ -209,6 +209,22 @@ venv/bin/python -c "import flask, flask_socketio, cv2, numpy, PIL, yaml, dotenv,
 ok "Python packages installed$([ "$WITH_YOLO" -eq 1 ] && echo " (with YOLO)")"
 
 # ----------------------------------------------------------------------------
+step "OCR reader (optional)"
+
+# light-ocr reads cards before the vision AI is asked (card_ocr.py); it runs on Node.js
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
+        && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; then
+    if (cd ocr && npm install --no-audit --no-fund --silent); then
+        ok "light-ocr installed (Settings > Read with OCR first)"
+    else
+        warn "light-ocr could not be installed - cards will be read by the vision AI only"
+    fi
+else
+    warn "Node.js 22+ not found - cards will be read by the vision AI only"
+    echo "    Install Node.js (with npm) and run this script again to read cards with OCR first"
+fi
+
+# ----------------------------------------------------------------------------
 step "Configuration"
 
 mkdir -p data scanned_cards

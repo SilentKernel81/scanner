@@ -242,6 +242,13 @@
 
                 <div class="settings-section">
                     <h3>Vision AI</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Read with OCR first</span>
+                            <span class="switch-desc" id="ocr-desc">Faster: light-ocr reads each card on this computer; the AI is asked only when that isn't a certain match</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-ocr">
+                    </label>
                     <div class="input-group">
                         <label for="ai-provider">Provider</label>
                         <select id="ai-provider">
@@ -440,6 +447,6 @@
     <div id="toast-container" class="toast-container"></div>
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=33"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=34"></script>
 </body>
 </html>

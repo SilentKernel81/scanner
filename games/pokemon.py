@@ -346,6 +346,9 @@ class Pokemon(Game):
             self.log(f"Matched {card['name']} ({card['set']} #{card['number']}) by {card['match']}")
         return card
 
+    def confirmed_read(self, name, number=None, set_code=None):
+        return self.is_confirmed(self._identify(name, number, (set_code or '').strip().upper()))
+
     def _identify(self, name, number, set_code):
         key, total = parse_number(number)
         if PROMO_NUMBER.fullmatch(set_code) and not (key and total):

@@ -17,6 +17,7 @@ from datetime import datetime
 from config import Config
 from object_detector import ObjectDetector, warp_card
 from card_identifier import CardIdentifier
+from card_ocr import CardOcr
 import games
 import prompts
 from settings import Settings
@@ -146,6 +147,13 @@ class CardScanner:
                 except Exception as e:
                     self.log(f"Vision AI initialization failed: {e}", level="warning")
                     self.log("Continuing without AI identification", level="warning")
+
+        # light-ocr reads each card first; the vision AI is asked only when that read isn't
+        # a confirmed match (identify_card_from_image)
+        self.card_ocr = CardOcr(log_callback=log_callback)
+        self.ocr_enabled = bool(self.settings.get('ocr_first', True))
+        if self.ocr_enabled:
+            self.card_ocr.warm_up()
 
         # Detection settings
         self.enable_detection = True  # Toggle auto-detection
@@ -1374,12 +1382,31 @@ class CardScanner:
 
     def identify_card_from_image(self, card_image_rgb, foil_image=None):
         """
-        Identify a card using Vision AI from a preprocessed RGB image.
+        Identify a card from a preprocessed RGB image: light-ocr first (when switched on), and
+        the vision AI when OCR's read isn't a confirmed match (measured on 747 scans: OCR alone
+        confirmed 82% in 0.16 s each, the AI 95% in ~1 s; OCR first with the AI behind it 95%).
         foil_image: perspective-corrected card to read the star/dot foil marker from (its
-        corner is at a known position); no foil check without it.
-        Returns: card_info dict with name, collector_number, foil ('foil'|'non-foil'|'unknown')
+        corner is at a known position); no AI foil check without it.
+        Returns: card_info dict with name, collector_number, foil ('foil'|'non-foil'|'unknown'),
+        and 'reader' when it wasn't the vision AI that read the card
         This is used for async AI processing.
         """
+        ai_foil_check = (self.card_identifier and foil_image is not None and Config.VISION_AI_DETECT_FOIL
+                         and prompts.has('foil', games.active_id()))
+
+        ocr_info = None
+        if self.ocr_enabled:
+            ocr_info = self.card_ocr.read_card(card_image_rgb, games.active_id())
+            if ocr_info and games.active().confirmed_read(ocr_info['name'], ocr_info['collector_number'],
+                                                         ocr_info['set_code']):
+                # OCR misses the marker on about a third of the foils: ask the AI about those
+                if ocr_info['foil'] == 'unknown' and ai_foil_check:
+                    ocr_info['foil'] = self.card_identifier.read_foil_symbol(foil_image)
+                self.log(f"✓ Card identified by OCR: {ocr_info['name']} #{ocr_info['collector_number']}", level="success")
+                return ocr_info
+            if ocr_info and self.card_identifier:
+                self.log("OCR read is not a confirmed match - asking the vision AI")
+
         card_info = None
         if self.card_identifier:
             self.log("Identifying card with Vision AI...")
@@ -1387,7 +1414,7 @@ class CardScanner:
             # Ollama, more with cloud providers that serve requests in parallel)
             foil_result = {}
             foil_thread = None
-            if foil_image is not None and Config.VISION_AI_DETECT_FOIL and prompts.has('foil', games.active_id()):
+            if ai_foil_check and (not ocr_info or ocr_info['foil'] == 'unknown'):
                 foil_thread = threading.Thread(
                     target=lambda: foil_result.update(foil=self.card_identifier.read_foil_symbol(foil_image)),
                     daemon=True)
@@ -1395,6 +1422,8 @@ class CardScanner:
             card_info = self.card_identifier.identify_card(card_image_rgb)
             if foil_thread:
                 foil_thread.join(timeout=60)
+            # A marker OCR did read stands (it agreed with the AI on 480 of 481 scans)
+            foil = foil_result.get('foil') or (ocr_info or {}).get('foil') or 'unknown'
 
             if card_info and card_info.get('name'):
                 name = card_info['name']
@@ -1404,9 +1433,15 @@ class CardScanner:
                 else:
                     self.log(f"✓ Card identified: {name} (no collector number)", level="success")
 
-                card_info['foil'] = foil_result.get('foil', 'unknown')
+                card_info['foil'] = foil
             else:
                 self.log("Vision AI could not identify card", level="warning")
+                if ocr_info:
+                    # Better than nothing: the name OCR read still finds the card for review
+                    ocr_info['foil'] = foil
+                    card_info = ocr_info
+        elif ocr_info:
+            card_info = ocr_info
         else:
             self.log("⚠ Vision AI not enabled - set API key to enable automatic identification", level="warning")
 
@@ -1620,9 +1655,20 @@ class CardScanner:
         self.anti_glare_enabled = enabled
         self.log(f"Anti-glare preprocessing {'enabled' if enabled else 'disabled'}")
 
+    def set_ocr_enabled(self, enabled):
+        """Read cards with light-ocr before asking the vision AI (remembered)"""
+        self.ocr_enabled = enabled
+        self.settings.set('ocr_first', enabled)
+        if enabled:
+            self.card_ocr.warm_up()
+        else:
+            self.card_ocr.stop()
+        self.log(f"Read cards with OCR first: {'on' if enabled else 'off'}")
+
     def cleanup(self):
         """Clean up camera resources"""
         self.running = False
+        self.card_ocr.stop()
         if self.capture_thread:
             self.capture_thread.join(timeout=2)
 

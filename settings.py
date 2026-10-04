@@ -17,6 +17,7 @@ class Settings:
         'ai_model': None,  # None means use provider's default
         'auto_capture_enabled': False,  # Controlled via UI button, not config
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
+        'ocr_first': True,  # light-ocr reads each card; the vision AI only when that isn't a confirmed match
         'focus_value': None,  # Locked manual focus position (None = continuous autofocus)
         'detection_enabled': True,
         'fixed_area_enabled': False,  # Judge cards by a fixed area instead of their outline (sleeves)

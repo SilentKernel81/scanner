@@ -80,6 +80,9 @@ class Config:
     VISION_AI_DETECT_FOIL = config.get('vision_ai', 'detect_foil', default=True)
     VISION_AI_IMAGE_SIZE = int(config.get('vision_ai', 'image_size', default=1024))
 
+    # light-ocr reader (card_ocr.py): auto (GPU when available), cpu or webgpu
+    OCR_PROVIDER = config.get('ocr', 'provider', default='auto')
+
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://192.168.1.60:11434/v1/chat/completions')
     LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL') or config.get('vision_ai', 'local', 'model', default='llava:13b')

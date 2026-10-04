@@ -93,6 +93,10 @@ class Magic(Game):
     def identify(self, name, number=None, set_code=None, ai_model=None):
         return self.searcher.search_by_name(name, number, ai_model=ai_model, set_code=set_code)
 
+    def confirmed_read(self, name, number=None, set_code=None):
+        # Every confirmed match needs the collector number
+        return bool(number) and self.is_confirmed(self.db.search_card_exact(name, number, set_code))
+
     def find_printings(self, name, number=None, treatment=None, set_code=None):
         return self.searcher.find_printings(name, number, treatment, set_code)
 

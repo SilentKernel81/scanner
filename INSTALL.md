@@ -53,12 +53,16 @@ Each step is skipped when it's already done, so it's safe to run again at any ti
    for the service.
 3. **Python environment**: creates `venv/` with Python 3.10+ and installs `requirements.txt`
    (about 300 MB; `--with-yolo` adds the optional YOLO detector and PyTorch, about 1 GB more).
-4. **Configuration**: creates `.env` from `.env.example` (readable only by you), sets the camera
+4. **OCR reader** (optional): if Node.js 22+ with npm is installed, installs
+   [light-ocr](https://github.com/arcships/light-ocr) into `ocr/` (about 130 MB), which reads
+   most cards without an AI request. Without Node.js this step is skipped and every card goes
+   to the vision AI; install Node.js and run the script again to add it later.
+5. **Configuration**: creates `.env` from `.env.example` (readable only by you), sets the camera
    with `--camera N`, and checks that an API key is set for your AI provider.
-5. **Camera**: checks the configured camera and lists all cameras found.
-6. **Card database**: downloads it from Scryfall if missing (`--refresh-cards` downloads the
+6. **Camera**: checks the configured camera and lists all cameras found.
+7. **Card database**: downloads it from Scryfall if missing (`--refresh-cards` downloads the
    latest cards and prices). Your inventory is kept.
-7. **Service** (with `--service`): installs `/etc/systemd/system/mtg-scanner.service` for your
+8. **Service** (with `--service`): installs `/etc/systemd/system/mtg-scanner.service` for your
    user and folder, enables it and (re)starts it. If the service is already installed, each run
    restarts it so new code and packages are used - except a plain `--refresh-cards`, since the
    running scanner reads new card data directly.

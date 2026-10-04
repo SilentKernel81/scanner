@@ -1,0 +1,9 @@
+{
+  "name": "mtg-scanner-ocr",
+  "private": true,
+  "description": "light-ocr reader used by the scanner (card_ocr.py starts server.mjs)",
+  "type": "module",
+  "dependencies": {
+    "@arcships/light-ocr": "^0.5.8"
+  }
+}

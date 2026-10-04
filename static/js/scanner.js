@@ -635,6 +635,17 @@ function autoScanHint() {
     return fastScanMode ? 'Auto scanning - adding cards automatically' : 'Auto scanning - confirm each card';
 }
 
+// "Read with OCR first": without the light-ocr package the switch does nothing, so say why
+const OCR_DESC = document.getElementById('ocr-desc').textContent;
+
+function applyOcrState(enabled, installed) {
+    const toggle = document.getElementById('toggle-ocr');
+    toggle.checked = Boolean(enabled) && installed;
+    toggle.disabled = !installed;
+    document.getElementById('ocr-desc').textContent = installed ? OCR_DESC
+        : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
+}
+
 function undoLastAdd() {
     socket.emit('undo_last_add');
 }
@@ -647,6 +658,7 @@ function loadScanSettings() {
             fastScanMode = data.auto_add;
             document.getElementById('toggle-fast-scan').checked = data.auto_add;
             document.getElementById('toggle-autofocus').checked = data.autofocus;
+            applyOcrState(data.ocr_first, data.ocr_installed);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             document.getElementById('camera-rotation').value = String(data.camera_rotation || 0);
         })
@@ -1689,6 +1701,12 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('toggle-autofocus').addEventListener('change', function(e) {
         socket.emit('set_autofocus', {enabled: e.target.checked});
     });
+
+    // Read cards with light-ocr before asking the vision AI
+    document.getElementById('toggle-ocr').addEventListener('change', function(e) {
+        socket.emit('toggle_ocr', {enabled: e.target.checked});
+    });
+    socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
 
     // Toggle anti-glare
     document.getElementById('toggle-anti-glare').addEventListener('change', function(e) {
