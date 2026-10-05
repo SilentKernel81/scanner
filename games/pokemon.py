@@ -71,7 +71,7 @@ CARDS_QUERY = ('{ cards { id localId name rarity category image hp types stage t
 SETS_QUERY = '{ sets { id name releaseDate serie { id } cardCount { official } } }'
 
 CSV_COLUMNS = ['Card Name', 'Set', 'Card Number', 'Rarity', 'Type', 'Finish', 'Price (USD)',
-               'Quantity', 'Condition', 'Timestamp']
+               'Quantity', 'Condition', 'Timestamp', 'Location', 'Tags']
 
 
 def number_key(text):
@@ -139,7 +139,7 @@ def write_csv(rows, file):
     for row in rows:
         writer.writerow([row['name'], row['set_name'], row['number'], row['rarity'], row['type_line'],
                          row['finish'], f"${row['price']:.2f}", row['quantity'], row['condition'],
-                         row['timestamp']])
+                         row['timestamp'], row.get('location', ''), ', '.join(row.get('tags') or [])])
 
 
 class Pokemon(Game):
@@ -507,6 +507,15 @@ class Pokemon(Game):
             'finish_options': options,
             'confirmed': self.is_confirmed(card) if card.get('match') else None,
         }
+
+    def card_details(self, card_ids):
+        ids = [card_id for card_id in dict.fromkeys(card_ids) if card_id]
+        details = {}
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for row in self._rows(f"id IN ({', '.join('?' * len(chunk))})", chunk):
+                details[row['id']] = {'image_uri': f"{row['image_url']}/low.webp" if row['image_url'] else ''}
+        return details
 
     # -- Inventory -----------------------------------------------------------
 

@@ -1,0 +1,338 @@
+// Shared by the scanner page and the collection page: text helpers, the active game's
+// finishes, in-page dialogs and notifications, the inventory edit dialog and the capture viewer.
+// Each page defines inventoryChanged() (reload what it shows after an edit).
+
+function timeNow() {
+    // 24-hour HH:MM:SS, matching timestamps sent by the server
+    return new Date().toLocaleTimeString('en-GB', {hour12: false});
+}
+
+let gameInfo = null;  // {id, label, finishes: [[key, label]], exports: [[key, label]]}
+
+function defaultFinish() {
+    return gameInfo.finishes[0][0];
+}
+
+function finishLabel(key) {
+    const finish = gameInfo.finishes.find(([k]) => k === key);
+    return finish ? finish[1] : key;
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+const RARITY_ORDER = {special: 0, bonus: 0, mythic: 1, rare: 2, uncommon: 3, common: 4};
+const byText = (a, b) => (a || '').localeCompare(b || '', undefined, {numeric: true, sensitivity: 'base'});
+const INVENTORY_SORTS = {
+    newest: null,
+    oldest: (a, b) => byText(a.timestamp, b.timestamp) || a.id - b.id,
+    name: (a, b) => byText(a.name, b.name),
+    price_desc: (a, b) => (b.price || 0) - (a.price || 0),
+    price_asc: (a, b) => (a.price || 0) - (b.price || 0),
+    value_desc: (a, b) => (b.price || 0) * b.quantity - (a.price || 0) * a.quantity,
+    quantity_desc: (a, b) => b.quantity - a.quantity,
+    rarity: (a, b) => (RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9),
+    set: (a, b) => byText(a.set_name, b.set_name) || byText(a.number, b.number),
+};
+
+// ============================================================================
+// Inventory edit dialog (templates/_dialogs.html)
+// ============================================================================
+
+let currentEditId = null;
+
+// The entry as it was, to detect a split (another finish or location for part of a stack)
+let originalFinish = null;
+let originalLocation = '';
+let originalQuantity = 0;
+
+function logLine(level, message) {
+    // The activity panel only exists on the scanner page
+    if (typeof addLog === 'function') addLog(timeNow(), level, message);
+}
+
+function parseTags(text) {
+    // "trade, Keep ,trade" -> ["trade", "Keep"]
+    const seen = new Set();
+    return (text || '').split(',').map(tag => tag.trim()).filter(tag => {
+        const key = tag.toLowerCase();
+        if (!tag || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function renderEditFinishes(selected) {
+    document.getElementById('edit-finishes').innerHTML = gameInfo.finishes.map(([key, label]) => `
+        <label class="radio-pill">
+            <input type="radio" name="edit-finish" value="${escapeHtml(key)}" ${key === selected ? 'checked' : ''} onchange="updateSplitQuantityVisibility()">
+            <span>${escapeHtml(label)}</span>
+        </label>`).join('');
+}
+
+function editCard(card, locations = []) {
+    // locations: the ones already in use, offered while typing
+    currentEditId = card.id;
+    originalQuantity = card.quantity;
+    originalFinish = card.finish;
+    originalLocation = card.location || '';
+
+    document.getElementById('edit-card-name').textContent = card.name;
+    document.getElementById('edit-quantity').value = card.quantity;
+    document.getElementById('edit-condition').value = card.condition;
+    document.getElementById('edit-location').value = originalLocation;
+    document.getElementById('edit-location-options').innerHTML =
+        locations.map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
+    document.getElementById('edit-tags').value = (card.tags || []).join(', ');
+    renderEditFinishes(card.finish);
+
+    const splitInput = document.getElementById('edit-split-quantity');
+    splitInput.value = 1;
+    splitInput.max = originalQuantity;
+    splitInput.oninput = updateSplitPreview;
+    document.getElementById('split-quantity-section').style.display = 'none';
+
+    document.getElementById('edit-card-modal').classList.add('show');
+}
+
+function closeEditCard() {
+    document.getElementById('edit-card-modal').classList.remove('show');
+    currentEditId = null;
+    originalFinish = null;
+    originalLocation = '';
+    originalQuantity = 0;
+}
+
+function editedFinish() {
+    return document.querySelector('input[name="edit-finish"]:checked').value;
+}
+
+function editedLocation() {
+    return document.getElementById('edit-location').value.trim();
+}
+
+function editSplits() {
+    // Several copies and a new finish or location: ask how many get it
+    return originalQuantity > 1 && (editedFinish() !== originalFinish || editedLocation() !== originalLocation);
+}
+
+function updateSplitQuantityVisibility() {
+    const splitSection = document.getElementById('split-quantity-section');
+    if (editSplits()) {
+        splitSection.style.display = 'block';
+        updateSplitPreview();
+    } else {
+        splitSection.style.display = 'none';
+    }
+}
+
+function updateSplitPreview() {
+    const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
+    const remaining = originalQuantity - splitQuantity;
+    const preview = document.getElementById('split-preview');
+    if (!preview) return;
+    const describe = (finish, location) => escapeHtml(finishLabel(finish) + (location ? `, ${location}` : ''));
+    preview.innerHTML = `<strong>${splitQuantity}</strong> ${describe(editedFinish(), editedLocation())}`
+        + ` + <strong>${remaining}</strong> stay ${describe(originalFinish, originalLocation)}`;
+}
+
+function updateSplitMaxQuantity() {
+    const newQuantity = parseInt(document.getElementById('edit-quantity').value) || 1;
+    const splitInput = document.getElementById('edit-split-quantity');
+
+    if (splitInput) {
+        // Update max to the new total quantity
+        splitInput.max = newQuantity;
+
+        // If current split value exceeds new max, adjust it
+        if (parseInt(splitInput.value) > newQuantity) {
+            splitInput.value = newQuantity;
+        }
+
+        // Update preview
+        updateSplitPreview();
+    }
+}
+
+function saveEditCard() {
+    if (currentEditId === null) {
+        notify('No card selected for editing', 'error');
+        return;
+    }
+
+    const quantity = parseInt(document.getElementById('edit-quantity').value);
+    const condition = document.getElementById('edit-condition').value;
+
+    if (isNaN(quantity) || quantity < 1 || quantity > 999) {
+        notify('Please enter a quantity between 1 and 999', 'warning');
+        return;
+    }
+
+    const requestBody = {quantity: quantity, condition: condition, finish: editedFinish(),
+                         location: editedLocation(), tags: parseTags(document.getElementById('edit-tags').value)};
+    if (editSplits()) {
+        const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
+        if (splitQuantity < 1 || splitQuantity > originalQuantity) {
+            notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
+            return;
+        }
+        requestBody.split_quantity = splitQuantity;
+    }
+
+    const cardName = document.getElementById('edit-card-name').textContent;
+    const rowId = currentEditId;
+    closeEditCard();
+    logLine('info', `Updating ${cardName}...`);
+
+    fetch(`/api/inventory/update/${rowId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            logLine('success', `${cardName} updated` + (data.split ? ' (entry split)' : ''));
+            inventoryChanged();
+        } else {
+            notify('Failed to update card: ' + (data.error || data.message || 'Unknown error'), 'error');
+        }
+    })
+    .catch(error => notify('Failed to update card: ' + error.message, 'error'));
+}
+
+async function deleteCard(rowId, cardName) {
+    const ok = await confirmDialog({
+        title: 'Delete card?',
+        message: `Delete "${cardName}" from your inventory? This can't be undone.`,
+        confirmText: 'Delete',
+        danger: true
+    });
+    if (!ok) return;
+
+    logLine('info', `Deleting ${cardName}...`);
+
+    fetch(`/api/inventory/delete/${rowId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            logLine('success', `${cardName} deleted from inventory`);
+            inventoryChanged();
+        } else {
+            notify('Failed to delete card: ' + (data.error || 'Unknown error'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Delete error:', error);
+        notify('Failed to delete card: ' + error, 'error');
+    });
+}
+
+// ============================================================================
+// In-page dialogs and notifications
+// Native confirm()/alert() can be silently blocked by the browser ("prevent this page from
+// creating additional dialogs"), after which confirm() always returns false - so the app
+// uses its own.
+// ============================================================================
+
+let dialogResolve = null;
+
+function choiceDialog({title, message, choices}) {
+    // choices: [{label, value, style: 'primary' | 'danger' | undefined}]; resolves with the
+    // chosen value, or null when dismissed (Escape, click outside)
+    return new Promise(resolve => {
+        if (dialogResolve) dialogResolve(null);
+        dialogResolve = resolve;
+        document.getElementById('dialog-title').textContent = title;
+        document.getElementById('dialog-message').textContent = message;
+        const buttons = document.getElementById('dialog-buttons');
+        buttons.innerHTML = '';
+        choices.forEach(choice => {
+            const button = document.createElement('button');
+            button.className = 'btn' + (choice.style ? ` btn-${choice.style}` : '');
+            button.textContent = choice.label;
+            button.onclick = () => closeDialog(choice.value);
+            buttons.appendChild(button);
+        });
+        document.getElementById('dialog-modal').classList.add('show');
+        buttons.firstChild.focus();  // the safe choice (Cancel) is first
+    });
+}
+
+function closeDialog(value = null) {
+    document.getElementById('dialog-modal').classList.remove('show');
+    const resolve = dialogResolve;
+    dialogResolve = null;
+    if (resolve) resolve(value);
+}
+
+function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
+    return choiceDialog({title, message, choices: [
+        {label: 'Cancel', value: false},
+        {label: confirmText, value: true, style: danger ? 'danger' : 'primary'}
+    ]}).then(value => value === true);
+}
+
+function notify(message, level = 'info') {
+    // Shows a short notification and records it in the activity log
+    logLine(level, message);
+    const toast = document.createElement('div');
+    toast.className = `toast ${level}`;
+    toast.textContent = message;
+    document.getElementById('toast-container').appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+}
+
+const POPOVER_MAX = 8;
+
+function captureGridHtml(card, max = Infinity) {
+    const shown = card.captures.slice(0, max);
+    const more = card.captures.length - shown.length;
+    return shown.map(capture => `
+        <figure>
+            <img src="${escapeHtml(capture.url)}" alt="${escapeHtml(card.name)}" loading="lazy">
+            <figcaption>${escapeHtml(capture.captured_at)}</figcaption>
+        </figure>`).join('')
+        + (more > 0 ? `<div class="capture-more">+${more} more<br><span>click to see all</span></div>` : '');
+}
+
+function showCapturePopover(card, row) {
+    const popover = document.getElementById('capture-popover');
+    popover.className = 'capture-popover capture-grid' + (card.captures.length === 1 ? ' single' : '');
+    popover.innerHTML = captureGridHtml(card, POPOVER_MAX);
+    popover.hidden = false;
+    // Beside the row's thumbnail; above the row when there is no room below
+    const rect = row.getBoundingClientRect();
+    const box = popover.getBoundingClientRect();
+    const left = Math.min(rect.left + 70, window.innerWidth - box.width - 16);
+    const below = rect.bottom + 6;
+    popover.style.left = `${Math.max(16, left)}px`;
+    popover.style.top = `${below + box.height < window.innerHeight - 8 ? below : Math.max(8, rect.top - box.height - 6)}px`;
+}
+
+function hideCapturePopover() {
+    document.getElementById('capture-popover').hidden = true;
+}
+
+function openCaptures(card) {
+    hideCapturePopover();
+    const count = card.captures.length;
+    document.getElementById('capture-title').textContent =
+        `${card.name} - ${count} capture${count > 1 ? 's' : ''} of ${card.quantity} ${card.quantity > 1 ? 'copies' : 'copy'}`;
+    document.getElementById('capture-grid').innerHTML = captureGridHtml(card);
+    document.getElementById('capture-modal').classList.add('show');
+}
+
+function closeCaptures() {
+    document.getElementById('capture-modal').classList.remove('show');
+}

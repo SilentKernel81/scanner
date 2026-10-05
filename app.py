@@ -174,8 +174,10 @@ logger = setup_logging()
 scanned_cards_logger = logging.getLogger('scanned_cards')
 
 from config import Config
-from database import CardDatabase
+from database import CardDatabase, search_key
 from inventory import InventoryManager
+from decks import DeckManager
+from recommendations import Recommendations, Unavailable
 from review import REVIEW_DIR, ReviewQueue
 import games
 from cleanup import cleanup_old_images, get_images_stats
@@ -207,6 +209,8 @@ current_card_info = None
 current_review_id = None  # review queue item open on the page
 review_sid = None         # Socket.IO session of the page reviewing it (a reload / disconnect closes it)
 review = None             # review.ReviewQueue
+deck_store = None         # decks.DeckManager
+recommend = None          # recommendations.Recommendations
 # The capture being reviewed (image path): kept with the card added from it - also when the
 # card is found by a manual search after the AI couldn't identify it
 pending_capture = None
@@ -313,6 +317,11 @@ def added_payload(game, card, finish, quantity):
             'finish': game.finishes[finish], 'quantity': quantity}
 
 
+def scan_location():
+    """Where cards being scanned are put (the inventory location new entries get; '' = none)"""
+    return (scanner.settings.get('scan_location', '') if scanner else '') or ''
+
+
 def add_automatically(game, card, image_path, foil):
     """
     A confirmed card goes straight into the inventory: one Near Mint copy in the likely finish.
@@ -321,7 +330,7 @@ def add_automatically(game, card, image_path, foil):
     """
     finish = game.suggested_finish(card, foil)
     row_id = inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', 1,
-                                capture=image_path)
+                                capture=image_path, location=scan_location())
     socketio.emit('inventory_updated', {'auto': True, 'stats': inventory.get_stats(game.id),
                                         'added': added_payload(game, card, finish, 1)}, namespace='/')
     start_price_update(game, card, [row_id])
@@ -483,7 +492,7 @@ def ai_processing_worker():
 
 def initialize_components():
     """Initialize all components"""
-    global scanner, database, inventory, review
+    global scanner, database, inventory, review, deck_store, recommend
 
     logger.info("Initializing components...")
 
@@ -510,6 +519,8 @@ def initialize_components():
     logger.info("Initializing inventory...")
     inventory = InventoryManager(log_callback=log_to_client)
     review = ReviewQueue()
+    deck_store = DeckManager()
+    recommend = Recommendations()
 
     # Set up auto-capture callback
     def handle_auto_capture():
@@ -678,6 +689,12 @@ def index():
     return render_template('scanner.html')
 
 
+@app.route('/collection')
+def collection():
+    """Inventory management and deck building"""
+    return render_template('collection.html')
+
+
 def generate_frames():
     """MJPEG stream of the annotated live view (each new frame once; encoding is shared)"""
     last_id = -1
@@ -728,7 +745,12 @@ def get_inventory():
 
     if inventory:
         try:
-            cards = inventory.get_all_cards(games.active().id)
+            game = games.active()
+            cards = inventory.get_all_cards(game.id)
+            # What the collection page shows and filters with beyond the stored columns
+            details = game.card_details([card['card_id'] for card in cards])
+            for card in cards:
+                card['details'] = details.get(card['card_id'], {})
 
             return jsonify({
                 'success': True,
@@ -769,6 +791,8 @@ def update_inventory_card(row_id):
             condition = data.get('condition')
             finish = data.get('finish')
             split_quantity = data.get('split_quantity')
+            location = data.get('location')
+            tags = data.get('tags')
             if finish is not None and finish not in games.active().finishes:
                 return jsonify({'success': False, 'split': False, 'error': f'Unknown finish: {finish}'}), 400
 
@@ -784,7 +808,9 @@ def update_inventory_card(row_id):
             # Changing the finish of several copies splits the entry
             result = inventory.update_card(row_id, quantity=quantity, condition=condition,
                                            finish=finish, split_quantity=split_quantity,
-                                           finish_price=finish_price)
+                                           finish_price=finish_price,
+                                           location=str(location)[:60] if location is not None else None,
+                                           tags=tags)
 
             if result['success']:
                 return jsonify(result)
@@ -796,6 +822,20 @@ def update_inventory_card(row_id):
             return jsonify({'success': False, 'split': False, 'error': str(e)}), 500
 
     return jsonify({'success': False, 'split': False, 'error': 'Inventory not initialized'}), 500
+
+
+@app.route('/api/inventory/bulk', methods=['POST'])
+def bulk_update_inventory():
+    """One change to several entries (JSON: ids, action, value) - see InventoryManager.bulk_update"""
+    if not inventory:
+        return jsonify({'success': False, 'error': 'Inventory not initialized'}), 500
+    data = request.get_json(silent=True) or {}
+    try:
+        ids = [int(row_id) for row_id in data.get('ids') or []]
+        changed = inventory.bulk_update(ids, data.get('action'), str(data.get('value') or '')[:60])
+    except (ValueError, TypeError) as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({'success': True, 'changed': changed})
 
 
 @app.route('/api/export_inventory/<fmt>')
@@ -907,6 +947,467 @@ def clear_inventory():
     except Exception as e:
         logger.exception(f"Clear inventory failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================================
+# Decks (collection page) - lists of cards; what is owned comes from the inventory
+# ============================================================================
+
+def commander_formats(game):
+    return [key for key, rules in game.deck_formats.items() if rules.get('commander')]
+
+
+def deck_format_for(game, site_format, entries):
+    """Deck format for a deck from another site, whose format name may be unknown here"""
+    if site_format in game.deck_formats:
+        return site_format
+    if any(entry['board'] == 'commander' for entry in entries):
+        return commander_formats(game)[0]
+    return 'legacy' if 'legacy' in game.deck_formats else next(iter(game.deck_formats))
+
+
+def resolve_entries(game, entries, deck_format):
+    """
+    Entries from a pasted list or another site, as stored in a deck: the card data's spelling
+    of each name and a printing to show. Returns (entries, names not in the card data).
+    """
+    has_commander = deck_format in commander_formats(game)
+    by_name = game.cards_by_names([entry['name'] for entry in entries])
+    resolved, unknown = [], []
+    for entry in entries:
+        board = entry.get('board') or 'main'
+        if board == 'maybe':  # cards the other site lists outside the deck
+            if not has_commander:
+                continue
+            board = 'side'
+        if board == 'commander' and not has_commander:
+            board = 'main'
+        card = by_name.get(search_key(entry['name']))
+        if not card:
+            unknown.append(entry['name'])
+        resolved.append({'name': card['name'] if card else entry['name'], 'card_id': card['id'] if card else None,
+                         'quantity': entry.get('quantity') or 1, 'board': board})
+    return resolved, unknown
+
+
+def deck_payload(deck):
+    """A deck as the page shows it: card data, copies owned, other decks wanting them, issues, totals"""
+    game = games.get(deck['game'])
+    considering = deck['format'] in commander_formats(game)  # its 'side' board isn't played
+    by_name = game.cards_by_names([card['name'] for card in deck['cards']])
+    owned = inventory.owned_by_name(game.id)
+    needed = deck_store.needed_by_name(game.id, commander_formats(game))
+    cards, checked = [], []
+    for entry in deck['cards']:
+        key = search_key(entry['name'])
+        card = by_name.get(key)
+        cards.append({
+            'name': entry['name'], 'quantity': entry['quantity'], 'board': entry['board'],
+            'card': game.deck_card_payload(card) if card else None,
+            'owned': owned.get(key, 0),
+            'elsewhere': [other for other in needed.get(key, []) if other['deck_id'] != deck['id']],
+        })
+        checked.append({'name': entry['name'], 'quantity': entry['quantity'], 'board': entry['board'], 'card': card})
+    played = [card for card in cards if not (considering and card['board'] == 'side')]
+    wanted = {}
+    for card in played:
+        wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
+    price = lambda card: (card['card'] or {}).get('price') or 0.0
+    first = {card['name']: card for card in played}
+    missing = {name: max(0, count - first[name]['owned']) for name, count in wanted.items()}
+    return {
+        'id': deck['id'], 'name': deck['name'], 'format': deck['format'], 'notes': deck['notes'],
+        'updated_at': deck['updated_at'], 'cards': cards,
+        'issues': game.check_deck(deck['format'], checked),
+        'totals': {
+            'cards': sum(card['quantity'] for card in played if card['board'] != 'side'),
+            'side': sum(card['quantity'] for card in cards if card['board'] == 'side'),
+            'price': round(sum(price(first[name]) * count for name, count in wanted.items()), 2),
+            'missing': sum(missing.values()),
+            'missing_price': round(sum(price(first[name]) * count for name, count in missing.items()), 2),
+        },
+    }
+
+
+def get_deck_or_404(deck_id):
+    deck = deck_store.get(deck_id) if deck_store else None
+    if not deck:
+        return None, (jsonify({'success': False, 'error': 'Deck not found'}), 404)
+    return deck, None
+
+
+def entries_from_source(game, data, deck_format):
+    """
+    Cards for a deck from what the page sent: 'text' (a pasted list), 'url' (Moxfield /
+    Archidekt), 'precon' (MTGJSON file name) or 'average' (EDHREC's average deck for these
+    commander names). Returns (entries or None, name from the source, its format name).
+    """
+    if data.get('text'):
+        return game.parse_decklist(data['text'], deck_format), None, None
+    if data.get('url'):
+        found = recommend.deck_from_url(data['url'])
+        return found['entries'], found['name'], found['format']
+    if data.get('precon'):
+        entries = recommend.precon(data['precon'])
+        if entries is None:
+            raise Unavailable('MTGJSON does not have this deck')
+        return entries, None, None
+    if data.get('average'):
+        entries = recommend.average_deck(data['average'])
+        if entries is None:
+            raise Unavailable('EDHREC has no average deck for this commander')
+        return entries, None, None
+    return None, None, None
+
+
+@app.route('/api/decks', methods=['GET', 'POST'])
+def decks_collection():
+    """List the active game's decks, or create one (JSON: name, format, and optionally a source
+    of cards - see entries_from_source - or 'commander': a card name to start with)"""
+    game = games.active()
+    if not game.deck_formats:
+        return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
+    if request.method == 'GET':
+        owned = inventory.owned_by_name(game.id)
+        considering = commander_formats(game)
+        listed = []
+        for deck in deck_store.list_decks(game.id):
+            wanted = {}
+            for card in deck_store.get(deck['id'])['cards']:
+                if not (card['board'] == 'side' and deck['format'] in considering):
+                    wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
+            have = sum(min(count, owned.get(search_key(name), 0)) for name, count in wanted.items())
+            total = sum(wanted.values())
+            listed.append({**deck, 'owned': have, 'owned_percent': round(100 * have / total) if total else 0})
+        return jsonify({'success': True, 'decks': listed, 'has_deck_data': bool(game.has_deck_data())})
+
+    data = request.get_json(silent=True) or {}
+    deck_format = data.get('format')
+    try:
+        entries, source_name, source_format = entries_from_source(game, data, deck_format)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Unavailable as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+    if entries is not None and deck_format not in game.deck_formats:
+        deck_format = deck_format_for(game, source_format, entries)
+    if deck_format not in game.deck_formats:
+        return jsonify({'success': False, 'error': 'Choose a format'}), 400
+    if entries is None and data.get('commander'):
+        entries = [{'name': data['commander'], 'quantity': 1, 'board': 'commander'}]
+    unknown = []
+    deck_id = deck_store.create(game.id, str(data.get('name') or source_name or 'New deck')[:80], deck_format)
+    if entries:
+        resolved, unknown = resolve_entries(game, entries, deck_format)
+        deck_store.import_cards(deck_id, resolved)
+    logger.info(f"Deck created: {deck_id} ({deck_format})")
+    return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_id)), 'unknown': unknown})
+
+
+@app.route('/api/decks/<int:deck_id>', methods=['GET', 'PUT', 'DELETE'])
+def deck_item(deck_id):
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    if request.method == 'DELETE':
+        deck_store.delete(deck_id)
+        return jsonify({'success': True})
+    if request.method == 'PUT':
+        data = request.get_json(silent=True) or {}
+        deck_format = data.get('format')
+        if deck_format is not None and deck_format not in games.get(deck['game']).deck_formats:
+            return jsonify({'success': False, 'error': f'Unknown format: {deck_format}'}), 400
+        name = str(data['name'])[:80] if data.get('name') is not None else None
+        notes = str(data['notes'])[:4000] if data.get('notes') is not None else None
+        deck_store.update(deck_id, name=name, deck_format=deck_format, notes=notes)
+        deck = deck_store.get(deck_id)
+    return jsonify({'success': True, 'deck': deck_payload(deck)})
+
+
+@app.route('/api/decks/<int:deck_id>/duplicate', methods=['POST'])
+def deck_duplicate(deck_id):
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_store.duplicate(deck_id)))})
+
+
+@app.route('/api/decks/<int:deck_id>/cards', methods=['POST'])
+def deck_cards(deck_id):
+    """
+    Change a deck's cards. JSON: 'cards': [{name, board, card_id, and one of 'change' (+1 / -1),
+    'quantity' (set; 0 removes) or 'move_to' (another board)}]. Returns the deck.
+    """
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    try:
+        for item in data.get('cards') or []:
+            name, board = str(item['name']), item.get('board') or 'main'
+            if item.get('move_to'):
+                deck_store.move_card(deck_id, name, board, item['move_to'])
+            elif 'quantity' in item:
+                deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
+            else:
+                deck_store.add_card(deck_id, name, board, int(item.get('change', 1)), item.get('card_id'))
+    except (KeyError, ValueError, TypeError) as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_id))})
+
+
+@app.route('/api/decks/<int:deck_id>/import', methods=['POST'])
+def deck_import(deck_id):
+    """Add cards from a source (see entries_from_source) to a deck; 'replace': true empties it first"""
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    game = games.get(deck['game'])
+    data = request.get_json(silent=True) or {}
+    try:
+        entries, _name, _format = entries_from_source(game, data, deck['format'])
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Unavailable as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+    if not entries:
+        return jsonify({'success': False, 'error': 'No cards found'}), 400
+    resolved, unknown = resolve_entries(game, entries, deck['format'])
+    added = deck_store.import_cards(deck_id, resolved, replace=bool(data.get('replace')))
+    return jsonify({'success': True, 'added': added, 'unknown': unknown,
+                    'deck': deck_payload(deck_store.get(deck_id))})
+
+
+@app.route('/api/decks/<int:deck_id>/export/<kind>')
+def deck_export(deck_id, kind):
+    """Download a deck as a text list ('text'), or only the copies not owned ('buylist')"""
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    game = games.get(deck['game'])
+    entries = deck['cards']
+    if kind == 'buylist':
+        owned = inventory.owned_by_name(game.id)
+        wanted = {}
+        for entry in entries:
+            if not (entry['board'] == 'side' and deck['format'] in commander_formats(game)):
+                wanted[entry['name']] = wanted.get(entry['name'], 0) + entry['quantity']
+        lines = [f"{count - owned.get(search_key(name), 0)} {name}" for name, count in sorted(wanted.items())
+                 if count > owned.get(search_key(name), 0)]
+        text = '\n'.join(lines) + '\n'
+    elif kind == 'text':
+        text = game.format_decklist(entries, deck['format'])
+    else:
+        return jsonify({'success': False, 'error': f'Unknown export: {kind}'}), 404
+    file_name = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in deck['name']).strip() or 'deck'
+    return Response(text, mimetype='text/plain', headers={
+        'Content-Disposition': f'attachment; filename="{file_name}{"_buylist" if kind == "buylist" else ""}.txt"'})
+
+
+@app.route('/api/cards/search')
+def search_cards():
+    """Deck builder card search: one result per card name, with the copies owned"""
+    game = games.active()
+    if not game.deck_formats:
+        return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
+    args = request.args
+    owned = inventory.owned_by_name(game.id)
+    try:
+        cmc = float(args['cmc']) if args.get('cmc') not in (None, '') else None
+        offset = max(0, int(args.get('offset') or 0))
+        cards, more = game.search_cards(
+            text=args.get('q'), type_text=args.get('type'), oracle_text=args.get('text'),
+            identity=args.get('identity'), colors=args.get('colors'), cmc=cmc, rarity=args.get('rarity'),
+            legal_in=args.get('format') or None, names=list(owned) if args.get('owned') else None, offset=offset)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({'success': True, 'more': more, 'cards': [
+        {**game.deck_card_payload(card), 'owned': owned.get(search_key(card['name']), 0)} for card in cards]})
+
+
+# -- Recommendations (recommendations.py: EDHREC, MTGJSON, Archidekt, Moxfield) --
+
+@app.route('/api/decks/<int:deck_id>/suggestions')
+def deck_suggestions(deck_id):
+    """Cards played with the deck's commander (EDHREC), with the copies owned; the deck's own cards left out"""
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    game = games.get(deck['game'])
+    commanders = [card['name'] for card in deck['cards'] if card['board'] == 'commander']
+    if not commanders:
+        return jsonify({'success': True, 'categories': [], 'message': 'Choose a commander to get suggestions'})
+    try:
+        found = recommend.commander_cards(commanders)
+    except Unavailable as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+    if not found:
+        return jsonify({'success': True, 'categories': [], 'message': 'EDHREC has no data for this commander'})
+    in_deck = {search_key(card['name']) for card in deck['cards']}
+    owned = inventory.owned_by_name(game.id)
+    by_name = game.cards_by_names([card['name'] for category in found['categories'] for card in category['cards']])
+    categories = []
+    for category in found['categories']:
+        cards = []
+        for suggestion in category['cards']:
+            card = by_name.get(search_key(suggestion['name']))
+            if not card or search_key(card['name']) in in_deck:
+                continue
+            cards.append({**game.deck_card_payload(card), 'inclusion': suggestion['inclusion'],
+                          'synergy': suggestion['synergy'], 'owned': owned.get(search_key(card['name']), 0)})
+        if cards:
+            categories.append({'title': category['title'], 'cards': cards})
+    return jsonify({'success': True, 'decks': found['decks'], 'url': found['url'], 'categories': categories})
+
+
+@app.route('/api/decks/popular')
+def popular_decks():
+    """Public decks on other sites: with a deck's commander (deck_id), or of a format"""
+    game = games.active()
+    commander, deck_format = None, request.args.get('format')
+    if request.args.get('deck_id'):
+        deck, error = get_deck_or_404(int(request.args['deck_id']))
+        if error:
+            return error
+        deck_format = deck['format']
+        commander = next((card['name'] for card in deck['cards'] if card['board'] == 'commander'), None)
+    if deck_format not in game.deck_formats:
+        return jsonify({'success': False, 'error': 'Unknown format'}), 400
+    found, problems = recommend.popular_decks(commander=commander, deck_format=deck_format)
+    return jsonify({'success': True, 'decks': found, 'problems': problems, 'commander': commander})
+
+
+@app.route('/api/precons')
+def precon_list():
+    """Preconstructed decks (MTGJSON), newest first - to browse, open as a deck, or add as owned"""
+    try:
+        return jsonify({'success': True, 'precons': recommend.precon_list()})
+    except Unavailable as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+
+
+@app.route('/api/precons/<file_name>/own', methods=['POST'])
+def precon_own(file_name):
+    """
+    "I own this precon": its cards go into the inventory - the printings and finishes that are
+    in the box, Near Mint, at 'location' - and it becomes a deck to change from there.
+    JSON: name (of the deck), location.
+    """
+    game = games.active()
+    data = request.get_json(silent=True) or {}
+    try:
+        precon = next((deck for deck in recommend.precon_list() if deck['file'] == file_name), None)
+        entries = recommend.precon(file_name) if precon else None
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Unavailable as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+    if not entries:
+        return jsonify({'success': False, 'error': 'MTGJSON does not have this deck'}), 404
+    name = str(data.get('name') or precon['name'])[:80]
+    location = str(data.get('location') or '').strip()[:60]
+
+    # The exact printing: by its Scryfall id, else set + number, else any printing of the name
+    by_id = database.cards_by_ids([entry['scryfall_id'] for entry in entries])
+    by_name = game.cards_by_names([entry['name'] for entry in entries])
+    deck_entries, unknown, added = [], [], 0
+    for entry in entries:
+        card = by_id.get(entry['scryfall_id']) \
+            or (database.get_card_by_set_number(entry['set'], entry['number']) if entry['set'] and entry['number'] else None) \
+            or by_name.get(search_key(entry['name']))
+        if not card:
+            unknown.append(entry['name'])
+            continue
+        finish = game.suggested_finish(card, 'foil' if entry['foil'] else 'non-foil')
+        inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', entry['quantity'],
+                           location=location, quiet=True)
+        added += entry['quantity']
+        deck_entries.append({'name': card['name'], 'card_id': card['id'], 'quantity': entry['quantity'],
+                             'board': entry['board']})
+    inventory.last_added = None  # Undo takes back one add, not a whole deck
+    deck_id = deck_store.create(game.id, name, precon['format'])
+    deck_store.import_cards(deck_id, deck_entries)
+    log_to_client(f"Added to inventory: {added} cards of {precon['name']}"
+                  + (f" ({location})" if location else ''), level="success")
+    socketio.emit('inventory_updated', {'auto': False, 'stats': inventory.get_stats(game.id)}, namespace='/')
+    return jsonify({'success': True, 'added': added, 'unknown': unknown,
+                    'deck': deck_payload(deck_store.get(deck_id))})
+
+
+# "What can I build?": rankings that need a request per commander / precon, so they run in
+# the background and the page asks for their state. kind -> state
+deck_ideas = {}
+deck_ideas_lock = threading.Lock()
+
+
+def run_deck_ideas(kind, game):
+    state = deck_ideas[kind]
+    try:
+        owned = inventory.owned_by_name(game.id)
+        if kind == 'commanders':
+            # Legendary creatures in the inventory, by how much of what is played with them is owned
+            legends = sorted({row['name'] for row in inventory.get_all_cards(game.id)
+                              if 'Legendary' in row['type_line'] and 'Creature' in row['type_line']})
+            cards = game.cards_by_names(legends)
+            legends = [name for name in legends if cards.get(search_key(name))
+                       and game.can_be_commander(cards[search_key(name)])]
+            state['total'] = len(legends)
+            for name in legends:
+                found = recommend.commander_cards([name])
+                if found:
+                    played = {card['name']: card['inclusion'] for category in found['categories']
+                              for card in category['cards']}
+                    have = [card for card in played if owned.get(search_key(card))]
+                    weight = sum(played.values())
+                    card = cards[search_key(name)]
+                    state['items'].append({
+                        'name': card['name'], 'image_uri': card['image_uri'], 'identity': card['color_identity'],
+                        'decks': found['decks'], 'owned': len(have), 'total': len(played),
+                        'fit': round(100 * sum(played[card_name] for card_name in have) / weight) if weight else 0,
+                    })
+                state['done'] += 1
+        else:
+            precons = recommend.precon_list()
+            state['total'] = len(precons)
+            for precon in precons:
+                entries = recommend.precon(precon['file'])
+                if entries:
+                    total = sum(entry['quantity'] for entry in entries)
+                    have = sum(min(entry['quantity'], owned.get(search_key(entry['name']), 0)) for entry in entries)
+                    state['items'].append({**precon, 'owned': have, 'total': total,
+                                           'percent': round(100 * have / total) if total else 0})
+                state['done'] += 1
+    except Unavailable as e:
+        state['error'] = str(e)
+    except Exception as e:
+        logger.exception(f"Deck ideas ({kind}) failed: {e}")
+        state['error'] = 'Something went wrong - see data/logs/app.log'
+    finally:
+        state['running'] = False
+
+
+@app.route('/api/decks/ideas/<kind>', methods=['GET', 'POST'])
+def deck_ideas_state(kind):
+    """
+    "What can I build?" rankings: kind 'commanders' (owned legendary creatures, by the share of
+    their EDHREC cards that is owned) or 'precons' (preconstructed decks, by the share owned).
+    POST starts a run (answers are cached, so a second run is quick); GET returns its state.
+    """
+    game = games.active()
+    if kind not in ('commanders', 'precons') or not game.deck_formats:
+        return jsonify({'success': False, 'error': 'Unknown ranking'}), 404
+    with deck_ideas_lock:
+        state = deck_ideas.get(kind)
+        if request.method == 'POST' and not (state and state['running']):
+            state = deck_ideas[kind] = {'running': True, 'done': 0, 'total': 0, 'items': [], 'error': None}
+            threading.Thread(target=run_deck_ideas, args=(kind, game), daemon=True).start()
+    if not state:
+        return jsonify({'success': True, 'started': False, 'running': False, 'items': []})
+    order = 'fit' if kind == 'commanders' else 'percent'
+    return jsonify({'success': True, 'started': True, 'running': state['running'], 'done': state['done'],
+                    'total': state['total'], 'error': state['error'],
+                    'items': sorted(list(state['items']), key=lambda item: item[order], reverse=True)})
+
 
 
 @app.route('/api/detection_status')
@@ -1210,7 +1711,7 @@ def handle_add_inventory(data):
                 quantity = 1
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
             added_rows.append(inventory.add_card(game.inventory_fields(card, finish), game.id, finish, condition,
-                                                 quantity, capture=capture))
+                                                 quantity, capture=capture, location=scan_location()))
             capture = None
 
             # Send updated stats and what was added (the page offers an Undo)
@@ -1395,6 +1896,9 @@ def game_info(game):
         'number_example': game.number_example,
         'finishes': [[key, label] for key, label in game.finishes.items()],
         'exports': [[key, label] for key, (label, _prefix, _writer) in game.export_formats().items()],
+        # Deck builder formats: [[id, label, has a commander]] (none: the game has no deck builder)
+        'deck_formats': [[key, rules['label'], bool(rules.get('commander'))]
+                         for key, rules in game.deck_formats.items()],
     }
 
 
@@ -1479,8 +1983,19 @@ def get_scan_settings():
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
-        'camera_rotation': scanner.rotation if scanner else 0
+        'camera_rotation': scanner.rotation if scanner else 0,
+        'scan_location': scan_location(),
+        'locations': inventory.locations(games.active_id()) if inventory else [],
     })
+
+
+@app.route('/api/scan_location', methods=['POST'])
+def set_scan_location():
+    """Set the inventory location scanned cards are added to ('' = none)"""
+    location = str((request.get_json(silent=True) or {}).get('location') or '').strip()[:60]
+    scanner.settings.set('scan_location', location)
+    log_to_client(f"Scanned cards go to: {location}" if location else "Scanned cards get no location")
+    return jsonify({'success': True, 'scan_location': location})
 
 
 @socketio.on('toggle_fast_scan')

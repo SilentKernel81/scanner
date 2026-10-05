@@ -14,10 +14,11 @@ deployment see [INSTALL.md](INSTALL.md).
 7. [Foil and finish](#foil-and-finish)
 8. [Database](#database)
 9. [Focus](#focus)
-10. [Web interface](#web-interface)
-11. [Configuration and files](#configuration-and-files)
-12. [Performance](#performance)
-13. [Known limitations](#known-limitations)
+10. [Collection page and decks](#collection-page-and-decks)
+11. [Web interface](#web-interface)
+12. [Configuration and files](#configuration-and-files)
+13. [Performance](#performance)
+14. [Known limitations](#known-limitations)
 
 ## Overview
 
@@ -52,13 +53,18 @@ Design choices:
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
 | `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports), `pokemon.Pokemon` (TCGdex data, matching, prices, finishes, export); `games.active()` is the game being scanned |
 | `card_search.py` | Magic search helpers combining name, number, set and treatment |
-| `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, delete, stats, CSV import/export |
+| `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, bulk edits, locations and tags, delete, stats, CSV import/export |
+| `decks.py` | Decks (`decks`, `deck_cards`): lists of card names with a count and a board; never touches the inventory |
+| `games/mtg_decks.py` | Magic deck formats, the deck checks (size, copies, color identity, legality) and text decklists |
+| `recommendations.py` | Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield, cached in `web_cache` |
 | `anti_glare.py` | Optional glare reduction applied to captures (CLAHE, bilateral filter, inpainting) |
 | `settings.py` | UI preferences persisted in `data/settings.json` |
 | `config.py`, `config_loader.py` | Settings from `config.yaml` (+ environment variables) |
 | `cleanup.py` | Deletes old scanned images (on startup and as a CLI) |
 | `setup_database.py` | Downloads and builds the card database |
-| `templates/scanner.html`, `static/` | Single-page web interface |
+| `templates/scanner.html`, `static/` | The scanner page |
+| `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css` | The collection page (`/collection`): inventory management, deck builder, statistics |
+| `static/js/common.js`, `templates/_icons.html`, `templates/_dialogs.html` | Shared by both pages: text helpers, in-page dialogs and notifications, the inventory edit dialog, the capture viewer, the icon sprite |
 
 ### Threads
 
@@ -543,14 +549,25 @@ cards excluded. Columns are defined once in `database.CARD_COLUMNS`:
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
+| Deck building | `oracle_id` (the same for every printing of a card), `cmc`, `color_identity` (JSON), `legalities` (JSON: format → `legal` / `restricted` / `banned`; formats a card is not legal in are left out), `keywords` (JSON) |
 
-Indexes: name, flavor name, search names, (set code, collector number), rarity, type.
-Missing columns are added on startup (search names are filled in automatically; treatment data
-arrives with the next card database update). "Rebuild database schema" copies the table into the
+Indexes: name, flavor name, search names, (set code, collector number), rarity, type, oracle id.
+Missing columns are added on startup (search names are filled in automatically; treatment and
+deck-building data arrive with the next card database update - until then
+`CardDatabase.has_deck_data()` is false and the Decks tab offers the update). "Rebuild database schema" copies the table into the
 canonical column order by column name.
 
 **`inventory`** (created and migrated by `inventory.py`) - one row per game + card name + set +
-number + condition + finish (`UNIQUE`); adding an existing combination increases `quantity`.
+number + condition + finish + location (`UNIQUE`); adding an existing combination increases `quantity`.
+`location` ('' = none) says where the copies are (a binder, a box), so copies of one printing
+can be in two places; `tags` ("trade, keep") belong to the entry and are not part of the key -
+entries that merge keep both sets. Moving part of a stack to another location splits the row,
+like a finish change (`split_quantity`). `bulk_update` applies one change (delete, condition,
+location - whole stacks -, add / remove a tag) to several entries. Cards added while scanning
+get the `scan_location` setting (Settings → Scan into location). Inventories from before
+locations are rebuilt once on startup (the key changed): backup in
+`data/backups/inventory_before_locations_<time>.db`, row ids kept (the captures point at them),
+entry and card counts checked, one transaction.
 Rows are addressed by `id` (edit, delete, undo). Also stores the printing id (`card_id`), set
 code, rarity, type, mana cost, colors, color identity, price and timestamp. `finish` is one of
 the game's finish keys (Magic: `regular`, `foil`, `surge`). Editing the finish of part of a stack
@@ -682,6 +699,75 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
 
 Cameras without a `focus_absolute` control (and the Pi camera module) keep their own autofocus.
 
+## Collection page and decks
+
+`/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
+game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
+and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.
+
+**Inventory tab.** `/api/inventory` adds to every row its `location`, `tags` and `details` from
+`Game.card_details` (Magic: image, mana value, color identity; Pokémon: image). Filters (text,
+color identity, type, rarity, set, finish, location, tag, price), sorts, the list / image grid
+and the statistics are computed in the browser from that one response; rows render 200 at a
+time. Selected entries get the bulk bar (`POST /api/inventory/bulk`).
+
+**Decks** (Magic; a game without `Game.deck_formats` has no Decks tab). A deck (`decks.py`) is a
+name, a format and `deck_cards` rows: card name, count, board (`commander`, `main`, `side`) and
+a printing id for the image. The card is identified by its name, so any printing owned counts.
+Nothing a deck does changes the inventory. `deck_payload` in `app.py` puts together what the
+page shows:
+
+- card data: one printing per name (`CardDatabase.cards_by_names` - the newest with an image)
+  and the cheapest price among all printings, which is what the deck and buy-list totals use;
+- `owned`: copies in the inventory over every printing, finish and location
+  (`InventoryManager.owned_by_name`), and `elsewhere`: other decks with the card
+  (`DeckManager.needed_by_name`) - the page shows *owned*, *shared* (owned, but other decks
+  want more copies than there are), *n of m* or *missing*;
+- `issues` from `games/mtg_decks.check_deck`, which reports and never blocks:
+
+| Format | Checked |
+|---|---|
+| Commander | exactly 100 cards with the commander; one copy of each card; every card within the commanders' color identity; `legalities.commander`; a commander is a legendary creature (or says it can be one); two commanders need Partner, Friends forever, a Background or Doctor's companion |
+| Standard, Pioneer, Modern, Legacy, Vintage, Pauper | at least 60 cards; at most 15 in the sideboard; at most 4 copies over main deck and sideboard (1 when restricted); legal in the format |
+
+  Basic lands and cards that say "A deck can have any number of cards named" have no copy
+  limit; "up to seven cards named" sets it to seven. A Commander deck's `side` board is a list
+  of cards being considered: not counted, not checked, not in the buy list.
+
+Card search for the builder is `CardDatabase.search_cards`: one row per card name, filtered by
+name, type, rules text, mana value, rarity, color identity (within the commander's / including
+chosen colors), legality in the deck's format and "owned"; the exact name sorts first. Text
+decklists (`1 Sol Ring`, `4x Lightning Bolt (2X2) 117`, `Commander` / `Deck` / `Sideboard`
+sections, a blank line before the sideboard of a 60-card list) are read and written by
+`parse_decklist` / `format_decklist`.
+
+**Deck ideas from other sites** (`recommendations.py`). Every answer is cached in the
+`web_cache` table (EDHREC and the MTGJSON list 7 days, precon lists 90 days, deck searches and
+decks 1 day; a 403/404 is cached too), requests to one site are at least 1 s apart (MTGJSON
+0.25 s) with a 10 s timeout, and a site that fails or answers in another shape raises
+`Unavailable`: that panel says so and the rest works. Nothing here runs while scanning.
+
+| Source | Used for |
+|---|---|
+| EDHREC `json.edhrec.com/pages/commanders/<slug>.json`, `/average-decks/<slug>.json` | Suggestions for a Commander deck (inclusion % = decks with the card / decks that could play it, synergy), "Start from the average deck", and the commander ranking. A pair is filed under one order of the names; the other order answers with a `redirect` that is followed |
+| MTGJSON `DeckList.json`, `decks/<file>.json` | Preconstructed decks (Commander, Challenger, Pioneer Challenger) - the only source that is published for programs |
+| Archidekt `api/decks/v3/?commanderName=` / `?deckFormat=`, `api/decks/<id>/` | Most viewed public decks of a commander or format; a deck by its address |
+| Moxfield `api2.moxfield.com/v2/decks/search?fmt=`, `/v3/decks/all/<id>` | Most viewed public decks of a format (its search can't be narrowed to a commander by name); a deck by its address. Unofficial - Moxfield may refuse it |
+
+"What can I build?" (`run_deck_ideas`) needs one request per item, so it runs in a background
+thread and the page polls `GET /api/decks/ideas/<kind>`: `commanders` ranks the legendary
+creatures in the inventory by the share (weighted by inclusion) of their EDHREC cards that is
+owned; `precons` ranks the preconstructed decks by the share of their cards owned (about 230
+lists the first time, then cached).
+
+**Preconstructed decks.** The Decks tab lists them from `GET /api/precons` (one cached request)
+with a search; the ranking only adds the share owned. "Open as deck" creates a deck from the
+list. "I own it" (`precon_own`) also adds the cards to the inventory: MTGJSON names the printing
+in the box (`identifiers.scryfallId`, else set + number, else any printing of the name) and
+whether it is foil, so the entries get the right set, finish (`Game.suggested_finish`) and
+price; they are Near Mint at the location given (the deck's name by default), which is also how
+to find them again - filter by that location to move or delete them. Undo does not cover it.
+
 ## Web interface
 
 `templates/scanner.html` + `static/js/scanner.js` + `static/css/style.css` (dark/light theme via
@@ -700,7 +786,8 @@ Socket.IO events:
 | `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
 | `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
 
-HTTP endpoints are listed in the README.
+HTTP endpoints are listed in the README. The collection page adds no Socket.IO events; it only
+listens to the inventory, game and card data events above (and sends `update_database`).
 
 **Inventory captures.** Each entry shows its newest capture as a thumbnail. Hovering an entry
 (only on devices with a mouse) shows a grid of its captures - up to 8, then "+N more"; clicking
@@ -724,7 +811,8 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
-| `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`) and inventory |
+| `data/backups/` | Copies of the inventory table made before a migration rebuilds it |
+| `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |
 

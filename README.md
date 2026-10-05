@@ -247,7 +247,41 @@ thumbnail to open them larger - handy to check what a scan actually added. You c
 price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
 edit quantity / condition / finish (changing the finish of part of a stack splits it; the price follows the finish), delete, clear, import a CSV, and
 export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
-condition and finish increases its quantity instead of creating a duplicate.
+condition, finish and location increases its quantity instead of creating a duplicate.
+
+### Collection page
+
+**Collection** in the top bar (`http://localhost:5000/collection`) is the place to manage what
+you have scanned and to build decks. It works on a phone too.
+
+- **Inventory** - filter by name, color identity, type, rarity, set, finish, location, tag and
+  price; switch between the list and a grid of card images; tick entries to move them to a
+  **location** (a binder, a box), tag them (*trade*, *keep*), change their condition, add them
+  to a deck or delete them in one step. Copies of the same printing can be in two locations -
+  moving part of a stack splits it. *Settings → Scan into location* on the scanner page puts
+  everything you scan next into a location.
+- **Decks** (Magic) - Commander, Standard, Pioneer, Modern, Legacy, Vintage and Pauper. Search
+  the whole card database (name, type, rules text, mana value, colors, "owned", legal in the
+  format, within the commander's colors) and click to add. Every card shows whether you own it,
+  are missing it, or need it in another deck too; the deck shows what is not legal or
+  unfinished, its mana curve, its price and what completing it costs, and **Buy list**
+  downloads the missing cards. A deck is only a list: it never changes the inventory. Import a
+  pasted decklist or a Moxfield / Archidekt deck address; export as text.
+- **Deck ideas** - for a Commander deck, *Suggestions* lists the cards played with its
+  commander (EDHREC, with how often) and can show only the ones you own; *Popular decks* lists
+  public decks from Archidekt and Moxfield you can copy. *What can I build?* ranks the
+  legendary creatures you own by how much of their usual deck you already have, and the
+  preconstructed decks by how much of each you own. These read other sites, so they need
+  internet; if a site doesn't answer, only that list is missing.
+- **Preconstructed decks** - search the Commander and Challenger decks by name, set code or
+  year. **Open as deck** makes a deck list to change as you like; **I own it** also adds its
+  cards to your inventory (the printings and foils that come in the box, Near Mint, in a
+  location named after the deck unless you change it) - then upgrade the deck from there.
+- **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
+  your most valuable cards.
+
+Deck building needs card data downloaded with this version: the Decks tab offers
+**Update card database** when it is missing.
 
 ### Tips for reliable scans
 
@@ -365,7 +399,9 @@ prompts.py           AI prompts: built-in ones and those edited in Settings (dat
 database.py          Scryfall card database: download, schema, search, printings
 games/               Card games: base.py (interface), mtg.py (Magic), pokemon.py (Pokémon)
 card_search.py       Magic search helpers
-inventory.py         Inventory storage, stats, import/export
+inventory.py         Inventory storage, locations and tags, stats, import/export
+decks.py             Decks (lists of cards; the inventory says what is owned)
+recommendations.py   Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield (cached)
 anti_glare.py        Glare reduction for reflective cards
 cleanup.py           Scanned image cleanup (also a CLI)
 setup_database.py    Downloads and builds the card database
@@ -394,7 +430,18 @@ The web interface uses these endpoints, which you can also call directly:
 | `GET /api/inventory` | The active game's inventory (each entry has an `id` and its `captures`) |
 | `GET /captures/<file>` | Thumbnail of a capture kept with an inventory entry |
 | `GET /review_images/<file>` | Capture of a review queue item |
-| `POST /api/inventory/update/<id>` | Update quantity, condition or finish (JSON: `quantity`, `condition`, `finish`, `split_quantity`) |
+| `POST /api/inventory/update/<id>` | Update an entry (JSON: `quantity`, `condition`, `finish`, `location`, `tags`, `split_quantity`) |
+| `POST /api/inventory/bulk` | One change to several entries (JSON: `ids`, `action`: `delete` / `condition` / `location` / `add_tag` / `remove_tag`, `value`) |
+| `POST /api/scan_location` | Inventory location for the cards scanned next (JSON: `location`) |
+| `GET /api/cards/search` | Deck builder card search (`q`, `type`, `text`, `cmc`, `rarity`, `colors`, `identity`, `format`, `owned`, `offset`) |
+| `GET /api/decks`, `POST /api/decks` | List decks; create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
+| `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned and issues; rename / change format; delete |
+| `POST /api/decks/<id>/cards` | Change cards (JSON: `cards`: `name`, `board`, and `change`, `quantity` or `move_to`) |
+| `POST /api/decks/<id>/import`, `POST /api/decks/<id>/duplicate` | Add cards from a list, a deck address or EDHREC's average deck; copy a deck |
+| `GET /api/decks/<id>/export/<text\|buylist>` | Download the decklist, or the cards not owned |
+| `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
+| `GET` / `POST /api/decks/ideas/<commanders\|precons>` | "What can I build?" ranking: state / start a run |
+| `GET /api/precons`, `POST /api/precons/<file>/own` | Preconstructed decks; add one's cards to the inventory and open it as a deck (JSON: `name`, `location`) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |

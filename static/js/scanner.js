@@ -16,11 +16,6 @@ let activeProvider = null;  // provider/model the server is actually using (not 
 let activeModel = null;
 
 // Helper function for console logging
-function timeNow() {
-    // 24-hour HH:MM:SS, matching timestamps sent by the server
-    return new Date().toLocaleTimeString('en-GB', {hour12: false});
-}
-
 function logSeparator() {
     return "=".repeat(60);
 }
@@ -661,8 +656,23 @@ function loadScanSettings() {
             applyOcrState(data.ocr_first, data.ocr_installed);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             document.getElementById('camera-rotation').value = String(data.camera_rotation || 0);
+            document.getElementById('scan-location').value = data.scan_location || '';
+            document.getElementById('scan-location-options').innerHTML = (data.locations || [])
+                .map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
         })
         .catch(error => console.error('Error loading scan settings:', error));
+}
+
+function setScanLocation(location) {
+    // Where scanned cards are put in the inventory (remembered on the server)
+    fetch('/api/scan_location', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({location: location})
+    })
+    .then(response => response.json())
+    .then(data => { document.getElementById('scan-location').value = data.scan_location; })
+    .catch(error => notify('Could not save the location: ' + error.message, 'error'));
 }
 
 // ============================================================================
@@ -1557,17 +1567,6 @@ socket.on('prompt_test_result', function(data) {
 // Card game being scanned (one at a time; the selector shows when there are several)
 // ============================================================================
 
-let gameInfo = null;  // {id, label, finishes: [[key, label]], exports: [[key, label]]}
-
-function defaultFinish() {
-    return gameInfo.finishes[0][0];
-}
-
-function finishLabel(key) {
-    const finish = gameInfo.finishes.find(([k]) => k === key);
-    return finish ? finish[1] : key;
-}
-
 function applyGameFields() {
     // Manual search fields and the card data hint follow the game being scanned
     document.querySelector('.search-treatment').style.display = gameInfo.has_treatments ? '' : 'none';
@@ -1610,17 +1609,6 @@ socket.on('game_changed', function(data) {
         ? `Scanning ${data.label}`
         : `Scanning ${data.label} - downloading its card data`, data.card_count ? 'success' : 'info');
 });
-
-function escapeHtml(text) {
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, m => map[m]);
-}
 
 // ============================================================================
 // Event Listeners
@@ -1803,6 +1791,12 @@ document.addEventListener('DOMContentLoaded', function() {
 let currentInventory = [];
 let filteredInventory = [];
 
+function inventoryChanged() {
+    // After an edit or delete (common.js)
+    loadInventory();
+    loadStats();
+}
+
 function showInventory() {
     document.getElementById('inventory-modal').classList.add('show');
     loadInventory();
@@ -1889,6 +1883,7 @@ function renderInventory() {
                         ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
                         ${special ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
                         ${card.color_identity ? `<span class="inventory-badge">${escapeHtml(card.color_identity)}</span>` : ''}
+                        ${card.location ? `<span class="inventory-badge" title="Location">${escapeHtml(card.location)}</span>` : ''}
                         <span>${escapeHtml(card.condition)}</span>
                     </div>
                 </div>
@@ -1912,20 +1907,6 @@ function renderInventory() {
 
 // Inventory sort, remembered in this browser (the server sends rows newest first)
 const INVENTORY_SORT_KEY = 'inventorySort';
-const RARITY_ORDER = {special: 0, bonus: 0, mythic: 1, rare: 2, uncommon: 3, common: 4};
-const byText = (a, b) => (a || '').localeCompare(b || '', undefined, {numeric: true, sensitivity: 'base'});
-const INVENTORY_SORTS = {
-    newest: null,
-    oldest: (a, b) => byText(a.timestamp, b.timestamp) || a.id - b.id,
-    name: (a, b) => byText(a.name, b.name),
-    price_desc: (a, b) => (b.price || 0) - (a.price || 0),
-    price_asc: (a, b) => (a.price || 0) - (b.price || 0),
-    value_desc: (a, b) => (b.price || 0) * b.quantity - (a.price || 0) * a.quantity,
-    quantity_desc: (a, b) => b.quantity - a.quantity,
-    rarity: (a, b) => (RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9),
-    set: (a, b) => byText(a.set_name, b.set_name) || byText(a.number, b.number),
-};
-
 function inventorySort() {
     try {
         const saved = localStorage.getItem(INVENTORY_SORT_KEY);
@@ -2115,224 +2096,6 @@ async function clearInventory() {
     });
 }
 
-let currentEditId = null;
-
-// Original finish and quantity, to detect a split
-let originalFinish = null;
-let originalQuantity = 0;
-
-function renderEditFinishes(selected) {
-    document.getElementById('edit-finishes').innerHTML = gameInfo.finishes.map(([key, label]) => `
-        <label class="radio-pill">
-            <input type="radio" name="edit-finish" value="${escapeHtml(key)}" ${key === selected ? 'checked' : ''} onchange="updateSplitQuantityVisibility()">
-            <span>${escapeHtml(label)}</span>
-        </label>`).join('');
-}
-
-function editCard(card) {
-    currentEditId = card.id;
-    originalQuantity = card.quantity;
-    originalFinish = card.finish;
-
-    document.getElementById('edit-card-name').textContent = card.name;
-    document.getElementById('edit-quantity').value = card.quantity;
-    document.getElementById('edit-condition').value = card.condition;
-    renderEditFinishes(card.finish);
-
-    const splitInput = document.getElementById('edit-split-quantity');
-    splitInput.value = 1;
-    splitInput.max = originalQuantity;
-    splitInput.oninput = updateSplitPreview;
-    document.getElementById('split-quantity-section').style.display = 'none';
-
-    document.getElementById('edit-card-modal').classList.add('show');
-}
-
-function closeEditCard() {
-    document.getElementById('edit-card-modal').classList.remove('show');
-    currentEditId = null;
-    originalFinish = null;
-    originalQuantity = 0;
-}
-
-function updateSplitQuantityVisibility() {
-    const finish = document.querySelector('input[name="edit-finish"]:checked').value;
-    const splitSection = document.getElementById('split-quantity-section');
-
-    // Several copies and a new finish: ask how many get it
-    if (finish !== originalFinish && originalQuantity > 1) {
-        splitSection.style.display = 'block';
-        updateSplitPreview();
-    } else {
-        splitSection.style.display = 'none';
-    }
-}
-
-function updateSplitPreview() {
-    const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
-    const remaining = originalQuantity - splitQuantity;
-    const preview = document.getElementById('split-preview');
-
-    if (preview) {
-        preview.innerHTML = `<strong>${splitQuantity}</strong> ${escapeHtml(finishLabel(document.querySelector('input[name="edit-finish"]:checked').value))} + <strong>${remaining}</strong> stay ${escapeHtml(finishLabel(originalFinish))}`;
-    }
-}
-
-function updateSplitMaxQuantity() {
-    const newQuantity = parseInt(document.getElementById('edit-quantity').value) || 1;
-    const splitInput = document.getElementById('edit-split-quantity');
-
-    if (splitInput) {
-        // Update max to the new total quantity
-        splitInput.max = newQuantity;
-
-        // If current split value exceeds new max, adjust it
-        if (parseInt(splitInput.value) > newQuantity) {
-            splitInput.value = newQuantity;
-        }
-
-        // Update preview
-        updateSplitPreview();
-    }
-}
-
-function saveEditCard() {
-    if (currentEditId === null) {
-        notify('No card selected for editing', 'error');
-        return;
-    }
-
-    const quantity = parseInt(document.getElementById('edit-quantity').value);
-    const condition = document.getElementById('edit-condition').value;
-    const finish = document.querySelector('input[name="edit-finish"]:checked').value;
-
-    if (isNaN(quantity) || quantity < 1 || quantity > 999) {
-        notify('Please enter a quantity between 1 and 999', 'warning');
-        return;
-    }
-
-    const requestBody = {quantity: quantity, condition: condition, finish: finish};
-    if (finish !== originalFinish && originalQuantity > 1) {
-        const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
-        if (splitQuantity < 1 || splitQuantity > originalQuantity) {
-            notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
-            return;
-        }
-        requestBody.split_quantity = splitQuantity;
-    }
-
-    const cardName = document.getElementById('edit-card-name').textContent;
-    const rowId = currentEditId;
-    closeEditCard();
-    addLog(timeNow(), 'info', `Updating ${cardName}...`);
-
-    fetch(`/api/inventory/update/${rowId}`, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(requestBody)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            addLog(timeNow(), 'success', `${cardName} updated` + (data.split ? ' (entry split by finish)' : ''));
-            loadInventory();
-            loadStats();
-        } else {
-            notify('Failed to update card: ' + (data.error || data.message || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => notify('Failed to update card: ' + error.message, 'error'));
-}
-
-async function deleteCard(rowId, cardName) {
-    const ok = await confirmDialog({
-        title: 'Delete card?',
-        message: `Delete "${cardName}" from your inventory? This can't be undone.`,
-        confirmText: 'Delete',
-        danger: true
-    });
-    if (!ok) return;
-
-    // Show loading state
-    addLog(timeNow(), 'info', `Deleting ${cardName}...`);
-
-    // Delete via API
-    fetch(`/api/inventory/delete/${rowId}`, {
-        method: 'DELETE'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            addLog(timeNow(), 'success', `${cardName} deleted from inventory`);
-            // Reload inventory
-            loadInventory();
-            // Update main stats
-            loadStats();
-        } else {
-            notify('Failed to delete card: ' + (data.error || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Delete error:', error);
-        notify('Failed to delete card: ' + error, 'error');
-    });
-}
-
-// ============================================================================
-// In-page dialogs and notifications
-// Native confirm()/alert() can be silently blocked by the browser ("prevent this page from
-// creating additional dialogs"), after which confirm() always returns false - so the app
-// uses its own.
-// ============================================================================
-
-let dialogResolve = null;
-
-function choiceDialog({title, message, choices}) {
-    // choices: [{label, value, style: 'primary' | 'danger' | undefined}]; resolves with the
-    // chosen value, or null when dismissed (Escape, click outside)
-    return new Promise(resolve => {
-        if (dialogResolve) dialogResolve(null);
-        dialogResolve = resolve;
-        document.getElementById('dialog-title').textContent = title;
-        document.getElementById('dialog-message').textContent = message;
-        const buttons = document.getElementById('dialog-buttons');
-        buttons.innerHTML = '';
-        choices.forEach(choice => {
-            const button = document.createElement('button');
-            button.className = 'btn' + (choice.style ? ` btn-${choice.style}` : '');
-            button.textContent = choice.label;
-            button.onclick = () => closeDialog(choice.value);
-            buttons.appendChild(button);
-        });
-        document.getElementById('dialog-modal').classList.add('show');
-        buttons.firstChild.focus();  // the safe choice (Cancel) is first
-    });
-}
-
-function closeDialog(value = null) {
-    document.getElementById('dialog-modal').classList.remove('show');
-    const resolve = dialogResolve;
-    dialogResolve = null;
-    if (resolve) resolve(value);
-}
-
-function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
-    return choiceDialog({title, message, choices: [
-        {label: 'Cancel', value: false},
-        {label: confirmText, value: true, style: danger ? 'danger' : 'primary'}
-    ]}).then(value => value === true);
-}
-
-function notify(message, level = 'info') {
-    // Shows a short notification and records it in the activity log
-    addLog(timeNow(), level, message);
-    const toast = document.createElement('div');
-    toast.className = `toast ${level}`;
-    toast.textContent = message;
-    document.getElementById('toast-container').appendChild(toast);
-    setTimeout(() => toast.remove(), 5000);
-}
-
 function openSettings() {
     document.getElementById('settings-drawer').classList.add('show');
 }
@@ -2403,7 +2166,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (button.classList.contains('btn-delete')) {
                 deleteCard(card.id, card.name);
             } else {
-                editCard(card);
+                editCard(card, [...new Set(currentInventory.map(entry => entry.location).filter(Boolean))].sort(byText));
             }
         });
     }
@@ -2412,50 +2175,6 @@ document.addEventListener('DOMContentLoaded', function() {
 // ============================================================================
 // Captures behind inventory entries: a grid of the copies on hover, all of them on click
 // ============================================================================
-
-const POPOVER_MAX = 8;
-
-function captureGridHtml(card, max = Infinity) {
-    const shown = card.captures.slice(0, max);
-    const more = card.captures.length - shown.length;
-    return shown.map(capture => `
-        <figure>
-            <img src="${escapeHtml(capture.url)}" alt="${escapeHtml(card.name)}" loading="lazy">
-            <figcaption>${escapeHtml(capture.captured_at)}</figcaption>
-        </figure>`).join('')
-        + (more > 0 ? `<div class="capture-more">+${more} more<br><span>click to see all</span></div>` : '');
-}
-
-function showCapturePopover(card, row) {
-    const popover = document.getElementById('capture-popover');
-    popover.className = 'capture-popover capture-grid' + (card.captures.length === 1 ? ' single' : '');
-    popover.innerHTML = captureGridHtml(card, POPOVER_MAX);
-    popover.hidden = false;
-    // Beside the row's thumbnail; above the row when there is no room below
-    const rect = row.getBoundingClientRect();
-    const box = popover.getBoundingClientRect();
-    const left = Math.min(rect.left + 70, window.innerWidth - box.width - 16);
-    const below = rect.bottom + 6;
-    popover.style.left = `${Math.max(16, left)}px`;
-    popover.style.top = `${below + box.height < window.innerHeight - 8 ? below : Math.max(8, rect.top - box.height - 6)}px`;
-}
-
-function hideCapturePopover() {
-    document.getElementById('capture-popover').hidden = true;
-}
-
-function openCaptures(card) {
-    hideCapturePopover();
-    const count = card.captures.length;
-    document.getElementById('capture-title').textContent =
-        `${card.name} - ${count} capture${count > 1 ? 's' : ''} of ${card.quantity} ${card.quantity > 1 ? 'copies' : 'copy'}`;
-    document.getElementById('capture-grid').innerHTML = captureGridHtml(card);
-    document.getElementById('capture-modal').classList.add('show');
-}
-
-function closeCaptures() {
-    document.getElementById('capture-modal').classList.remove('show');
-}
 
 document.addEventListener('DOMContentLoaded', function() {
     // Hover preview only where there is a mouse; touch screens tap the thumbnail

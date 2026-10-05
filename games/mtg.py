@@ -10,12 +10,14 @@ from card_search import CardSearcher
 from config import Config
 from database import CONFIRMED_MATCHES
 from games.base import Game
+from games import mtg_decks
 
 COLOR_NAMES = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green'}
 
 # Column order of the CSV export (also what import_csv reads back)
 CSV_COLUMNS = ['Card Name', 'Set', 'Card Number', 'Rarity', 'Type', 'Mana Cost', 'Colors',
-               'Color Identity', 'Price (USD)', 'Quantity', 'Condition', 'Foil', 'Surge', 'Timestamp']
+               'Color Identity', 'Price (USD)', 'Quantity', 'Condition', 'Foil', 'Surge', 'Timestamp',
+               'Location', 'Tags']
 
 
 def color_identity(colors):
@@ -36,7 +38,7 @@ def write_csv(rows, file):
             row['quantity'], row['condition'],
             'Yes' if row['finish'] == 'foil' else 'No',
             'Yes' if row['finish'] == 'surge' else 'No',
-            row['timestamp'],
+            row['timestamp'], row.get('location', ''), ', '.join(row.get('tags') or []),
         ])
 
 
@@ -66,6 +68,7 @@ class Magic(Game):
     number_example = '123'
     finishes = {'regular': 'Regular', 'foil': 'Foil', 'surge': 'Surge foil'}
     confirmed_matches = CONFIRMED_MATCHES
+    deck_formats = mtg_decks.DECK_FORMATS
 
     def __init__(self, database, log_callback=None):
         super().__init__(database, log_callback)
@@ -156,6 +159,51 @@ class Magic(Game):
             'color_identity': color_identity(colors),
             'price': next((float(p) for p in prices if p), 0.0),
         }
+
+    def card_details(self, card_ids):
+        return {card_id: {'image_uri': card['image_uri'], 'cmc': card['cmc'],
+                          'identity': card['color_identity'] if card['oracle_id'] else card['colors']}
+                for card_id, card in self.db.cards_by_ids(card_ids).items()}
+
+    # -- Decks ---------------------------------------------------------------
+
+    def has_deck_data(self):
+        return self.db.has_deck_data()
+
+    def search_cards(self, **filters):
+        return self.db.search_cards(**filters)
+
+    def cards_by_names(self, names):
+        return self.db.cards_by_names(names)
+
+    def deck_card_payload(self, card):
+        return {
+            'id': card['id'],
+            'name': card['name'],
+            'type_line': card['type_line'] or '',
+            'mana_cost': card['mana_cost'],
+            'cmc': card['cmc'],
+            'colors': card['colors'],
+            'identity': card['color_identity'],
+            'rarity': card['rarity'],
+            'oracle_text': card['oracle_text'] or '',
+            'image_uri': card['image_uri'],
+            # The cheapest printing: what completing a deck costs at least
+            'price': card.get('cheapest') or card['price'] or card['price_foil'],
+        }
+
+    def check_deck(self, deck_format, entries):
+        return mtg_decks.check_deck(deck_format, entries)
+
+    def can_be_commander(self, card):
+        return mtg_decks.can_be_commander(card)
+
+    def parse_decklist(self, text, deck_format=None):
+        return mtg_decks.parse_decklist(
+            text, commander_format=bool(mtg_decks.DECK_FORMATS.get(deck_format, {}).get('commander')))
+
+    def format_decklist(self, entries, deck_format=None):
+        return mtg_decks.format_decklist(entries, deck_format)
 
     def export_formats(self):
         return {

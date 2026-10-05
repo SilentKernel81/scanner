@@ -23,6 +23,9 @@ class Game:
     confirmed_matches = set()
     # Prices fetched per card (a network request, with_prices) instead of coming with the data
     fetches_prices = False
+    # Deck builder: format id -> {'label', 'commander' (has a commander; its 'side' board is a
+    # list of cards being considered), ...}, in display order. Empty: no deck builder
+    deck_formats = {}
 
     def __init__(self, database, log_callback=None):
         self.db = database
@@ -106,6 +109,42 @@ class Game:
         Inventory columns for a printing in a finish: card_id, name, set_name, set_code,
         number, rarity, type_line, price, and (optional) mana_cost, colors, color_identity
         """
+        raise NotImplementedError
+
+    def card_details(self, card_ids):
+        """
+        {printing id: {'image_uri', ...}} for the collection page: what the inventory rows of
+        these printings are shown and filtered with, beyond the columns they store
+        """
+        return {}
+
+    # -- Decks (games with deck_formats) --------------------------------------
+
+    def has_deck_data(self):
+        """Whether the card data has what deck building needs (older downloads may not)"""
+        return False
+
+    def search_cards(self, **filters):
+        """Deck builder search: (cards - one per name, whether there are more)"""
+        raise NotImplementedError
+
+    def cards_by_names(self, names):
+        """{search key of the name: card} - one printing per card name"""
+        raise NotImplementedError
+
+    def deck_card_payload(self, card):
+        """Card fields the deck builder shows and counts with"""
+        raise NotImplementedError
+
+    def check_deck(self, deck_format, entries):
+        """Issues of a deck: [{'level', 'message', 'cards'}]; entries: [{'name', 'quantity', 'board', 'card'}]"""
+        return []
+
+    def parse_decklist(self, text, deck_format=None):
+        """Pasted decklist -> [{'name', 'quantity', 'board'}]"""
+        raise NotImplementedError
+
+    def format_decklist(self, entries, deck_format=None):
         raise NotImplementedError
 
     # Export key -> (label, file name prefix, writer(rows, file)); rows come from

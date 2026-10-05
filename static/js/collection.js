@@ -1,0 +1,1190 @@
+// Collection page: inventory management, deck builder, statistics.
+// Shared helpers (escapeHtml, dialogs, notify, the edit dialog, sorts) come from common.js.
+
+const socket = io();
+const $ = id => document.getElementById(id);
+const money = value => '$' + (value || 0).toFixed(2);
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+async function api(path, options = {}) {
+    // JSON request; shows the server's error and returns null when it fails
+    if (options.body && typeof options.body !== 'string') {
+        options = {...options, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(options.body)};
+    }
+    try {
+        const response = await fetch(path, options);
+        const data = await response.json();
+        if (data.success === false) {
+            notify(data.error || 'Request failed', 'error');
+            return null;
+        }
+        return data;
+    } catch (error) {
+        notify(`Request failed: ${error.message}`, 'error');
+        return null;
+    }
+}
+
+function remember(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ }
+}
+
+function recall(key, fallback) {
+    try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
+}
+
+function manaHtml(cost) {
+    // "{2}{W}{U/B}" -> colored pips
+    return (cost || '').replace(/\{([^}]+)\}/g, (_, symbol) => {
+        // Hybrid symbols ("W/U") take the first color; numbers and X are neutral
+        const color = [...'WUBRGC'].find(letter => symbol.includes(letter)) || 'N';
+        const text = symbol.replace('/', '');
+        return `<span class="mana mana-${color}${text.length > 1 ? ' is-long' : ''}">${escapeHtml(text)}</span>`;
+    });
+}
+
+function closeModal(id) {
+    $(id).classList.remove('show');
+}
+
+// ============================================================================
+// Tabs
+// ============================================================================
+
+let currentTab = 'inventory';
+
+function showTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
+    document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== `tab-${tab}`; });
+    remember('collectionTab', tab);
+    if (tab === 'decks') {
+        loadDecks();
+        if (gameInfo.deck_formats.length) loadPrecons();
+    }
+    if (tab === 'stats') renderStats();
+}
+
+// ============================================================================
+// Inventory
+// ============================================================================
+
+const COLORS = [['W', 'White'], ['U', 'Blue'], ['B', 'Black'], ['R', 'Red'], ['G', 'Green'], ['C', 'Colorless']];
+const MTG_TYPES = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Battle', 'Land'];
+const CONDITIONS = ['Mint', 'Near Mint', 'Excellent', 'Good', 'Played', 'Poor'];
+const PAGE_SIZE = 200;
+
+let inventory = [];
+let shown = [];             // after filters and sort
+let shownLimit = PAGE_SIZE;
+let selected = new Set();   // entry ids
+let filterColors = new Set();
+let inventoryView = recall('collectionView', 'list');
+
+function inventoryChanged() {
+    // After an edit or delete (common.js), a bulk action or a change made while scanning
+    loadInventory();
+}
+
+function identityOf(card) {
+    return (card.details && card.details.identity) || null;
+}
+
+function mainType(card) {
+    // Magic: the card type; other games: the first part of the type line
+    const front = (card.type_line || '').split(' // ')[0];
+    if (gameInfo.id === 'mtg') return MTG_TYPES.find(type => front.includes(type)) || 'Other';
+    return front.split(' · ')[0] || 'Other';
+}
+
+function colorGroup(card) {
+    const identity = identityOf(card);
+    if (!identity) return card.color_identity || 'Unknown';
+    if (!identity.length) return 'Colorless';
+    return identity.length > 1 ? 'Multicolor' : COLORS.find(([key]) => key === identity[0])[1];
+}
+
+async function loadInventory() {
+    const data = await api('/api/inventory');
+    if (!data) {
+        $('inventory-list').innerHTML = '<div class="empty-state is-error">Failed to load the inventory</div>';
+        return;
+    }
+    inventory = data.cards;
+    selected = new Set([...selected].filter(id => inventory.some(card => card.id === id)));
+    fillFilterOptions();
+    applyFilters();
+    if (currentTab === 'stats') renderStats();
+}
+
+function fillSelect(id, label, values, labels = {}) {
+    const select = $(id);
+    const current = select.value;
+    select.innerHTML = `<option value="">${escapeHtml(label)}</option>` + values.map(value =>
+        `<option value="${escapeHtml(value)}">${escapeHtml(labels[value] || value)}</option>`).join('');
+    select.value = values.includes(current) ? current : '';
+    select.hidden = values.length === 0;
+}
+
+function distinct(values) {
+    return [...new Set(values.filter(Boolean))].sort(byText);
+}
+
+function fillFilterOptions() {
+    fillSelect('filter-type', 'Any type', distinct(inventory.map(mainType)));
+    fillSelect('filter-rarity', 'Any rarity', distinct(inventory.map(card => card.rarity))
+        .sort((a, b) => (RARITY_ORDER[a] ?? 9) - (RARITY_ORDER[b] ?? 9)));
+    fillSelect('filter-set', 'Any set', distinct(inventory.map(card => card.set_name)));
+    fillSelect('filter-finish', 'Any finish', gameInfo.finishes.map(([key]) => key),
+               Object.fromEntries(gameInfo.finishes));
+    fillSelect('filter-location', 'Any location', ['(none)', ...distinct(inventory.map(card => card.location))]);
+    fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
+    // Color chips only where the card data has color identities (Magic)
+    const hasColors = inventory.some(card => identityOf(card));
+    $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
+}
+
+function colorChipsHtml(active) {
+    return COLORS.map(([key, label]) =>
+        `<button class="color-chip mana-${key} ${active.has(key) ? 'is-active' : ''}" data-color="${key}" title="${label}">${key}</button>`).join('');
+}
+
+function knownLocations() {
+    return distinct(inventory.map(card => card.location));
+}
+
+function applyFilters() {
+    const text = $('filter-text').value.trim().toLowerCase();
+    const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
+    const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
+    const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
+    const rows = inventory.filter(card => {
+        if (text && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
+            .some(value => (value || '').toLowerCase().includes(text))) return false;
+        if (type && mainType(card) !== type) return false;
+        if (rarity && card.rarity !== rarity) return false;
+        if (set && card.set_name !== set) return false;
+        if (finish && card.finish !== finish) return false;
+        if (location && card.location !== (location === '(none)' ? '' : location)) return false;
+        if (tag && !card.tags.includes(tag)) return false;
+        if (!isNaN(min) && card.price < min) return false;
+        if (!isNaN(max) && card.price > max) return false;
+        if (filterColors.size) {
+            // Every chosen color must be in the card's identity; C = colorless
+            const identity = identityOf(card) || [];
+            if (filterColors.has('C') ? identity.length > 0 : ![...filterColors].every(color => identity.includes(color))) return false;
+        }
+        return true;
+    });
+    const sort = recall('collectionSort', 'newest');
+    $('inventory-sort').value = sort in INVENTORY_SORTS ? sort : 'newest';
+    shown = INVENTORY_SORTS[sort] ? [...rows].sort(INVENTORY_SORTS[sort]) : rows;
+    shownLimit = PAGE_SIZE;
+    renderInventory();
+}
+
+function badgesHtml(card) {
+    const rarity = (card.rarity || '').toLowerCase();
+    return `
+        ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
+        ${card.finish !== defaultFinish() ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
+        ${card.location ? `<span class="inventory-badge location" title="Location">${escapeHtml(card.location)}</span>` : ''}
+        ${card.tags.map(tag => `<span class="inventory-badge tag" title="Tag">${escapeHtml(tag)}</span>`).join('')}`;
+}
+
+function renderInventory() {
+    const list = $('inventory-list');
+    const cards = shown.reduce((sum, card) => sum + card.quantity, 0);
+    const value = shown.reduce((sum, card) => sum + card.price * card.quantity, 0);
+    $('inventory-summary').innerHTML = `<strong>${plural(shown.length, 'entry').replace('entrys', 'entries')}</strong> · ${plural(cards, 'card')} · <strong>${money(value)}</strong>`
+        + (shown.length !== inventory.length ? ` (of ${inventory.length})` : '');
+    list.classList.toggle('is-grid', inventoryView === 'grid');
+    document.querySelectorAll('#view-switch button').forEach(button =>
+        button.classList.toggle('is-active', button.dataset.view === inventoryView));
+
+    if (!shown.length) {
+        list.classList.remove('is-grid');
+        list.innerHTML = inventory.length
+            ? '<div class="empty-state">No cards match the filters.</div>'
+            : '<div class="empty-state">No cards in the inventory yet.<br>Scan some cards to build your collection.</div>';
+    } else if (inventoryView === 'grid') {
+        list.innerHTML = shown.slice(0, shownLimit).map(card => {
+            const image = (card.details && card.details.image_uri) || (card.captures[0] && card.captures[0].url);
+            return `
+                <div class="grid-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
+                    ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">`
+                            : `<div class="no-image">${escapeHtml(card.name)}</div>`}
+                    <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
+                    ${card.quantity > 1 ? `<span class="grid-qty">${card.quantity}×</span>` : ''}
+                    <div class="grid-name" title="${escapeHtml(card.name)}">${escapeHtml(card.name)}</div>
+                    <div class="grid-meta"><span>${escapeHtml((card.set_code || card.set_name).toUpperCase())} ${escapeHtml(card.number)}</span><span>${money(card.price)}</span></div>
+                    <div class="inventory-card-meta">${badgesHtml(card)}</div>
+                </div>`;
+        }).join('');
+    } else {
+        list.innerHTML = shown.slice(0, shownLimit).map(card => {
+            const image = (card.captures[0] && card.captures[0].url) || (card.details && card.details.image_uri);
+            return `
+                <div class="inventory-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
+                    <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
+                    ${image ? `<button class="inventory-thumb" title="${card.captures.length ? plural(card.captures.length, 'capture') : 'Card image'}">
+                                   <img src="${escapeHtml(image)}" alt="" loading="lazy"></button>`
+                            : '<div class="inventory-thumb empty" title="No image"></div>'}
+                    <div class="inventory-card-info">
+                        <div class="inventory-card-name">
+                            ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
+                            ${manaHtml(card.mana_cost)}
+                        </div>
+                        <div class="inventory-card-details">
+                            ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
+                            ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
+                        </div>
+                        <div class="inventory-card-meta">${badgesHtml(card)}<span>${escapeHtml(card.condition)}</span></div>
+                    </div>
+                    <div class="inventory-card-price">
+                        <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
+                        ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
+                        <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
+                    </div>
+                    <div class="inventory-card-actions">
+                        <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
+                        <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+    $('inventory-more').hidden = shown.length <= shownLimit;
+    $('inventory-more').textContent = `Show more (${shown.length - shownLimit} left)`;
+    renderBulkBar();
+}
+
+function renderBulkBar() {
+    $('bulk-bar').hidden = selected.size === 0;
+    const copies = inventory.filter(card => selected.has(card.id)).reduce((sum, card) => sum + card.quantity, 0);
+    $('bulk-count').textContent = `${plural(selected.size, 'entry').replace('entrys', 'entries')} selected (${plural(copies, 'card')})`;
+    $('bulk-deck').hidden = !gameInfo.deck_formats.length;
+}
+
+function toggleSelected(id, on) {
+    if (on) selected.add(id); else selected.delete(id);
+    const row = document.querySelector(`#inventory-list [data-id="${id}"]`);
+    if (row) {
+        row.classList.toggle('is-selected', on);
+        row.querySelector('.row-check').checked = on;
+    }
+    renderBulkBar();
+}
+
+// -- One value for a bulk action ----------------------------------------------
+
+let valueResolve = null;
+
+function valueDialog({title, label, options = [], choices = null, value = ''}) {
+    // Free text with suggestions (options), or one of choices ([[value, label]]); resolves
+    // with the value, or null when cancelled
+    return new Promise(resolve => {
+        valueResolve = resolve;
+        $('value-title').textContent = title;
+        $('value-label').textContent = label;
+        const input = $('value-input'), select = $('value-select');
+        input.hidden = !!choices;
+        select.hidden = !choices;
+        if (choices) {
+            select.innerHTML = choices.map(([key, text]) => `<option value="${escapeHtml(String(key))}">${escapeHtml(text)}</option>`).join('');
+        } else {
+            input.value = value;
+            $('value-options').innerHTML = options.map(option => `<option value="${escapeHtml(option)}"></option>`).join('');
+        }
+        $('value-modal').classList.add('show');
+        (choices ? select : input).focus();
+    });
+}
+
+function closeValueDialog(value) {
+    closeModal('value-modal');
+    const resolve = valueResolve;
+    valueResolve = null;
+    if (resolve) resolve(value);
+}
+
+async function bulkAction(action) {
+    const ids = [...selected];
+    const entries = plural(ids.length, 'entry').replace('entrys', 'entries');
+    let value = '';
+    if (action === 'delete') {
+        const ok = await confirmDialog({title: `Delete ${entries}?`, confirmText: 'Delete', danger: true,
+            message: "The selected cards are removed from your inventory. This can't be undone."});
+        if (!ok) return;
+    } else if (action === 'location') {
+        value = await valueDialog({title: `Move ${entries}`, label: 'Location (empty: none)', options: knownLocations()});
+        if (value === null) return;
+    } else if (action === 'add_tag' || action === 'remove_tag') {
+        const tags = distinct(inventory.filter(card => action === 'add_tag' || selected.has(card.id)).flatMap(card => card.tags));
+        value = await valueDialog({title: `${action === 'add_tag' ? 'Tag' : 'Remove a tag from'} ${entries}`, label: 'Tag', options: tags});
+        if (!value) return;
+    } else if (action === 'condition') {
+        value = await valueDialog({title: `Condition of ${entries}`, label: 'Condition', choices: CONDITIONS.map(c => [c, c])});
+        if (!value) return;
+    } else if (action === 'deck') {
+        return addSelectionToDeck();
+    }
+    const data = await api('/api/inventory/bulk', {method: 'POST', body: {ids, action, value}});
+    if (!data) return;
+    notify(`${plural(data.changed, 'entry').replace('entrys', 'entries')} changed`, 'success');
+    if (action === 'delete') selected.clear();
+    loadInventory();
+}
+
+async function addSelectionToDeck() {
+    const data = await api('/api/decks');
+    if (!data) return;
+    const choice = await valueDialog({title: 'Add to a deck', label: 'Deck (one copy of each selected card)',
+        choices: [...data.decks.map(deck => [deck.id, deck.name]), ['new', 'New deck...']]});
+    if (!choice) return;
+    const names = distinct(inventory.filter(card => selected.has(card.id)).map(card => card.name));
+    if (choice === 'new') {
+        showTab('decks');
+        return openDeckModal({text: names.map(name => `1 ${name}`).join('\n')});
+    }
+    const result = await api(`/api/decks/${choice}/import`, {method: 'POST', body: {text: names.map(name => `1 ${name}`).join('\n')}});
+    if (result) notify(`${plural(result.added, 'card')} added to ${result.deck.name}`, 'success');
+}
+
+// -- Export / import -----------------------------------------------------------
+
+function renderExportButtons() {
+    $('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
+        `<a class="btn btn-small" href="/api/export_inventory/${encodeURIComponent(format)}" download>Export ${escapeHtml(label)}</a>`).join('');
+}
+
+async function importInventory() {
+    const input = $('import-file-input');
+    const file = input.files[0];
+    if (!file) return;
+    const mode = await choiceDialog({
+        title: `Import ${file.name}`,
+        message: 'Add the cards in this file to your inventory (quantities of matching cards are added up), or replace your whole inventory with this file?',
+        choices: [
+            {label: 'Cancel', value: null},
+            {label: 'Replace inventory', value: 'replace', style: 'danger'},
+            {label: 'Add to inventory', value: 'merge', style: 'primary'}
+        ]
+    });
+    if (mode) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('replace_existing', mode === 'replace' ? 'true' : 'false');
+        const data = await api('/api/import_inventory', {method: 'POST', body: form});
+        if (data) {
+            notify(`Import complete: ${data.stats.added} added, ${data.stats.updated} updated, ${data.stats.skipped} skipped, ${data.stats.errors} errors`, 'success');
+            loadInventory();
+        }
+    }
+    input.value = '';
+}
+
+// ============================================================================
+// Statistics (from the loaded inventory)
+// ============================================================================
+
+let statsMeasure = 'value';
+
+function barsHtml(rows, format, limit = 12) {
+    // rows: [[label, number]] - largest first; the rest folds into "Other"
+    rows = rows.filter(([, number]) => number > 0).sort((a, b) => b[1] - a[1]);
+    if (rows.length > limit) {
+        const rest = rows.slice(limit - 1);
+        rows = [...rows.slice(0, limit - 1), [`Other (${rest.length})`, rest.reduce((sum, [, number]) => sum + number, 0)]];
+    }
+    const top = Math.max(...rows.map(([, number]) => number), 0);
+    if (!rows.length) return '<div class="hint">Nothing to show</div>';
+    return rows.map(([label, number]) => `
+        <div class="bar-row" title="${escapeHtml(label)}: ${format(number)}">
+            <span class="bar-label">${escapeHtml(label)}</span>
+            <span class="bar-track"><div class="bar-fill" style="width: ${top ? (100 * number / top).toFixed(1) : 0}%"></div></span>
+            <span class="bar-value">${format(number)}</span>
+        </div>`).join('');
+}
+
+function groupTotals(rows, keyOf, measure) {
+    const totals = new Map();
+    rows.forEach(card => {
+        const amount = measure === 'value' ? card.price * card.quantity : card.quantity;
+        [].concat(keyOf(card)).forEach(key => totals.set(key, (totals.get(key) || 0) + amount));
+    });
+    return [...totals.entries()];
+}
+
+function renderStats() {
+    const cards = inventory.reduce((sum, card) => sum + card.quantity, 0);
+    const value = inventory.reduce((sum, card) => sum + card.price * card.quantity, 0);
+    const tile = (number, label) => `
+        <div class="inventory-stat"><div class="inventory-stat-value">${number}</div><div class="inventory-stat-label">${label}</div></div>`;
+    $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
+        + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
+        + tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card');
+    document.querySelectorAll('#stats-measure button').forEach(button =>
+        button.classList.toggle('is-active', button.dataset.measure === statsMeasure));
+    const format = statsMeasure === 'value' ? money : number => number.toLocaleString();
+    const chart = (title, keyOf, limit) => `
+        <div class="panel"><h3 class="section-title">${title}</h3>${barsHtml(groupTotals(inventory, keyOf, statsMeasure), format, limit)}</div>`;
+    const valuable = [...inventory].sort((a, b) => b.price - a.price).slice(0, 10)
+        .map(card => [`${card.name} (${(card.set_code || '').toUpperCase()}${card.finish !== defaultFinish() ? ', ' + finishLabel(card.finish) : ''})`, card.price]);
+    $('stats-grid').innerHTML = chart('Color', colorGroup) + chart('Type', mainType)
+        + chart('Rarity', card => card.rarity ? card.rarity[0].toUpperCase() + card.rarity.slice(1) : 'Unknown') + chart('Finish', card => finishLabel(card.finish))
+        + chart('Set', card => card.set_name) + chart('Location', card => card.location || 'No location')
+        + (inventory.some(card => card.tags.length) ? chart('Tag', card => card.tags.length ? card.tags : ['No tag']) : '')
+        + `<div class="panel"><h3 class="section-title">Most valuable cards</h3>${barsHtml(valuable, money, 10)}</div>`;
+}
+
+// ============================================================================
+// Decks: list
+// ============================================================================
+
+let deck = null;          // the deck open in the builder (server payload)
+let deckList = [];
+
+function formatLabel(format) {
+    const found = gameInfo.deck_formats.find(([key]) => key === format);
+    return found ? found[1] : format;
+}
+
+function hasCommander(format) {
+    const found = gameInfo.deck_formats.find(([key]) => key === format);
+    return !!(found && found[2]);
+}
+
+async function loadDecks() {
+    if (!gameInfo.deck_formats.length) return;
+    const data = await api('/api/decks');
+    if (!data) return;
+    deckList = data.decks;
+    $('deck-data-notice').hidden = data.has_deck_data;
+    $('deck-list').innerHTML = deckList.length ? deckList.map(item => `
+        <button class="deck-tile" data-deck="${item.id}">
+            <span class="deck-tile-name">${escapeHtml(item.name)}</span>
+            <span class="deck-tile-meta">${escapeHtml(formatLabel(item.format))} · ${plural(item.cards, 'card')}${item.commanders.length ? ' · ' + escapeHtml(item.commanders.join(' + ')) : ''}</span>
+            <span class="meter" title="${item.owned} of ${item.cards} owned"><span style="width: ${item.owned_percent}%"></span></span>
+            <span class="deck-tile-meta">${item.owned_percent}% owned · changed ${escapeHtml(item.updated_at.slice(0, 10))}</span>
+        </button>`).join('')
+        : '<div class="empty-state">No decks yet. Create one, or see below what your collection can build.</div>';
+}
+
+function openDeckModal({text = '', importInto = null} = {}) {
+    // New deck, or (importInto: a deck) add cards to an existing one
+    $('deck-modal').dataset.importInto = importInto ? importInto.id : '';
+    $('deck-modal-title').textContent = importInto ? `Import cards into ${importInto.name}` : 'New deck';
+    $('deck-modal-name-group').hidden = $('deck-modal-format-group').hidden = !!importInto;
+    $('deck-modal-replace').hidden = !importInto;
+    $('deck-modal-save').textContent = importInto ? 'Import' : 'Create';
+    $('new-deck-name').value = '';
+    $('new-deck-url').value = '';
+    $('new-deck-text').value = text;
+    $('new-deck-replace').checked = false;
+    $('new-deck-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
+        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('deck-modal').classList.add('show');
+    (importInto ? $('new-deck-url') : $('new-deck-name')).focus();
+}
+
+function reportUnknown(unknown) {
+    if (unknown && unknown.length) {
+        notify(`Not in the card data: ${unknown.slice(0, 6).join(', ')}${unknown.length > 6 ? ` and ${unknown.length - 6} more` : ''}`, 'warning');
+    }
+}
+
+async function saveDeckModal() {
+    const importInto = $('deck-modal').dataset.importInto;
+    const body = {text: $('new-deck-text').value.trim() || undefined, url: $('new-deck-url').value.trim() || undefined};
+    const button = $('deck-modal-save');
+    button.disabled = true;
+    let data;
+    if (importInto) {
+        if (!body.text && !body.url) {
+            notify('Paste a decklist or a deck address', 'warning');
+            button.disabled = false;
+            return;
+        }
+        data = await api(`/api/decks/${importInto}/import`, {method: 'POST', body: {...body, replace: $('new-deck-replace').checked}});
+    } else {
+        // A deck from another site keeps that site's format unless the list is pasted
+        data = await api('/api/decks', {method: 'POST', body: {...body, name: $('new-deck-name').value.trim() || undefined,
+                                                              format: body.url ? undefined : $('new-deck-format').value}});
+    }
+    button.disabled = false;
+    if (!data) return;
+    closeModal('deck-modal');
+    reportUnknown(data.unknown);
+    openDeck(data.deck);
+}
+
+async function createDeck(body, message) {
+    const data = await api('/api/decks', {method: 'POST', body});
+    if (!data) return;
+    reportUnknown(data.unknown);
+    if (message) notify(message, 'success');
+    openDeck(data.deck);
+}
+
+// -- "What can I build?" --------------------------------------------------------
+
+const ideaTimers = {};
+
+// -- Preconstructed decks: browse, open as a deck, or add as owned ----------------
+
+let precons = null;          // [{file, name, type, format, released, set}] newest first
+let preconRank = {};         // file -> {owned, total, percent}, after "Rank by what I own"
+
+async function loadPrecons() {
+    if (precons) return renderPrecons();
+    $('ideas-precons').innerHTML = '<div class="hint">Loading the list...</div>';
+    const data = await api('/api/precons');
+    if (!data) {
+        $('ideas-precons').innerHTML = '<div class="hint">The list of preconstructed decks is not available right now.</div>';
+        return;
+    }
+    precons = data.precons;
+    renderPrecons();
+}
+
+function renderPrecons() {
+    if (!precons) return;
+    const words = $('precon-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const ranked = Object.keys(preconRank).length > 0;
+    let rows = precons.filter(item => {
+        const text = `${item.name} ${item.set} ${item.type} ${item.released.slice(0, 4)}`.toLowerCase();
+        return words.every(word => text.includes(word));
+    });
+    // Ranked: the decks you own most of first; otherwise the newest first (as loaded)
+    if (ranked) rows = [...rows].sort((a, b) => ((preconRank[b.file] || {}).percent || 0) - ((preconRank[a.file] || {}).percent || 0));
+    const more = rows.length - 80;
+    $('ideas-precons').innerHTML = rows.slice(0, 80).map(item => {
+        const rank = preconRank[item.file];
+        return `
+        <div class="idea-row precon" data-file="${escapeHtml(item.file)}">
+            <div><div class="idea-name">${escapeHtml(item.name)}</div>
+                 <div class="idea-meta">${escapeHtml(item.type)} · ${escapeHtml(item.set)} · ${escapeHtml(item.released.slice(0, 7))}${rank ? ` · ${rank.owned} of ${rank.total} cards owned` : ''}</div></div>
+            ${rank ? `<div class="idea-share"><strong>${rank.percent}%</strong><div class="meter" style="width: 70px"><span style="width: ${rank.percent}%"></span></div></div>` : '<span></span>'}
+            <div class="idea-actions">
+                <button class="btn btn-small" data-precon="deck" title="A deck list to work on - your inventory is not changed">Open as deck</button>
+                <button class="btn btn-small" data-precon="own" title="Add its cards to your inventory and open it as a deck">I own it</button>
+            </div>
+        </div>`;
+    }).join('') + (more > 0 ? `<div class="hint">${more} more - type to narrow the list</div>` : '')
+        || '<div class="hint">No preconstructed deck matches.</div>';
+}
+
+async function ownPrecon(item) {
+    const location = await valueDialog({
+        title: `Add ${item.name} to your inventory`,
+        label: 'Its cards are added as Near Mint, in the printings that come in the box. Location (empty: none)',
+        options: knownLocations(), value: item.name.slice(0, 60)});
+    if (location === null) return;
+    const data = await api(`/api/precons/${encodeURIComponent(item.file)}/own`, {method: 'POST', body: {name: item.name, location}});
+    if (!data) return;
+    reportUnknown(data.unknown);
+    notify(`${plural(data.added, 'card')} of ${item.name} added to your inventory`, 'success');
+    preconRank = {};  // what is owned changed
+    loadInventory();
+    openDeck(data.deck);
+}
+
+function renderIdeas(kind, state) {
+    if (kind === 'precons') {
+        // The ranking fills in the browsable list
+        state.items.forEach(item => { preconRank[item.file] = item; });
+        $('precon-progress').innerHTML = (state.running ? `<div class="hint">Reading the lists... ${state.done} of ${state.total || '?'}</div>` : '')
+            + (state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '');
+        return renderPrecons();
+    }
+    const list = $(`ideas-${kind}`);
+    const progress = state.running ? `<div class="hint">Looking... ${state.done} of ${state.total || '?'}</div>` : '';
+    const error = state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '';
+    const rows = state.items.slice(0, 60).map(item => `
+        <div class="idea-row" data-image="${escapeHtml(item.image_uri || '')}">
+            <div><div class="idea-name">${escapeHtml(item.name)}</div>
+                 <div class="idea-meta">${item.decks.toLocaleString()} decks on EDHREC · you own ${item.owned} of the ${item.total} cards played with it</div></div>
+            <div class="idea-share"><strong>${item.fit}%</strong><div class="meter"><span style="width: ${item.fit}%"></span></div></div>
+            <button class="btn btn-small" data-start-commander="${escapeHtml(item.name)}">Start deck</button>
+        </div>`).join('');
+    const empty = !state.running && !state.error && state.started && !state.items.length
+        ? '<div class="hint">No legendary creatures in the inventory yet.</div>' : '';
+    list.innerHTML = progress + error + rows + empty;
+}
+
+async function pollIdeas(kind, start = false) {
+    clearTimeout(ideaTimers[kind]);
+    const state = await api(`/api/decks/ideas/${kind}`, start ? {method: 'POST'} : {});
+    if (!state) return;
+    renderIdeas(kind, state);
+    if (state.running) ideaTimers[kind] = setTimeout(() => pollIdeas(kind), 1500);
+}
+
+// ============================================================================
+// Decks: builder
+// ============================================================================
+
+const BOARD_TITLES = {commander: 'Commander', main: 'Main deck', side: 'Sideboard'};
+const TYPE_GROUPS = [['Creature', 'Creatures'], ['Planeswalker', 'Planeswalkers'], ['Instant', 'Instants'],
+                     ['Sorcery', 'Sorceries'], ['Artifact', 'Artifacts'], ['Enchantment', 'Enchantments'],
+                     ['Battle', 'Battles'], ['Land', 'Lands']];
+let sidePanel = 'search';
+let searchColors = new Set();
+let searchOffset = 0;
+let searchTimer = null;
+let suggestions = null;    // {deckKey, data}: loaded per commander
+
+function openDeck(payload) {
+    deck = payload;
+    suggestions = null;
+    $('deck-home').hidden = true;
+    $('deck-builder').hidden = false;
+    $('deck-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
+        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    renderDeck();
+    showSide(hasCommander(deck.format) && commanders().length && deck.totals.cards < 30 ? 'suggestions' : 'search');
+    window.scrollTo(0, 0);
+}
+
+function closeDeck() {
+    deck = null;
+    $('deck-builder').hidden = true;
+    $('deck-home').hidden = false;
+    loadDecks();
+}
+
+function commanders() {
+    return deck.cards.filter(entry => entry.board === 'commander');
+}
+
+function sideTitle() {
+    return hasCommander(deck.format) ? 'Considering (not in the deck)' : BOARD_TITLES.side;
+}
+
+function typeGroup(entry) {
+    const front = ((entry.card && entry.card.type_line) || '').split(' // ')[0];
+    // A creature that is also an artifact or enchantment is filed as a creature; a land always as a land
+    if (front.includes('Land')) return 'Lands';
+    const found = TYPE_GROUPS.find(([type]) => front.includes(type));
+    return found ? found[1] : 'Other';
+}
+
+function ownHtml(entry, wanted) {
+    // wanted: copies of the card this deck plays over all its boards
+    const elsewhere = entry.elsewhere.reduce((sum, other) => sum + other.quantity, 0);
+    const others = entry.elsewhere.map(other => `${other.quantity} in ${other.deck}`).join(', ');
+    if (entry.owned >= wanted + elsewhere) return `<span class="own have" title="You own ${entry.owned}${others ? ' - also ' + others : ''}">✓ owned</span>`;
+    if (entry.owned >= wanted) return `<span class="own shared" title="You own ${entry.owned}, but other decks want it too: ${escapeHtml(others)}">⇄ shared</span>`;
+    if (entry.owned > 0) return `<span class="own partly" title="You own ${entry.owned} of ${wanted}">${entry.owned} of ${wanted}</span>`;
+    return '<span class="own none" title="Not in your inventory">✕ missing</span>';
+}
+
+function deckRowHtml(entry, wanted) {
+    const moves = [];
+    if (entry.board !== 'main') moves.push(['main', 'Main', 'Move to the main deck']);
+    if (entry.board !== 'side') moves.push(['side', hasCommander(deck.format) ? 'Maybe' : 'Side', `Move to: ${sideTitle()}`]);
+    const card = entry.card;
+    if (canCommand(card) && entry.board !== 'commander') moves.push(['commander', 'Cmdr', 'Make it the commander']);
+    return `
+        <div class="deck-row" data-name="${escapeHtml(entry.name)}" data-board="${entry.board}" data-image="${escapeHtml((card && card.image_uri) || '')}">
+            <span class="qty">
+                <button class="mini-btn" data-change="-1" title="One less"><svg class="icon"><use href="#i-minus"/></svg></button>
+                <strong>${entry.quantity}</strong>
+                <button class="mini-btn" data-change="1" title="One more"><svg class="icon"><use href="#i-plus"/></svg></button>
+            </span>
+            <span class="result-main"><span class="result-name ${card ? '' : 'unknown'}">${escapeHtml(entry.name)}</span> ${card ? manaHtml(card.mana_cost) : '<span class="hint">not in the card data</span>'}</span>
+            ${ownHtml(entry, wanted)}
+            <span class="result-numbers">${card ? money(card.price * entry.quantity) : ''}</span>
+            <span class="result-actions">${moves.map(([board, label, title]) =>
+                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}</span>
+        </div>`;
+}
+
+function renderDeck() {
+    $('deck-name').value = deck.name;
+    $('deck-format').value = deck.format;
+    const totals = deck.totals;
+    const considering = hasCommander(deck.format);
+    $('deck-totals').innerHTML = `
+        <span><strong>${totals.cards}</strong> cards${totals.side ? ` + ${totals.side} ${considering ? 'considered' : 'sideboard'}` : ''}</span>
+        <span>Price <strong>${money(totals.price)}</strong></span>
+        <span>${totals.missing ? `Missing <strong>${totals.missing}</strong> cards (${money(totals.missing_price)})` : totals.cards ? '<strong>You own every card</strong>' : ''}</span>`;
+    $('deck-issues').innerHTML = deck.issues.length ? deck.issues.map(issue => `
+        <div class="issue ${issue.level}">${issue.level === 'error' ? '✕' : '!'} ${escapeHtml(issue.message)}${issue.cards.length
+            ? `<span class="issue-cards">: ${escapeHtml(issue.cards.slice(0, 12).join(', '))}${issue.cards.length > 12 ? ` and ${issue.cards.length - 12} more` : ''}</span>` : ''}</div>`).join('')
+        : (totals.cards ? `<div class="issue ok">✓ Legal ${escapeHtml(formatLabel(deck.format))} deck</div>` : '');
+
+    // Copies of each card over the boards that are played
+    const played = deck.cards.filter(entry => !(considering && entry.board === 'side'));
+    const wanted = {};
+    played.forEach(entry => { wanted[entry.name] = (wanted[entry.name] || 0) + entry.quantity; });
+    renderDeckCharts(played.filter(entry => entry.board !== 'side' && entry.card));
+
+    const sections = [];
+    const section = (title, entries) => {
+        if (!entries.length) return;
+        const count = entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        sections.push(`<div class="category-title">${escapeHtml(title)} (${count})</div>`
+            + entries.map(entry => deckRowHtml(entry, wanted[entry.name] || entry.quantity)).join(''));
+    };
+    section(BOARD_TITLES.commander, commanders());
+    const main = deck.cards.filter(entry => entry.board === 'main');
+    [...TYPE_GROUPS.map(([, title]) => title), 'Other'].forEach(title =>
+        section(title, main.filter(entry => typeGroup(entry) === title)));
+    section(sideTitle(), deck.cards.filter(entry => entry.board === 'side'));
+    $('deck-cards').innerHTML = sections.join('')
+        || '<div class="empty-state">No cards yet. Search on the left and click a card to add it.</div>';
+
+    $('side-suggestions').hidden = !considering;
+    $('search-identity-label').hidden = !considering;
+}
+
+function renderDeckCharts(entries) {
+    if (!entries.length) {
+        $('deck-charts').innerHTML = '';
+        return;
+    }
+    // Mana curve: spells by mana value (lands have none)
+    const curve = Array(8).fill(0);
+    const pips = {W: 0, U: 0, B: 0, R: 0, G: 0};
+    const types = new Map();
+    entries.forEach(entry => {
+        const group = typeGroup(entry);
+        types.set(group, (types.get(group) || 0) + entry.quantity);
+        if (group !== 'Lands') curve[Math.min(7, Math.floor(entry.card.cmc || 0))] += entry.quantity;
+        ((entry.card.mana_cost || '').match(/\{[^}]+\}/g) || []).forEach(symbol =>
+            Object.keys(pips).forEach(color => { if (symbol.includes(color)) pips[color] += entry.quantity; }));
+    });
+    const top = Math.max(...curve, 1);
+    const colorNames = Object.fromEntries(COLORS);
+    $('deck-charts').innerHTML = `
+        <div><div class="chart-title">Mana curve</div>
+            <div class="curve">${curve.map((count, cost) => `
+                <div class="curve-col" title="Mana value ${cost}${cost === 7 ? ' or more' : ''}: ${plural(count, 'card')}">
+                    <span>${count || ''}</span><div class="curve-bar" style="height: ${(72 * count / top).toFixed(0)}px"></div><span>${cost}${cost === 7 ? '+' : ''}</span>
+                </div>`).join('')}</div></div>
+        <div><div class="chart-title">Types</div>${barsHtml([...types.entries()], number => String(number), 9)}</div>
+        <div><div class="chart-title">Mana symbols</div>${barsHtml(Object.entries(pips).map(([color, count]) => [colorNames[color], count]), number => String(number), 5)}</div>`;
+}
+
+async function changeDeckCards(cards) {
+    const data = await api(`/api/decks/${deck.id}/cards`, {method: 'POST', body: {cards}});
+    if (!data) return;
+    const before = commanders().map(entry => entry.name).join('|');
+    deck = data.deck;
+    renderDeck();
+    if (before !== commanders().map(entry => entry.name).join('|')) suggestions = null;
+    refreshSide();
+}
+
+async function saveDeckInfo(body) {
+    const data = await api(`/api/decks/${deck.id}`, {method: 'PUT', body});
+    if (!data) return;
+    deck = data.deck;
+    renderDeck();
+    refreshSide();
+}
+
+// -- Left side: search, suggestions, popular decks -----------------------------
+
+function showSide(panel) {
+    sidePanel = panel;
+    document.querySelectorAll('#side-switch button').forEach(button =>
+        button.classList.toggle('is-active', button.dataset.side === panel));
+    $('side-search').hidden = panel !== 'search';
+    $('side-suggestions-panel').hidden = panel !== 'suggestions';
+    $('side-popular-panel').hidden = panel !== 'popular';
+    refreshSide(true);
+}
+
+function refreshSide(opened = false) {
+    // After the deck changed: what is shown beside it depends on its cards
+    if (sidePanel === 'search') { if (opened) runSearch(); else markResults(); }
+    if (sidePanel === 'suggestions') loadSuggestions();
+    if (sidePanel === 'popular' && opened) loadPopular();
+}
+
+function inDeck(name) {
+    return deck.cards.filter(entry => entry.name === name).reduce((sum, entry) => sum + entry.quantity, 0);
+}
+
+function canCommand(card) {
+    return !!card && hasCommander(deck.format)
+        && /Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text);
+}
+
+function resultRowHtml(card, numbers = '') {
+    const count = inDeck(card.name);
+    return `
+        <div class="result-row" data-name="${escapeHtml(card.name)}" data-id="${escapeHtml(card.id)}" data-image="${escapeHtml(card.image_uri || '')}" title="${escapeHtml(card.oracle_text)}">
+            <span class="result-main">
+                <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
+                <div class="result-sub">${escapeHtml(card.type_line)}</div>
+            </span>
+            <span class="result-numbers">${numbers}${card.owned ? `<span class="own have">✓ ${card.owned} owned</span>` : ''}<div>${money(card.price)}</div></span>
+            <span class="result-actions">
+                ${canCommand(card) ? '<button class="mini-btn" data-add="commander" title="Make it the commander">Cmdr</button>' : ''}
+                <button class="mini-btn" data-add="main" title="Add to the deck">${count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>'}</button>
+            </span>
+        </div>`;
+}
+
+async function runSearch(more = false) {
+    if (!deck) return;
+    searchOffset = more ? searchOffset : 0;
+    const params = new URLSearchParams({offset: searchOffset});
+    const add = (key, value) => { if (value) params.set(key, value); };
+    add('q', $('search-text').value.trim());
+    add('type', $('search-type').value.trim());
+    add('text', $('search-oracle').value.trim());
+    add('cmc', $('search-cmc').value);
+    add('rarity', $('search-rarity').value);
+    add('colors', [...searchColors].join(''));
+    add('owned', $('search-owned').checked ? '1' : '');
+    add('format', $('search-legal').checked ? deck.format : '');
+    if (hasCommander(deck.format) && $('search-identity').checked && commanders().some(entry => entry.card)) {
+        params.set('identity', [...new Set(commanders().flatMap(entry => (entry.card && entry.card.identity) || []))].join(''));
+    }
+    const data = await api(`/api/cards/search?${params}`);
+    if (!data || !deck) return;
+    const html = data.cards.map(card => resultRowHtml(card)).join('');
+    const list = $('search-results');
+    if (more) list.insertAdjacentHTML('beforeend', html);
+    else list.innerHTML = html || '<div class="empty-state">No cards match.</div>';
+    searchOffset += data.cards.length;
+    $('search-more').hidden = !data.more;
+}
+
+function markResults() {
+    // The counts on the add buttons follow the deck
+    document.querySelectorAll('#search-results .result-row').forEach(row => {
+        const count = inDeck(row.dataset.name);
+        row.querySelector('[data-add="main"]').innerHTML = count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>';
+    });
+}
+
+async function loadSuggestions() {
+    const key = `${deck.id}:${commanders().map(entry => entry.name).join('|')}`;
+    if (!suggestions || suggestions.key !== key) {
+        $('suggestions-list').innerHTML = '<div class="hint">Asking EDHREC...</div>';
+        $('suggestions-source').textContent = '';
+        const data = await api(`/api/decks/${deck.id}/suggestions`);
+        if (!deck) return;
+        suggestions = {key, data: data || {categories: [], message: 'Suggestions are not available right now'}};
+    }
+    const data = suggestions.data;
+    const ownedOnly = $('suggestions-owned').checked;
+    $('suggestions-source').innerHTML = data.decks
+        ? `Played with this commander in ${data.decks.toLocaleString()} decks - <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">EDHREC</a>` : '';
+    const html = data.categories.map(category => {
+        const cards = category.cards.filter(card => !inDeck(card.name) && (!ownedOnly || card.owned));
+        return cards.length ? `<div class="category-title">${escapeHtml(category.title)}</div>` + cards.map(card => resultRowHtml(card,
+            `<span title="In ${card.inclusion}% of this commander's decks; synergy ${card.synergy > 0 ? '+' : ''}${card.synergy}%">${card.inclusion}% </span>`)).join('') : '';
+    }).join('');
+    const average = !deck.totals.cards || deck.totals.cards <= 2
+        ? '<button class="btn btn-small btn-block" id="suggestions-average">Start from EDHREC\'s average deck</button>' : '';
+    $('suggestions-list').innerHTML = (data.categories.length ? average : '') + (html
+        || `<div class="empty-state">${escapeHtml(data.message || (ownedOnly ? 'You own none of the suggested cards that are not in the deck already.' : 'No suggestions left.'))}</div>`);
+}
+
+async function loadPopular() {
+    $('popular-list').innerHTML = '<div class="hint">Looking...</div>';
+    const data = await api(`/api/decks/popular?deck_id=${deck.id}`);
+    if (!data || !deck) return;
+    $('popular-source').textContent = data.commander
+        ? `Most viewed public decks with ${data.commander} (Archidekt)`
+        : `Most viewed public ${formatLabel(deck.format)} decks (Archidekt, Moxfield)`;
+    $('popular-list').innerHTML = data.problems.map(problem => `<div class="callout warning">${escapeHtml(problem)}</div>`).join('')
+        + (data.decks.map(item => `
+            <div class="result-row">
+                <span class="result-main">
+                    <div class="result-name">${escapeHtml(item.name)}</div>
+                    <div class="result-sub">${escapeHtml(item.source)}${item.author ? ' · ' + escapeHtml(item.author) : ''} · ${item.views.toLocaleString()} views</div>
+                </span>
+                <span class="result-actions">
+                    <a class="mini-btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener" title="Open on ${escapeHtml(item.source)}"><svg class="icon"><use href="#i-link"/></svg></a>
+                    <button class="mini-btn" data-import-url="${escapeHtml(item.url)}" title="Open a copy as a new deck here">Copy</button>
+                </span>
+            </div>`).join('') || (data.problems.length ? '' : '<div class="empty-state">No decks found.</div>'));
+}
+
+// -- Card image beside the hovered row -----------------------------------------
+
+function showPreview(row) {
+    const preview = $('card-preview');
+    const image = row && row.dataset.image;
+    if (!image) {
+        preview.hidden = true;
+        return;
+    }
+    preview.src = image;
+    preview.hidden = false;
+    const rect = row.getBoundingClientRect();
+    const height = 240 * 88 / 63;
+    const left = rect.right + 250 < window.innerWidth ? rect.right + 8 : rect.left - 248;
+    preview.style.left = `${Math.max(8, left)}px`;
+    preview.style.top = `${Math.max(8, Math.min(rect.top - 40, window.innerHeight - height - 8))}px`;
+}
+
+// ============================================================================
+// Events
+// ============================================================================
+
+function debounce(callback, delay = 250) {
+    let timer = null;
+    return () => {
+        clearTimeout(timer);
+        timer = setTimeout(callback, delay);
+    };
+}
+
+function bindEvents() {
+    $('tabs').addEventListener('click', event => {
+        const tab = event.target.closest('.tab');
+        if (tab) showTab(tab.dataset.tab);
+    });
+
+    // Inventory filters
+    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag']
+        .forEach(id => $(id).addEventListener('change', applyFilters));
+    ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
+    $('filter-colors').addEventListener('click', event => {
+        const chip = event.target.closest('.color-chip');
+        if (!chip) return;
+        if (filterColors.has(chip.dataset.color)) filterColors.delete(chip.dataset.color); else filterColors.add(chip.dataset.color);
+        chip.classList.toggle('is-active');
+        applyFilters();
+    });
+    $('filter-clear').addEventListener('click', () => {
+        ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
+         'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
+        filterColors.clear();
+        fillFilterOptions();
+        applyFilters();
+    });
+    $('inventory-sort').addEventListener('change', event => {
+        remember('collectionSort', event.target.value);
+        applyFilters();
+    });
+    $('view-switch').addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        inventoryView = button.dataset.view;
+        remember('collectionView', inventoryView);
+        renderInventory();
+    });
+    $('inventory-more').addEventListener('click', () => {
+        shownLimit += PAGE_SIZE;
+        renderInventory();
+    });
+    $('import-file-input').addEventListener('change', importInventory);
+
+    // Inventory rows
+    $('inventory-list').addEventListener('click', event => {
+        const row = event.target.closest('[data-id]');
+        if (!row) return;
+        const card = inventory.find(entry => entry.id === parseInt(row.dataset.id));
+        if (!card) return;
+        if (event.target.closest('.btn-edit')) return editCard(card, knownLocations());
+        if (event.target.closest('.btn-delete')) return deleteCard(card.id, card.name);
+        if (event.target.closest('.inventory-thumb') && card.captures.length) return openCaptures(card);
+        if (event.target.classList.contains('row-check')) return toggleSelected(card.id, event.target.checked);
+        // Grid: a click on the card selects it, a double click edits it
+        if (row.classList.contains('grid-card')) toggleSelected(card.id, !selected.has(card.id));
+    });
+    $('inventory-list').addEventListener('dblclick', event => {
+        const row = event.target.closest('.grid-card');
+        const card = row && inventory.find(entry => entry.id === parseInt(row.dataset.id));
+        if (card) {
+            toggleSelected(card.id, false);
+            editCard(card, knownLocations());
+        }
+    });
+    $('bulk-bar').addEventListener('click', event => {
+        const button = event.target.closest('[data-bulk]');
+        if (button) bulkAction(button.dataset.bulk);
+    });
+    $('bulk-all').addEventListener('click', () => {
+        shown.forEach(card => selected.add(card.id));
+        renderInventory();
+    });
+    $('bulk-none').addEventListener('click', () => {
+        selected.clear();
+        renderInventory();
+    });
+    $('value-ok').addEventListener('click', () =>
+        closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
+    $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
+
+    // Statistics
+    $('stats-measure').addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        statsMeasure = button.dataset.measure;
+        renderStats();
+    });
+
+    // Deck list
+    $('deck-new').addEventListener('click', () => openDeckModal());
+    $('deck-modal-save').addEventListener('click', saveDeckModal);
+    $('deck-list').addEventListener('click', async event => {
+        const tile = event.target.closest('[data-deck]');
+        if (!tile) return;
+        const data = await api(`/api/decks/${tile.dataset.deck}`);
+        if (data) openDeck(data.deck);
+    });
+    document.querySelectorAll('[data-ideas]').forEach(button =>
+        button.addEventListener('click', () => pollIdeas(button.dataset.ideas, true)));
+    $('ideas-commanders').addEventListener('click', event => {
+        const button = event.target.closest('[data-start-commander]');
+        if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});
+    });
+    $('precon-search').addEventListener('input', debounce(renderPrecons, 150));
+    $('ideas-precons').addEventListener('click', event => {
+        const button = event.target.closest('[data-precon]');
+        const row = event.target.closest('[data-file]');
+        const item = button && row && precons.find(precon => precon.file === row.dataset.file);
+        if (!item) return;
+        if (button.dataset.precon === 'own') ownPrecon(item);
+        else createDeck({name: item.name, format: item.format, precon: item.file});
+    });
+    $('deck-data-update').addEventListener('click', event => {
+        event.target.disabled = true;
+        $('deck-data-progress').textContent = 'Starting...';
+        socket.emit('update_database');
+    });
+
+    // Builder header
+    $('deck-back').addEventListener('click', closeDeck);
+    $('deck-name').addEventListener('change', event => saveDeckInfo({name: event.target.value}));
+    $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
+    $('deck-import').addEventListener('click', () => openDeckModal({importInto: deck}));
+    $('deck-export').addEventListener('click', () => { window.location = `/api/decks/${deck.id}/export/text`; });
+    $('deck-buylist').addEventListener('click', () => {
+        if (!deck.totals.missing) return notify('You own every card of this deck', 'success');
+        window.location = `/api/decks/${deck.id}/export/buylist`;
+    });
+    $('deck-duplicate').addEventListener('click', async () => {
+        const data = await api(`/api/decks/${deck.id}/duplicate`, {method: 'POST'});
+        if (data) openDeck(data.deck);
+    });
+    $('deck-delete').addEventListener('click', async () => {
+        const ok = await confirmDialog({title: `Delete "${deck.name}"?`, confirmText: 'Delete', danger: true,
+            message: "The deck list is deleted. Your inventory is not touched."});
+        if (ok && await api(`/api/decks/${deck.id}`, {method: 'DELETE'})) closeDeck();
+    });
+
+    // Deck cards
+    $('deck-cards').addEventListener('click', event => {
+        const row = event.target.closest('.deck-row');
+        const button = event.target.closest('.mini-btn');
+        if (!row || !button) return;
+        const card = {name: row.dataset.name, board: row.dataset.board};
+        if (button.dataset.change) changeDeckCards([{...card, change: parseInt(button.dataset.change)}]);
+        else if (button.dataset.move) changeDeckCards([{...card, move_to: button.dataset.move}]);
+    });
+
+    // Search, suggestions, popular decks
+    $('side-switch').addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (button) showSide(button.dataset.side);
+    });
+    ['search-text', 'search-type', 'search-oracle'].forEach(id => $(id).addEventListener('input', debounce(() => runSearch())));
+    ['search-cmc', 'search-rarity', 'search-owned', 'search-legal', 'search-identity']
+        .forEach(id => $(id).addEventListener('change', () => runSearch()));
+    $('search-colors').innerHTML = colorChipsHtml(searchColors);
+    $('search-colors').addEventListener('click', event => {
+        const chip = event.target.closest('.color-chip');
+        if (!chip) return;
+        if (searchColors.has(chip.dataset.color)) searchColors.delete(chip.dataset.color); else searchColors.add(chip.dataset.color);
+        chip.classList.toggle('is-active');
+        runSearch();
+    });
+    $('search-more').addEventListener('click', () => runSearch(true));
+    const addFromRow = event => {
+        const row = event.target.closest('.result-row[data-name]');
+        if (!row || event.target.closest('a')) return;
+        const button = event.target.closest('[data-add]');
+        changeDeckCards([{name: row.dataset.name, card_id: row.dataset.id, board: button ? button.dataset.add : 'main', change: 1}]);
+    };
+    $('search-results').addEventListener('click', addFromRow);
+    $('suggestions-list').addEventListener('click', event => {
+        if (event.target.id === 'suggestions-average') return startFromAverage();
+        addFromRow(event);
+    });
+    $('suggestions-owned').addEventListener('change', loadSuggestions);
+    $('popular-list').addEventListener('click', event => {
+        const button = event.target.closest('[data-import-url]');
+        if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
+    });
+    $('popular-import').addEventListener('click', () => {
+        const url = $('popular-url').value.trim();
+        if (url) createDeck({url}, 'Deck copied');
+    });
+
+    // Card image preview (devices with a mouse)
+    if (window.matchMedia('(hover: hover)').matches) {
+        document.addEventListener('mouseover', event => showPreview(event.target.closest('[data-image]')));
+    }
+
+    // Overlays: Escape and a click outside close the topmost one
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        if ($('dialog-modal').classList.contains('show')) closeDialog(null);
+        else if ($('value-modal').classList.contains('show')) closeValueDialog(null);
+        else if ($('capture-modal').classList.contains('show')) closeCaptures();
+        else if ($('edit-card-modal').classList.contains('show')) closeEditCard();
+        else closeModal('deck-modal');
+    });
+    window.addEventListener('click', event => {
+        if (event.target === $('dialog-modal')) closeDialog(null);
+        else if (event.target === $('value-modal')) closeValueDialog(null);
+        else if (event.target === $('capture-modal')) closeCaptures();
+        else if (event.target === $('edit-card-modal')) closeEditCard();
+        else if (event.target === $('deck-modal')) closeModal('deck-modal');
+    });
+}
+
+async function startFromAverage() {
+    const data = await api(`/api/decks/${deck.id}/import`, {method: 'POST',
+        body: {average: commanders().map(entry => entry.name), replace: true}});
+    if (!data) return;
+    reportUnknown(data.unknown);
+    notify("Filled with EDHREC's average deck", 'success');
+    deck = data.deck;
+    renderDeck();
+    refreshSide();
+}
+
+// The inventory changes while scanning on another tab or device
+['inventory_updated', 'inventory_undone', 'inventory_prices_updated'].forEach(name =>
+    socket.on(name, debounce(() => {
+        loadInventory();
+        if (deck) api(`/api/decks/${deck.id}`).then(data => { if (data && deck) { deck = data.deck; renderDeck(); } });
+    }, 500)));
+socket.on('game_changed', () => window.location.reload());
+socket.on('database_update_progress', data => { $('deck-data-progress').textContent = data.message; });
+socket.on('database_update_complete', () => {
+    $('deck-data-progress').textContent = '';
+    notify('Card database updated', 'success');
+    loadInventory();
+    loadDecks();
+});
+socket.on('database_update_error', data => {
+    $('deck-data-progress').textContent = '';
+    $('deck-data-update').disabled = false;
+    notify(`Card database update failed: ${data.message}`, 'error');
+});
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const data = await api('/api/games');
+    if (!data) return;
+    gameInfo = data.games.find(game => game.id === data.active);
+    $('game-label').textContent = data.games.length > 1 ? gameInfo.label : '';
+    $('tab-button-decks').hidden = !gameInfo.deck_formats.length;
+    renderExportButtons();
+    bindEvents();
+    await loadInventory();
+    const tab = recall('collectionTab', 'inventory');
+    showTab(tab === 'decks' && !gameInfo.deck_formats.length ? 'inventory' : tab);
+});

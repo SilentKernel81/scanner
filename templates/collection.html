@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>Collection - Card Scanner</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=2">
+</head>
+<body>
+    {% include '_icons.html' %}
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark"><svg class="icon"><use href="#i-layers"/></svg></span>
+            Collection
+            <span class="game-label" id="game-label"></span>
+        </div>
+        <nav class="tabs" id="tabs">
+            <button class="tab is-active" data-tab="inventory"><svg class="icon"><use href="#i-list"/></svg> Inventory</button>
+            <button class="tab" data-tab="decks" id="tab-button-decks"><svg class="icon"><use href="#i-layers"/></svg> Decks</button>
+            <button class="tab" data-tab="stats"><svg class="icon"><use href="#i-chart"/></svg> Statistics</button>
+        </nav>
+        <a class="btn btn-small" href="{{ url_for('index') }}" title="Back to scanning">
+            <svg class="icon"><use href="#i-camera"/></svg> Scanner
+        </a>
+    </header>
+
+    <main class="container collection">
+        <!-- ================= Inventory ================= -->
+        <section id="tab-inventory" class="tab-panel">
+            <div class="panel filter-panel">
+                <div class="filter-row">
+                    <input type="search" id="filter-text" class="text-input filter-text" placeholder="Name, set, type...">
+                    <div class="color-chips" id="filter-colors" title="Color identity"></div>
+                    <select id="filter-type" class="select" title="Type"></select>
+                    <select id="filter-rarity" class="select" title="Rarity"></select>
+                    <select id="filter-set" class="select" title="Set"></select>
+                    <select id="filter-finish" class="select" title="Finish"></select>
+                    <select id="filter-location" class="select" title="Location"></select>
+                    <select id="filter-tag" class="select" title="Tag"></select>
+                    <span class="price-range" title="Price of one copy (USD)">
+                        $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
+                        – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
+                    </span>
+                    <button class="btn btn-small btn-ghost" id="filter-clear">Clear filters</button>
+                </div>
+                <div class="filter-row">
+                    <span class="summary" id="inventory-summary"></span>
+                    <span class="spacer"></span>
+                    <select id="inventory-sort" class="select" title="Sort">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="name">Name A–Z</option>
+                        <option value="price_desc">Price: high to low</option>
+                        <option value="price_asc">Price: low to high</option>
+                        <option value="value_desc">Total value (price × qty)</option>
+                        <option value="quantity_desc">Quantity: most first</option>
+                        <option value="rarity">Rarity: mythic first</option>
+                        <option value="set">Set and number</option>
+                    </select>
+                    <div class="segmented" id="view-switch">
+                        <button data-view="list" class="is-active" title="List"><svg class="icon"><use href="#i-list"/></svg></button>
+                        <button data-view="grid" title="Card images"><svg class="icon"><use href="#i-grid"/></svg></button>
+                    </div>
+                    <span id="export-buttons" class="export-buttons"></span>
+                    <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
+                    <input type="file" id="import-file-input" accept=".csv" style="display: none;">
+                </div>
+            </div>
+
+            <!-- Shown while entries are selected -->
+            <div class="bulk-bar" id="bulk-bar" hidden>
+                <strong id="bulk-count"></strong>
+                <button class="btn btn-small" data-bulk="location">Move to location</button>
+                <button class="btn btn-small" data-bulk="add_tag">Add tag</button>
+                <button class="btn btn-small" data-bulk="remove_tag">Remove tag</button>
+                <button class="btn btn-small" data-bulk="condition">Set condition</button>
+                <button class="btn btn-small" data-bulk="deck" id="bulk-deck">Add to deck</button>
+                <button class="btn btn-small btn-danger" data-bulk="delete">Delete</button>
+                <span class="spacer"></span>
+                <button class="btn btn-small btn-ghost" id="bulk-all">Select all shown</button>
+                <button class="btn btn-small btn-ghost" id="bulk-none">Clear selection</button>
+            </div>
+
+            <div id="inventory-list" class="inventory-list collection-list">
+                <div class="empty-state">Loading inventory...</div>
+            </div>
+            <div class="more-row"><button class="btn" id="inventory-more" hidden>Show more</button></div>
+        </section>
+
+        <!-- ================= Decks ================= -->
+        <section id="tab-decks" class="tab-panel" hidden>
+            <div class="callout warning" id="deck-data-notice" hidden>
+                The card data is from before deck building: mana values, color identity and format legality are missing.
+                <button class="btn btn-small btn-primary" id="deck-data-update">Update card database</button>
+                <span id="deck-data-progress"></span>
+            </div>
+
+            <!-- Deck list -->
+            <div id="deck-home">
+                <div class="section-head">
+                    <h2>Decks</h2>
+                    <button class="btn btn-primary" id="deck-new"><svg class="icon"><use href="#i-plus"/></svg> New deck</button>
+                </div>
+                <div id="deck-list" class="deck-list"></div>
+
+                <div class="section-head">
+                    <h2><svg class="icon"><use href="#i-spark"/></svg> What can I build?</h2>
+                </div>
+                <div class="ideas">
+                    <div class="panel idea-panel">
+                        <div class="panel-header">
+                            <h3 class="section-title">Commanders you own</h3>
+                            <button class="btn btn-small" data-ideas="commanders">Find</button>
+                        </div>
+                        <div class="hint">Your legendary creatures, by how many of the cards played with them (EDHREC) you already own.</div>
+                        <div id="ideas-commanders" class="idea-list"></div>
+                    </div>
+                    <div class="panel idea-panel">
+                        <div class="panel-header">
+                            <h3 class="section-title">Preconstructed decks</h3>
+                            <button class="btn btn-small" data-ideas="precons" title="Reads every list the first time (about a minute)">Rank by what I own</button>
+                        </div>
+                        <div class="hint">Commander and Challenger decks (MTGJSON). <strong>Open as deck</strong> makes a list to work on; <strong>I own it</strong> also adds its cards to your inventory.</div>
+                        <div class="filter-row">
+                            <input type="search" id="precon-search" class="text-input filter-text" placeholder="Deck name, set code or year">
+                        </div>
+                        <div id="precon-progress"></div>
+                        <div id="ideas-precons" class="idea-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deck builder -->
+            <div id="deck-builder" hidden>
+                <div class="builder-head">
+                    <button class="btn btn-small btn-ghost" id="deck-back"><svg class="icon"><use href="#i-back"/></svg> Decks</button>
+                    <input type="text" id="deck-name" class="text-input deck-name" maxlength="80">
+                    <select id="deck-format" class="select"></select>
+                    <span class="spacer"></span>
+                    <button class="btn btn-small" id="deck-import">Import cards</button>
+                    <button class="btn btn-small" id="deck-export">Export</button>
+                    <button class="btn btn-small" id="deck-buylist" title="Download the cards you don't own">Buy list</button>
+                    <button class="btn btn-small" id="deck-duplicate">Duplicate</button>
+                    <button class="btn btn-small btn-danger" id="deck-delete">Delete</button>
+                </div>
+
+                <div class="builder">
+                    <div class="panel builder-side">
+                        <div class="segmented wide" id="side-switch">
+                            <button data-side="search" class="is-active">Search</button>
+                            <button data-side="suggestions" id="side-suggestions">Suggestions</button>
+                            <button data-side="popular">Popular decks</button>
+                        </div>
+
+                        <div id="side-search">
+                            <div class="filter-row">
+                                <input type="search" id="search-text" class="text-input filter-text" placeholder="Card name">
+                                <input type="search" id="search-type" class="text-input" placeholder="Type (creature elf)">
+                            </div>
+                            <div class="filter-row">
+                                <input type="search" id="search-oracle" class="text-input filter-text" placeholder="Rules text contains...">
+                                <select id="search-cmc" class="select" title="Mana value">
+                                    <option value="">Any cost</option>
+                                    <option>0</option><option>1</option><option>2</option><option>3</option>
+                                    <option>4</option><option>5</option><option>6</option><option value="7">7+</option>
+                                </select>
+                                <select id="search-rarity" class="select" title="Rarity">
+                                    <option value="">Any rarity</option>
+                                    <option value="common">Common</option><option value="uncommon">Uncommon</option>
+                                    <option value="rare">Rare</option><option value="mythic">Mythic</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <div class="color-chips" id="search-colors" title="Color identity includes"></div>
+                                <label class="chip-toggle"><input type="checkbox" id="search-owned"><span>Owned</span></label>
+                                <label class="chip-toggle" title="Only cards legal in the deck's format"><input type="checkbox" id="search-legal" checked><span>Legal</span></label>
+                                <label class="chip-toggle" id="search-identity-label" title="Only cards within the commander's color identity"><input type="checkbox" id="search-identity" checked><span>Commander's colors</span></label>
+                            </div>
+                            <div id="search-results" class="result-list"></div>
+                            <div class="more-row"><button class="btn btn-small" id="search-more" hidden>More results</button></div>
+                        </div>
+
+                        <div id="side-suggestions-panel" hidden>
+                            <div class="filter-row">
+                                <span class="hint" id="suggestions-source"></span>
+                                <span class="spacer"></span>
+                                <label class="chip-toggle"><input type="checkbox" id="suggestions-owned"><span>Owned</span></label>
+                            </div>
+                            <div id="suggestions-list" class="result-list"></div>
+                        </div>
+
+                        <div id="side-popular-panel" hidden>
+                            <div class="hint" id="popular-source"></div>
+                            <div class="url-row">
+                                <input type="url" id="popular-url" class="text-input" placeholder="Paste a Moxfield or Archidekt deck address">
+                                <button class="btn btn-small" id="popular-import">Open as new deck</button>
+                            </div>
+                            <div id="popular-list" class="result-list"></div>
+                        </div>
+                    </div>
+
+                    <div class="panel builder-deck">
+                        <div class="deck-totals" id="deck-totals"></div>
+                        <div id="deck-issues" class="deck-issues"></div>
+                        <div class="deck-charts" id="deck-charts"></div>
+                        <div id="deck-cards" class="deck-cards"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= Statistics ================= -->
+        <section id="tab-stats" class="tab-panel" hidden>
+            <div class="inventory-stats" id="stats-tiles"></div>
+            <div class="filter-row stats-controls">
+                <span class="hint">Bars show</span>
+                <div class="segmented" id="stats-measure">
+                    <button data-measure="value" class="is-active">Value</button>
+                    <button data-measure="cards">Cards</button>
+                </div>
+            </div>
+            <div class="stats-grid" id="stats-grid"></div>
+        </section>
+    </main>
+
+    <!-- New deck -->
+    <div id="deck-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <h2 id="deck-modal-title">New deck</h2>
+                <span class="close" onclick="closeModal('deck-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="input-group" id="deck-modal-name-group">
+                    <label for="new-deck-name">Name</label>
+                    <input type="text" id="new-deck-name" maxlength="80" placeholder="New deck">
+                </div>
+                <div class="input-group" id="deck-modal-format-group">
+                    <label for="new-deck-format">Format</label>
+                    <select id="new-deck-format"></select>
+                </div>
+                <div class="input-group">
+                    <label for="new-deck-url">From another site (optional)</label>
+                    <input type="url" id="new-deck-url" placeholder="moxfield.com/decks/... or archidekt.com/decks/...">
+                </div>
+                <div class="input-group">
+                    <label for="new-deck-text">Or paste a decklist (optional)</label>
+                    <textarea id="new-deck-text" class="text-input" rows="7" spellcheck="false" placeholder="1 Sol Ring&#10;4 Lightning Bolt&#10;&#10;Sideboard&#10;2 Pyroblast"></textarea>
+                </div>
+                <label class="switch-row" id="deck-modal-replace" hidden>
+                    <span class="switch-text"><span class="switch-title">Replace the deck's cards</span></span>
+                    <input type="checkbox" class="switch" id="new-deck-replace">
+                </label>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" id="deck-modal-save">Create</button>
+                    <button class="btn" onclick="closeModal('deck-modal')">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- One value for a bulk action (location, tag, condition, deck) -->
+    <div id="value-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <h2 id="value-title"></h2>
+                <span class="close" onclick="closeValueDialog(null)">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="value-input" id="value-label"></label>
+                    <input type="text" id="value-input" list="value-options" maxlength="60" autocomplete="off">
+                    <select id="value-select" hidden></select>
+                    <datalist id="value-options"></datalist>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" id="value-ok">OK</button>
+                    <button class="btn" onclick="closeValueDialog(null)">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card image beside the row under the mouse -->
+    <img id="card-preview" class="card-preview" alt="" hidden>
+
+    {% include '_dialogs.html' %}
+
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=1"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=2"></script>
+</body>
+</html>

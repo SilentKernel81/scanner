@@ -55,7 +55,10 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Card search / printing match / confidence (Magic) | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add`; automatic adds on the server (`add_automatically`, `Game.suggested_finish`) |
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
-| Inventory add/merge/undo/split/export, capture thumbnails | `inventory.py` (`inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']` |
+| Inventory add/merge/undo/split/export, locations and tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']`; `scan_location` |
+| Collection page (`/collection`: inventory filters / grid / bulk bar, deck builder, statistics) | `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css`; shared with the scanner page: `static/js/common.js`, `templates/_dialogs.html`, `templates/_icons.html` |
+| Decks (lists; ownership computed from the inventory), deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
+| Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
@@ -102,7 +105,18 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   masks them; the UI can only replace or remove a key.
 - **No native `confirm()` / `alert()`** in the web UI: browsers can silently block them ("prevent
   this page from creating additional dialogs"), after which `confirm()` always returns false - this
-  broke "Clear all". Use `confirmDialog()` / `choiceDialog()` / `notify()` in scanner.js.
+  broke "Clear all". Use `confirmDialog()` / `choiceDialog()` / `notify()` in common.js.
+- **Two pages share code**: helpers used by both the scanner and the collection page live in
+  `static/js/common.js` / `templates/_dialogs.html`; each page defines `inventoryChanged()`.
+  `scanner.js` runs scanner-only code on load - never include it in another page.
+- **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
+  attribute; `collection.css` has `[hidden] { display: none !important }` for that page.
+- **Inventory key**: `location` is part of `inventory.KEY_COLUMNS` (and the table's UNIQUE);
+  anything that looks an entry up by its key must include it. Changing the key means rebuilding
+  the table (`_migrate_add_location` is the pattern: backup, keep ids, check counts).
+- **Other sites** (`recommendations.py`): only MTGJSON is a published API. Go through `_get`
+  (cache, 1 request/s per site), catch shape changes and raise `Unavailable`; never call these
+  from scanning code paths.
 - **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
   in PROGRAM_DOCUMENTATION.md.
 - **Logs**: `data/logs/app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log`.

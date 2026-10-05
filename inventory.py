@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import Config
+from database import search_key
 
 logger = logging.getLogger('database')
 
@@ -19,7 +20,8 @@ logger = logging.getLogger('database')
 CAPTURES_DIR = Config.DATA_DIR / 'captures'
 CAPTURE_HEIGHT = 400  # px - ~25 KB per card
 
-# One row per card + set + number + condition + finish, per game. Rows are addressed by id.
+# One row per card + set + number + condition + finish + location, per game. Rows are
+# addressed by id. tags: "trade, keep" - not part of the key (see clean_tags)
 INVENTORY_TABLE = '''
     CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,19 +41,22 @@ INVENTORY_TABLE = '''
         condition TEXT NOT NULL DEFAULT 'Near Mint',
         finish TEXT NOT NULL DEFAULT 'regular',
         timestamp TEXT NOT NULL,
-        UNIQUE(game, card_name, set_name, card_number, condition, finish)
+        location TEXT NOT NULL DEFAULT '',
+        tags TEXT NOT NULL DEFAULT '',
+        UNIQUE(game, card_name, set_name, card_number, condition, finish, location)
     )
 '''
-KEY_COLUMNS = ('game', 'card_name', 'set_name', 'card_number', 'condition', 'finish')
+KEY_COLUMNS = ('game', 'card_name', 'set_name', 'card_number', 'condition', 'finish', 'location')
 UPSERT = '''
     INSERT INTO inventory (game, card_id, card_name, set_name, set_code, card_number, rarity,
                            type_line, mana_cost, colors, color_identity, price_usd, quantity,
-                           condition, finish, timestamp)
+                           condition, finish, timestamp, location, tags)
     VALUES (:game, :card_id, :card_name, :set_name, :set_code, :card_number, :rarity,
             :type_line, :mana_cost, :colors, :color_identity, :price_usd, :quantity,
-            :condition, :finish, :timestamp)
-    ON CONFLICT(game, card_name, set_name, card_number, condition, finish) DO UPDATE SET
+            :condition, :finish, :timestamp, :location, :tags)
+    ON CONFLICT(game, card_name, set_name, card_number, condition, finish, location) DO UPDATE SET
         quantity = quantity + excluded.quantity,
+        tags = CASE WHEN tags = '' THEN excluded.tags ELSE tags END,
         timestamp = excluded.timestamp,
         price_usd = excluded.price_usd,
         card_id = COALESCE(excluded.card_id, card_id),
@@ -61,6 +66,19 @@ UPSERT = '''
 
 def now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def clean_tags(tags):
+    """Tags as a list without blanks or repeats (case-insensitive), from a list or "a, b" text"""
+    if isinstance(tags, str):
+        tags = tags.split(',')
+    result, seen = [], set()
+    for tag in tags or []:
+        tag = str(tag).strip()
+        if tag and tag.lower() not in seen:
+            seen.add(tag.lower())
+            result.append(tag)
+    return result
 
 
 def _row_dict(row):
@@ -83,6 +101,8 @@ def _row_dict(row):
         'condition': row['condition'],
         'finish': row['finish'],
         'timestamp': row['timestamp'],
+        'location': row['location'],
+        'tags': clean_tags(row['tags']),
     }
 
 
@@ -116,6 +136,8 @@ class InventoryManager:
                 self.conn.execute(INVENTORY_TABLE.format(table='inventory'))
             elif 'finish' not in columns:
                 self._migrate_to_multi_game(columns)
+            elif 'location' not in columns:
+                self._migrate_add_location()
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_game_name ON inventory(game, card_name COLLATE NOCASE)')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_timestamp ON inventory(timestamp DESC)')
             # One row per captured copy: which entry it belongs to and its thumbnail file
@@ -129,21 +151,57 @@ class InventoryManager:
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_captures_entry ON inventory_captures(inventory_id)')
             self.conn.commit()
 
-    def _migrate_to_multi_game(self, columns):
-        """
-        Inventories from before multi-game support had foil/surge flags and no game column.
-        The UNIQUE constraint changes, so the table is rebuilt (SQLite can't alter it) -
-        after copying the old table to data/backups/.
-        """
+    def _backup_table(self, label):
+        """Copy the inventory table to data/backups/ before rebuilding it; returns the file and
+        (entries, cards) to compare afterwards"""
         backup_dir = Config.DATA_DIR / 'backups'
         backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_file = backup_dir / f"inventory_before_multigame_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        backup_file = backup_dir / f"inventory_before_{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         self.conn.execute('ATTACH DATABASE ? AS backup', (str(backup_file),))
         self.conn.execute('CREATE TABLE backup.inventory AS SELECT * FROM main.inventory')
         self.conn.commit()
         self.conn.execute('DETACH DATABASE backup')
         before = self.conn.execute('SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM inventory').fetchone()
         logger.info(f"Inventory backed up to {backup_file} ({before[0]} rows)")
+        return backup_file, before
+
+    def _migrate_add_location(self):
+        """
+        Inventories from before locations: the location joins the UNIQUE key (copies of one
+        printing can be in two places), so the table is rebuilt - after a backup, keeping every
+        row's id (inventory_captures point at them).
+        """
+        backup_file, before = self._backup_table('locations')
+        old_columns = [row['name'] for row in self.conn.execute("PRAGMA table_info(inventory)")]
+        columns = ', '.join(old_columns)
+        conn = sqlite3.connect(str(self.db_file), isolation_level=None, timeout=10.0)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute('DROP TABLE IF EXISTS inventory_new')
+            conn.execute(INVENTORY_TABLE.format(table='inventory_new'))
+            conn.execute(f'INSERT INTO inventory_new ({columns}) SELECT {columns} FROM inventory')
+            after = conn.execute('SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM inventory_new').fetchone()
+            if tuple(after) != tuple(before):
+                raise RuntimeError(f"inventory changed ({tuple(before)} -> {tuple(after)})")
+            conn.execute('DROP TABLE inventory')
+            conn.execute('ALTER TABLE inventory_new RENAME TO inventory')
+            conn.execute('COMMIT')
+        except Exception:
+            conn.execute('ROLLBACK')
+            logger.exception("Inventory migration failed - the old table is unchanged")
+            raise
+        finally:
+            conn.close()
+        self.log(f"Inventory upgraded for locations and tags ({before[0]} entries, {before[1]} cards; "
+                 f"backup: data/backups/{backup_file.name})", level="success")
+
+    def _migrate_to_multi_game(self, columns):
+        """
+        Inventories from before multi-game support had foil/surge flags and no game column.
+        The UNIQUE constraint changes, so the table is rebuilt (SQLite can't alter it) -
+        after copying the old table to data/backups/.
+        """
+        backup_file, before = self._backup_table('multigame')
 
         surge = 'surge' if 'surge' in columns else '0'
         finish = f"CASE WHEN {surge} = 1 THEN 'surge' WHEN foil = 1 THEN 'foil' ELSE 'regular' END"
@@ -161,7 +219,7 @@ class InventoryManager:
                        mana_cost, colors, color_identity, price_usd, quantity,
                        COALESCE(condition, 'Near Mint'), {finish}, timestamp
                 FROM inventory WHERE true ORDER BY id
-                ON CONFLICT(game, card_name, set_name, card_number, condition, finish)
+                ON CONFLICT(game, card_name, set_name, card_number, condition, finish, location)
                 DO UPDATE SET quantity = quantity + excluded.quantity
             ''')
             after = conn.execute('SELECT COALESCE(SUM(quantity), 0) FROM inventory_new').fetchone()[0]
@@ -241,11 +299,12 @@ class InventoryManager:
                     {'url': f"/captures/{row['file']}", 'captured_at': row['captured_at']})
         return result
 
-    def add_card(self, fields, game, finish, condition='Near Mint', quantity=1, capture=None):
+    def add_card(self, fields, game, finish, condition='Near Mint', quantity=1, capture=None, location='',
+                 quiet=False):
         """
         Add copies of a printing (fields from Game.inventory_fields) - merged with an existing
-        entry for the same card, set, number, condition and finish. capture: the scanned image
-        of the card, kept as a thumbnail with the entry.
+        entry for the same card, set, number, condition, finish and location. capture: the
+        scanned image of the card, kept as a thumbnail with the entry.
         """
         quantity = max(1, int(quantity or 1))
         values = {
@@ -256,6 +315,7 @@ class InventoryManager:
             'colors': fields.get('colors'), 'color_identity': fields.get('color_identity'),
             'price_usd': float(fields.get('price') or 0), 'quantity': quantity,
             'condition': condition or 'Near Mint', 'finish': finish, 'timestamp': now(),
+            'location': (location or '').strip(), 'tags': '',
         }
         thumbnail = self._make_thumbnail(capture) if capture else None
         with self._lock:
@@ -270,8 +330,9 @@ class InventoryManager:
                     (row['id'], thumbnail, values['timestamp'])).lastrowid
             self.conn.commit()
             self.last_added = (row['id'], quantity, capture_id)
-        self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
-                 f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
+        if not quiet:
+            self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
+                     f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
         return row['id']
 
     def set_price(self, row_id, price):
@@ -313,6 +374,23 @@ class InventoryManager:
         captures = self.captures_by_entry(game)
         return [{**_row_dict(row), 'captures': captures.get(row['id'], [])} for row in rows]
 
+    def owned_by_name(self, game):
+        """{search_key(card name): copies owned} over every printing, finish and location"""
+        owned = {}
+        with self._lock:
+            for row in self.conn.execute(
+                    'SELECT card_name, SUM(quantity) AS copies FROM inventory WHERE game = ? GROUP BY card_name', (game,)):
+                key = search_key(row['card_name'])
+                owned[key] = owned.get(key, 0) + row['copies']
+        return owned
+
+    def locations(self, game):
+        """Locations in use, alphabetically"""
+        with self._lock:
+            return [row['location'] for row in self.conn.execute(
+                "SELECT DISTINCT location FROM inventory WHERE game = ? AND location != '' "
+                'ORDER BY location COLLATE NOCASE', (game,))]
+
     def get_stats(self, game=None):
         """Totals for the top bar and the inventory window"""
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
@@ -333,7 +411,7 @@ class InventoryManager:
     # Editing
     # ------------------------------------------------------------------------
 
-    def delete_card(self, row_id):
+    def delete_card(self, row_id, quiet=False):
         with self._lock:
             row = self._get_row(row_id)
             if not row:
@@ -341,7 +419,8 @@ class InventoryManager:
             self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
             self._drop_orphan_captures()
             self.conn.commit()
-        self.log(f"Deleted from inventory: {row['card_name']}", level="success")
+        if not quiet:
+            self.log(f"Deleted from inventory: {row['card_name']}", level="success")
         return True
 
     def get_entry(self, row_id):
@@ -349,11 +428,22 @@ class InventoryManager:
             row = self._get_row(row_id)
             return dict(row) if row else None
 
-    def _copy_with(self, row, quantity, condition, finish, price=None):
-        """Add `quantity` copies of an entry under another condition/finish (merging), with
-        the newest `quantity` of its captures; returns the id of the entry they went to"""
+    def _add_tags(self, row_id, tags):
+        """Entries merged into another one bring their tags along"""
+        row = self._get_row(row_id)
+        merged = ', '.join(clean_tags(clean_tags(row['tags']) + clean_tags(tags)))
+        if merged != row['tags']:
+            self.conn.execute('UPDATE inventory SET tags = ? WHERE id = ?', (merged, row_id))
+
+    def _copy_with(self, row, quantity, condition, finish, price=None, location=None, tags=None):
+        """Add `quantity` copies of an entry under another condition/finish/location (merging),
+        with the newest `quantity` of its captures; returns the id of the entry they went to"""
         values = dict(row)
         values.update(quantity=quantity, condition=condition, finish=finish)
+        if location is not None:
+            values['location'] = location
+        if tags is not None:
+            values['tags'] = tags
         if price is not None:
             values['price_usd'] = price
         values.pop('id')
@@ -361,16 +451,18 @@ class InventoryManager:
         target = self.conn.execute(
             f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
             [values[c] for c in KEY_COLUMNS]).fetchone()['id']
+        self._add_tags(target, values['tags'])
         self._move_captures(row['id'], target, quantity)
         return target
 
     def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None,
-                    finish_price=None):
+                    finish_price=None, location=None, tags=None, quiet=False):
         """
-        Change an entry's quantity, condition or finish. Changing the finish of an entry with
-        several copies moves split_quantity of them (default 1) to the new finish. An entry
-        that ends up identical to another one is merged into it. finish_price: the printing's
-        price in the new finish (used when the finish changes; None keeps the price).
+        Change an entry's quantity, condition, finish, location or tags. Changing the finish or
+        location of an entry with several copies moves split_quantity of them (default 1) to
+        the new finish / location. An entry that ends up identical to another one is merged
+        into it. finish_price: the printing's price in the new finish (used when the finish
+        changes; None keeps the price). location: '' = none; tags: list or "a, b" text.
 
         Returns:
             dict: {'success': bool, 'split': bool, 'message': str}
@@ -382,17 +474,19 @@ class InventoryManager:
             new_quantity = int(quantity) if quantity is not None else row['quantity']
             new_condition = condition or row['condition']
             new_finish = finish or row['finish']
+            new_location = location.strip() if location is not None else row['location']
+            new_tags = ', '.join(clean_tags(tags)) if tags is not None else row['tags']
             new_price = finish_price if finish_price is not None and new_finish != row['finish'] else row['price_usd']
             if new_quantity < 1:
                 return {'success': False, 'split': False, 'message': 'Quantity must be at least 1'}
 
-            if new_finish != row['finish'] and row['quantity'] > 1:
+            if (new_finish != row['finish'] or new_location != row['location']) and row['quantity'] > 1:
                 moved = int(split_quantity) if split_quantity is not None else 1
                 if not 1 <= moved <= row['quantity']:
                     return {'success': False, 'split': False,
                             'message': f"Split quantity must be 1-{row['quantity']}"}
                 remaining = row['quantity'] - moved
-                self._copy_with(row, moved, new_condition, new_finish, new_price)
+                self._copy_with(row, moved, new_condition, new_finish, new_price, new_location, new_tags)
                 if remaining:
                     self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (remaining, row_id))
                     self._trim_captures(row_id, remaining)
@@ -400,27 +494,69 @@ class InventoryManager:
                     self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
                     self._drop_orphan_captures()
                 self.conn.commit()
-                self.log(f"{row['card_name']}: {moved} moved to {new_finish}"
-                         + (f", {remaining} stay {row['finish']}" if remaining else ''), level="success")
-                return {'success': True, 'split': True, 'message': 'Card updated and split'}
+                if not quiet:
+                    where = ', '.join(part for part in (new_finish, new_location) if part)
+                    self.log(f"{row['card_name']}: {moved} moved to {where}"
+                             + (f", {remaining} stay" if remaining else ''), level="success")
+                return {'success': True, 'split': bool(remaining), 'message': 'Card updated and split' if remaining else 'Card updated'}
 
             # An entry that becomes identical to another one is merged into it
             twin = self.conn.execute(f'''
                 SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)} AND id != ?''',
                 (row['game'], row['card_name'], row['set_name'], row['card_number'], new_condition, new_finish,
-                 row_id)).fetchone()
+                 new_location, row_id)).fetchone()
             if twin:
                 self._trim_captures(row_id, new_quantity)
                 self._move_captures(row_id, twin['id'])
                 self.conn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', (new_quantity, twin['id']))
+                self._add_tags(twin['id'], new_tags)
                 self.conn.execute('DELETE FROM inventory WHERE id = ?', (row_id,))
             else:
-                self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ?, price_usd = ? WHERE id = ?',
-                                  (new_quantity, new_condition, new_finish, new_price, row_id))
+                self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ?, price_usd = ?, '
+                                  'location = ?, tags = ? WHERE id = ?',
+                                  (new_quantity, new_condition, new_finish, new_price, new_location, new_tags, row_id))
                 self._trim_captures(row_id, new_quantity)
             self.conn.commit()
-        self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}", level="success")
+        if not quiet:
+            self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}"
+                     + (f", {new_location}" if new_location else ''), level="success")
         return {'success': True, 'split': False, 'message': 'Card updated'}
+
+    BULK_ACTIONS = ('delete', 'condition', 'location', 'add_tag', 'remove_tag')
+
+    def bulk_update(self, row_ids, action, value=None):
+        """
+        One change to several entries: 'delete', 'condition' (value: the condition), 'location'
+        (value: the location, '' = none - whole stacks move), 'add_tag' / 'remove_tag' (value:
+        the tag). Returns the number of entries changed.
+        """
+        if action not in self.BULK_ACTIONS:
+            raise ValueError(f"Unknown action: {action}")
+        value = (value or '').strip()
+        if action in ('condition', 'add_tag', 'remove_tag') and not value:
+            raise ValueError(f"{action} needs a value")
+        changed = 0
+        with self._lock:
+            for row_id in row_ids:
+                row = self._get_row(row_id)
+                if not row:  # merged into another entry earlier in this loop, or already gone
+                    continue
+                if action == 'delete':
+                    done = self.delete_card(row_id, quiet=True)
+                elif action == 'condition':
+                    done = self.update_card(row_id, condition=value, quiet=True)['success']
+                elif action == 'location':
+                    done = self.update_card(row_id, location=value, split_quantity=row['quantity'], quiet=True)['success']
+                else:
+                    tags = clean_tags(row['tags'])
+                    if action == 'add_tag':
+                        tags = clean_tags(tags + [value])
+                    else:
+                        tags = [tag for tag in tags if tag.lower() != value.lower()]
+                    done = self.update_card(row_id, tags=tags, quiet=True)['success']
+                changed += bool(done)
+        self.log(f"Inventory: {action.replace('_', ' ')}{' ' + value if value else ''} - {changed} entries", level="success")
+        return changed
 
     def clear_inventory(self, game=None):
         """Delete every entry (of one game, if given)"""
@@ -452,7 +588,8 @@ class InventoryManager:
     def import_csv(self, csv_file_path, game, finishes, replace_existing=False):
         """
         Import a CSV written by the CSV export (Card Name, Set, Card Number, ..., Quantity,
-        Condition, and Finish or the older Foil / Surge columns) into one game's inventory.
+        Condition, Finish or the older Foil / Surge columns, and Location / Tags when present)
+        into one game's inventory.
 
         Args:
             finishes: the game's finish keys - the first is used when a row has none
@@ -503,6 +640,8 @@ class InventoryManager:
                             'color_identity': (row.get('Color Identity') or '').strip(), 'price_usd': price,
                             'quantity': quantity, 'condition': (row.get('Condition') or '').strip() or 'Near Mint',
                             'finish': finish, 'timestamp': now(),
+                            'location': (row.get('Location') or '').strip(),
+                            'tags': ', '.join(clean_tags(row.get('Tags') or '')),
                         }
                         exists = self.conn.execute(
                             f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",

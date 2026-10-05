@@ -47,6 +47,13 @@ CARD_COLUMNS = [
     # Lowercase, accent-free names for searching ("Fíli" -> "fili"), see search_key()
     ('name_search', 'TEXT'),
     ('flavor_search', 'TEXT'),
+    # Deck building (from Scryfall; empty until the card data is downloaded again).
+    # oracle_id is the same for every printing of a card; JSON is stored as text.
+    ('oracle_id', 'TEXT'),
+    ('cmc', 'REAL'),
+    ('color_identity', 'TEXT'),
+    ('legalities', 'TEXT'),
+    ('keywords', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -163,6 +170,16 @@ def _json_list(value):
         return []
 
 
+def _json_dict(value):
+    if not value:
+        return {}
+    try:
+        result = json.loads(value)
+        return result if isinstance(result, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 class CardDatabase:
     """Manages local card database"""
 
@@ -237,6 +254,7 @@ class CardDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_set_number ON cards(set_code, collector_number)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_rarity ON cards(rarity)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_type ON cards(type_line)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_oracle ON cards(oracle_id)')
 
     def get_data_info(self, game):
         """{'source_updated', 'downloaded_at', 'card_count'} of a game's card data, or None"""
@@ -373,7 +391,14 @@ class CardDatabase:
                     json.dumps(card.get('finishes', [])),
                     card.get('released_at'),
                     search_key(card.get('name')),
-                    search_key(card.get('flavor_name'))
+                    search_key(card.get('flavor_name')),
+                    card.get('oracle_id') or (card.get('card_faces') or [{}])[0].get('oracle_id'),
+                    card.get('cmc'),
+                    json.dumps(card.get('color_identity', [])),
+                    # Only the formats a card is not "not_legal" in - a tenth of the text
+                    json.dumps({name: status for name, status in (card.get('legalities') or {}).items()
+                                if status != 'not_legal'}),
+                    json.dumps(card.get('keywords', [])),
                 ))
                 
                 inserted += 1
@@ -606,6 +631,10 @@ class CardDatabase:
             'promo_types': _json_list(row['promo_types']),
             'finishes': _json_list(row['finishes']),
             'released_at': row['released_at'],
+            'oracle_id': row['oracle_id'],
+            'cmc': row['cmc'] or 0.0,
+            'color_identity': _json_list(row['color_identity']),
+            'legalities': _json_dict(row['legalities']),
         }
         card['treatments'] = self._treatment_labels(card)
         return card
@@ -634,6 +663,128 @@ class CardDatabase:
         with self._lock:
             row = self.conn.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
             return self._format_card_result(row) if row else None
+
+    # ------------------------------------------------------------------------
+    # Collection page and deck builder
+    # ------------------------------------------------------------------------
+
+    def has_deck_data(self):
+        """Whether the card data has mana values, color identities and legalities (card data
+        downloaded before deck building existed doesn't, until the next update)"""
+        with self._lock:
+            return self.conn.execute('SELECT 1 FROM cards WHERE oracle_id IS NOT NULL LIMIT 1').fetchone() is not None
+
+    def cards_by_ids(self, card_ids):
+        """{printing id: card} for the ids that exist"""
+        result = {}
+        ids = [card_id for card_id in dict.fromkeys(card_ids) if card_id]
+        with self._lock:
+            for start in range(0, len(ids), 500):  # SQLite's parameter limit
+                chunk = ids[start:start + 500]
+                for row in self.conn.execute(
+                        f"SELECT * FROM cards WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                    result[row['id']] = self._format_card_result(row)
+        return result
+
+    # One row per card name: with a single MAX(), SQLite takes the other columns from the row
+    # that has it - the newest printing with an image. cheapest: lowest price of any printing
+    _ONE_PER_NAME = """
+        SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END) || COALESCE(released_at, '')) AS _pick,
+               (SELECT MIN(COALESCE(p.price_usd, p.price_usd_foil)) FROM cards p
+                WHERE p.name_search = c.name_search) AS cheapest
+        FROM cards c WHERE {where} GROUP BY c.name
+    """
+
+    def _named_card(self, row):
+        card = self._format_card_result(row)
+        card['cheapest'] = row['cheapest'] or 0.0
+        return card
+
+    def cards_by_names(self, names):
+        """
+        {search_key(name): card} - one representative printing per card (the newest), with
+        'cheapest': the lowest price among its printings. Names are matched without case or
+        accents; a double-faced card also by its front face ("Delver of Secrets")
+        """
+        keys = [key for key in dict.fromkeys(search_key(name) for name in names) if key]
+        result = {}
+        with self._lock:
+            for start in range(0, len(keys), 500):
+                chunk = keys[start:start + 500]
+                for row in self.conn.execute(self._ONE_PER_NAME.format(
+                        where=f"name_search IN ({', '.join('?' * len(chunk))})"), chunk):
+                    result[row['name_search']] = self._named_card(row)
+            for key in keys:
+                if key not in result:
+                    row = self.conn.execute(self._ONE_PER_NAME.format(where='name_search LIKE ?')
+                                            + ' LIMIT 1', (key + ' // %',)).fetchone()
+                    if row:
+                        result[key] = self._named_card(row)
+        return result
+
+    def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
+                     cmc=None, rarity=None, legal_in=None, names=None, limit=60, offset=0):
+        """
+        Cards (one per name) for the deck builder, by name.
+
+        Args:
+            text: part of the name; type_text / oracle_text: part of the type line / rules text
+            identity: color letters ("WUB") the card's color identity must fit within
+            colors: color letters the card's identity must include ("C" = colorless only)
+            cmc: mana value (7 = seven or more)
+            legal_in: Scryfall format key ("commander", "modern") the card is legal or restricted in
+            names: only these card names (the "owned only" filter)
+        Returns:
+            (cards, whether there are more)
+        """
+        where, params = ["COALESCE(name, '') != ''"], []
+        order, order_params = 'name', []
+        if text and search_key(text):
+            # The card with exactly this name first, then names starting with it
+            order = '(name_search = ?) DESC, (name_search LIKE ?) DESC, name'
+            order_params = [search_key(text), search_key(text) + '%']
+            where.append('(name_search LIKE ? OR flavor_search LIKE ?)')
+            params += [f'%{search_key(text)}%'] * 2
+        if type_text:
+            for word in type_text.split():
+                where.append('type_line LIKE ?')
+                params.append(f'%{word}%')
+        if oracle_text:
+            where.append('oracle_text LIKE ?')
+            params.append(f'%{oracle_text}%')
+        if identity is not None:
+            for color in 'WUBRG':
+                if color not in identity.upper():
+                    where.append("COALESCE(color_identity, '') NOT LIKE ?")
+                    params.append(f'%"{color}"%')
+        if colors:
+            if 'C' in colors.upper():
+                where.append("color_identity = '[]'")
+            for color in colors.upper():
+                if color in 'WUBRG':
+                    where.append('color_identity LIKE ?')
+                    params.append(f'%"{color}"%')
+        if cmc is not None:
+            where.append('cmc >= ?' if cmc >= 7 else 'cmc = ?')
+            params.append(cmc)
+        if rarity:
+            where.append('rarity = ?')
+            params.append(rarity)
+        if legal_in:
+            if not re.fullmatch(r'[a-z]+', legal_in):
+                raise ValueError(f"Unknown format: {legal_in}")
+            where.append(f"json_extract(legalities, '$.{legal_in}') IN ('legal', 'restricted')")
+        if names is not None:
+            keys = [search_key(name) for name in names]
+            if not keys:
+                return [], False
+            where.append(f"name_search IN ({', '.join('?' * len(keys))})")
+            params += keys
+        with self._lock:
+            rows = self.conn.execute(
+                self._ONE_PER_NAME.format(where=' AND '.join(where)) + f' ORDER BY {order} LIMIT ? OFFSET ?',
+                (*params, *order_params, limit + 1, offset)).fetchall()
+        return [self._named_card(row) for row in rows[:limit]], len(rows) > limit
 
     def find_printings(self, card_name, treatment=None, limit=200):
         """

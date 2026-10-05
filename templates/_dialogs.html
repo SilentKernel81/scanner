@@ -1,0 +1,95 @@
+<!-- Shared by scanner.html and collection.html (static/js/common.js) -->
+<!-- Edit Card Modal -->
+<div id="edit-card-modal" class="modal">
+    <div class="modal-content narrow">
+        <div class="modal-header">
+            <h2>Edit card</h2>
+            <span class="close" onclick="closeEditCard()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="edit-card-name" class="edit-card-name"></div>
+
+            <div class="input-group">
+                <label for="edit-quantity">Quantity</label>
+                <input type="number" id="edit-quantity" min="1" max="999" value="1" oninput="updateSplitMaxQuantity()">
+            </div>
+
+            <div class="input-group">
+                <label for="edit-condition">Condition</label>
+                <select id="edit-condition">
+                    <option value="Mint">Mint (M)</option>
+                    <option value="Near Mint">Near Mint (NM)</option>
+                    <option value="Excellent">Excellent (EX)</option>
+                    <option value="Good">Good (GD)</option>
+                    <option value="Played">Played (PL)</option>
+                    <option value="Poor">Poor (P)</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label for="edit-location">Location</label>
+                <input type="text" id="edit-location" list="edit-location-options" maxlength="60"
+                       placeholder="Binder, box, deck box..." autocomplete="off" oninput="updateSplitQuantityVisibility()">
+                <datalist id="edit-location-options"></datalist>
+            </div>
+
+            <div class="input-group">
+                <label for="edit-tags">Tags</label>
+                <input type="text" id="edit-tags" maxlength="200" placeholder="trade, keep (separated by commas)" autocomplete="off">
+            </div>
+
+            <div class="input-group">
+                <span class="field-label">Finish</span>
+                <div class="radio-group" id="edit-finishes">
+                    <!-- The game's finishes (renderEditFinishes) -->
+                </div>
+            </div>
+
+            <div id="split-quantity-section" class="callout" style="display: none;">
+                <label for="edit-split-quantity">How many copies change?</label>
+                <input type="number" id="edit-split-quantity" class="text-input" min="1" value="1">
+                <div id="split-preview">
+                    
+                </div>
+            </div>
+
+            <div class="callout warning">
+                Changing the finish or location of several copies splits this entry - choose how many change.
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-success" onclick="saveEditCard()">Save changes</button>
+                <button class="btn" onclick="closeEditCard()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Captures kept with an inventory entry: preview on hover, viewer on click / tap -->
+<div id="capture-popover" class="capture-popover" hidden></div>
+<div id="capture-modal" class="modal">
+    <div class="modal-content capture-modal">
+        <div class="modal-header">
+            <h2 id="capture-title">Captures</h2>
+            <span class="close" onclick="closeCaptures()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="capture-grid" class="capture-grid large"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation dialog: in-page, because browsers can silently block native confirm() -->
+<div id="dialog-modal" class="modal">
+    <div class="modal-content narrow">
+        <div class="modal-header">
+            <h2 id="dialog-title"></h2>
+        </div>
+        <div class="modal-body">
+            <p id="dialog-message" class="dialog-message"></p>
+            <div id="dialog-buttons" class="modal-actions dialog-buttons"></div>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
