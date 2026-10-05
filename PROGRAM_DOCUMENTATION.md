@@ -730,8 +730,12 @@ a printing id for the image. The card is identified by its name, so any printing
 Nothing a deck does changes the inventory. `deck_payload` in `app.py` puts together what the
 page shows:
 
-- card data: one printing per name (`CardDatabase.cards_by_names` - the newest with an image)
-  and the cheapest price among all printings, which is what the deck and buy-list totals use;
+- card data: one printing per name (`CardDatabase.cards_by_names` - the newest one that has an
+  image and exists non-foil, so foil-only inserts and collector editions are not the default)
+  and the cheapest price among all printings, which is what the deck and buy-list totals use.
+  The image shown is the entry's own printing (`deck_cards.card_id`): the search result
+  clicked, or the printing a precon / Moxfield / Archidekt list names (`scryfall_id` in
+  `resolve_entries`);
 - `owned`: copies in the inventory over every printing, finish and location
   (`InventoryManager.owned_by_name`), and `elsewhere`: other decks with the card
   (`DeckManager.needed_by_name`) - the page shows *owned*, *shared* (owned, but other decks

@@ -989,6 +989,8 @@ def resolve_entries(game, entries, deck_format):
     """
     has_commander = deck_format in commander_formats(game)
     by_name = game.cards_by_names([entry['name'] for entry in entries])
+    # The printing the source names (a precon's own cards, a Moxfield deck) is the one shown
+    printings = game.card_details([entry.get('scryfall_id') for entry in entries])
     resolved, unknown = [], []
     for entry in entries:
         board = entry.get('board') or 'main'
@@ -1001,7 +1003,9 @@ def resolve_entries(game, entries, deck_format):
         card = by_name.get(search_key(entry['name']))
         if not card:
             unknown.append(entry['name'])
-        resolved.append({'name': card['name'] if card else entry['name'], 'card_id': card['id'] if card else None,
+        printing = entry.get('scryfall_id') if card and entry.get('scryfall_id') in printings else None
+        resolved.append({'name': card['name'] if card else entry['name'],
+                         'card_id': printing or (card['id'] if card else None),
                          'quantity': entry.get('quantity') or 1, 'board': board})
     return resolved, unknown
 
@@ -1013,13 +1017,19 @@ def deck_payload(deck):
     by_name = game.cards_by_names([card['name'] for card in deck['cards']])
     owned = inventory.owned_by_name(game.id)
     needed = deck_store.needed_by_name(game.id, commander_formats(game))
+    # The image is the printing the deck entry was added with (a precon's own printing, the
+    # search result clicked); the rest is the card's data, the same for every printing
+    printings = game.card_details([entry['card_id'] for entry in deck['cards']])
     cards, checked = [], []
     for entry in deck['cards']:
         key = search_key(entry['name'])
         card = by_name.get(key)
+        payload = game.deck_card_payload(card) if card else None
+        if payload and printings.get(entry['card_id'], {}).get('image_uri'):
+            payload['image_uri'] = printings[entry['card_id']]['image_uri']
         cards.append({
             'name': entry['name'], 'quantity': entry['quantity'], 'board': entry['board'],
-            'card': game.deck_card_payload(card) if card else None,
+            'card': payload,
             'owned': owned.get(key, 0),
             'elsewhere': [other for other in needed.get(key, []) if other['deck_id'] != deck['id']],
         })

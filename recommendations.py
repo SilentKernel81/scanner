@@ -261,7 +261,8 @@ class Recommendations:
         if deck.get('_missing'):
             raise Unavailable('Moxfield does not show this deck (private, deleted, or access is blocked)')
         try:
-            entries = [{'name': card['card']['name'], 'quantity': int(card.get('quantity') or 1), 'board': board}
+            entries = [{'name': card['card']['name'], 'quantity': int(card.get('quantity') or 1), 'board': board,
+                        'scryfall_id': card['card'].get('scryfall_id')}
                        for key, board in MOXFIELD_BOARDS.items()
                        for card in (deck['boards'].get(key) or {}).get('cards', {}).values()]
             return {'name': deck['name'], 'format': (deck.get('format') or '').lower() or None, 'entries': entries}
@@ -281,7 +282,8 @@ class Recommendations:
                 board = 'commander' if category == 'Commander' else 'side' if category == 'Sideboard' \
                     else 'maybe' if category in outside else 'main'
                 entries.append({'name': card['card']['oracleCard']['name'],
-                                'quantity': int(card.get('quantity') or 1), 'board': board})
+                                'quantity': int(card.get('quantity') or 1), 'board': board,
+                                'scryfall_id': card['card'].get('uid')})
             formats = {number: name for name, number in ARCHIDEKT_FORMATS.items()}
             return {'name': deck['name'], 'format': formats.get(deck.get('deckFormat')), 'entries': entries}
         except (KeyError, TypeError, ValueError) as e:

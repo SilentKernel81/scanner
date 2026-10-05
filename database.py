@@ -687,9 +687,13 @@ class CardDatabase:
         return result
 
     # One row per card name: with a single MAX(), SQLite takes the other columns from the row
-    # that has it - the newest printing with an image. cheapest: lowest price of any printing
+    # that has it - the newest ordinary printing: one with an image, then one that exists
+    # non-foil (foil-only inserts and collector editions are rarely the copy meant), then the
+    # latest release. cheapest: lowest price of any printing
     _ONE_PER_NAME = """
-        SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END) || COALESCE(released_at, '')) AS _pick,
+        SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END)
+                        || (CASE WHEN finishes LIKE '%"nonfoil"%' THEN '1' ELSE '0' END)
+                        || COALESCE(released_at, '')) AS _pick,
                (SELECT MIN(COALESCE(p.price_usd, p.price_usd_foil)) FROM cards p
                 WHERE p.name_search = c.name_search) AS cheapest
         FROM cards c WHERE {where} GROUP BY c.name
