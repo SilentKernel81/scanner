@@ -23,8 +23,8 @@
                 <span class="stat-label">Database</span>
                 <span class="stat-value" id="db-cards">0</span>
             </div>
-            <div class="stat-box clickable" onclick="showInventory()" title="View inventory">
-                <span class="stat-label">Inventory</span>
+            <div class="stat-box clickable" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
+                <span class="stat-label">Scanned</span>
                 <span class="stat-value" id="inv-cards">0</span>
             </div>
             <div class="stat-box">
@@ -296,7 +296,10 @@
     <div id="inventory-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Inventory</h2>
+                <div>
+                    <h2>Scanned cards</h2>
+                    <div class="modal-subtitle">Not in the collection yet - check them, then add them</div>
+                </div>
                 <span class="close" onclick="closeInventory()">&times;</span>
             </div>
             <div class="modal-body">
@@ -313,6 +316,7 @@
                         <option value="rarity">Rarity: mythic first</option>
                         <option value="set">Set and number</option>
                     </select>
+                    <button class="btn btn-small btn-primary" onclick="addToCollection()" title="Move these cards to your collection">Add to collection</button>
                     <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
                     <span id="export-buttons" class="export-buttons"></span>
                     <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
@@ -363,7 +367,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=36"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=37"></script>
 </body>
 </html>

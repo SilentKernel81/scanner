@@ -701,6 +701,19 @@ Cameras without a `focus_absolute` control (and the Pi camera module) keep their
 
 ## Collection page and decks
 
+**Scanned cards and the collection are two inventories.** The scanner page adds to
+`scan_inventory` - a second `InventoryManager` on its own file, `data/scan_inventory.db`, with
+the same tables - and its top bar counter, inventory window, edit / delete, Undo, export, import
+and "Clear all" work on that one only (`?area=scan` on the `/api/inventory*` endpoints,
+`inventory_area()` in `app.py`; `/api/stats` reports it as `inventory` and the collection as
+`collection`). So a scanning session can be checked, corrected or thrown away without touching
+the collection. **Add to collection** (`POST /api/scan_inventory/to_collection`,
+`InventoryManager.take_from`) moves every scanned entry of the active game into the collection
+(`inventory` in `cards_database.db`): entries that exist there get the copies added, tags are
+joined, and the capture thumbnails follow (their rows move, the files stay). It commits the
+collection first and then empties the scanned cards. Decks, statistics and "owned" only look at
+the collection; the collection page shows a notice while scanned cards are waiting.
+
 `/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
 game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
 and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.
@@ -812,6 +825,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Copies of the inventory table made before a migration rebuilds it |
+| `data/scan_inventory.db` | Cards scanned and not yet added to the collection |
 | `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |

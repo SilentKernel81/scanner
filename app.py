@@ -201,10 +201,14 @@ socketio = SocketIO(
     ping_interval=25
 )
 
+# Cards added by the scanner page, until "Add to collection" (same tables as the collection's)
+SCAN_INVENTORY_FILE = Config.DATA_DIR / 'scan_inventory.db'
+
 # Global instances
 scanner = None
 database = None
-inventory = None
+inventory = None           # the collection (table inventory in the card database file)
+scan_inventory = None      # what the scanner page adds to, until it is moved to the collection
 current_card_info = None
 current_review_id = None  # review queue item open on the page
 review_sid = None         # Socket.IO session of the page reviewing it (a reload / disconnect closes it)
@@ -329,9 +333,9 @@ def add_automatically(game, card, image_path, foil):
     the current script - an old tab once sent every add without its card)
     """
     finish = game.suggested_finish(card, foil)
-    row_id = inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', 1,
-                                capture=image_path, location=scan_location())
-    socketio.emit('inventory_updated', {'auto': True, 'stats': inventory.get_stats(game.id),
+    row_id = scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', 1,
+                                     capture=image_path, location=scan_location())
+    socketio.emit('inventory_updated', {'auto': True, 'stats': scan_inventory.get_stats(game.id),
                                         'added': added_payload(game, card, finish, 1)}, namespace='/')
     start_price_update(game, card, [row_id])
 
@@ -492,7 +496,7 @@ def ai_processing_worker():
 
 def initialize_components():
     """Initialize all components"""
-    global scanner, database, inventory, review, deck_store, recommend
+    global scanner, database, inventory, scan_inventory, review, deck_store, recommend
 
     logger.info("Initializing components...")
 
@@ -518,6 +522,8 @@ def initialize_components():
     # Initialize inventory manager
     logger.info("Initializing inventory...")
     inventory = InventoryManager(log_callback=log_to_client)
+    # Scanned cards wait in their own file: clearing them never touches the collection
+    scan_inventory = InventoryManager(db_file=SCAN_INVENTORY_FILE, log_callback=log_to_client)
     review = ReviewQueue()
     deck_store = DeckManager()
     recommend = Recommendations()
@@ -732,21 +738,35 @@ def get_stats():
             'database': {'total_cards': game.card_count(), 'update': data_update_notices.get(game.id),
                          'updating': game.id in data_updates_running},
             'review': review.count(game.id) if review else 0,
-            'inventory': inventory.get_stats(game.id)
+            # The scanner page's counters: what was scanned and not moved to the collection yet
+            'inventory': scan_inventory.get_stats(game.id),
+            'collection': inventory.get_stats(game.id)
         })
 
     return jsonify({'error': 'Components not initialized'}), 500
 
 
+def inventory_area():
+    """The inventory a request is about: the scanner's (?area=scan) or the collection"""
+    return scan_inventory if request.args.get('area') == 'scan' else inventory
+
+
+@app.route('/api/scan_inventory/to_collection', methods=['POST'])
+def scan_to_collection():
+    """Move every scanned card of the active game into the collection (merging with what is there)"""
+    game = games.active()
+    moved = inventory.take_from(scan_inventory, game.id)
+    socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')
+    return jsonify({'success': True, **moved, 'stats': scan_inventory.get_stats(game.id)})
+
+
 @app.route('/api/inventory')
 def get_inventory():
     """Get full inventory list"""
-    global inventory
-
     if inventory:
         try:
             game = games.active()
-            cards = inventory.get_all_cards(game.id)
+            cards = inventory_area().get_all_cards(game.id)
             # What the collection page shows and filters with beyond the stored columns
             details = game.card_details([card['card_id'] for card in cards])
             for card in cards:
@@ -767,7 +787,7 @@ def get_inventory():
 def delete_inventory_card(row_id):
     """Delete an inventory entry by its id"""
     if inventory:
-        success = inventory.delete_card(row_id)
+        success = inventory_area().delete_card(row_id)
 
         if success:
             return jsonify({
@@ -798,7 +818,7 @@ def update_inventory_card(row_id):
 
             # A new finish takes the printing's price in that finish (foil / holo / reverse)
             finish_price = None
-            entry = inventory.get_entry(row_id) if finish else None
+            entry = inventory_area().get_entry(row_id) if finish else None
             if entry and finish != entry['finish'] and entry['card_id']:
                 game = games.get(entry['game']) or games.active()
                 card = game.get_card(entry['card_id'])
@@ -806,7 +826,7 @@ def update_inventory_card(row_id):
                     finish_price = game.inventory_fields(card, finish)['price']
 
             # Changing the finish of several copies splits the entry
-            result = inventory.update_card(row_id, quantity=quantity, condition=condition,
+            result = inventory_area().update_card(row_id, quantity=quantity, condition=condition,
                                            finish=finish, split_quantity=split_quantity,
                                            finish_price=finish_price,
                                            location=str(location)[:60] if location is not None else None,
@@ -832,7 +852,7 @@ def bulk_update_inventory():
     data = request.get_json(silent=True) or {}
     try:
         ids = [int(row_id) for row_id in data.get('ids') or []]
-        changed = inventory.bulk_update(ids, data.get('action'), str(data.get('value') or '')[:60])
+        changed = inventory_area().bulk_update(ids, data.get('action'), str(data.get('value') or '')[:60])
     except (ValueError, TypeError) as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'changed': changed})
@@ -849,7 +869,7 @@ def export_inventory(fmt):
         return jsonify({'error': f'Unknown export format: {fmt}'}), 404
     try:
         _label, prefix, writer = formats[fmt]
-        export_path = inventory.export(game.id, writer, prefix)
+        export_path = inventory_area().export(game.id, writer, prefix)
         return send_file(str(export_path), mimetype='text/csv', as_attachment=True,
                          download_name=export_path.name)
     except Exception as e:
@@ -860,8 +880,6 @@ def export_inventory(fmt):
 @app.route('/api/import_inventory', methods=['POST'])
 def import_inventory():
     """Import inventory from CSV file upload"""
-    global inventory
-
     if not inventory:
         return jsonify({'error': 'Inventory not initialized'}), 500
 
@@ -895,14 +913,14 @@ def import_inventory():
 
         # Import the CSV
         game = games.active()
-        stats = inventory.import_csv(temp_file_path, game.id, list(game.finishes),
+        stats = inventory_area().import_csv(temp_file_path, game.id, list(game.finishes),
                                      replace_existing=replace_existing)
 
         # Clean up temporary file
         temp_file_path.unlink()
 
         if stats['success']:
-            inv_stats = inventory.get_stats(game.id)
+            inv_stats = inventory_area().get_stats(game.id)
 
             return jsonify({
                 'success': True,
@@ -924,13 +942,11 @@ def import_inventory():
 @app.route('/api/clear_inventory', methods=['POST', 'DELETE'])
 def clear_inventory():
     """Clear all cards from inventory"""
-    global inventory
-
     if not inventory:
         return jsonify({'error': 'Inventory not initialized'}), 500
 
     try:
-        result = inventory.clear_inventory(games.active().id)
+        result = inventory_area().clear_inventory(games.active().id)
 
         if result['success']:
             return jsonify({
@@ -1329,7 +1345,8 @@ def precon_own(file_name):
     deck_store.import_cards(deck_id, deck_entries)
     log_to_client(f"Added to inventory: {added} cards of {precon['name']}"
                   + (f" ({location})" if location else ''), level="success")
-    socketio.emit('inventory_updated', {'auto': False, 'stats': inventory.get_stats(game.id)}, namespace='/')
+    # (the event's stats are the scanner page's counters: the scanned cards)
+    socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')
     return jsonify({'success': True, 'added': added, 'unknown': unknown,
                     'deck': deck_payload(deck_store.get(deck_id))})
 
@@ -1681,7 +1698,7 @@ def handle_add_inventory(data):
     global inventory, current_card_info, scanner, current_review_id
 
     card = current_card_info
-    if not inventory or not card:
+    if not scan_inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
         emit('error', {'message': 'No card selected'})
         return
@@ -1710,12 +1727,13 @@ def handle_add_inventory(data):
             except (ValueError, TypeError):
                 quantity = 1
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
-            added_rows.append(inventory.add_card(game.inventory_fields(card, finish), game.id, finish, condition,
-                                                 quantity, capture=capture, location=scan_location()))
+            added_rows.append(scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish,
+                                                      condition, quantity, capture=capture,
+                                                      location=scan_location()))
             capture = None
 
             # Send updated stats and what was added (the page offers an Undo)
-            emit('inventory_updated', {'auto': False, 'stats': inventory.get_stats(game.id),
+            emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id),
                                        'added': added_payload(game, card, finish, quantity)})
 
         logger.info("Card added to inventory successfully")
@@ -1757,15 +1775,15 @@ def update_added_prices(game, card, row_ids):
         card = game.with_prices(dict(card))
         changed = False
         for row_id in row_ids:
-            entry = inventory.get_entry(row_id)
+            entry = scan_inventory.get_entry(row_id)
             if not entry or entry['card_id'] != card['id']:
                 continue  # deleted or merged meanwhile
             price = game.inventory_fields(card, entry['finish'])['price']
             if price != entry['price_usd']:
-                inventory.set_price(row_id, price)
+                scan_inventory.set_price(row_id, price)
                 changed = True
         if changed:
-            socketio.emit('inventory_prices_updated', {'stats': inventory.get_stats(game.id)}, namespace='/')
+            socketio.emit('inventory_prices_updated', {'stats': scan_inventory.get_stats(game.id)}, namespace='/')
     except Exception as e:
         logger.warning(f"Price update for {card.get('name')} failed: {e}")
 
@@ -1841,9 +1859,9 @@ def handle_undo_last_add():
         emit('error', {'message': 'Inventory not initialized'})
         return
 
-    undone = inventory.undo_last_add()
+    undone = scan_inventory.undo_last_add()
     if undone:
-        emit('inventory_undone', {'name': undone, 'stats': inventory.get_stats(games.active().id)})
+        emit('inventory_undone', {'name': undone, 'stats': scan_inventory.get_stats(games.active().id)})
     else:
         emit('error', {'message': 'Nothing to undo'})
 

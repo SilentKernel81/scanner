@@ -37,7 +37,7 @@ dev venv on this machine is Python 3.12 with YOLO installed.
 
 There is no automated test suite. Verify changes by running the app (or a copy of it on another
 port with a copy of the database - never test adds against the real `data/cards_database.db`
-inventory), and for scanner logic by feeding recorded/synthetic frames through `CardScanner`
+inventory or `data/scan_inventory.db`), and for scanner logic by feeding recorded/synthetic frames through `CardScanner`
 with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 
 ## Where Things Live
@@ -111,6 +111,10 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   `scanner.js` runs scanner-only code on load - never include it in another page.
 - **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.
+- **Two inventories**: `scan_inventory` (the scanner page: `data/scan_inventory.db`) and
+  `inventory` (the collection). Scanning code adds to `scan_inventory`; decks, statistics and
+  "owned" read `inventory`; REST routes pick with `inventory_area()` (`?area=scan`). The
+  `stats` in `inventory_*` Socket.IO events are the scanned cards' (the scanner's top bar).
 - **Inventory key**: `location` is part of `inventory.KEY_COLUMNS` (and the table's UNIQUE);
   anything that looks an entry up by its key must include it. Changing the key means rebuilding
   the table (`_migrate_add_location` is the pattern: backup, keep ids, check counts).

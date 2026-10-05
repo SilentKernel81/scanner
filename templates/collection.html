@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=3">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -31,6 +31,10 @@
     <main class="container collection">
         <!-- ================= Inventory ================= -->
         <section id="tab-inventory" class="tab-panel">
+            <div class="callout" id="scanned-notice" hidden>
+                <span id="scanned-text"></span>
+                <button class="btn btn-small btn-primary" id="scanned-add">Add to collection</button>
+            </div>
             <div class="panel filter-panel">
                 <div class="filter-row">
                     <input type="search" id="filter-text" class="text-input filter-text" placeholder="Name, set, type...">
@@ -290,7 +294,7 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=3"></script>
 </body>
 </html>

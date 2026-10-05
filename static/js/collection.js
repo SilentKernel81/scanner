@@ -104,7 +104,23 @@ function colorGroup(card) {
     return identity.length > 1 ? 'Multicolor' : COLORS.find(([key]) => key === identity[0])[1];
 }
 
+async function loadScanned() {
+    // Cards scanned on the scanner page wait there until they are added to the collection
+    const data = await api('/api/stats');
+    const waiting = data && data.inventory ? data.inventory.total_cards : 0;
+    $('scanned-notice').hidden = !waiting;
+    $('scanned-text').textContent = `${plural(waiting, 'scanned card')} ${waiting === 1 ? 'is' : 'are'} waiting on the scanner page.`;
+}
+
+async function addScanned() {
+    const data = await api('/api/scan_inventory/to_collection', {method: 'POST'});
+    if (!data) return;
+    notify(`${plural(data.cards, 'card')} added to the collection`, 'success');
+    loadInventory();
+}
+
 async function loadInventory() {
+    loadScanned();
     const data = await api('/api/inventory');
     if (!data) {
         $('inventory-list').innerHTML = '<div class="empty-state is-error">Failed to load the inventory</div>';
@@ -978,6 +994,7 @@ function bindEvents() {
         renderInventory();
     });
     $('import-file-input').addEventListener('change', importInventory);
+    $('scanned-add').addEventListener('click', addScanned);
 
     // Inventory rows
     $('inventory-list').addEventListener('click', event => {

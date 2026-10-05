@@ -1788,6 +1788,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // Inventory Viewer Functions
 // ============================================================================
 
+// The scanner page lists the cards scanned and not yet moved to the collection (common.js: areaQuery)
+const inventoryArea = 'scan';
+
 let currentInventory = [];
 let filteredInventory = [];
 
@@ -1807,7 +1810,7 @@ function closeInventory() {
 }
 
 function loadInventory() {
-    fetch('/api/inventory')
+    fetch('/api/inventory?area=scan')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1833,7 +1836,7 @@ function renderInventory() {
         statsDiv.innerHTML = '';
         listDiv.innerHTML = currentInventory.length
             ? '<div class="empty-state">No cards match the filter.</div>'
-            : '<div class="empty-state">No cards in inventory yet.<br>Start scanning cards to build your collection!</div>';
+            : '<div class="empty-state">No scanned cards waiting.<br>Cards you scan are listed here until you add them to the collection.</div>';
         return;
     }
 
@@ -1934,13 +1937,13 @@ function filterInventory() {
 
 function refreshInventory() {
     loadInventory();
-    addLog(timeNow(), 'info', 'Inventory refreshed');
+    addLog(timeNow(), 'info', 'Scanned cards refreshed');
 }
 
 function exportInventory(format, label) {
     // The server sends the file as a download
     const downloadLink = document.createElement('a');
-    downloadLink.href = `/api/export_inventory/${encodeURIComponent(format)}`;
+    downloadLink.href = `/api/export_inventory/${encodeURIComponent(format)}?area=scan`;
     downloadLink.download = '';
     document.body.appendChild(downloadLink);
     downloadLink.click();
@@ -2009,11 +2012,11 @@ async function importInventory() {
 
     const mode = await choiceDialog({
         title: `Import ${file.name}`,
-        message: 'Add the cards in this file to your inventory (quantities of matching cards are added up), or replace your whole inventory with this file?',
+        message: 'Add the cards in this file to the scanned cards (quantities of matching cards are added up), or replace the scanned cards with this file? Your collection is not changed.',
         choices: [
             {label: 'Cancel', value: null},
-            {label: 'Replace inventory', value: 'replace', style: 'danger'},
-            {label: 'Add to inventory', value: 'merge', style: 'primary'}
+            {label: 'Replace scanned cards', value: 'replace', style: 'danger'},
+            {label: 'Add to scanned cards', value: 'merge', style: 'primary'}
         ]
     });
     if (!mode) {
@@ -2023,7 +2026,7 @@ async function importInventory() {
     const replaceExisting = mode === 'replace';
 
     // Show loading state
-    addLog(timeNow(), 'info', `Importing inventory from ${file.name}...`);
+    addLog(timeNow(), 'info', `Importing ${file.name} into the scanned cards...`);
 
     // Create form data
     const formData = new FormData();
@@ -2031,7 +2034,7 @@ async function importInventory() {
     formData.append('replace_existing', replaceExisting ? 'true' : 'false');
 
     // Upload file
-    fetch('/api/import_inventory', {
+    fetch('/api/import_inventory?area=scan', {
         method: 'POST',
         body: formData
     })
@@ -2061,11 +2064,37 @@ async function importInventory() {
     });
 }
 
+async function addToCollection() {
+    // Move what was scanned into the collection (the Collection page); the list here empties
+    const cards = currentInventory.reduce((sum, card) => sum + card.quantity, 0);
+    if (!cards) {
+        notify('No scanned cards to add', 'info');
+        return;
+    }
+    const ok = await confirmDialog({
+        title: 'Add to the collection?',
+        message: `The ${cards} scanned card${cards > 1 ? 's' : ''} move to your collection (cards you already have there get the copies added) and this list is emptied.`,
+        confirmText: 'Add to collection'
+    });
+    if (!ok) return;
+    fetch('/api/scan_inventory/to_collection', {method: 'POST'})
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                notify(`${data.cards} card${data.cards === 1 ? '' : 's'} added to the collection`, 'success');
+                inventoryChanged();
+            } else {
+                notify('Could not add to the collection: ' + (data.error || 'Unknown error'), 'error');
+            }
+        })
+        .catch(error => notify('Could not add to the collection: ' + error.message, 'error'));
+}
+
 async function clearInventory() {
     const count = document.getElementById('inv-cards').textContent;
     const ok = await confirmDialog({
-        title: 'Clear the whole inventory?',
-        message: `This permanently deletes all ${count} cards from your inventory and can't be undone.\n\nExport a CSV first if you want a backup.`,
+        title: 'Clear the scanned cards?',
+        message: `This deletes the ${count} scanned cards that are not in the collection yet, to start over. Your collection is not touched.`,
         confirmText: 'Delete everything',
         danger: true
     });
@@ -2075,13 +2104,13 @@ async function clearInventory() {
     addLog(timeNow(), 'warning', 'Clearing inventory...');
 
     // Call API to clear inventory
-    fetch('/api/clear_inventory', {
+    fetch('/api/clear_inventory?area=scan', {
         method: 'POST'
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            notify(`Inventory cleared: ${data.deleted} entries removed`, 'success');
+            notify(`Scanned cards cleared: ${data.deleted} entries removed`, 'success');
 
             // Reload inventory and stats
             loadInventory();

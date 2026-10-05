@@ -70,6 +70,7 @@ data/cards_database.db-journal
 data/captures/
 data/review/
 data/backups/
+data/scan_inventory.db*
 data/uploads/
 data/card_inventory.csv
 data/card_inventory_export_*.csv

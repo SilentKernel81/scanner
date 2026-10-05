@@ -558,6 +558,37 @@ class InventoryManager:
         self.log(f"Inventory: {action.replace('_', ' ')}{' ' + value if value else ''} - {changed} entries", level="success")
         return changed
 
+    def take_from(self, source, game):
+        """
+        Move every entry of a game from another inventory (the scanner's) into this one, with
+        its captures; entries that exist here already get the copies added. Returns
+        {'entries', 'cards'} moved.
+        """
+        with self._lock, source._lock:
+            rows = source.conn.execute('SELECT * FROM inventory WHERE game = ? ORDER BY id', (game,)).fetchall()
+            for row in rows:
+                values = dict(row)
+                values.pop('id')
+                self.conn.execute(UPSERT, values)
+                target = self.conn.execute(
+                    f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+                    [values[c] for c in KEY_COLUMNS]).fetchone()['id']
+                self._add_tags(target, values['tags'])
+                for capture in source.conn.execute(
+                        'SELECT file, captured_at FROM inventory_captures WHERE inventory_id = ? ORDER BY id', (row['id'],)):
+                    self.conn.execute('INSERT INTO inventory_captures (inventory_id, file, captured_at) VALUES (?, ?, ?)',
+                                      (target, capture['file'], capture['captured_at']))
+            self.conn.commit()
+            # Here first, then gone there. The capture rows go without their files, which moved
+            source.conn.execute('DELETE FROM inventory_captures WHERE inventory_id IN '
+                                '(SELECT id FROM inventory WHERE game = ?)', (game,))
+            source.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
+            source.conn.commit()
+            source.last_added = None
+        moved = {'entries': len(rows), 'cards': sum(row['quantity'] for row in rows)}
+        self.log(f"Added to the collection: {moved['cards']} cards ({moved['entries']} entries)", level="success")
+        return moved
+
     def clear_inventory(self, game=None):
         """Delete every entry (of one game, if given)"""
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())

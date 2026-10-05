@@ -54,6 +54,12 @@ let originalFinish = null;
 let originalLocation = '';
 let originalQuantity = 0;
 
+function areaQuery() {
+    // The scanner page works on the scanned cards (it sets inventoryArea = 'scan'), the
+    // collection page on the collection
+    return typeof inventoryArea === 'string' ? `?area=${inventoryArea}` : '';
+}
+
 function logLine(level, message) {
     // The activity panel only exists on the scanner page
     if (typeof addLog === 'function') addLog(timeNow(), level, message);
@@ -192,7 +198,7 @@ function saveEditCard() {
     closeEditCard();
     logLine('info', `Updating ${cardName}...`);
 
-    fetch(`/api/inventory/update/${rowId}`, {
+    fetch(`/api/inventory/update/${rowId}${areaQuery()}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(requestBody)
@@ -212,7 +218,7 @@ function saveEditCard() {
 async function deleteCard(rowId, cardName) {
     const ok = await confirmDialog({
         title: 'Delete card?',
-        message: `Delete "${cardName}" from your inventory? This can't be undone.`,
+        message: `Delete "${cardName}"? This can't be undone.`,
         confirmText: 'Delete',
         danger: true
     });
@@ -220,13 +226,13 @@ async function deleteCard(rowId, cardName) {
 
     logLine('info', `Deleting ${cardName}...`);
 
-    fetch(`/api/inventory/delete/${rowId}`, {
+    fetch(`/api/inventory/delete/${rowId}${areaQuery()}`, {
         method: 'DELETE'
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            logLine('success', `${cardName} deleted from inventory`);
+            logLine('success', `${cardName} deleted`);
             inventoryChanged();
         } else {
             notify('Failed to delete card: ' + (data.error || 'Unknown error'), 'error');

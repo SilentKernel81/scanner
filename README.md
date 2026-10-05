@@ -239,9 +239,13 @@ The card panel only offers the finishes the printing exists in (normal, holo, re
 normal print, so change it before adding. Prices are TCGplayer market prices per finish.
 Pokémon support was tested on official card images; camera scans still need real-world tuning.
 
-### Inventory
+### Scanned cards
 
-Open it from the inventory count in the top bar. Each entry shows a thumbnail of what was
+What you scan is kept apart from your collection until you say so: the **Scanned** count in the
+top bar opens the list. Check it, fix what is wrong, then click **Add to collection** - or
+**Clear all** to throw the session away and start over, which never touches the collection.
+
+Open it from the Scanned count in the top bar. Each entry shows a thumbnail of what was
 captured: hover over an entry to see all its captured copies side by side, or click (tap) the
 thumbnail to open them larger - handy to check what a scan actually added. You can filter, sort (newest / oldest, name,
 price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
@@ -419,7 +423,8 @@ auto-capture, identification, matching, database); [INSTALL.md](INSTALL.md) cove
 
 ## HTTP API
 
-The web interface uses these endpoints, which you can also call directly:
+The web interface uses these endpoints, which you can also call directly. The inventory
+endpoints work on the collection; add `?area=scan` for the cards scanned and not yet added to it.
 
 | Endpoint | Description |
 |---|---|
@@ -445,6 +450,7 @@ The web interface uses these endpoints, which you can also call directly:
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
+| `POST /api/scan_inventory/to_collection` | Move the scanned cards into the collection |
 | `GET /api/export_inventory/<format>` | Download the inventory: `csv` (both games), `moxfield` (Magic) |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |
