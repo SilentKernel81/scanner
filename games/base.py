@@ -132,6 +132,11 @@ class Game:
         """{search key of the name: card} - one printing per card name"""
         raise NotImplementedError
 
+    def printings(self, name):
+        """Every printing of a card, newest first, for the deck builder's printing picker:
+        [{'id', 'set', 'set_code', 'number', 'image_uri', 'price', 'price_foil', 'finishes', 'treatments'}]"""
+        raise NotImplementedError
+
     def deck_card_payload(self, card):
         """Card fields the deck builder shows and counts with"""
         raise NotImplementedError

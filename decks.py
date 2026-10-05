@@ -137,6 +137,14 @@ class DeckManager:
             self._touch(deck_id)
             self.conn.commit()
 
+    def set_printing(self, deck_id, name, board, card_id):
+        """Choose the printing an entry is shown in"""
+        with self._lock:
+            self.conn.execute('UPDATE deck_cards SET card_id = ? WHERE deck_id = ? AND card_name = ? AND board = ?',
+                              (card_id, deck_id, name, board))
+            self._touch(deck_id)
+            self.conn.commit()
+
     def add_card(self, deck_id, name, board, change=1, card_id=None):
         """Add (or, with a negative change, take out) copies; returns the new count"""
         with self._lock:

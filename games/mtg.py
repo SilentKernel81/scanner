@@ -162,6 +162,7 @@ class Magic(Game):
 
     def card_details(self, card_ids):
         return {card_id: {'image_uri': card['image_uri'], 'cmc': card['cmc'],
+                          'set_code': card['set_code'], 'number': card['number'],
                           'identity': card['color_identity'] if card['oracle_id'] else card['colors']}
                 for card_id, card in self.db.cards_by_ids(card_ids).items()}
 
@@ -175,6 +176,12 @@ class Magic(Game):
 
     def cards_by_names(self, names):
         return self.db.cards_by_names(names)
+
+    def printings(self, name):
+        # Straight from the card data: the manual search (find_printings) writes to the activity log
+        _resolved, cards = self.db.find_printings(name)
+        return [{key: card[key] for key in ('id', 'set', 'set_code', 'number', 'image_uri', 'price',
+                                            'price_foil', 'finishes', 'treatments')} for card in cards]
 
     def deck_card_payload(self, card):
         return {

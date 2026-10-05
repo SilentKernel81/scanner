@@ -269,7 +269,8 @@ you have scanned and to build decks. It works on a phone too.
   format, within the commander's colors) and click to add. Every card shows whether you own it,
   are missing it, or need it in another deck too; the deck shows what is not legal or
   unfinished, its mana curve, its price and what completing it costs, and **Buy list**
-  downloads the missing cards. A deck is only a list: it never changes the inventory. Import a
+  downloads the missing cards. The set code on a card's row (e.g. `MSC 1`) opens its
+  printings to choose the one shown. A deck is only a list: it never changes the inventory. Import a
   pasted decklist or a Moxfield / Archidekt deck address; export as text.
 - **Deck ideas** - for a Commander deck, *Suggestions* lists the cards played with its
   commander (EDHREC, with how often) and can show only the ones you own; *Popular decks* lists
@@ -441,7 +442,8 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `GET /api/cards/search` | Deck builder card search (`q`, `type`, `text`, `cmc`, `rarity`, `colors`, `identity`, `format`, `owned`, `offset`) |
 | `GET /api/decks`, `POST /api/decks` | List decks; create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
 | `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned and issues; rename / change format; delete |
-| `POST /api/decks/<id>/cards` | Change cards (JSON: `cards`: `name`, `board`, and `change`, `quantity` or `move_to`) |
+| `POST /api/decks/<id>/cards` | Change cards (JSON: `cards`: `name`, `board`, and `change`, `quantity`, `move_to` or `printing`) |
+| `GET /api/cards/printings?name=` | Every printing of a card, with the copies of each that are owned |
 | `POST /api/decks/<id>/import`, `POST /api/decks/<id>/duplicate` | Add cards from a list, a deck address or EDHREC's average deck; copy a deck |
 | `GET /api/decks/<id>/export/<text\|buylist>` | Download the decklist, or the cards not owned |
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |

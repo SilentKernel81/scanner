@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=4">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -267,6 +267,22 @@
         </div>
     </div>
 
+    <!-- Printing of a deck card -->
+    <div id="printing-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="printing-title">Printing</h2>
+                    <div class="modal-subtitle">The printing this deck shows for the card. Any printing you own counts as owned.</div>
+                </div>
+                <span class="close" onclick="closeModal('printing-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="printing-grid" class="printing-grid"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- One value for a bulk action (location, tag, condition, deck) -->
     <div id="value-modal" class="modal">
         <div class="modal-content narrow">
@@ -295,6 +311,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=3"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=4"></script>
 </body>
 </html>

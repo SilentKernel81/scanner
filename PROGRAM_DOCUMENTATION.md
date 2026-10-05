@@ -735,7 +735,10 @@ page shows:
   and the cheapest price among all printings, which is what the deck and buy-list totals use.
   The image shown is the entry's own printing (`deck_cards.card_id`): the search result
   clicked, or the printing a precon / Moxfield / Archidekt list names (`scryfall_id` in
-  `resolve_entries`);
+  `resolve_entries`). The set code + number button on a deck row opens the printing picker
+  (`GET /api/cards/printings?name=`: every printing, the ones owned first; choosing one sends
+  `printing` to `POST /api/decks/<id>/cards`). The printing only decides the picture - any
+  printing owned counts as owned;
 - `owned`: copies in the inventory over every printing, finish and location
   (`InventoryManager.owned_by_name`), and `elsewhere`: other decks with the card
   (`DeckManager.needed_by_name`) - the page shows *owned*, *shared* (owned, but other decks

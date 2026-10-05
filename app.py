@@ -1025,11 +1025,15 @@ def deck_payload(deck):
         key = search_key(entry['name'])
         card = by_name.get(key)
         payload = game.deck_card_payload(card) if card else None
-        if payload and printings.get(entry['card_id'], {}).get('image_uri'):
-            payload['image_uri'] = printings[entry['card_id']]['image_uri']
+        printing = printings.get(entry['card_id']) or {}
+        if payload and printing.get('image_uri'):
+            payload['image_uri'] = printing['image_uri']
         cards.append({
             'name': entry['name'], 'quantity': entry['quantity'], 'board': entry['board'],
             'card': payload,
+            # The printing shown (the picker changes it)
+            'printing': {'id': entry['card_id'], 'set_code': printing.get('set_code') or '',
+                         'number': printing.get('number') or ''},
             'owned': owned.get(key, 0),
             'elsewhere': [other for other in needed.get(key, []) if other['deck_id'] != deck['id']],
         })
@@ -1162,7 +1166,8 @@ def deck_duplicate(deck_id):
 def deck_cards(deck_id):
     """
     Change a deck's cards. JSON: 'cards': [{name, board, card_id, and one of 'change' (+1 / -1),
-    'quantity' (set; 0 removes) or 'move_to' (another board)}]. Returns the deck.
+    'quantity' (set; 0 removes), 'move_to' (another board) or 'printing' (the printing id to
+    show the entry in)}]. Returns the deck.
     """
     deck, error = get_deck_or_404(deck_id)
     if error:
@@ -1171,7 +1176,11 @@ def deck_cards(deck_id):
     try:
         for item in data.get('cards') or []:
             name, board = str(item['name']), item.get('board') or 'main'
-            if item.get('move_to'):
+            if item.get('printing'):
+                if not games.get(deck['game']).card_details([item['printing']]):
+                    raise ValueError('Unknown printing')
+                deck_store.set_printing(deck_id, name, board, item['printing'])
+            elif item.get('move_to'):
                 deck_store.move_card(deck_id, name, board, item['move_to'])
             elif 'quantity' in item:
                 deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
@@ -1249,6 +1258,18 @@ def search_cards():
         return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'more': more, 'cards': [
         {**game.deck_card_payload(card), 'owned': owned.get(search_key(card['name']), 0)} for card in cards]})
+
+
+@app.route('/api/cards/printings')
+def card_printings():
+    """Every printing of a card (name), newest first, with the copies of each that are owned"""
+    game = games.active()
+    if not game.deck_formats:
+        return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
+    name = request.args.get('name') or ''
+    owned = inventory.owned_by_printing(game.id, name)
+    return jsonify({'success': True, 'printings': [
+        {**printing, 'owned': owned.get(printing['id'], 0)} for printing in game.printings(name)]})
 
 
 # -- Recommendations (recommendations.py: EDHREC, MTGJSON, Archidekt, Moxfield) --

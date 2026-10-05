@@ -862,3 +862,62 @@ a.btn {
     margin: 0 0 12px;
     font-size: 13px;
 }
+
+/* Printing picker (deck builder) */
+.printing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.printing {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.printing:hover {
+    border-color: var(--accent);
+}
+
+.printing.is-current {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.printing img,
+.printing .no-image {
+    width: 100%;
+    aspect-ratio: 63 / 88;
+    border-radius: 7px;
+    object-fit: cover;
+    background: var(--surface-3);
+}
+
+.printing-set {
+    font-weight: 600;
+}
+
+.printing-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    color: var(--text-muted);
+}
+
+.mini-btn.printing-btn {
+    font-weight: 500;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}

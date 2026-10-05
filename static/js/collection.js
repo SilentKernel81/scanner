@@ -711,7 +711,8 @@ function deckRowHtml(entry, wanted) {
             <span class="result-main"><span class="result-name ${card ? '' : 'unknown'}">${escapeHtml(entry.name)}</span> ${card ? manaHtml(card.mana_cost) : '<span class="hint">not in the card data</span>'}</span>
             ${ownHtml(entry, wanted)}
             <span class="result-numbers">${card ? money(card.price * entry.quantity) : ''}</span>
-            <span class="result-actions">${moves.map(([board, label, title]) =>
+            <span class="result-actions">${card ? `<button class="mini-btn printing-btn" data-printing title="Choose the printing shown">${
+                escapeHtml(entry.printing.set_code ? `${entry.printing.set_code} ${entry.printing.number}` : 'Printing')}</button>` : ''}${moves.map(([board, label, title]) =>
                 `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}</span>
         </div>`;
 }
@@ -781,6 +782,34 @@ function renderDeckCharts(entries) {
                 </div>`).join('')}</div></div>
         <div><div class="chart-title">Types</div>${barsHtml([...types.entries()], number => String(number), 9)}</div>
         <div><div class="chart-title">Mana symbols</div>${barsHtml(Object.entries(pips).map(([color, count]) => [colorNames[color], count]), number => String(number), 5)}</div>`;
+}
+
+// -- Printing of a deck card ------------------------------------------------------
+
+let printingEntry = null;   // {name, board} of the entry whose printing is being chosen
+
+async function openPrintings(name, board) {
+    const entry = deck.cards.find(card => card.name === name && card.board === board);
+    if (!entry) return;
+    printingEntry = {name, board};
+    $('printing-title').textContent = name;
+    $('printing-grid').innerHTML = '<div class="hint">Loading the printings...</div>';
+    $('printing-modal').classList.add('show');
+    const data = await api(`/api/cards/printings?name=${encodeURIComponent(name)}`);
+    if (!data) return closeModal('printing-modal');
+    // The printings you own first, then the newest
+    const printings = [...data.printings].sort((a, b) => (b.owned > 0) - (a.owned > 0));
+    $('printing-grid').innerHTML = printings.map(printing => `
+        <button class="printing ${printing.id === entry.printing.id ? 'is-current' : ''}" data-id="${escapeHtml(printing.id)}">
+            ${printing.image_uri ? `<img src="${escapeHtml(printing.image_uri)}" alt="" loading="lazy">` : '<div class="no-image"></div>'}
+            <span class="printing-set">${escapeHtml(printing.set)}</span>
+            <span class="printing-meta">
+                <span>${escapeHtml((printing.set_code || '').toUpperCase())} #${escapeHtml(printing.number)}</span>
+                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil' : ''}</span>
+                ${printing.owned ? `<span class="own have">✓ ${printing.owned} owned</span>` : ''}
+            </span>
+            ${printing.treatments.length ? `<span class="printing-meta">${escapeHtml(printing.treatments.join(', '))}</span>` : ''}
+        </button>`).join('') || '<div class="hint">No printings found.</div>';
 }
 
 async function changeDeckCards(cards) {
@@ -1097,8 +1126,16 @@ function bindEvents() {
         const button = event.target.closest('.mini-btn');
         if (!row || !button) return;
         const card = {name: row.dataset.name, board: row.dataset.board};
-        if (button.dataset.change) changeDeckCards([{...card, change: parseInt(button.dataset.change)}]);
+        if ('printing' in button.dataset) openPrintings(card.name, card.board);
+        else if (button.dataset.change) changeDeckCards([{...card, change: parseInt(button.dataset.change)}]);
         else if (button.dataset.move) changeDeckCards([{...card, move_to: button.dataset.move}]);
+    });
+
+    $('printing-grid').addEventListener('click', event => {
+        const button = event.target.closest('.printing');
+        if (!button || !printingEntry) return;
+        closeModal('printing-modal');
+        changeDeckCards([{...printingEntry, printing: button.dataset.id}]);
     });
 
     // Search, suggestions, popular decks
@@ -1151,6 +1188,7 @@ function bindEvents() {
         else if ($('value-modal').classList.contains('show')) closeValueDialog(null);
         else if ($('capture-modal').classList.contains('show')) closeCaptures();
         else if ($('edit-card-modal').classList.contains('show')) closeEditCard();
+        else if ($('printing-modal').classList.contains('show')) closeModal('printing-modal');
         else closeModal('deck-modal');
     });
     window.addEventListener('click', event => {
@@ -1159,6 +1197,7 @@ function bindEvents() {
         else if (event.target === $('capture-modal')) closeCaptures();
         else if (event.target === $('edit-card-modal')) closeEditCard();
         else if (event.target === $('deck-modal')) closeModal('deck-modal');
+        else if (event.target === $('printing-modal')) closeModal('printing-modal');
     });
 }
 

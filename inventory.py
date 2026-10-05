@@ -384,6 +384,14 @@ class InventoryManager:
                 owned[key] = owned.get(key, 0) + row['copies']
         return owned
 
+    def owned_by_printing(self, game, name):
+        """{printing id: copies owned} of one card, over every finish, condition and location"""
+        with self._lock:
+            return {row['card_id']: row['copies'] for row in self.conn.execute(
+                '''SELECT card_id, SUM(quantity) AS copies FROM inventory
+                   WHERE game = ? AND card_name = ? COLLATE NOCASE AND card_id IS NOT NULL GROUP BY card_id''',
+                (game, name))}
+
     def locations(self, game):
         """Locations in use, alphabetically"""
         with self._lock:
