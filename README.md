@@ -259,7 +259,8 @@ condition, finish and location increases its quantity instead of creating a dupl
 you have scanned and to build decks. It works on a phone too.
 
 - **Inventory** - filter by name, color identity, type, rarity, set, finish, location, tag and
-  price; switch between the list and a grid of card images; tick entries to move them to a
+  price, or tick **Not in a deck** to see only the cards no deck uses yet (the deck builder's
+  search and suggestions have the same tick, *Not in other decks*); switch between the list and a grid of card images; tick entries to move them to a
   **location** (a binder, a box), tag them (*trade*, *keep*), change their condition, add them
   to a deck or delete them in one step. Copies of the same printing can be in two locations -
   moving part of a stack splits it. *Settings → Scan into location* on the scanner page puts

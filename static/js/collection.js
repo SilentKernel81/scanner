@@ -162,6 +162,7 @@ function fillFilterOptions() {
     fillSelect('filter-added', 'Added any time', times,
                Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
     // Color chips only where the card data has color identities (Magic)
+    $('filter-free-label').hidden = !gameInfo.deck_formats.length;
     const hasColors = inventory.some(card => identityOf(card));
     $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
 }
@@ -180,6 +181,7 @@ function applyFilters() {
     const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
     const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
     const added = $('filter-added').value;
+    const free = $('filter-free').checked;
     const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         if (text && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
@@ -191,6 +193,7 @@ function applyFilters() {
         if (location && card.location !== (location === '(none)' ? '' : location)) return false;
         if (tag && !card.tags.includes(tag)) return false;
         if (added && card.added_at !== added) return false;
+        if (free && card.decks.length) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
         if (filterColors.size) {
@@ -214,7 +217,9 @@ function badgesHtml(card) {
         ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
         ${card.finish !== defaultFinish() ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
         ${card.location ? `<span class="inventory-badge location" title="Location">${escapeHtml(card.location)}</span>` : ''}
-        ${card.tags.map(tag => `<span class="inventory-badge tag" title="Tag">${escapeHtml(tag)}</span>`).join('')}`;
+        ${card.tags.map(tag => `<span class="inventory-badge tag" title="Tag">${escapeHtml(tag)}</span>`).join('')}
+        ${card.decks.length ? `<span class="inventory-badge deck" title="Used in: ${escapeHtml(card.decks.join(', '))}">${
+            escapeHtml(card.decks.length === 1 ? card.decks[0] : plural(card.decks.length, 'deck'))}</span>` : ''}`;
 }
 
 function renderInventory() {
@@ -913,6 +918,10 @@ async function runSearch(more = false) {
     add('rarity', $('search-rarity').value);
     add('colors', [...searchColors].join(''));
     add('owned', $('search-owned').checked ? '1' : '');
+    if ($('search-free').checked) {
+        params.set('free', '1');
+        params.set('deck_id', deck.id);
+    }
     add('format', $('search-legal').checked ? deck.format : '');
     if (hasCommander(deck.format) && $('search-identity').checked && commanders().some(entry => entry.card)) {
         params.set('identity', [...new Set(commanders().flatMap(entry => (entry.card && entry.card.identity) || []))].join(''));
@@ -946,10 +955,11 @@ async function loadSuggestions() {
     }
     const data = suggestions.data;
     const ownedOnly = $('suggestions-owned').checked;
+    const freeOnly = $('suggestions-free').checked;
     $('suggestions-source').innerHTML = data.decks
         ? `Played with this commander in ${data.decks.toLocaleString()} decks - <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">EDHREC</a>` : '';
     const html = data.categories.map(category => {
-        const cards = category.cards.filter(card => !inDeck(card.name) && (!ownedOnly || card.owned));
+        const cards = category.cards.filter(card => !inDeck(card.name) && (!ownedOnly || card.owned) && (!freeOnly || !card.elsewhere));
         return cards.length ? `<div class="category-title">${escapeHtml(category.title)}</div>` + cards.map(card => resultRowHtml(card,
             `<span title="In ${card.inclusion}% of this commander's decks; synergy ${card.synergy > 0 ? '+' : ''}${card.synergy}%">${card.inclusion}% </span>`)).join('') : '';
     }).join('');
@@ -1017,8 +1027,8 @@ function bindEvents() {
     });
 
     // Inventory filters
-    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added']
-        .forEach(id => $(id).addEventListener('change', applyFilters));
+    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
+     'filter-free'].forEach(id => $(id).addEventListener('change', applyFilters));
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
     $('filter-colors').addEventListener('click', event => {
         const chip = event.target.closest('.color-chip');
@@ -1030,6 +1040,7 @@ function bindEvents() {
     $('filter-clear').addEventListener('click', () => {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
+        $('filter-free').checked = false;
         filterColors.clear();
         fillFilterOptions();
         applyFilters();
@@ -1172,7 +1183,7 @@ function bindEvents() {
         if (button) showSide(button.dataset.side);
     });
     ['search-text', 'search-type', 'search-oracle'].forEach(id => $(id).addEventListener('input', debounce(() => runSearch())));
-    ['search-cmc', 'search-rarity', 'search-owned', 'search-legal', 'search-identity']
+    ['search-cmc', 'search-rarity', 'search-owned', 'search-free', 'search-legal', 'search-identity']
         .forEach(id => $(id).addEventListener('change', () => runSearch()));
     $('search-colors').innerHTML = colorChipsHtml(searchColors);
     $('search-colors').addEventListener('click', event => {
@@ -1195,6 +1206,7 @@ function bindEvents() {
         addFromRow(event);
     });
     $('suggestions-owned').addEventListener('change', loadSuggestions);
+    $('suggestions-free').addEventListener('change', loadSuggestions);
     $('popular-list').addEventListener('click', event => {
         const button = event.target.closest('[data-import-url]');
         if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');

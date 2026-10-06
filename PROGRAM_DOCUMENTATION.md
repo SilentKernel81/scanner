@@ -732,7 +732,12 @@ and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads 
 `Game.card_details` (Magic: image, mana value, color identity; Pokémon: image). Filters (text,
 color identity, type, rarity, set, finish, location, tag, price), sorts, the list / image grid
 and the statistics are computed in the browser from that one response; rows render 200 at a
-time. Selected entries get the bulk bar (`POST /api/inventory/bulk`).
+time. Selected entries get the bulk bar (`POST /api/inventory/bulk`). Rows also carry `decks`:
+the names of the decks that use the card (by name, `DeckManager.needed_by_name`; a Commander
+deck's considered cards don't count) - shown as a badge, and hidden by the **Not in a deck**
+tick. The deck builder has the same idea as **Not in other decks** on the card search
+(`free=1&deck_id=` → `search_cards(exclude_names=)`) and on the suggestions (`elsewhere`). It
+goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
 
 **Decks** (Magic; a game without `Game.deck_formats` has no Decks tab). A deck (`decks.py`) is a
 name, a format and `deck_cards` rows: card name, count, board (`commander`, `main`, `side`) and

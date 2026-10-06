@@ -769,8 +769,12 @@ def get_inventory():
             cards = inventory_area().get_all_cards(game.id)
             # What the collection page shows and filters with beyond the stored columns
             details = game.card_details([card['card_id'] for card in cards])
+            # The decks that use each card (by name; not for the scanned cards)
+            in_decks = deck_store.needed_by_name(game.id, commander_formats(game)) \
+                if game.deck_formats and inventory_area() is inventory else {}
             for card in cards:
                 card['details'] = details.get(card['card_id'], {})
+                card['decks'] = [used['deck'] for used in in_decks.get(search_key(card['name']), [])]
 
             return jsonify({
                 'success': True,
@@ -1256,13 +1260,20 @@ def search_cards():
         return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
     args = request.args
     owned = inventory.owned_by_name(game.id)
+    # free=1: leave out the cards other decks use (deck_id: the deck being built, which doesn't count)
+    taken = None
+    if args.get('free'):
+        current = int(args['deck_id']) if (args.get('deck_id') or '').isdigit() else None
+        taken = [key for key, used in deck_store.needed_by_name(game.id, commander_formats(game)).items()
+                 if any(deck['deck_id'] != current for deck in used)]
     try:
         cmc = float(args['cmc']) if args.get('cmc') not in (None, '') else None
         offset = max(0, int(args.get('offset') or 0))
         cards, more = game.search_cards(
             text=args.get('q'), type_text=args.get('type'), oracle_text=args.get('text'),
             identity=args.get('identity'), colors=args.get('colors'), cmc=cmc, rarity=args.get('rarity'),
-            legal_in=args.get('format') or None, names=list(owned) if args.get('owned') else None, offset=offset)
+            legal_in=args.get('format') or None, names=list(owned) if args.get('owned') else None,
+            exclude_names=taken, offset=offset)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'more': more, 'cards': [
@@ -1301,6 +1312,8 @@ def deck_suggestions(deck_id):
         return jsonify({'success': True, 'categories': [], 'message': 'EDHREC has no data for this commander'})
     in_deck = {search_key(card['name']) for card in deck['cards']}
     owned = inventory.owned_by_name(game.id)
+    elsewhere = {key for key, used in deck_store.needed_by_name(game.id, commander_formats(game)).items()
+                 if any(other['deck_id'] != deck['id'] for other in used)}
     by_name = game.cards_by_names([card['name'] for category in found['categories'] for card in category['cards']])
     categories = []
     for category in found['categories']:
@@ -1310,7 +1323,8 @@ def deck_suggestions(deck_id):
             if not card or search_key(card['name']) in in_deck:
                 continue
             cards.append({**game.deck_card_payload(card), 'inclusion': suggestion['inclusion'],
-                          'synergy': suggestion['synergy'], 'owned': owned.get(search_key(card['name']), 0)})
+                          'synergy': suggestion['synergy'], 'owned': owned.get(search_key(card['name']), 0),
+                          'elsewhere': search_key(card['name']) in elsewhere})
         if cards:
             categories.append({'title': category['title'], 'cards': cards})
     return jsonify({'success': True, 'decks': found['decks'], 'url': found['url'], 'categories': categories})

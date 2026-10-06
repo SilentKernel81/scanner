@@ -727,7 +727,7 @@ class CardDatabase:
         return result
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
-                     cmc=None, rarity=None, legal_in=None, names=None, limit=60, offset=0):
+                     cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, limit=60, offset=0):
         """
         Cards (one per name) for the deck builder, by name.
 
@@ -738,6 +738,7 @@ class CardDatabase:
             cmc: mana value (7 = seven or more)
             legal_in: Scryfall format key ("commander", "modern") the card is legal or restricted in
             names: only these card names (the "owned only" filter)
+            exclude_names: not these card names (cards other decks already use)
         Returns:
             (cards, whether there are more)
         """
@@ -783,6 +784,10 @@ class CardDatabase:
             if not keys:
                 return [], False
             where.append(f"name_search IN ({', '.join('?' * len(keys))})")
+            params += keys
+        if exclude_names:
+            keys = [search_key(name) for name in exclude_names]
+            where.append(f"name_search NOT IN ({', '.join('?' * len(keys))})")
             params += keys
         with self._lock:
             rows = self.conn.execute(

@@ -243,6 +243,11 @@ a.btn {
     color: var(--info);
 }
 
+.inventory-badge.deck {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
 .inventory-badge.tag {
     background: var(--surface-3);
     color: var(--text-muted);

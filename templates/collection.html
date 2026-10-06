@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=5">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -46,6 +46,7 @@
                     <select id="filter-location" class="select" title="Location"></select>
                     <select id="filter-tag" class="select" title="Tag"></select>
                     <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
+                    <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
                     <span class="price-range" title="Price of one copy (USD)">
                         $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
                         – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
@@ -184,6 +185,7 @@
                             <div class="filter-row">
                                 <div class="color-chips" id="search-colors" title="Color identity includes"></div>
                                 <label class="chip-toggle"><input type="checkbox" id="search-owned"><span>Owned</span></label>
+                                <label class="chip-toggle" title="Hide the cards your other decks already use"><input type="checkbox" id="search-free"><span>Not in other decks</span></label>
                                 <label class="chip-toggle" title="Only cards legal in the deck's format"><input type="checkbox" id="search-legal" checked><span>Legal</span></label>
                                 <label class="chip-toggle" id="search-identity-label" title="Only cards within the commander's color identity"><input type="checkbox" id="search-identity" checked><span>Commander's colors</span></label>
                             </div>
@@ -196,6 +198,7 @@
                                 <span class="hint" id="suggestions-source"></span>
                                 <span class="spacer"></span>
                                 <label class="chip-toggle"><input type="checkbox" id="suggestions-owned"><span>Owned</span></label>
+                                <label class="chip-toggle" title="Hide the cards your other decks already use"><input type="checkbox" id="suggestions-free"><span>Not in other decks</span></label>
                             </div>
                             <div id="suggestions-list" class="result-list"></div>
                         </div>
@@ -314,6 +317,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=6"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=7"></script>
 </body>
 </html>
