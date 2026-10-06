@@ -11,11 +11,6 @@ a.btn {
     display: block;
 }
 
-.game-label {
-    font-weight: 450;
-    font-size: 13px;
-    color: var(--text-muted);
-}
 
 /* Buttons, chips and panels set their own display, which would win over the hidden attribute */
 [hidden] {
@@ -30,7 +25,6 @@ a.btn {
 .tabs {
     display: flex;
     gap: 4px;
-    margin-right: auto;
 }
 
 .tab {
@@ -55,10 +49,6 @@ a.btn {
 .tab.is-active {
     background: var(--accent-soft);
     color: var(--accent);
-}
-
-.topbar .brand {
-    margin-right: 8px;
 }
 
 /* Filters */
@@ -859,17 +849,6 @@ a.btn {
 }
 
 @media (max-width: 720px) {
-    .topbar {
-        flex-wrap: wrap;
-        padding: 10px 16px;
-    }
-
-    .tabs {
-        order: 3;
-        width: 100%;
-        margin: 0;
-    }
-
     .tab {
         flex: 1;
         justify-content: center;

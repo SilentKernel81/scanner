@@ -63,6 +63,11 @@
     box-sizing: border-box;
 }
 
+/* Room for the scrollbar on every page: the header doesn't shift between a long page and a short one */
+html {
+    scrollbar-gutter: stable;
+}
+
 body {
     font-family: var(--font);
     font-size: 14px;
@@ -95,6 +100,7 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
+    min-height: 80px;  /* the same on every page (the scanner's counters are the tallest part) */
     padding: 12px 24px;
     background: color-mix(in srgb, var(--bg) 85%, transparent);
     backdrop-filter: blur(12px);
@@ -108,7 +114,61 @@ body {
     font-weight: 650;
     font-size: 16px;
     letter-spacing: -0.01em;
-    margin-right: auto;
+    white-space: nowrap;
+}
+
+/* Links between the pages: the same place on every page */
+.page-nav {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+
+.page-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: calc(var(--radius-sm) - 2px);
+    color: var(--text-muted);
+    font-weight: 550;
+    font-size: 14px;
+    text-decoration: none;
+}
+
+.page-link:hover {
+    color: var(--text);
+    background: var(--surface-2);
+}
+
+.page-link.is-active {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* The page's own part of the header (counters, tabs), between the links and the settings button */
+.topbar-page {
+    margin-left: auto;
+}
+
+.topbar-settings {
+    flex-shrink: 0;
+}
+
+.game-label {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+/* The game: a choice on the scanner page, its name elsewhere - the same room for both, so
+   what follows wraps at the same width */
+.topbar .game-select,
+.topbar .game-label {
+    width: 176px;
+    flex-shrink: 0;
 }
 
 .brand-mark {
@@ -1706,19 +1766,36 @@ input[type="radio"] {
     }
 }
 
+/* No room for everything in one row: the page's own part goes below, on every page alike */
+@media (max-width: 1280px) {
+    .topbar {
+        flex-wrap: wrap;
+    }
+
+    .topbar-page {
+        order: 3;
+        width: 100%;
+        margin: 0;
+        min-height: 56px;  /* the counters' height, for the tabs too */
+        align-items: center;
+    }
+
+    .topbar-settings {
+        margin-left: auto;
+    }
+}
+
 @media (max-width: 720px) {
     .container {
         padding: 16px;
     }
 
     .topbar {
-        flex-wrap: wrap;
         padding: 10px 16px;
     }
 
-    .stats {
-        order: 3;
-        width: 100%;
+    .page-link {
+        padding: 6px 9px;
     }
 
     .stat-box {

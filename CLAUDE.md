@@ -56,7 +56,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add`; automatic adds on the server (`add_automatically`, `Game.suggested_finish`) |
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Inventory add/merge/undo/split/export, locations and tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']`; `scan_location` |
-| Collection page (`/collection`: inventory filters / grid / bulk bar, deck builder, statistics) | `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css`; shared with the scanner page: `static/js/common.js`, `templates/_dialogs.html`, `templates/_icons.html` |
+| Collection page (`/collection`: inventory filters / grid / bulk bar, deck builder, statistics) | `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css`; shared with the scanner page: `static/js/common.js`, `templates/_topbar.html` (the header of both pages), `templates/_dialogs.html`, `templates/_icons.html` |
 | Backups of the collection, scanned cards and decks (collection page's settings drawer) | `backups.py`: `create`, `restore`, `list_backups` (`data/backups/<date_time>/`); `app.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups`, `backupAction` |
 | Decks (lists; ownership computed from the inventory), deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
@@ -108,7 +108,9 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   this page from creating additional dialogs"), after which `confirm()` always returns false - this
   broke "Clear all". Use `confirmDialog()` / `choiceDialog()` / `notify()` in common.js.
 - **Two pages share code**: helpers used by both the scanner and the collection page live in
-  `static/js/common.js` / `templates/_dialogs.html`; each page defines `inventoryChanged()`.
+  `static/js/common.js` / `templates/_dialogs.html`; the header is `templates/_topbar.html`
+  (brand, page links and the settings button must stay in the same place on every page - only
+  the `.topbar-page` part is a page's own; each page defines `openSettings()`); each page defines `inventoryChanged()`.
   `scanner.js` runs scanner-only code on load - never include it in another page.
 - **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.

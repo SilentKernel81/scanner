@@ -6,45 +6,13 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=32">
 </head>
 <body>
     {% include '_icons.html' %}
 
-    <header class="topbar">
-        <div class="brand">
-            <span class="brand-mark"><svg class="icon"><use href="#i-card"/></svg></span>
-            Card Scanner
-        </div>
-        <!-- Shown only when more than one game is supported -->
-        <select id="game-select" class="select game-select" title="Card game being scanned" hidden></select>
-        <div class="stats">
-            <div class="stat-box" id="db-stat" onclick="offerDataUpdate()">
-                <span class="stat-label">Database</span>
-                <span class="stat-value" id="db-cards">0</span>
-            </div>
-            <div class="stat-box clickable" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
-                <span class="stat-label">Scanned</span>
-                <span class="stat-value" id="inv-cards">0</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-label">Value</span>
-                <span class="stat-value" id="total-value">$0.00</span>
-            </div>
-            <div class="stat-box" id="processing-queue-box" title="Cards waiting to be identified">
-                <span class="stat-label">Processing</span>
-                <span class="stat-value" id="processing-queue">0</span>
-            </div>
-            <div class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
-                <span class="stat-label">Review</span>
-                <span class="stat-value" id="review-count">0</span>
-            </div>
-        </div>
-        <a class="btn btn-small" href="{{ url_for('collection') }}" title="Manage the inventory and build decks">
-            <svg class="icon"><use href="#i-layers"/></svg> Collection
-        </a>
-        <button class="icon-btn" onclick="openSettings()" title="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
-    </header>
+    {% set page = 'scanner' %}
+    {% include '_topbar.html' %}
 
     <main class="container">
         <div class="main-content">

@@ -1456,7 +1456,6 @@ function bindEvents() {
     }
 
     // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
-    $('settings-open').addEventListener('click', openSettings);
     $('settings-close').addEventListener('click', closeSettings);
     $('backup-create').addEventListener('click', createBackup);
     $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });
