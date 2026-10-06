@@ -1334,8 +1334,19 @@ def search_cards():
             exclude_names=taken, offset=offset)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-    return jsonify({'success': True, 'more': more, 'cards': [
-        {**game.deck_card_payload(card), 'owned': owned.get(search_key(card['name']), 0)} for card in cards]})
+    # A card that is owned is shown in the printing owned (the search picks one printing per
+    # name, which for a card from a preconstructed deck is usually another art)
+    printing = inventory.owned_printing_by_name(game.id)
+    details = game.card_details([printing.get(search_key(card['name'])) for card in cards])
+    results = []
+    for card in cards:
+        key = search_key(card['name'])
+        payload = {**game.deck_card_payload(card), 'owned': owned.get(key, 0)}
+        mine = details.get(printing.get(key)) or {}
+        if mine.get('image_uri'):
+            payload.update(id=printing[key], image_uri=mine['image_uri'])
+        results.append(payload)
+    return jsonify({'success': True, 'more': more, 'cards': results})
 
 
 @app.route('/api/cards/printings')

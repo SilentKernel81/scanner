@@ -455,7 +455,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/inventory/update/<id>` | Update an entry (JSON: `quantity`, `condition`, `finish`, `location`, `tags`, `split_quantity`) |
 | `POST /api/inventory/bulk` | One change to several entries (JSON: `ids`, `action`: `delete` / `condition` / `location` / `add_tag` / `remove_tag`, `value`) |
 | `POST /api/scan_location` | Inventory location for the cards scanned next (JSON: `location`) |
-| `GET /api/cards/search` | Deck builder card search (`q`, `type`, `text`, `cmc`, `rarity`, `colors`, `identity`, `format`, `owned`, `offset`) |
+| `GET /api/cards/search` | Deck builder card search (`q`, `type`, `text`, `cmc`, `rarity`, `colors`, `identity`, `format`, `owned`, `offset`); a card you own comes in the printing you own |
 | `GET /api/backups`, `POST /api/backups` | List the backups of the collection, scanned cards and decks; make one (JSON: `note`) |
 | `POST /api/backups/<id>/restore`, `DELETE /api/backups/<id>` | Put all three back as in a backup (the current state is backed up first); delete a backup |
 | `GET /api/decks`, `POST /api/decks` | List decks; create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |

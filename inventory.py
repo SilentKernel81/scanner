@@ -420,6 +420,18 @@ class InventoryManager:
                 owned[key] = owned.get(key, 0) + row['copies']
         return owned
 
+    def owned_printing_by_name(self, game):
+        """{search_key(card name): id of the printing owned} - the one with most copies (the
+        newest of those), to show an owned card as it is on the shelf"""
+        printings = {}
+        with self._lock:
+            for row in self.conn.execute(
+                    '''SELECT card_name, card_id, SUM(quantity) AS copies, MAX(timestamp) AS newest FROM inventory
+                       WHERE game = ? AND card_id IS NOT NULL GROUP BY card_name, card_id
+                       ORDER BY copies, newest''', (game,)):
+                printings[search_key(row['card_name'])] = row['card_id']  # the last one wins
+        return printings
+
     def owned_by_printing(self, game, name):
         """{printing id: copies owned} of one card, over every finish, condition and location"""
         with self._lock:
