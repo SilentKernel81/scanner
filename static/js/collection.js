@@ -772,6 +772,74 @@ function renderAround(state = aroundState) {
 }
 
 // ============================================================================
+// Settings drawer: backups of the collection, the scanned cards and the decks
+// ============================================================================
+
+function openSettings() {
+    $('settings-drawer').classList.add('show');
+    loadBackups();
+}
+
+function closeSettings() {
+    $('settings-drawer').classList.remove('show');
+    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
+}
+
+async function loadBackups() {
+    const data = await api('/api/backups');
+    if (data) renderBackups(data.backups);
+}
+
+function renderBackups(backups) {
+    $('backup-list').innerHTML = backups.map(backup => `
+        <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
+            <div>
+                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic ? ' <span class="backup-auto">automatic</span>' : ''}</div>
+                ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
+                <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
+            </div>
+            <button class="btn btn-small" data-backup-action="restore">Restore</button>
+            <button class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
+        </div>`).join('') || '<div class="hint">No backups yet.</div>';
+}
+
+async function createBackup() {
+    const button = $('backup-create');
+    button.disabled = true;
+    const data = await api('/api/backups', {method: 'POST', body: {note: $('backup-note').value}});
+    button.disabled = false;
+    if (!data) return;
+    $('backup-note').value = '';
+    renderBackups(data.backups);
+    notify(`Backup made: ${plural(data.backup.cards, 'card')}, ${data.backup.scanned} scanned, ${plural(data.backup.decks, 'deck')}`, 'success');
+}
+
+async function backupAction(row, action) {
+    const id = row.dataset.backup, created = row.dataset.created;
+    if (action === 'restore') {
+        const ok = await confirmDialog({title: `Restore the backup of ${created}?`, confirmText: 'Restore', danger: true,
+            message: 'The collection, the scanned cards and the decks go back to how they were then - everything '
+                + 'changed since is replaced. What you have now is backed up first, so you can go back to it.'});
+        if (!ok) return;
+        const data = await api(`/api/backups/${id}/restore`, {method: 'POST'});
+        if (!data) return loadBackups();  // a backup of the state before may have been made
+        renderBackups(data.backups);
+        notify(`Backup of ${created} restored`, 'success');
+        selected.clear();
+        loadInventory();
+        loadScanned();
+        if (deck) closeDeck();  // the open deck may be gone or different
+        else loadDecks();
+    } else {
+        const ok = await confirmDialog({title: `Delete the backup of ${created}?`, confirmText: 'Delete', danger: true,
+            message: "Your cards are not changed. This can't be undone."});
+        if (!ok) return;
+        const data = await api(`/api/backups/${id}`, {method: 'DELETE'});
+        if (data) renderBackups(data.backups);
+    }
+}
+
+// ============================================================================
 // Decks: builder
 // ============================================================================
 
@@ -1349,6 +1417,17 @@ function bindEvents() {
         document.addEventListener('mouseover', event => showPreview(event.target.closest('[data-image]')));
     }
 
+    // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
+    $('settings-open').addEventListener('click', openSettings);
+    $('settings-close').addEventListener('click', closeSettings);
+    $('backup-create').addEventListener('click', createBackup);
+    $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });
+    $('backup-list').addEventListener('click', event => {
+        const button = event.target.closest('[data-backup-action]');
+        if (button) backupAction(button.closest('[data-backup]'), button.dataset.backupAction);
+    });
+    if (window.location.hash === '#settings') openSettings();
+
     // Overlays: Escape and a click outside close the topmost one
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
@@ -1357,6 +1436,7 @@ function bindEvents() {
         else if ($('capture-modal').classList.contains('show')) closeCaptures();
         else if ($('edit-card-modal').classList.contains('show')) closeEditCard();
         else if ($('printing-modal').classList.contains('show')) closeModal('printing-modal');
+        else if ($('settings-drawer').classList.contains('show')) closeSettings();
         else closeModal('deck-modal');
     });
     window.addEventListener('click', event => {
@@ -1366,6 +1446,7 @@ function bindEvents() {
         else if (event.target === $('edit-card-modal')) closeEditCard();
         else if (event.target === $('deck-modal')) closeModal('deck-modal');
         else if (event.target === $('printing-modal')) closeModal('printing-modal');
+        else if (event.target === $('settings-drawer')) closeSettings();
     });
 }
 

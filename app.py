@@ -177,6 +177,7 @@ from config import Config
 from database import CardDatabase, search_key
 from inventory import InventoryManager
 from decks import DeckManager
+import backups
 from recommendations import Recommendations, Unavailable
 from review import REVIEW_DIR, ReviewQueue
 import games
@@ -885,6 +886,46 @@ def remove_inventory_batch():
     if not added_at:
         return jsonify({'success': False, 'error': 'added_at is missing'}), 400
     return jsonify({'success': True, **inventory_area().remove_batch(games.active().id, added_at)})
+
+
+@app.route('/api/backups', methods=['GET', 'POST'])
+def collection_backups():
+    """The backups of the collection, scanned cards and decks; POST makes one (JSON: note)"""
+    if request.method == 'POST':
+        note = str((request.get_json(silent=True) or {}).get('note') or '')
+        try:
+            made = backups.create(inventory, scan_inventory, deck_store, note)
+        except Exception as e:
+            logger.error(f"Backup failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': f'The backup failed: {e}'}), 500
+        return jsonify({'success': True, 'backup': made, 'backups': backups.list_backups()})
+    return jsonify({'success': True, 'backups': backups.list_backups()})
+
+
+@app.route('/api/backups/<backup_id>/restore', methods=['POST'])
+def restore_backup(backup_id):
+    """Put the collection, scanned cards and decks back as in a backup (the current state is backed up first)"""
+    try:
+        result = backups.restore(backup_id, inventory, scan_inventory, deck_store)
+    except backups.BackupError as e:
+        logger.error(f"Restoring backup {backup_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Restoring backup {backup_id} failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': f'The restore failed: {e}'}), 500
+    log_to_client(f"Backup of {result['restored']['created']} restored", level="success")
+    # Every open page shows the restored cards
+    socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(games.active().id)}, namespace='/')
+    return jsonify({'success': True, **result, 'backups': backups.list_backups()})
+
+
+@app.route('/api/backups/<backup_id>', methods=['DELETE'])
+def delete_backup(backup_id):
+    try:
+        backups.delete(backup_id)
+    except backups.BackupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 404
+    return jsonify({'success': True, 'backups': backups.list_backups()})
 
 
 @app.route('/api/export_inventory/<fmt>')

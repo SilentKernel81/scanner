@@ -45,6 +45,7 @@ Design choices:
 | Module | Responsibility |
 |---|---|
 | `app.py` | Flask + Socket.IO server: routes, events, capture orchestration, AI worker queue |
+| `backups.py` | Backups of the collection, the scanned cards and the decks, made and restored on the collection page |
 | `scanner.py` | Camera (USB via OpenCV/V4L2 or Pi camera), capture thread, detection state, stability, auto-capture |
 | `object_detector.py` | Outline detection (`find_card_outline`), perspective warp (`warp_card`), optional YOLO fallback |
 | `card_ocr.py`, `ocr/server.mjs` | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
@@ -728,6 +729,26 @@ at the same `added_at` (two in one second, a file with repeated rows) add up in
 moved back to the scanner. Both columns are added on startup (`ALTER TABLE`; `added_at` starts
 as the scan time).
 
+### Backups
+
+The gear button opens the page's settings drawer (`/collection#settings` opens it directly; the
+scanner's drawer links there, and this one links to `/#settings` for camera, AI and sound).
+**Back up now** (`POST /api/backups`, `backups.create`) writes `data/backups/<date_time>/`:
+`backup.db` with plain copies of `inventory` + `inventory_captures` of the collection
+(`collection_*`) and of the scanned cards (`scanned_*`), `decks`, `deck_cards` and an `info`
+row (time, note, counts) - every game - and `captures/`, hard links to the thumbnails those
+entries point at (no extra space; they survive the app deleting its own). It is written to a
+`.tmp` folder and moved into place, under the three managers' locks.
+
+**Restore** (`POST /api/backups/<id>/restore`, `backups.restore`) first makes an automatic
+backup of the current state ("Before restoring ...", the last 5 are kept), then replaces the
+rows of each table (the columns the backup has; row ids are kept) and links missing
+thumbnails back. Collection, scanned cards and decks are committed one after the other - the
+collection and the decks are two connections to one file - so a failure part way leaves the
+earlier parts restored; the automatic backup has the state from before. Every page reloads its
+inventory (`inventory_updated`). Card data, the review queue and settings are not part of
+these backups: `scripts/backup.sh` archives all of `data/`.
+
 `/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
 game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
 and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.
@@ -857,7 +878,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
-| `data/backups/` | Copies of the inventory table made before a migration rebuilds it |
+| `data/backups/` | Backups made on the collection page (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
 | `data/scan_inventory.db` | Cards scanned and not yet added to the collection |
 | `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |

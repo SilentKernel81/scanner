@@ -291,6 +291,12 @@ you have scanned and to build decks. It works on a phone too.
   **Remove this batch** to take exactly those copies back out (copies you had before stay).
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
+- **Backups** - the gear button opens Settings: **Back up now** keeps your collection, the
+  scanned cards and your decks as they are (with an optional note) - do it before a big load,
+  like adding a pile of scanned cards or importing a file. **Restore** puts all three back as
+  they were; what you had at that moment is backed up first, so a restore can be taken back.
+  Card data and settings are not part of these backups (`scripts/backup.sh` archives
+  everything).
 
 Deck building needs card data downloaded with this version: the Decks tab offers
 **Update card database** when it is missing.
@@ -409,6 +415,7 @@ card_ocr.py, ocr/    OCR first: light-ocr reader (Node.js) and the parser for wh
 card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings
+backups.py           Backups of the collection, scanned cards and decks (collection page)
 games/               Card games: base.py (interface), mtg.py (Magic), pokemon.py (Pokémon)
 card_search.py       Magic search helpers
 inventory.py         Inventory storage, locations and tags, stats, import/export
@@ -447,6 +454,8 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/inventory/bulk` | One change to several entries (JSON: `ids`, `action`: `delete` / `condition` / `location` / `add_tag` / `remove_tag`, `value`) |
 | `POST /api/scan_location` | Inventory location for the cards scanned next (JSON: `location`) |
 | `GET /api/cards/search` | Deck builder card search (`q`, `type`, `text`, `cmc`, `rarity`, `colors`, `identity`, `format`, `owned`, `offset`) |
+| `GET /api/backups`, `POST /api/backups` | List the backups of the collection, scanned cards and decks; make one (JSON: `note`) |
+| `POST /api/backups/<id>/restore`, `DELETE /api/backups/<id>` | Put all three back as in a backup (the current state is backed up first); delete a backup |
 | `GET /api/decks`, `POST /api/decks` | List decks; create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
 | `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned and issues; rename / change format; delete |
 | `POST /api/decks/<id>/cards` | Change cards (JSON: `cards`: `name`, `board`, and `change`, `quantity`, `move_to` or `printing`) |

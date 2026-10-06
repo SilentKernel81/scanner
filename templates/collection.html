@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=8">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -26,6 +26,7 @@
         <a class="btn btn-small" href="{{ url_for('index') }}" title="Back to scanning">
             <svg class="icon"><use href="#i-camera"/></svg> Scanner
         </a>
+        <button class="icon-btn" id="settings-open" title="Settings and backups"><svg class="icon"><use href="#i-settings"/></svg></button>
     </header>
 
     <main class="container collection">
@@ -333,12 +334,38 @@
         </div>
     </div>
 
+    <!-- Settings drawer: backups here; camera, AI and sound are set on the scanner page -->
+    <div id="settings-drawer" class="drawer">
+        <aside class="drawer-panel">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="close" id="settings-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Backups</h3>
+                    <div class="hint">Your collection, the scanned cards and your decks as they are now. Make one before a big load (adding scanned cards, importing a file) - restoring it puts all three back.</div>
+                    <div class="model-row backup-new">
+                        <input type="text" id="backup-note" class="text-input" maxlength="80" placeholder="Note (optional)" autocomplete="off">
+                        <button class="btn btn-primary" id="backup-create">Back up now</button>
+                    </div>
+                    <div id="backup-list" class="backup-list"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Scanner</h3>
+                    <a class="btn btn-block" href="{{ url_for('index') }}#settings">Camera, AI, sound and card database</a>
+                    <div class="hint">These settings are on the scanner page</div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
     <!-- Card image beside the row under the mouse -->
     <img id="card-preview" class="card-preview" alt="" hidden>
 
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=9"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=10"></script>
 </body>
 </html>

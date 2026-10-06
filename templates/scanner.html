@@ -288,6 +288,12 @@
                     <button id="rebuild-database-btn" onclick="rebuildDatabase()" class="btn btn-block">Rebuild database schema</button>
                     <div class="hint">Reorders columns and rebuilds indexes (~30 sec)</div>
                 </div>
+
+                <div class="settings-section">
+                    <h3>Backups</h3>
+                    <a class="btn btn-block" href="{{ url_for('collection') }}#settings">Back up or restore your cards</a>
+                    <div class="hint">The collection, the scanned cards and the decks - on the collection page</div>
+                </div>
             </div>
         </aside>
     </div>
@@ -368,6 +374,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=37"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=38"></script>
 </body>
 </html>

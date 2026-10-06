@@ -2131,7 +2131,11 @@ function openSettings() {
 
 function closeSettings() {
     document.getElementById('settings-drawer').classList.remove('show');
+    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
 }
+
+// The collection page's settings link here (/#settings)
+if (window.location.hash === '#settings') openSettings();
 
 // Close the topmost overlay with Escape
 document.addEventListener('keydown', function(event) {
