@@ -129,8 +129,9 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    set line): fit a line to the edges along each side of the
    previous outline (within 6 px at 640 px, corner zones left out) and intersect them. The
    result is kept if it is card-shaped, within 15% of the previous size, has edges along ≥ 80%
-   of its perimeter and moved ≤ 2% (more means it was fitted to another edge, e.g. the inner
-   frame of a blurry card - taking it made the outline flip); otherwise it is only a last
+   of its perimeter, moved ≤ 2% (more means it was fitted to another edge, e.g. the inner
+   frame of a blurry card - taking it made the outline flip) and is a rectangle (step 6) - one
+   that moved ≤ 2% but is skewed keeps the previous outline as it was; otherwise it is only a last
    resort after steps 1-5. On a sleeved pile the top card's outline often merges with the
    edge of a card underneath or with the box's corner crease once the pile is high - then no
    closed contour exists (in recorded pile frames the detector found nothing in most frames
@@ -171,11 +172,18 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    its perimeter. On 100 recorded frames it found only that card (no false detection on empty
    boxes, piles or screenshots); it costs ~5 ms more on frames where it runs.
 6. **Rectangle check** for the outlines of steps 0 and 5, which are built from edge pieces or
-   fitted lines: opposite sides within 8% of each other and corners within 8° of square (the
+   fitted lines: opposite sides within 4% of each other and corners within 3° of square (the
    camera looks straight down). A holo Pokémon card (N's Zoroark ex) once gave a skewed outline
    whose "top edge" was a streak of the holo art running from the name to the top-right corner,
    and the photo lost the card name. Rejected outlines leave the photo to the other steps or,
-   in fixed area mode, to the area itself. On 1,825 recorded frames the check changed nothing.
+   in fixed area mode, to the area itself. The check was 8% / 8° at first and skipped the
+   followed outline that had moved ≤ 2%: such an outline creeps a little every frame, and a
+   showcase Théoden was photographed with corners of 84° and 94° (top edge 6° off, the name
+   chopped; 2026-10-06). On 400 recorded pile frames, followed outlines that were right were
+   within 2% / 1°, wrong ones 7-15% / 3-7° off; with 4% / 3° none of the skewed ones is left.
+   A skewed followed outline is not dropped but replaced by the previous outline: dropping it
+   left the photo to the other steps, which on a borderless The Shire took the frame inside
+   the card - the outline went back and forth and the same card was captured 9 times (2026-10-06).
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in

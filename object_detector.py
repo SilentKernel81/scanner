@@ -48,8 +48,12 @@ def side_middles(corners):
     return (corners + np.roll(corners, -1, axis=0)) / 2
 
 
-def _is_rectangular(corners, side_tolerance=0.08, angle_tolerance=8):
-    """Opposite sides about equally long and corners about square (camera looking down)"""
+def _is_rectangular(corners, side_tolerance=0.04, angle_tolerance=3):
+    """
+    Opposite sides about equally long and corners about square (camera looking down). Measured
+    on recorded pile frames: outlines following the card right were within 2% / 1 degree, the
+    ones that had latched onto another edge 7-15% / 3-7 degrees off (and chopped the photo).
+    """
     tl, tr, br, bl = corners
     for first, second in ((tr - tl, br - bl), (bl - tl, br - tr)):
         a, b = np.linalg.norm(first), np.linalg.norm(second)
@@ -270,7 +274,11 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
 
     # Follow the previous card - as a small refinement only: an outline more than 2% away was
     # fitted to another edge (e.g. the card's inner frame on a blurry image), and taking it
-    # would make the result flip between two outlines. Then it is only a last resort.
+    # would make the result flip between two outlines. Then it is only a last resort. It must
+    # be a rectangle too: 2% a frame adds up, and a side that crept onto another edge (the
+    # card below, a frame inside the card) skewed the outline and chopped the photo. A skewed
+    # one keeps the previous outline - going on to the other steps took another outline (the
+    # frame inside a borderless card), and the change looked like a new card, again and again.
     tracked = None
     if previous is not None:
         previous = np.asarray(previous, np.float32) * scale
@@ -278,7 +286,10 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
         if tracked is not None:
             shift = np.linalg.norm(tracked[1] - previous, axis=1).max() / np.linalg.norm(previous[2] - previous[0])
             if shift <= 0.02:
-                return tracked[1] / scale, float(tracked[2])
+                if _is_rectangular(tracked[1]):
+                    return tracked[1] / scale, float(tracked[2])
+                if _is_rectangular(previous):
+                    return previous / scale, 1.0
 
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     min_area = 0.02 * small.shape[0] * small.shape[1]  # card must cover at least 2% of the frame
