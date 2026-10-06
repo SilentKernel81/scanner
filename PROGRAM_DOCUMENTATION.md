@@ -145,7 +145,13 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
 2. Canny edges with thresholds derived from the median brightness, dilated to close gaps.
 3. For each contour covering at least 2% of the frame, fit the minimum-area rectangle and keep
    it if:
-   - its aspect ratio is within 18% of a card's (88 × 63 mm = 1.397),
+   - its aspect ratio is within 8% of a card's (88 × 63 mm = 1.397; settled cards measure
+     1.33-1.37 on the widened edges). It was 18% until a borderless Rivendell, whose name
+     banner runs from side to side, was photographed without its name (2026-10-06): when the
+     card's own outline did not close, the part below the banner (1.18-1.25) was the largest
+     card-shaped outline. On 1,600 recorded frames of that session 104 outlines had that
+     shape at 18% and none at 8%, with an outline in 1,408 frames instead of 1,421; the
+     outline also jumped less between frames (38 → 7 jumps over 5%),
    - the contour fills at least 85% of the rectangle (it really is rectangular),
    - it is portrait - unless `detection.allow_landscape` (a card's landscape art box has
      nearly the card's proportions),

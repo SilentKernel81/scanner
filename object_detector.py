@@ -241,7 +241,7 @@ def _track_outline(raw_edges, edges, gray, previous, allow_landscape, ratio_tole
     return area, corners, 1.0
 
 
-def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_size=640, previous=None):
+def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_size=640, previous=None):
     """
     Find a card by its outline: the largest 4-sided contour with a card's aspect ratio.
 
@@ -253,7 +253,9 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.18, work_s
         frame: RGB image
         allow_landscape: Accept cards lying sideways. Off by default because a
             card's (landscape) art box has nearly the same aspect ratio as a card.
-        ratio_tolerance: Allowed relative deviation from the card aspect ratio
+        ratio_tolerance: Allowed relative deviation from the card aspect ratio. Settled cards
+            measure 1.33-1.37 here (1.397 less the widened edges); at 18% the part of a
+            borderless card below its name banner (1.18-1.25) passed, and the photo lost the name
         work_size: Longest side of the downscaled image used for detection
         previous: The card's corners in the previous frame (frame coordinates), if any - the
             card is then followed along its sides first (see _track_outline)
