@@ -350,7 +350,7 @@ settings.
 | Update card data and prices | Click the Database counter when it shows a dot, **Settings → Update card database** (the game being scanned), or `python3 setup_database.py` (Magic) |
 | Scanned image statistics | `python3 cleanup.py --stats` |
 | Delete old scanned images | `python3 cleanup.py --days 30` (add `--dry-run` to preview, `--all` for everything) |
-| Back up database, inventory, settings, images and `.env` | `scripts/backup.sh` (set `SCANNER_DIR` at the top first) |
+| Back up database, inventory, settings, images and `.env` | `scripts/backup.sh` (can run while the app does) |
 
 Your inventory lives in the same SQLite file as the card data (`data/cards_database.db`,
 table `inventory`); updating the card database does not touch it, and scanning keeps working

@@ -469,11 +469,6 @@ class ObjectDetector:
                 return 0
             return max(width, height) / min(width, height)
 
-        # Helper function to calculate area
-        def get_box_area(box):
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            return (x2 - x1) * (y2 - y1)
-
         # Debug: Print all detections with aspect ratios (only if verbose=True)
         # Set to True in predict_frame() call to enable debugging
         if verbose:

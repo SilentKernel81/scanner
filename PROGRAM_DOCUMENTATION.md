@@ -830,7 +830,7 @@ Socket.IO events:
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
-| `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none) |
+| `set_game` | `game_changed` (to every client; stops auto scanning; downloads the game's card data if it has none). Captures still waiting for the AI keep their game (`game` on the queue item, `game_id` in `route_identified`): they are not looked up as cards of the new game but go, unread, to their own game's review queue |
 
 HTTP endpoints are listed in the README. The collection page adds no Socket.IO events; it only
 listens to the inventory, game and card data events above (and sends `update_database`).

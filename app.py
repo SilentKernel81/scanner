@@ -299,12 +299,23 @@ def queue_for_review(game, image_path, name='', number='', set_code='', foil='un
 
 
 def route_identified(image_path, card_name, collector_number, set_code, processing_time=None, foil='unknown',
-                     fast=False, reader=None):
+                     fast=False, reader=None, game_id=None):
     """
     After the AI (or OCR - reader says which read the card): look the card up and add it automatically, show it, or queue it for review.
     While a review is open, a card captured meanwhile (manual capture, auto scanning without
     automatic adds) waits in the queue instead of taking the reviewed card's place and capture.
+    game_id: the game being scanned when the card was captured.
     """
+    if game_id and game_id != games.active_id():
+        # The game was switched while this capture waited for (or was with) the AI: it is not
+        # looked up as a card of the other game - it waits in its own game's review queue,
+        # without what was read (the prompt and parser may have been the other game's)
+        review.add(game_id, image_path, foil=foil)
+        log_to_client(f"Captured before the game was switched: kept in the {games.get(game_id).label} review queue",
+                      level="warning")
+        if scanner:
+            scanner.card_under_review = False
+        return
     reviewing = current_review_id is not None
     if not fast and not reviewing:
         set_pending_capture(image_path)
@@ -437,9 +448,12 @@ def ai_processing_worker():
 
             logger.info(f"AI worker processing card #{card_number} (queue size: {ai_processing_queue.qsize()})")
 
-            # Run AI identification (this is the slow part - 13-36 seconds)
+            # Run AI identification (this is the slow part - 13-36 seconds) - not for a
+            # capture of the game scanned before a switch (see route_identified)
             start_time = time.time()
-            card_info = scanner.identify_card_from_image(card_image_rgb, item['foil_image'])
+            card_info = None
+            if item['game'] == games.active_id():
+                card_info = scanner.identify_card_from_image(card_image_rgb, item['foil_image'])
             processing_time = time.time() - start_time
 
             # Extract card info
@@ -467,7 +481,7 @@ def ai_processing_worker():
             }, namespace='/')
 
             route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
-                             fast=was_fast_scan_mode, reader=(card_info or {}).get('reader'))
+                             fast=was_fast_scan_mode, reader=(card_info or {}).get('reader'), game_id=item['game'])
 
             # In Fast Scan Mode, scanner is already ready for next capture
             # In Normal Mode, card awaits user review
@@ -597,7 +611,8 @@ def initialize_components():
                     'card_image': card_image_rgb,
                     'image_path': image_path,
                     'foil_image': foil_image,
-                    'fast_scan_mode': True
+                    'fast_scan_mode': True,
+                    'game': games.active_id(),  # a switch before the AI gets to it: see route_identified
                 })
 
                 # Immediately clear the review flag to allow next capture after cooldown
@@ -610,6 +625,7 @@ def initialize_components():
             # ========================================================================
             else:
                 # Synchronous capture with AI processing (blocks until AI completes)
+                game_id = games.active_id()
                 image_path, card_image_rgb, foil_image = scanner.capture_card_image_only(current_capture_number, settle=0)
                 announce_capture(taken=bool(image_path))
                 vision_ai_result = scanner.identify_card_from_image(card_image_rgb, foil_image) if image_path else None
@@ -647,7 +663,7 @@ def initialize_components():
                 }, namespace='/')
 
                 route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
-                                 reader=(vision_ai_result or {}).get('reader'))
+                                 reader=(vision_ai_result or {}).get('reader'), game_id=game_id)
 
                 # Normal mode: card awaits user review (card_under_review stays True)
                 logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
@@ -1672,6 +1688,7 @@ def handle_capture(data):
     try:
         # Manual capture works regardless of detection state
         # If no card detected, captures full frame
+        game_id = games.active_id()
         image_path, vision_ai_result = scanner.capture_card_image(card_number)
 
         if not image_path:
@@ -1703,7 +1720,7 @@ def handle_capture(data):
         emit('card_captured', result)
 
         route_identified(image_path, card_name, collector_number, set_code, processing_time, foil_status,
-                         reader=(vision_ai_result or {}).get('reader'))
+                         reader=(vision_ai_result or {}).get('reader'), game_id=game_id)
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")

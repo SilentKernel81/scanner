@@ -38,15 +38,56 @@ mkdir -p "$BACKUP_DIR"
 
 print_info "Creating backup..."
 
-# Create backup archive
-tar -czf "$BACKUP_DIR/$BACKUP_FILE" \
+if [ -e "$BACKUP_DIR/$BACKUP_FILE" ]; then
+    echo "Error: $BACKUP_DIR/$BACKUP_FILE exists already" >&2
+    exit 1
+fi
+
+STAGING=$(mktemp -d)
+trap 'rm -rf "$STAGING"' EXIT
+
+fail() {
+    echo "Error: $1 - no backup was made, the older backups are kept" >&2
+    rm -f "$BACKUP_DIR/$BACKUP_FILE" "$BACKUP_DIR/${BACKUP_FILE%.gz}"
+    exit 1
+}
+
+# The databases may be in use (the app writes them in WAL mode): archive a consistent
+# snapshot of each instead of the live files
+mkdir -p "$STAGING/data"
+for db in data/*.db; do
+    [ -f "$db" ] || continue
+    python3 - "$db" "$STAGING/$db" <<'PYTHON' || fail "could not snapshot $db"
+import sqlite3, sys
+source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=30)
+target = sqlite3.connect(sys.argv[2])
+source.backup(target)
+if target.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+    sys.exit(1)
+PYTHON
+done
+
+# What exists of: data/ (without the live database files and logs), the scanned images and
+# the API keys - then the snapshots in the databases' place
+PARTS=()
+[ -d data ] && PARTS+=(data)
+[ -d scanned_cards ] && PARTS+=(scanned_cards)
+[ -f .env ] && PARTS+=(.env)
+[ ${#PARTS[@]} -gt 0 ] || fail "nothing to back up in $SCANNER_DIR"
+
+ARCHIVE="$BACKUP_DIR/${BACKUP_FILE%.gz}"
+trap 'rm -rf "$STAGING" "$ARCHIVE"' EXIT
+tar -cf "$ARCHIVE" \
     --exclude='data/logs' \
-    --exclude='venv' \
+    --exclude='data/*.db' \
+    --exclude='data/*.db-wal' \
+    --exclude='data/*.db-shm' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
-    data/ \
-    scanned_cards/ \
-    .env 2>/dev/null || true
+    "${PARTS[@]}" || fail "tar failed"
+tar -rf "$ARCHIVE" -C "$STAGING" data || fail "tar failed (database snapshots)"
+gzip "$ARCHIVE" || fail "compressing the archive failed"
+tar -tzf "$BACKUP_DIR/$BACKUP_FILE" > /dev/null || fail "the archive cannot be read back"
 
 # Get backup size
 BACKUP_SIZE=$(du -h "$BACKUP_DIR/$BACKUP_FILE" | cut -f1)

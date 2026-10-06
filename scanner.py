@@ -1244,15 +1244,6 @@ class CardScanner:
                 self.log(f"Error capturing frame: {e}", level="error")
                 time.sleep(0.1)
     
-    def get_frame(self, annotated=True):
-        """Get current frame for streaming"""
-        with self.frame_lock:
-            if annotated and self.annotated_frame is not None:
-                return self.annotated_frame.copy()
-            elif self.current_frame is not None:
-                return self.current_frame.copy()
-        return None
-
     def get_full_frame(self):
         """Current frame at full camera resolution (RGB) - for captures"""
         with self.frame_lock:

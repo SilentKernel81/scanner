@@ -130,7 +130,9 @@ missing - see the logs).
 ## Backups
 
 `scripts/backup.sh` archives `data/` (card database, inventory, settings), the scanned images
-and `.env` to `~/scanner-backups/`, keeping the last 10. Your inventory lives in
+and `.env` to `~/scanner-backups/`, keeping the last 10. It can run while the app does (the
+databases are archived as consistent snapshots); if anything fails it says so, makes no
+backup and keeps the older ones. Your inventory lives in
 `data/cards_database.db`.
 
 ## Uninstalling

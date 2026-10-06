@@ -3,7 +3,8 @@
 # User preferences and settings persistence
 # ============================================================================
 import json
-from pathlib import Path
+import os
+import threading
 from config import Config
 
 
@@ -26,6 +27,7 @@ class Settings:
     }
 
     def __init__(self):
+        self._lock = threading.Lock()  # settings are saved from several threads
         self.settings = self._load_settings()
 
     def _load_settings(self):
@@ -52,8 +54,15 @@ class Settings:
             # Ensure data directory exists
             Config.DATA_DIR.mkdir(exist_ok=True)
 
-            with open(self.SETTINGS_FILE, 'w') as f:
-                json.dump(settings, f, indent=4)
+            # Written beside the file and moved into place: a crash while writing must not
+            # leave a cut-off file (which would load as the defaults)
+            temporary = self.SETTINGS_FILE.with_suffix('.json.tmp')
+            with self._lock:
+                with open(temporary, 'w') as f:
+                    json.dump(settings, f, indent=4)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary, self.SETTINGS_FILE)
         except Exception as e:
             print(f"Error saving settings: {e}")
 
@@ -79,7 +88,3 @@ class Settings:
         self.settings['ai_provider'] = provider
         self.settings['ai_model'] = model
         self._save_settings(self.settings)
-
-    def get_all(self):
-        """Get all settings"""
-        return self.settings.copy()
