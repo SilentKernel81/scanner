@@ -667,6 +667,7 @@ function loadScanSettings() {
             $('toggle-fast-scan').checked = data.auto_add;
             $('toggle-autofocus').checked = data.autofocus;
             applyOcrState(data.ocr_first, data.ocr_installed);
+            $('toggle-debug-trace').checked = Boolean(data.debug_trace);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             $('camera-rotation').value = String(data.camera_rotation || 0);
             $('scan-location').value = data.scan_location || '';

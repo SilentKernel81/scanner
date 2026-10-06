@@ -2199,6 +2199,7 @@ def get_scan_settings():
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
         'ocr_first': bool(scanner.ocr_enabled) if scanner else True,
         'ocr_installed': CardOcr.installed(),
+        'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
@@ -2247,7 +2248,7 @@ def handle_toggle_ocr(data):
 
 @socketio.on('toggle_debug_trace')
 def handle_toggle_debug_trace(data):
-    """Toggle debug trace logging on/off"""
+    """Toggle debug trace logging on/off (remembered)"""
     global scanner
 
     if not scanner:
@@ -2255,8 +2256,9 @@ def handle_toggle_debug_trace(data):
         emit('error', {'message': 'Scanner not initialized'})
         return
 
-    enabled = data.get('enabled', False)
+    enabled = bool(data.get('enabled', False))
     scanner.debug_trace_enabled = enabled
+    scanner.settings.set('debug_trace', enabled)
     emit('debug_trace_toggled', {'enabled': enabled})
     logger.info(f"Debug trace toggled: {enabled}")
 

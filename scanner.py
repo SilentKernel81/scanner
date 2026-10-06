@@ -157,7 +157,7 @@ class CardScanner:
 
         # Detection settings
         self.enable_detection = True  # Toggle auto-detection
-        self.debug_trace_enabled = False  # Toggle debug trace logging
+        self.debug_trace_enabled = bool(self.settings.get('debug_trace', False))  # Toggle debug trace logging
         # Debug trace also records problem moments: the last 3 s of frames (640 px, what the
         # outline detector works on) are saved to data/debug_frames/ when a card waits > 2 s
         # or a "new card" shows up < 2 s after a capture
