@@ -539,6 +539,7 @@ def initialize_components():
     inventory = InventoryManager(log_callback=log_to_client)
     # Scanned cards wait in their own file: clearing them never touches the collection
     scan_inventory = InventoryManager(db_file=SCAN_INVENTORY_FILE, log_callback=log_to_client)
+    inventory.finish_interrupted_moves(scan_inventory)  # an "Add to collection" cut short by a crash
     review = ReviewQueue()
     deck_store = DeckManager()
     recommend = Recommendations()

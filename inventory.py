@@ -76,6 +76,13 @@ UPSERT = '''
 '''
 
 
+# A move to the collection that is under way (take_from): noted in the inventory it moves from,
+# and - in the commit that brings the cards - in the one it moves to
+PENDING_MOVES_TABLE = ('CREATE TABLE IF NOT EXISTS pending_moves '
+                       '(game TEXT PRIMARY KEY, move_id TEXT NOT NULL, added_at TEXT NOT NULL)')
+ARRIVED_MOVES_TABLE = 'CREATE TABLE IF NOT EXISTS arrived_moves (move_id TEXT PRIMARY KEY)'
+
+
 def now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -604,29 +611,84 @@ class InventoryManager:
         added_at = now()  # one time for the whole batch (the collection page can filter by it)
         with self._lock, source._lock:
             rows = source.conn.execute('SELECT * FROM inventory WHERE game = ? ORDER BY id', (game,)).fetchall()
-            for row in rows:
-                values = dict(row)
-                values.pop('id')
-                values['added_at'] = added_at
-                self.conn.execute(UPSERT, values)
-                target = self.conn.execute(
-                    f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
-                    [values[c] for c in KEY_COLUMNS]).fetchone()['id']
-                self._add_tags(target, values['tags'])
-                for capture in source.conn.execute(
-                        'SELECT file, captured_at FROM inventory_captures WHERE inventory_id = ? ORDER BY id', (row['id'],)):
-                    self.conn.execute('INSERT INTO inventory_captures (inventory_id, file, captured_at) VALUES (?, ?, ?)',
-                                      (target, capture['file'], capture['captured_at']))
-            self.conn.commit()
-            # Here first, then gone there. The capture rows go without their files, which moved
-            source.conn.execute('DELETE FROM inventory_captures WHERE inventory_id IN '
-                                '(SELECT id FROM inventory WHERE game = ?)', (game,))
-            source.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
+            if not rows:
+                return {'entries': 0, 'cards': 0}
+            # Two files, two commits: the move is noted in the source first, so a crash between
+            # them is finished on the next start instead of leaving the cards in both
+            # (finish_interrupted_moves)
+            move_id = uuid.uuid4().hex
+            source.conn.execute(PENDING_MOVES_TABLE)
+            source.conn.execute('INSERT OR REPLACE INTO pending_moves (game, move_id, added_at) VALUES (?, ?, ?)',
+                                (game, move_id, added_at))
             source.conn.commit()
-            source.last_added = None
+            try:
+                self.conn.execute(ARRIVED_MOVES_TABLE)
+                self.conn.execute('INSERT INTO arrived_moves (move_id) VALUES (?)', (move_id,))
+                for row in rows:
+                    values = dict(row)
+                    values.pop('id')
+                    values['added_at'] = added_at
+                    self.conn.execute(UPSERT, values)
+                    target = self.conn.execute(
+                        f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+                        [values[c] for c in KEY_COLUMNS]).fetchone()['id']
+                    self._add_tags(target, values['tags'])
+                    for capture in source.conn.execute(
+                            'SELECT file, captured_at FROM inventory_captures WHERE inventory_id = ? ORDER BY id', (row['id'],)):
+                        self.conn.execute('INSERT INTO inventory_captures (inventory_id, file, captured_at) VALUES (?, ?, ?)',
+                                          (target, capture['file'], capture['captured_at']))
+                self.conn.commit()
+            except Exception:
+                # Nothing arrived here: the cards stay where they were
+                self.conn.rollback()
+                source.conn.execute('DELETE FROM pending_moves WHERE game = ?', (game,))
+                source.conn.commit()
+                raise
+            self._remove_moved(source, game)
+            self.conn.execute('DELETE FROM arrived_moves WHERE move_id = ?', (move_id,))
+            self.conn.commit()
         moved = {'entries': len(rows), 'cards': sum(row['quantity'] for row in rows)}
         self.log(f"Added to the collection: {moved['cards']} cards ({moved['entries']} entries)", level="success")
         return moved
+
+    @staticmethod
+    def _remove_moved(source, game):
+        """Second half of take_from: the cards are in the collection, so they go from the
+        source - with the note of the move, in one commit. The capture rows go without their
+        files, which moved"""
+        source.conn.execute('DELETE FROM inventory_captures WHERE inventory_id IN '
+                            '(SELECT id FROM inventory WHERE game = ?)', (game,))
+        source.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
+        source.conn.execute('DELETE FROM pending_moves WHERE game = ?', (game,))
+        source.conn.commit()
+        source.last_added = None
+
+    def finish_interrupted_moves(self, source):
+        """
+        On startup: a take_from the app did not get through (crash, power cut). If its cards
+        arrived here (the move's id is in arrived_moves - committed together with them) they
+        are removed from the source; otherwise nothing was moved and only the note goes.
+        Returns the games whose move was finished.
+        """
+        finished = []
+        with self._lock, source._lock:
+            source.conn.execute(PENDING_MOVES_TABLE)
+            self.conn.execute(ARRIVED_MOVES_TABLE)
+            for move in source.conn.execute('SELECT game, move_id, added_at FROM pending_moves').fetchall():
+                arrived = self.conn.execute('SELECT 1 FROM arrived_moves WHERE move_id = ?', (move['move_id'],)).fetchone()
+                if arrived:
+                    self._remove_moved(source, move['game'])
+                    finished.append(move['game'])
+                    self.log(f"Finished the interrupted \"Add to collection\" of {move['added_at']}: "
+                             "the cards were in the collection already, removed from the scanned cards", level="warning")
+                else:
+                    source.conn.execute('DELETE FROM pending_moves WHERE game = ?', (move['game'],))
+                    source.conn.commit()
+                    self.log(f"An \"Add to collection\" of {move['added_at']} was interrupted before any card "
+                             "was moved: the scanned cards are still waiting", level="warning")
+            self.conn.execute('DELETE FROM arrived_moves')  # nothing is under way any more
+            self.conn.commit()
+        return finished
 
     def remove_batch(self, game, added_at):
         """

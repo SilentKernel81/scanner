@@ -712,7 +712,14 @@ the collection. **Add to collection** (`POST /api/scan_inventory/to_collection`,
 `InventoryManager.take_from`) moves every scanned entry of the active game into the collection
 (`inventory` in `cards_database.db`): entries that exist there get the copies added, tags are
 joined, and the capture thumbnails follow (their rows move, the files stay). It commits the
-collection first and then empties the scanned cards. Decks, statistics and "owned" only look at
+collection first and then empties the scanned cards - two files, so two commits. A crash
+between them must not leave the cards in both (a second "Add to collection" would double
+them): the move is first noted in the scanned cards' file (`pending_moves`: game, a move id),
+the id is written to the collection (`arrived_moves`) in the commit that brings the cards, and
+the note goes in the commit that empties the scanned cards. On startup
+`finish_interrupted_moves` finishes a move whose id arrived and drops the note of one that
+did not (the scanned cards are then still waiting). An error while copying rolls the
+collection back. Decks, statistics and "owned" only look at
 the collection; the collection page shows a notice while scanned cards are waiting.
 
 Every entry records `added_at` - when it came into its inventory; one time for all entries of
