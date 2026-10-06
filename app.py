@@ -2758,6 +2758,12 @@ def main():
 
     logger.info(f"Starting Flask server on {Config.HOST}:{Config.PORT}")
 
+    # Flask's own two start lines (" * Serving Flask app", " * Debug mode") repeat what the
+    # banner above says
+    import flask.cli
+    flask.cli.show_server_banner = lambda *args, **kwargs: None
+    sys.stdout.flush()  # those lines used to flush the banner when the output is not a terminal (the service's journal)
+
     try:
         # Start Flask app with SocketIO
         socketio.run(
