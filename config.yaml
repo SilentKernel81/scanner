@@ -39,11 +39,6 @@ detection:
     min_area: 56000
     max_area: 4000000  # Increased for close-up cards
 
-# Anti-glare Settings (for foil/reflective cards)
-anti_glare:
-  enabled: false
-  method: adaptive  # Options: 'adaptive', 'clahe', 'inpaint'
-
 # Auto-capture Settings (now controlled via UI button)
 auto_capture:
   delay: 1.0  # Minimum seconds between auto-captures (the next capture also waits until the card is swapped)

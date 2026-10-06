@@ -157,7 +157,6 @@ class CardScanner:
 
         # Detection settings
         self.enable_detection = True  # Toggle auto-detection
-        self.anti_glare_enabled = Config.ANTI_GLARE_ENABLED  # Toggle anti-glare preprocessing
         self.debug_trace_enabled = False  # Toggle debug trace logging
         # Debug trace also records problem moments: the last 3 s of frames (640 px, what the
         # outline detector works on) are saved to data/debug_frames/ when a card waits > 2 s
@@ -186,9 +185,6 @@ class CardScanner:
         min_ratio = self.card_aspect_ratio_target * (1 - self.aspect_ratio_tolerance)
         max_ratio = self.card_aspect_ratio_target * (1 + self.aspect_ratio_tolerance)
         self.log(f"Aspect ratio detection: {min_ratio:.2f}-{max_ratio:.2f} (tolerance: {self.aspect_ratio_tolerance*100:.0f}%)", level="info")
-
-        # Anti-glare preprocessing (user-toggleable via web interface)
-        self.log(f"Anti-glare preprocessing: {('enabled' if Config.ANTI_GLARE_ENABLED else 'disabled')} by default (toggle in UI for foil cards)", level="info")
 
         # Bounding box smoothing to eliminate flicker
         self.smoothed_bbox = None  # Smoothed bounding box coordinates
@@ -995,7 +991,6 @@ class CardScanner:
 
                 elif self.enable_detection:
                     # Run detection on raw frame for better performance
-                    # Anti-glare is only applied during capture if enabled
                     # Follow the card of the previous frame (or of the last one, across a detector
                     # hiccup of up to 2 frames)
                     bounding_box, card_name, confidence, corners = self.object_detector.detect(
@@ -1353,23 +1348,16 @@ class CardScanner:
         else:
             self.log(f"Using detected card crop ({card_image.shape[1]}x{card_image.shape[0]}px)", level="info")
 
-        # Apply anti-glare preprocessing if enabled (for foil/glossy cards)
-        card_image_final = card_image
-        if self.anti_glare_enabled:
-            self.log("Applying anti-glare preprocessing for foil card...")
-            from anti_glare import reduce_glare_adaptive
-            card_image_final = reduce_glare_adaptive(card_image)
-
         # Save image
         timestamp = int(time.time())
         image_path = Config.IMAGES_DIR / f"card_{card_number}_{timestamp}.jpg"
 
-        card_bgr = cv2.cvtColor(card_image_final, cv2.COLOR_RGB2BGR)
+        card_bgr = cv2.cvtColor(card_image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(image_path), card_bgr)
 
-        self.last_capture = (card_image_final, foil_image)
+        self.last_capture = (card_image, foil_image)
         self.log(f"Card captured: {image_path.name}")
-        return image_path, card_image_final, foil_image
+        return image_path, card_image, foil_image
 
     def identify_card_from_image(self, card_image_rgb, foil_image=None):
         """
@@ -1640,11 +1628,6 @@ class CardScanner:
         """Enable or disable card detection"""
         self.enable_detection = enabled
         self.log(f"Card detection {'enabled' if enabled else 'disabled'}")
-
-    def set_anti_glare_enabled(self, enabled):
-        """Enable or disable anti-glare preprocessing"""
-        self.anti_glare_enabled = enabled
-        self.log(f"Anti-glare preprocessing {'enabled' if enabled else 'disabled'}")
 
     def set_ocr_enabled(self, enabled):
         """Read cards with light-ocr before asking the vision AI (remembered)"""

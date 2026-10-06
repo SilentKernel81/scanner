@@ -1780,7 +1780,6 @@ function setupScanToggles() {
     onToggle('toggle-autofocus', enabled => socket.emit('set_autofocus', {enabled: enabled}));
     // Read cards with light-ocr before asking the vision AI
     onToggle('toggle-ocr', enabled => socket.emit('toggle_ocr', {enabled: enabled}));
-    onToggle('toggle-anti-glare', enabled => socket.emit('toggle_anti_glare', {enabled: enabled}));  // the server logs the change
     onToggle('toggle-debug-trace', enabled => {
         socket.emit('toggle_debug_trace', {enabled: enabled});
         addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);

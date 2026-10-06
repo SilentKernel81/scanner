@@ -2236,23 +2236,6 @@ def handle_toggle_ocr(data):
     emit('ocr_toggled', {'enabled': scanner.ocr_enabled, 'installed': CardOcr.installed()})
 
 
-@socketio.on('toggle_anti_glare')
-def handle_toggle_anti_glare(data):
-    """Toggle anti-glare preprocessing on/off"""
-    global scanner
-
-    if not scanner:
-        logger.error("Toggle anti-glare requested but scanner not initialized")
-        emit('error', {'message': 'Scanner not initialized'})
-        return
-
-    enabled = data.get('enabled', False)
-    scanner.set_anti_glare_enabled(enabled)
-    emit('anti_glare_toggled', {'enabled': enabled})
-    logger.info(f"Anti-glare toggled: {enabled}")
-    # Log message sent by scanner.set_anti_glare_enabled()
-
-
 @socketio.on('toggle_debug_trace')
 def handle_toggle_debug_trace(data):
     """Toggle debug trace logging on/off"""

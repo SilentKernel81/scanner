@@ -51,8 +51,7 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
 - **Inventory** with automatic duplicate merging, condition, regular / foil / surge foil,
   prices, filtering, sorting, editing, CSV import, and export to CSV or
   [Moxfield](https://moxfield.com).
-- **Anti-glare** preprocessing option for reflective cards, sound effects, and a
-  dark/light interface that follows your system theme.
+- Sound effects, and a dark/light interface that follows your system theme.
 - **Housekeeping** - scanned images older than 7 days are cleaned up automatically. The app
   checks for newer card data when it starts (and daily) and marks the Database counter with
   a dot; click it to update.
@@ -318,7 +317,7 @@ Deck building needs card data downloaded with this version: the Decks tab offers
   camera's continuous autofocus.
 - **Camera sideways** gives more detail and a taller pile: the card's long side then runs along
   the image's long side. Set **Settings → Camera rotation** so the card shows upright.
-- **Light** evenly from above; the **Anti-glare** option helps with reflective foils.
+- **Light** evenly from above, so reflective foils don't glare.
 - Cards printed before the ★/• convention (roughly before 2020) have no foil marker; for
   those, set the finish yourself when both versions exist.
 
@@ -338,7 +337,6 @@ Settings live in `config.yaml`. The most useful ones:
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
 | `auto_capture.refocus_every` | `3` | Every this many captures, check if a focus one step away is sharper and follow it; `0` = off |
 | `fast_scan.stability_frames` | `6` | Same, when adding cards automatically (~0.3 s, lets a dropped sleeved card stop sliding) |
-| `anti_glare.enabled` | `false` | Default for the anti-glare toggle |
 | `camera.rotate` | `0` | Rotate the image (0/90/180/270) for a camera mounted sideways - also in Settings |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
 | `vision_ai.detect_foil` | `true` | Read the ★/• foil marker |
@@ -423,7 +421,6 @@ card_search.py       Magic search helpers
 inventory.py         Inventory storage, locations and tags, stats, import/export
 decks.py             Decks (lists of cards; the inventory says what is owned)
 recommendations.py   Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield (cached)
-anti_glare.py        Glare reduction for reflective cards
 cleanup.py           Scanned image cleanup (also a CLI)
 setup_database.py    Downloads and builds the card database
 config.yaml          Settings (loaded by config.py / config_loader.py)

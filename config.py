@@ -52,10 +52,6 @@ class Config:
     CARD_MIN_AREA = config.get('detection', 'card_size_filter', 'min_area', default=56000)
     CARD_MAX_AREA = config.get('detection', 'card_size_filter', 'max_area', default=4000000)
 
-    # Anti-glare settings
-    ANTI_GLARE_ENABLED = config.get('anti_glare', 'enabled', default=False)
-    ANTI_GLARE_METHOD = config.get('anti_glare', 'method', default='adaptive')
-
     # Focus settings
 
     # Auto-capture settings (enabled state now controlled via UI button)
