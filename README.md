@@ -259,7 +259,7 @@ condition, finish and location increases its quantity instead of creating a dupl
 you have scanned and to build decks. It works on a phone too.
 
 - **Inventory** - filter by name, color identity, type, rarity, set, finish, location, tag and
-  price, or tick **Not in a deck** to see only the cards no deck uses yet (the deck builder's
+  price, or tick **Not in a deck** to see only the cards no deck uses yet, or **No use in my decks** to also leave out the cards EDHREC lists for your decks' commanders - what remains can be sold or given away (the deck builder's
   search and suggestions have the same tick, *Not in other decks*); switch between the list and a grid of card images; tick entries to move them to a
   **location** (a binder, a box), tag them (*trade*, *keep*), change their condition, add them
   to a deck or delete them in one step. Copies of the same printing can be in two locations -
@@ -467,6 +467,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
 | `GET` / `POST /api/decks/ideas/<commanders\|precons\|card>` | "What can I build?" searches: state / start a run (`card`: JSON `card`, `format`) / stop it (`{"stop": true}`) |
 | `GET /api/precons`, `POST /api/precons/<file>/own` | Preconstructed decks; add one's cards to the inventory and open it as a deck (JSON: `name`, `location`) |
+| `GET /api/inventory/suggested` | The owned cards EDHREC lists for the decks' commanders (`cards`: name → decks; `unknown`: decks without data) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |

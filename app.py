@@ -1399,6 +1399,37 @@ def deck_suggestions(deck_id):
     return jsonify({'success': True, 'decks': found['decks'], 'url': found['url'], 'categories': categories})
 
 
+@app.route('/api/inventory/suggested')
+def inventory_suggested():
+    """
+    The owned cards that EDHREC lists for the commander of one of the decks:
+    {'cards': {card name: [deck names]}, 'unknown': [decks EDHREC has no answer for]}
+    """
+    game = games.active()
+    front = lambda name: search_key(name.split(' // ')[0])  # EDHREC names a double-faced card by its front
+    owned = {}
+    for card in inventory.get_all_cards(game.id):
+        owned.setdefault(front(card['name']), set()).add(card['name'])
+    cards, unknown = {}, []
+    for deck in deck_store.list_decks(game.id):
+        if not deck['commanders']:
+            continue
+        try:
+            found = recommend.commander_cards(deck['commanders'])
+        except Unavailable:
+            found = None
+        if not found:
+            unknown.append(deck['name'])
+            continue
+        for category in found['categories']:
+            for suggestion in category['cards']:
+                for name in owned.get(front(suggestion['name']), ()):
+                    decks = cards.setdefault(name, [])
+                    if deck['name'] not in decks:
+                        decks.append(deck['name'])
+    return jsonify({'success': True, 'cards': cards, 'unknown': unknown})
+
+
 @app.route('/api/decks/popular')
 def popular_decks():
     """Public decks on other sites: with a deck's commander (deck_id), or of a format"""

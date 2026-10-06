@@ -770,6 +770,11 @@ deck's considered cards don't count) - shown as a badge, and hidden by the **Not
 tick. The deck builder has the same idea as **Not in other decks** on the card search
 (`free=1&deck_id=` → `search_cards(exclude_names=)`) and on the suggestions (`elsewhere`). It
 goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
+**No use in my decks** goes further, to find what can be sold or given away: it also hides the
+cards EDHREC lists for the commander of one of the decks (`GET /api/inventory/suggested` →
+`Recommendations.commander_cards` per deck with a commander, matched to the owned names by front
+face; asked when the tick is set, one request per deck the first time, then from the 7-day
+cache). Decks EDHREC has no answer for come back in `unknown` and are named in a notification.
 
 **Decks** (Magic; a game without `Game.deck_formats` has no Decks tab). A deck (`decks.py`) is a
 name, a format and `deck_cards` rows: card name, count, board (`commander`, `main`, `side`) and

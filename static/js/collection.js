@@ -82,6 +82,7 @@ let shown = [];             // after filters and sort
 let shownLimit = PAGE_SIZE;
 let selected = new Set();   // entry ids
 let filterColors = new Set();
+let suggested = null;       // {card name: [decks whose commander it is played with]}, while "No use in my decks" is ticked
 let inventoryView = recall('collectionView', 'list');
 
 function inventoryChanged() {
@@ -132,8 +133,25 @@ async function loadInventory() {
     inventory = data.cards;
     selected = new Set([...selected].filter(id => inventory.some(card => card.id === id)));
     fillFilterOptions();
+    if ($('filter-spare').checked) await loadSuggested();
     applyFilters();
     if (currentTab === 'stats') renderStats();
+}
+
+async function loadSuggested() {
+    // The owned cards EDHREC lists for the decks' commanders (slow the first time: one request per deck)
+    $('inventory-list').innerHTML = '<div class="hint">Asking EDHREC about your commanders...</div>';
+    $('filter-spare').disabled = true;
+    const data = await api('/api/inventory/suggested');
+    $('filter-spare').disabled = false;
+    suggested = data ? data.cards : null;
+    if (!data) $('filter-spare').checked = false;
+    else if (data.unknown.length) notify(`No EDHREC data for ${data.unknown.join(', ')} - not counted`, 'warning');
+}
+
+async function spareChanged() {
+    if ($('filter-spare').checked) await loadSuggested();
+    applyFilters();
 }
 
 function fillSelect(id, label, values, labels = {}) {
@@ -167,6 +185,7 @@ function fillFilterOptions() {
                Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
     // Color chips only where the card data has color identities (Magic)
     $('filter-free-label').hidden = !gameInfo.deck_formats.length;
+    $('filter-spare-label').hidden = !gameInfo.deck_formats.some(([, , commander]) => commander);
     const hasColors = inventory.some(card => identityOf(card));
     $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
 }
@@ -186,6 +205,7 @@ function applyFilters() {
     const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
     const added = $('filter-added').value;
     const free = $('filter-free').checked;
+    const spare = $('filter-spare').checked && suggested;
     const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         if (text && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
@@ -198,6 +218,7 @@ function applyFilters() {
         if (tag && !card.tags.includes(tag)) return false;
         if (added && (card.added_at !== added || !card.added_quantity)) return false;
         if (free && card.decks.length) return false;
+        if (spare && (card.decks.length || suggested[card.name])) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
         if (filterColors.size) {
@@ -1230,6 +1251,7 @@ function bindEvents() {
     // Inventory filters
     ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
      'filter-free'].forEach(id => $(id).addEventListener('change', applyFilters));
+    $('filter-spare').addEventListener('change', spareChanged);
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
     $('filter-colors').addEventListener('click', event => {
         const chip = event.target.closest('.color-chip');
@@ -1242,6 +1264,7 @@ function bindEvents() {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         $('filter-free').checked = false;
+        $('filter-spare').checked = false;
         filterColors.clear();
         fillFilterOptions();
         applyFilters();

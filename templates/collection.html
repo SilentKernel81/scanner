@@ -34,6 +34,7 @@
                     <select id="filter-tag" class="select" title="Tag"></select>
                     <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
                     <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
+                    <label class="chip-toggle" id="filter-spare-label" title="Hide the cards that a deck uses, and the ones EDHREC lists for the commander of one of your decks"><input type="checkbox" id="filter-spare"><span>No use in my decks</span></label>
                     <span class="price-range" title="Price of one copy (USD)">
                         $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
                         – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
@@ -366,6 +367,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=13"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=15"></script>
 </body>
 </html>
