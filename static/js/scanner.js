@@ -1,97 +1,248 @@
-// Card Scanner Frontend JavaScript
+// Scanner page: camera status, capture and auto scanning, the card panel, the review queue,
+// the scanned cards list and the settings drawer.
+// Shared helpers (escapeHtml, dialogs, notify, the edit dialog, sorts) come from common.js.
 
 const socket = io();
+const $ = id => document.getElementById(id);
+
 let cardNumber = 1;
 let currentCard = null;
-let cardDetected = false;
 let lastDetectionStatus = {detected: false, stable_frames: 0, required_frames: 0, is_stable: false};  // from /api/detection_status
-let detectionEnabled = true;  // Track detection state
-let autoScanningEnabled = false;  // Track auto-scanning state
+let detectionEnabled = true;
+let autoScanningEnabled = false;
 let fastScanMode = true;  // "Add cards automatically" - loaded from /api/scan_settings
 let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last capture: 'foil' | 'non-foil' | 'unknown'
-let availableModels = {}; // Store available models for each provider
+let availableModels = {};  // provider -> model names
 let currentProvider = 'gemini';
 let currentModel = null;
 let activeProvider = null;  // provider/model the server is actually using (not just selected)
 let activeModel = null;
 
-// Helper function for console logging
-function logSeparator() {
-    return "=".repeat(60);
+function isOpen(id) {
+    return $(id).classList.contains('show');
+}
+
+function setCardPanel(html) {
+    $('card-display').innerHTML = html;
+}
+
+function setButton(id, text, disabled = false) {
+    const button = $(id);
+    button.disabled = disabled;
+    button.textContent = text;
 }
 
 // ============================================================================
-// Socket Event Handlers
+// Connection and activity log
 // ============================================================================
 
 socket.on('connect', function() {
-    console.log(logSeparator());
-    console.log('SOCKET CONNECTED TO SERVER');
-    console.log(logSeparator());
-
-    // Initialize audio context on connection (user interaction)
-    audioManager.ensureAudioContext().then(() => {
-        console.log('🔊 Audio system ready');
-    });
-
+    audioManager.ensureAudioContext();
     loadStats();
     // The server closes a review when its page disconnects: open it again
     if (reviewItem) openReview();
-    // Connection message sent from server
     startDetectionPolling();
     loadScanSettings();
 });
 
-socket.on('disconnect', function() {
-    console.log(logSeparator());
-    console.log('SOCKET DISCONNECTED FROM SERVER');
-    console.log(logSeparator());
-    // Don't log disconnect message - expected when app is shut down
-});
-
 socket.on('log', function(data) {
-    console.log('Server log:', data);
     addLog(data.timestamp, data.level, data.message);
 });
 
-socket.on('card_captured', function(data) {
-    console.log(logSeparator());
-    console.log('CARD CAPTURED EVENT RECEIVED');
-    console.log(logSeparator());
-    console.log('Data:', data);
+socket.on('error', function(data) {
+    console.error('Server error:', data.message);
+    audioManager.playError();
 
-    // Don't play sound here - it's played at capture time, not after AI processing
+    if (isOpen('prompt-modal')) {
+        notify(data.message, 'error');
+    } else {
+        addLog(timeNow(), 'error', data.message);
+    }
+});
+
+function addLog(timestamp, level, message) {
+    const logContainer = $('log-container');
+    const logEntry = document.createElement('div');
+    logEntry.className = 'log-entry';
+    logEntry.innerHTML = `
+        <span class="log-timestamp">[${timestamp}]</span>
+        <span class="log-${level}">${escapeHtml(message)}</span>
+    `;
+    logContainer.appendChild(logEntry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+
+    // Keep only last 100 log entries
+    while (logContainer.children.length > 100) {
+        logContainer.removeChild(logContainer.firstChild);
+    }
+}
+
+// ============================================================================
+// Detection Status
+// ============================================================================
+
+function detectionState(status) {
+    // [status class, icon, text, capture allowed]
+    // Detection off: the capture button takes the full frame
+    if (!detectionEnabled) return ['', '📷', 'Manual Mode - Click Capture', true];
+    // Focus sweep in progress (Refocus button, or automatic when the card stays blurry)
+    if (status.focusing) return ['status-stabilizing', '🎯', 'Focusing - finding the sharpest image...', false];
+    // Image being taken (and, every few cards, the focus checked) - the beep says when to drop
+    if (status.capturing) return ['status-stabilizing', '📸', 'Capturing - wait for the beep', false];
+    // Auto scanning captured this card and waits for the next one
+    if (status.awaiting_new_card) return ['status-locked', '✅', 'Captured - drop the next card', status.detected];
+    if (!status.detected) return ['', '⚪', 'Waiting for card...', false];
+    if (status.focus_locked) return ['status-locked', '🔵', 'LOCKED - Perfect!', true];
+    if (status.is_stable) return ['status-ready', '🟢', 'Ready to Capture', true];
+    return ['status-stabilizing', '🟠',
+            status.in_focus === false ? 'Focusing...' : `Stabilizing ${status.stable_frames}/${status.required_frames}...`, true];
+}
+
+function updateDetectionStatus(status) {
+    lastDetectionStatus = status;
+    const [statusClass, icon, text, canCapture] = detectionState(status);
+    const statusDiv = $('detection-status');
+    statusDiv.classList.remove('status-detected', 'status-stabilizing', 'status-ready', 'status-locked');
+    if (statusClass) statusDiv.classList.add(statusClass);
+    statusDiv.querySelector('.status-icon').textContent = icon;
+    statusDiv.querySelector('.status-text').textContent = text;
+    $('capture-btn').disabled = !canCapture;
+}
+
+let detectionPolling = null;
+
+function startDetectionPolling() {
+    // Called on every (re)connect: one poll, every 500 ms
+    if (detectionPolling) return;
+    detectionPolling = setInterval(function() {
+        fetch('/api/detection_status')
+            .then(response => response.json())
+            .then(updateDetectionStatus)
+            .catch(error => console.error('Error polling detection status:', error));
+    }, 500);
+}
+
+// ============================================================================
+// Capture, auto scanning, focus
+// ============================================================================
+
+function captureFeedback() {
+    // The beep and a flash on the video
+    audioManager.playCapture().catch(error => console.error('Failed to play capture sound:', error));
+    const videoContainer = document.querySelector('.video-container');
+    videoContainer.classList.add('capture-flash');
+    setTimeout(() => videoContainer.classList.remove('capture-flash'), 500);
+}
+
+function captureCard() {
+    // With detection off the full frame is captured, whatever is in it
+    if (detectionEnabled && !lastDetectionStatus.detected) {
+        addLog(timeNow(), 'warning', 'No card detected. Please position card in frame.');
+        return;
+    }
+    captureFeedback();
+    socket.emit('capture_card', {card_number: cardNumber});
+    cardNumber++;
+}
+
+socket.on('auto_capture_triggered', function(data) {
+    // The image is taken: this beep is the signal to drop the next card
+    captureFeedback();
+    addLog(timeNow(), 'info', `📸 Card #${data.counter} captured${fastScanMode ? ' - drop the next card' : ''}`);
+});
+
+function autoScanHint() {
+    return fastScanMode ? 'Auto scanning - adding cards automatically' : 'Auto scanning - confirm each card';
+}
+
+function toggleAutoScanning() {
+    autoScanningEnabled = !autoScanningEnabled;
+
+    const btn = $('toggle-auto-scanning-btn');
+    const hint = $('auto-scan-hint');
+    btn.classList.toggle('is-active', autoScanningEnabled);
+    hint.classList.toggle('is-active', autoScanningEnabled);
+    btn.innerHTML = `<svg class="icon"><use href="#i-play"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
+    hint.textContent = autoScanningEnabled ? autoScanHint() : 'Click to start automatic card scanning';
+
+    socket.emit('toggle_auto_capture', {enabled: autoScanningEnabled});
+    if (autoScanningEnabled) {
+        addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' - adding cards automatically' : ' - confirm each card'}`);
+    } else {
+        addLog(timeNow(), 'info', 'Auto scanning stopped - captures in progress will complete');
+    }
+}
+
+socket.on('processing_queue_update', function(data) {
+    const queueCount = data.queue_count || 0;
+    // Always shown (0 = nothing waiting); highlighted only when a backlog builds up
+    $('processing-queue').textContent = queueCount;
+    $('processing-queue-box').classList.toggle('is-busy', queueCount >= 3);
+});
+
+function resetFocus() {
+    addLog(timeNow(), 'info', 'Resetting camera focus...');
+    socket.emit('reset_focus');
+}
+
+socket.on('focus_reset', function(data) {
+    addLog(timeNow(), 'info', data.message || 'Focusing...');
+    // Refocusing locks the focus - reflect that in the settings switch
+    $('toggle-autofocus').checked = false;
+});
+
+// ============================================================================
+// Search and the card panel
+// ============================================================================
+
+function canSearch(name, setCode, number) {
+    // A name, or only the set + number (a name the AI can't read: runes, another language)
+    return Boolean(name || (number && (setCode || number.includes('/'))));
+}
+
+function clearSearchFields() {
+    ['card-name', 'collector-number', 'set-code', 'card-treatment'].forEach(id => { $(id).value = ''; });
+    $('search-btn').disabled = true;
+}
+
+function searchCard() {
+    const cardName = $('card-name').value.trim();
+    const collectorNumber = $('collector-number').value.trim();
+    const setCode = $('set-code').value.trim().toUpperCase();
+    const treatmentSelect = $('card-treatment');
+    const treatment = treatmentSelect.value;
+
+    if (!canSearch(cardName, setCode, collectorNumber)) {
+        addLog(timeNow(), 'warning', 'Enter a card name, or the set and number');
+        return;
+    }
+
+    const numberInfo = (setCode ? ` ${setCode}` : '') + (collectorNumber ? ` #${collectorNumber}` : '');
+    const treatmentInfo = treatment ? ` (${treatmentSelect.options[treatmentSelect.selectedIndex].text})` : '';
+    addLog(timeNow(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
+
+    socket.emit('search_card', {
+        card_name: cardName,
+        collector_number: collectorNumber || null,
+        set_code: setCode || null,
+        treatment: treatment || null
+    });
+}
+
+socket.on('card_captured', function(data) {
+    // The capture sound is played at capture time, not here after the AI
 
     // Scanning goes on during a review: leave the review's fields alone
     if (reviewItem) return;
 
-    // Store AI-detected foil status
     detectedFoilStatus = data.foil || 'unknown';
-    console.log('AI detected foil status:', detectedFoilStatus);
-
-    document.getElementById('card-name').value = data.card_name;
-    document.getElementById('collector-number').value = data.collector_number || '';
-    document.getElementById('set-code').value = data.set_code || '';
-    document.getElementById('search-btn').disabled = false;
-
-    // Show processing time if available
-    if (data.processing_time) {
-        console.log(`AI processing time: ${data.processing_time}s`);
-    }
-
-    // Log message sent from server
-    console.log('Search button enabled, card name set:', data.card_name);
-    if (data.collector_number) {
-        console.log('Collector number set:', data.collector_number);
-    }
+    $('card-name').value = data.card_name;
+    $('collector-number').value = data.collector_number || '';
+    $('set-code').value = data.set_code || '';
+    $('search-btn').disabled = false;
 });
 
 socket.on('card_found', function(data) {
-    console.log(logSeparator());
-    console.log('CARD FOUND EVENT RECEIVED');
-    console.log(logSeparator());
-    console.log('Card data:', data.card);
-
     // Cards added automatically don't come here: the server adds them (inventory_updated)
     audioManager.playSuccess();
     currentCard = data.card;
@@ -99,19 +250,16 @@ socket.on('card_found', function(data) {
 });
 
 socket.on('card_not_found', function(data) {
-    console.log('Card not found:', data.card_name);
-
-    // Play error sound
     audioManager.playError();
 
     const message = data.message || `Card "${data.card_name}" not found in database.`;
     addLog(timeNow(), 'warning', message);
-    document.getElementById('card-display').innerHTML = `
+    setCardPanel(`
         <div class="empty-state is-error">
             ${escapeHtml(message)}<br>
             <span class="hint">${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}</span>
         </div>
-    `;
+    `);
     // Auto-dismiss after card not found to allow next auto-capture; the capture is kept for
     // a manual search
     setTimeout(function() {
@@ -120,40 +268,20 @@ socket.on('card_not_found', function(data) {
 });
 
 socket.on('card_printings', function(data) {
-    console.log(`Printings received for ${data.name}:`, data.cards.length);
     currentCard = null;
     displayPrintings(data.name, data.cards);
 });
 
-// Prices fetched after an add (Pokémon): new totals, and the list if it is open
-socket.on('inventory_prices_updated', function() {
-    loadStats();
-    if (document.getElementById('inventory-modal').classList.contains('show')) loadInventory();
-});
-
-socket.on('inventory_undone', function(data) {
-    loadStats();
-    addLog(timeNow(), 'warning', `Removed ${data.name} from the inventory (undo)`);
-    document.getElementById('card-display').innerHTML = `
-        <div class="empty-state">
-            Removed <strong>${escapeHtml(data.name)}</strong> from the inventory.<br>
-            <span class="hint">Ready for the next card.</span>
-        </div>
-    `;
-});
-
 socket.on('similar_cards', function(data) {
-    console.log('Similar cards received:', data.cards.length);
     displaySimilarCards(data.cards);
 });
 
 socket.on('inventory_updated', function(data) {
-    console.log('Inventory updated:', data.stats);
+    const added = data.added;
+    loadStats();
 
     if (reviewItem) {
         // An automatic add while reviewing, or the reviewed card (the next item follows)
-        loadStats();
-        const added = data.added;
         if (added) addLog(timeNow(), 'success', `Added ${added.quantity}× ${added.name} (${added.finish})`);
         if (!data.auto) audioManager.playSuccess();
         return;
@@ -162,9 +290,7 @@ socket.on('inventory_updated', function(data) {
     // The drop signal is the capture beep; adding (1-2 s later, after the AI) just dings
     audioManager.playSuccess();
 
-    loadStats();
-    const added = data.added;
-    document.getElementById('card-display').innerHTML = `
+    setCardPanel(`
         <div class="empty-state is-success">
             ✓ Added to inventory
             ${added ? `<div class="added-card">${added.quantity > 1 ? added.quantity + '× ' : ''}<strong>${escapeHtml(added.name)}</strong>
@@ -172,51 +298,229 @@ socket.on('inventory_updated', function(data) {
                 <button class="btn btn-small" onclick="undoLastAdd()">Undo</button>` : ''}
             <span class="hint">Ready for the next card.</span>
         </div>
-    `;
-    document.getElementById('card-name').value = '';
-    document.getElementById('collector-number').value = '';
-    document.getElementById('set-code').value = '';
-    document.getElementById('card-treatment').value = '';
+    `);
+    clearSearchFields();
     detectedFoilStatus = 'unknown';
     currentCard = null;
-    document.getElementById('search-btn').disabled = true;
 });
 
-socket.on('error', function(data) {
-    console.error(logSeparator());
-    console.error('ERROR EVENT RECEIVED');
-    console.error(logSeparator());
-    console.error('Error message:', data.message);
+// Prices fetched after an add (Pokémon): new totals, and the list if it is open
+socket.on('inventory_prices_updated', function() {
+    loadStats();
+    if (isOpen('inventory-modal')) loadInventory();
+});
 
-    // Play error sound
-    audioManager.playError();
+socket.on('inventory_undone', function(data) {
+    loadStats();
+    addLog(timeNow(), 'warning', `Removed ${data.name} from the inventory (undo)`);
+    setCardPanel(`
+        <div class="empty-state">
+            Removed <strong>${escapeHtml(data.name)}</strong> from the inventory.<br>
+            <span class="hint">Ready for the next card.</span>
+        </div>
+    `);
+});
 
-    if (document.getElementById('prompt-modal').classList.contains('show')) {
-        notify(data.message, 'error');
-    } else {
-        addLog(timeNow(), 'error', data.message);
+function undoLastAdd() {
+    socket.emit('undo_last_add');
+}
+
+function suggestedFinish(card, foilStatus = detectedFoilStatus) {
+    // Same rule as Game.suggested_finish on the server (automatic adds)
+    // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
+    // Printings that only exist in one finish are certain; otherwise use the ★/• marker
+    // the AI read next to the set code on the last capture.
+    if (!gameInfo || gameInfo.id !== 'mtg') {
+        // Other games list the finishes the printing exists in; the plain one is the likely one
+        const options = card.finish_options || [defaultFinish()];
+        if (options.length === 1) return {finish: options[0], reason: `only printed as ${finishLabel(options[0]).toLowerCase()}`};
+        return {finish: options.includes(defaultFinish()) ? defaultFinish() : options[0], reason: null};
     }
-});
+    const finishes = card.finishes || [];
+    const hasFoil = finishes.includes('foil') || finishes.includes('etched');
+    const hasNonfoil = finishes.includes('nonfoil');
+    const foilKind = (card.treatments || []).includes('Surge Foil') ? 'surge' : 'foil';
 
-socket.on('auto_capture_triggered', function(data) {
-    console.log(logSeparator());
-    console.log('AUTO-CAPTURE TRIGGERED');
-    console.log(logSeparator());
-    console.log('Card number:', data.counter);
+    if (hasFoil && !hasNonfoil) return {finish: foilKind, reason: 'only printed in foil'};
+    if (hasNonfoil && !hasFoil) return {finish: 'regular', reason: 'only printed non-foil'};
+    if (foilStatus === 'foil') return {finish: foilKind, reason: '★ next to the set code'};
+    if (foilStatus === 'non-foil') return {finish: 'regular', reason: '• next to the set code'};
+    return {finish: 'regular', reason: null};
+}
 
-    // The image is taken: this beep is the signal to drop the next card
-    console.log('📸 Playing capture sound...');
-    audioManager.playCapture().catch(err => {
-        console.error('❌ Failed to play capture sound:', err);
+function cardFinishes(card) {
+    // The game's finishes, only those the printing exists in when the game says (Pokémon)
+    return card.finish_options ? gameInfo.finishes.filter(([key]) => card.finish_options.includes(key)) : gameInfo.finishes;
+}
+
+function treatmentTagsHtml(treatments) {
+    return '<span class="treatment-tags">' +
+        treatments.map(t => `<span class="treatment-tag">${escapeHtml(t)}</span>`).join('') +
+        '</span>';
+}
+
+function quantityCell(id, label, kind, value = 0) {
+    return `
+        <div class="qty-cell ${kind}">
+            <span class="qty-label"><span class="qty-dot"></span>${label}</span>
+            <div class="qty-stepper">
+                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease ${label}">−</button>
+                <input type="number" id="${id}" value="${value}" min="0" max="999" aria-label="${label} quantity">
+                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase ${label}">+</button>
+            </div>
+        </div>
+    `;
+}
+
+function adjustQtyInput(inputId, delta) {
+    const input = $(inputId);
+    input.value = Math.max(0, Math.min(999, (parseInt(input.value) || 0) + delta));
+}
+
+function cardPricesHtml(card) {
+    // Only prices that exist (e.g. foil-only printings have no regular price)
+    const prices = [];
+    if (card.prices) {
+        // [[finish label, price]] (games other than Magic)
+        card.prices.forEach(([label, price]) => prices.push(
+            `<span class="price-label">${escapeHtml(label.toLowerCase())}</span> <span class="price">$${price.toFixed(2)}</span>`));
+    } else {
+        if (card.price > 0) {
+            prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
+        }
+        if (card.price_foil > 0) {
+            prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
+        }
+    }
+    if (prices.length === 0) {
+        prices.push('<span class="price-label">No price data</span>');
+    }
+    return prices.join('<span class="price-sep">·</span>');
+}
+
+function displayCard(card) {
+    const suggestion = suggestedFinish(card);
+    setCardPanel(`
+        <div class="card-summary">
+            ${card.image_uri ? `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">` : ''}
+            <div class="card-facts">
+                <div class="card-title">${escapeHtml(card.name)}</div>
+                <div class="card-meta">${escapeHtml(card.set)} · #${escapeHtml(card.number)}</div>
+                <div class="card-meta"><span class="card-rarity">${escapeHtml(card.rarity)}</span> · ${escapeHtml(card.type)}</div>
+                ${card.treatments && card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
+                ${card.confirmed === false ? '<div class="card-warning">Printing not confirmed - check the set and number</div>' : ''}
+                <div class="card-prices">${cardPricesHtml(card)}</div>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label for="condition">Condition</label>
+            <select id="condition">
+                <option value="Mint">Mint (M)</option>
+                <option value="Near Mint" selected>Near Mint (NM)</option>
+                <option value="Excellent">Excellent (EX)</option>
+                <option value="Good">Good (GD)</option>
+                <option value="Played">Played (PL)</option>
+                <option value="Poor">Poor (P)</option>
+            </select>
+        </div>
+
+        <div class="input-group">
+            <span class="field-label">Quantity</span>
+            <div class="qty-grid">
+                ${cardFinishes(card).map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
+            </div>
+            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
+        </div>
+
+        <div class="card-actions">
+            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
+            <button class="btn" onclick="dismissCard()">Skip</button>
+        </div>
+    `);
+}
+
+function displayPrintings(cardName, cards) {
+    const printings = cards.map(card => {
+        // Scryfall's "small" image size keeps the grid light
+        const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
+        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
+        return `
+            <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
+                ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
+                <strong>${escapeHtml(card.set)}</strong><br>
+                <span class="meta">#${escapeHtml(card.number)} &middot; ${price}</span>
+                ${card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
+            </div>
+        `;
     });
+    setCardPanel(`<div class="similar-cards"><div class="list-heading">${escapeHtml(cardName)}</div>
+        <div class="list-subheading">${cards.length} printings - pick the one you have</div>
+        <div class="printing-grid">${printings.join('')}</div></div>`);
+}
 
-    // Flash animation on video container (visual feedback)
-    const videoContainer = document.querySelector('.video-container');
-    videoContainer.classList.add('capture-flash');
-    setTimeout(() => videoContainer.classList.remove('capture-flash'), 500);
+function selectPrinting(cardId) {
+    socket.emit('select_printing', {id: cardId});
+}
 
-    addLog(timeNow(), 'info', `📸 Card #${data.counter} captured${fastScanMode ? ' - drop the next card' : ''}`);
-});
+function displaySimilarCards(cards) {
+    const similar = cards.map(card => `
+        <div class="similar-card" onclick="selectSimilarCard('${escapeHtml(card.name.replace(/'/g, "\\'"))}')">
+            <strong>${escapeHtml(card.name)}</strong><br>
+            <small>${escapeHtml(card.set)} · ${card.price}</small>
+        </div>
+    `);
+    setCardPanel('<div class="similar-cards"><div class="list-heading">No exact match</div><div class="list-subheading">Did you mean:</div>'
+        + (similar.length ? similar.join('') : '<div class="empty-state">No similar cards found.</div>')
+        + '</div>');
+}
+
+function selectSimilarCard(cardName) {
+    if (reviewItem) {
+        $('review-name').value = cardName;
+        reviewSearch();
+        return;
+    }
+    $('card-name').value = cardName;
+    searchCard();
+}
+
+function addToInventoryBoth() {
+    if (!currentCard) {
+        addLog(timeNow(), 'error', 'No card selected');
+        return;
+    }
+
+    // One entry per finish with a quantity, sent together
+    const items = cardFinishes(currentCard)
+        .map(([finish]) => ({finish, quantity: parseInt($(`qty-${finish}`).value) || 0}))
+        .filter(item => item.quantity > 0);
+    if (items.length === 0) {
+        addLog(timeNow(), 'warning', 'Please set at least one quantity');
+        return;
+    }
+    socket.emit('add_to_inventory', {condition: $('condition').value, items: items});
+}
+
+function dismissCard() {
+    if (reviewItem) {
+        socket.emit('review_skip');  // drops the item; the next one follows
+        return;
+    }
+    currentCard = null;
+    detectedFoilStatus = 'unknown';
+
+    // The server re-enables auto-capture
+    socket.emit('dismiss_card');
+
+    setCardPanel(`
+        <div class="empty-state">
+            Card skipped.<br>
+            Ready to scan the next card.
+        </div>
+    `);
+    addLog(timeNow(), 'info', 'Card dismissed - ready for next card');
+}
 
 // ============================================================================
 // Review queue: cards not added automatically, reviewed one by one at the end
@@ -225,8 +529,8 @@ socket.on('auto_capture_triggered', function(data) {
 let reviewItem = null;  // the item open in the card panel
 
 function setReviewCount(count) {
-    document.getElementById('review-count').textContent = count;
-    document.getElementById('review-box').classList.toggle('has-items', count > 0);
+    $('review-count').textContent = count;
+    $('review-box').classList.toggle('has-items', count > 0);
 }
 
 function openReview() {
@@ -244,8 +548,7 @@ socket.on('review_item', function(data) {
         const wasReviewing = !!reviewItem;
         hideReviewPanel();
         if (wasReviewing) {
-            document.getElementById('card-display').innerHTML =
-                '<div class="empty-state is-success">✓ Review queue done.<br><span class="hint">Every card was added or skipped.</span></div>';
+            setCardPanel('<div class="empty-state is-success">✓ Review queue done.<br><span class="hint">Every card was added or skipped.</span></div>');
         } else {
             notify('Nothing to review', 'info');
         }
@@ -261,7 +564,7 @@ function renderReview(item) {
     const ai = item.ai;
     const read = [ai.name || 'no name', ai.number ? '#' + ai.number : '', ai.set,
                   ai.foil === 'foil' ? '★' : ai.foil === 'non-foil' ? '•' : ''].filter(Boolean).join(' · ');
-    const panel = document.getElementById('review-panel');
+    const panel = $('review-panel');
     panel.innerHTML = `
         <div class="review-header">
             <strong>Review</strong> <span class="hint">1 of ${item.total}</span>
@@ -297,18 +600,16 @@ function renderReview(item) {
         reviewSearch();  // no match kept: show what a search finds (printings / similar)
     } else {
         currentCard = null;
-        document.getElementById('card-display').innerHTML =
-            '<div class="empty-state">The AI couldn\'t read this card - search for it above, or Skip.' +
-            '<div class="card-actions"><button class="btn" onclick="dismissCard()">Skip</button></div></div>';
+        setCardPanel('<div class="empty-state">The AI couldn\'t read this card - search for it above, or Skip.' +
+            '<div class="card-actions"><button class="btn" onclick="dismissCard()">Skip</button></div></div>');
     }
 }
 
 function reviewSearch() {
-    // A name, or only the set + number (a name the AI can't read: runes, another language)
-    const name = document.getElementById('review-name').value.trim();
-    const setCode = document.getElementById('review-set').value.trim().toUpperCase();
-    const number = document.getElementById('review-number').value.trim();
-    if (!name && !(number && (setCode || number.includes('/')))) {
+    const name = $('review-name').value.trim();
+    const setCode = $('review-set').value.trim().toUpperCase();
+    const number = $('review-number').value.trim();
+    if (!canSearch(name, setCode, number)) {
         notify('Enter a name, or the set and number', 'info');
         return;
     }
@@ -321,15 +622,15 @@ function deleteReviewItem() {
 }
 
 function zoomReviewCapture() {
-    document.getElementById('capture-title').textContent = 'Capture';
-    document.getElementById('capture-grid').innerHTML =
+    $('capture-title').textContent = 'Capture';
+    $('capture-grid').innerHTML =
         `<figure><img src="${escapeHtml(reviewItem.image_url)}" alt="Capture"><figcaption>${escapeHtml(reviewItem.captured_at)}</figcaption></figure>`;
-    document.getElementById('capture-modal').classList.add('show');
+    $('capture-modal').classList.add('show');
 }
 
 function hideReviewPanel() {
     reviewItem = null;
-    const panel = document.getElementById('review-panel');
+    const panel = $('review-panel');
     panel.hidden = true;
     panel.innerHTML = '';
 }
@@ -338,326 +639,38 @@ function closeReview() {
     socket.emit('review_close');
     hideReviewPanel();
     currentCard = null;
-    document.getElementById('card-display').innerHTML =
-        '<div class="empty-state">Review closed - the rest stays in the queue.</div>';
-}
-
-socket.on('processing_queue_update', function(data) {
-    const queueCount = data.queue_count || 0;
-    const queueBox = document.getElementById('processing-queue-box');
-    const queueValue = document.getElementById('processing-queue');
-
-    // Always shown (0 = nothing waiting); highlighted only when a backlog builds up
-    queueValue.textContent = queueCount;
-    queueBox.classList.toggle('is-busy', queueCount >= 3);
-});
-
-socket.on('ai_provider_set', function(data) {
-    console.log(logSeparator());
-    console.log('AI PROVIDER/MODEL CHANGED');
-    console.log(logSeparator());
-    console.log('Provider:', data.provider);
-    console.log('Model:', data.model);
-    console.log('Message:', data.message);
-    currentProvider = data.provider;
-    currentModel = data.model;
-    activeProvider = data.provider;
-    activeModel = data.model;
-    addLog(timeNow(), 'success', data.message);
-    loadPrompts();
-});
-
-socket.on('focus_reset', function(data) {
-    console.log(logSeparator());
-    console.log('FOCUS RESET SUCCESS');
-    console.log(logSeparator());
-    addLog(timeNow(), 'info', data.message || 'Focusing...');
-    // Refocusing locks the focus - reflect that in the settings switch
-    document.getElementById('toggle-autofocus').checked = false;
-});
-
-socket.on('database_update_progress', function(data) {
-    console.log('DATABASE UPDATE PROGRESS:', data.message);
-    addLog(timeNow(), 'info', data.message);
-});
-
-socket.on('database_update_complete', function(data) {
-    console.log(logSeparator());
-    console.log('DATABASE UPDATE COMPLETE');
-    console.log(logSeparator());
-    console.log('Total cards:', data.total_cards);
-
-    // Play queue alert sound (triple beep for major operation)
-    audioManager.playQueueAlert();
-
-    const updateBtn = document.getElementById('update-database-btn');
-    updateBtn.disabled = false;
-    updateBtn.textContent = 'Update card database';
-
-    addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
-    loadStats();
-});
-
-socket.on('database_update_error', function(data) {
-    console.log(logSeparator());
-    console.log('DATABASE UPDATE ERROR');
-    console.log(logSeparator());
-    console.log('Error:', data.message);
-
-    // Play error sound
-    audioManager.playError();
-
-    const updateBtn = document.getElementById('update-database-btn');
-    updateBtn.disabled = false;
-    updateBtn.textContent = 'Update card database';
-
-    addLog(timeNow(), 'error', `Database update failed: ${data.message}`);
-});
-
-socket.on('database_rebuild_progress', function(data) {
-    console.log('DATABASE REBUILD PROGRESS:', data.message);
-    addLog(timeNow(), 'info', data.message);
-});
-
-socket.on('database_rebuild_complete', function(data) {
-    console.log(logSeparator());
-    console.log('DATABASE REBUILD COMPLETE');
-    console.log(logSeparator());
-    console.log('Cards imported:', data.cards_imported);
-    console.log('Schema type:', data.schema_type);
-
-    // Play queue alert sound (triple beep for major operation)
-    audioManager.playQueueAlert();
-
-    const rebuildBtn = document.getElementById('rebuild-database-btn');
-    rebuildBtn.disabled = false;
-    rebuildBtn.textContent = 'Rebuild database schema';
-
-    addLog(timeNow(), 'success', `Database rebuilt! ${data.cards_imported.toLocaleString()} cards migrated.`);
-    addLog(timeNow(), 'success', `Schema optimized: ${data.schema_type} (with performance indexes)`);
-    addLog(timeNow(), 'success', 'Database queries will now be faster!');
-});
-
-socket.on('database_rebuild_error', function(data) {
-    console.log(logSeparator());
-    console.log('DATABASE REBUILD ERROR');
-    console.log(logSeparator());
-    console.log('Error:', data.message);
-
-    // Play error sound
-    audioManager.playError();
-
-    const rebuildBtn = document.getElementById('rebuild-database-btn');
-    rebuildBtn.disabled = false;
-    rebuildBtn.textContent = 'Rebuild database schema';
-
-    addLog(timeNow(), 'error', `Database rebuild failed: ${data.message}`);
-});
-
-// ============================================================================
-// Detection Status
-// ============================================================================
-
-function updateDetectionStatus(status) {
-    console.log('Detection status update:', status);
-
-    lastDetectionStatus = status;
-    cardDetected = status.detected;
-    const statusDiv = document.getElementById('detection-status');
-    const statusIcon = statusDiv.querySelector('.status-icon');
-    const statusText = statusDiv.querySelector('.status-text');
-    const captureBtn = document.getElementById('capture-btn');
-
-    // Remove all status classes
-    statusDiv.classList.remove('status-detected', 'status-stabilizing', 'status-ready', 'status-locked');
-
-    // If detection is disabled, always enable capture button (captures full frame)
-    if (!detectionEnabled) {
-        statusIcon.textContent = '📷';
-        statusText.textContent = 'Manual Mode - Click Capture';
-        captureBtn.disabled = false;
-        console.log('Capture button ENABLED (detection disabled)');
-        return;
-    }
-
-    // Focus sweep in progress (Refocus button, or automatic when the card stays blurry)
-    if (status.focusing) {
-        statusDiv.classList.add('status-stabilizing');
-        statusIcon.textContent = '🎯';
-        statusText.textContent = 'Focusing - finding the sharpest image...';
-        captureBtn.disabled = true;
-        return;
-    }
-
-    // Image being taken (and, every few cards, the focus checked) - the beep says when to drop
-    if (status.capturing) {
-        statusDiv.classList.add('status-stabilizing');
-        statusIcon.textContent = '📸';
-        statusText.textContent = 'Capturing - wait for the beep';
-        captureBtn.disabled = true;
-        return;
-    }
-
-    // Auto scanning captured this card and waits for the next one
-    if (status.awaiting_new_card) {
-        statusDiv.classList.add('status-locked');
-        statusIcon.textContent = '✅';
-        statusText.textContent = 'Captured - drop the next card';
-        captureBtn.disabled = !status.detected;
-        return;
-    }
-
-    // Detection is enabled - update based on detected state
-    if (status.detected) {
-        captureBtn.disabled = false;
-
-        if (status.focus_locked) {
-            // Focus locked - optimal capture time!
-            statusDiv.classList.add('status-locked');
-            statusIcon.textContent = '🔵';
-            statusText.textContent = 'LOCKED - Perfect!';
-            console.log('Capture button ENABLED (focus locked)');
-        } else if (status.is_stable) {
-            // Stable but focus still adjusting
-            statusDiv.classList.add('status-ready');
-            statusIcon.textContent = '🟢';
-            statusText.textContent = 'Ready to Capture';
-            console.log('Capture button ENABLED (card stable)');
-        } else {
-            // Card detected but still stabilizing
-            statusDiv.classList.add('status-stabilizing');
-            statusIcon.textContent = '🟠';
-            statusText.textContent = status.in_focus === false ? 'Focusing...' : `Stabilizing ${status.stable_frames}/${status.required_frames}...`;
-            console.log('Capture button ENABLED (stabilizing)');
-        }
-    } else {
-        statusIcon.textContent = '⚪';
-        statusText.textContent = 'Waiting for card...';
-        captureBtn.disabled = true;
-        console.log('Capture button DISABLED (no card)');
-    }
-}
-
-function startDetectionPolling() {
-    console.log("Starting detection status polling...");
-    // Poll detection status every 500ms
-    setInterval(function() {
-        fetch('/api/detection_status')
-            .then(response => response.json())
-            .then(data => {
-                updateDetectionStatus(data);  // Pass full status object
-            })
-            .catch(error => {
-                console.error('Error polling detection status:', error);
-            });
-    }, 500);
+    setCardPanel('<div class="empty-state">Review closed - the rest stays in the queue.</div>');
 }
 
 // ============================================================================
-// UI Functions
+// Scan settings remembered on the server
 // ============================================================================
-
-function captureCard() {
-    console.log(logSeparator());
-    console.log("CAPTURE CARD BUTTON CLICKED");
-    console.log(logSeparator());
-    console.log("Detection enabled:", detectionEnabled);
-    console.log("Card detected status:", cardDetected);
-    console.log("Card number:", cardNumber);
-
-    // If detection is disabled, allow capture regardless of detection status (captures full frame)
-    if (detectionEnabled && !cardDetected) {
-        console.warn("Detection enabled but card not detected, showing warning");
-        addLog(timeNow(), 'warning', 'No card detected. Please position card in frame.');
-        return;
-    }
-
-    const data = {card_number: cardNumber};
-    console.log("Emitting capture_card event with data:", data);
-
-    // Play capture sound immediately when manual capture button is clicked
-    console.log('📸 Playing capture sound (manual capture)...');
-    audioManager.playCapture().catch(err => {
-        console.error('❌ Failed to play capture sound:', err);
-    });
-
-    // Flash animation on video container (visual feedback)
-    const videoContainer = document.querySelector('.video-container');
-    videoContainer.classList.add('capture-flash');
-    setTimeout(() => videoContainer.classList.remove('capture-flash'), 500);
-
-    socket.emit('capture_card', data);
-    console.log("Event emitted, incrementing card number");
-    cardNumber++;
-    console.log("New card number:", cardNumber);
-    console.log(logSeparator());
-}
-
-function searchCard() {
-    console.log(logSeparator());
-    console.log("SEARCH CARD BUTTON CLICKED");
-    console.log(logSeparator());
-
-    const cardName = document.getElementById('card-name').value.trim();
-    const collectorNumber = document.getElementById('collector-number').value.trim();
-    const setCode = document.getElementById('set-code').value.trim().toUpperCase();
-    const treatmentSelect = document.getElementById('card-treatment');
-    const treatment = treatmentSelect.value;
-    console.log("Card name from input:", cardName);
-    console.log("Collector number from input:", collectorNumber);
-
-    if (cardName || (collectorNumber && (setCode || collectorNumber.includes('/')))) {
-        const data = {
-            card_name: cardName,
-            collector_number: collectorNumber || null,
-            set_code: setCode || null,
-            treatment: treatment || null
-        };
-        console.log("Emitting search_card event with data:", data);
-
-        const numberInfo = (setCode ? ` ${setCode}` : '') + (collectorNumber ? ` #${collectorNumber}` : '');
-        const treatmentInfo = treatment ? ` (${treatmentSelect.options[treatmentSelect.selectedIndex].text})` : '';
-        addLog(timeNow(), 'info', `Searching for: ${cardName}${numberInfo}${treatmentInfo}`);
-
-        socket.emit('search_card', data);
-    } else {
-        addLog(timeNow(), 'warning', 'Enter a card name, or the set and number');
-    }
-    console.log(logSeparator());
-}
-
-function autoScanHint() {
-    return fastScanMode ? 'Auto scanning - adding cards automatically' : 'Auto scanning - confirm each card';
-}
 
 // "Read with OCR first": without the light-ocr package the switch does nothing, so say why
-const OCR_DESC = document.getElementById('ocr-desc').textContent;
+const OCR_DESC = $('ocr-desc').textContent;
 
 function applyOcrState(enabled, installed) {
-    const toggle = document.getElementById('toggle-ocr');
+    const toggle = $('toggle-ocr');
     toggle.checked = Boolean(enabled) && installed;
     toggle.disabled = !installed;
-    document.getElementById('ocr-desc').textContent = installed ? OCR_DESC
+    $('ocr-desc').textContent = installed ? OCR_DESC
         : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
 }
 
-function undoLastAdd() {
-    socket.emit('undo_last_add');
-}
+socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
 
 function loadScanSettings() {
-    // "Add cards automatically" is remembered on the server
     fetch('/api/scan_settings')
         .then(response => response.json())
         .then(data => {
             fastScanMode = data.auto_add;
-            document.getElementById('toggle-fast-scan').checked = data.auto_add;
-            document.getElementById('toggle-autofocus').checked = data.autofocus;
+            $('toggle-fast-scan').checked = data.auto_add;
+            $('toggle-autofocus').checked = data.autofocus;
             applyOcrState(data.ocr_first, data.ocr_installed);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
-            document.getElementById('camera-rotation').value = String(data.camera_rotation || 0);
-            document.getElementById('scan-location').value = data.scan_location || '';
-            document.getElementById('scan-location-options').innerHTML = (data.locations || [])
+            $('camera-rotation').value = String(data.camera_rotation || 0);
+            $('scan-location').value = data.scan_location || '';
+            $('scan-location-options').innerHTML = (data.locations || [])
                 .map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
         })
         .catch(error => console.error('Error loading scan settings:', error));
@@ -671,7 +684,7 @@ function setScanLocation(location) {
         body: JSON.stringify({location: location})
     })
     .then(response => response.json())
-    .then(data => { document.getElementById('scan-location').value = data.scan_location; })
+    .then(data => { $('scan-location').value = data.scan_location; })
     .catch(error => notify('Could not save the location: ' + error.message, 'error'));
 }
 
@@ -684,7 +697,7 @@ let areaDrag = null;
 
 function applyFixedArea(state) {
     fixedArea = state;
-    document.getElementById('fixed-area-toggle').checked = Boolean(state.enabled);
+    $('fixed-area-toggle').checked = Boolean(state.enabled);
 }
 
 socket.on('fixed_area_updated', function(state) {
@@ -695,9 +708,14 @@ socket.on('fixed_area_updated', function(state) {
     }
 });
 
+socket.on('camera_rotation_updated', function(data) {
+    $('camera-rotation').value = String(data.rotation);
+    notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
+});
+
 function imageContentRect() {
     // Where the video is drawn inside its box (object-fit: contain may leave bars)
-    const img = document.getElementById('video-feed');
+    const img = $('video-feed');
     const box = img.getBoundingClientRect();
     const ratio = (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : 16 / 9;
     let width = box.width, height = box.width / ratio;
@@ -708,35 +726,33 @@ function imageContentRect() {
 
 function placeAreaLayer() {
     const rect = imageContentRect();
-    const layer = document.getElementById('area-layer');
-    Object.assign(layer.style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
+    Object.assign($('area-layer').style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
 }
-
-socket.on('camera_rotation_updated', function(data) {
-    document.getElementById('camera-rotation').value = String(data.rotation);
-    notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
-});
 
 function updateVideoOrientation() {
     // A rotated camera gives a portrait image: show it upright instead of letterboxed
-    const img = document.getElementById('video-feed');
+    const img = $('video-feed');
     if (img.naturalWidth && img.naturalHeight) {
         img.parentElement.classList.toggle('portrait', img.naturalHeight > img.naturalWidth);
     }
 }
 
+function isDrawingArea() {
+    return $('area-layer').classList.contains('is-drawing');
+}
+
 function startDrawArea() {
     placeAreaLayer();
-    document.getElementById('area-layer').classList.add('is-drawing');
-    document.getElementById('area-hint').hidden = false;
+    $('area-layer').classList.add('is-drawing');
+    $('area-hint').hidden = false;
 }
 
 function cancelDrawArea() {
-    document.getElementById('area-layer').classList.remove('is-drawing');
-    document.getElementById('area-hint').hidden = true;
-    document.getElementById('area-rect').hidden = true;
+    $('area-layer').classList.remove('is-drawing');
+    $('area-hint').hidden = true;
+    $('area-rect').hidden = true;
     areaDrag = null;
-    document.getElementById('fixed-area-toggle').checked = Boolean(fixedArea.enabled);
+    $('fixed-area-toggle').checked = Boolean(fixedArea.enabled);
 }
 
 function useDetectedArea() {
@@ -745,13 +761,13 @@ function useDetectedArea() {
 }
 
 function areaPoint(event) {
-    const box = document.getElementById('area-layer').getBoundingClientRect();
+    const box = $('area-layer').getBoundingClientRect();
     return {x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
             y: Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))};
 }
 
 function drawAreaRect(a, b) {
-    const rect = document.getElementById('area-rect');
+    const rect = $('area-rect');
     Object.assign(rect.style, {
         left: Math.min(a.x, b.x) * 100 + '%', top: Math.min(a.y, b.y) * 100 + '%',
         width: Math.abs(a.x - b.x) * 100 + '%', height: Math.abs(a.y - b.y) * 100 + '%'
@@ -760,7 +776,7 @@ function drawAreaRect(a, b) {
 }
 
 function setupAreaDrawing() {
-    const layer = document.getElementById('area-layer');
+    const layer = $('area-layer');
     layer.addEventListener('pointerdown', event => {
         areaDrag = areaPoint(event);
         layer.setPointerCapture(event.pointerId);
@@ -775,7 +791,7 @@ function setupAreaDrawing() {
         areaDrag = null;
         if (Math.abs(a.x - b.x) < 0.05 || Math.abs(a.y - b.y) < 0.05) {
             notify('Drag a rectangle around the card', 'warning');
-            document.getElementById('area-rect').hidden = true;
+            $('area-rect').hidden = true;
             return;
         }
         socket.emit('set_fixed_area', {
@@ -784,7 +800,7 @@ function setupAreaDrawing() {
         });
         cancelDrawArea();
     });
-    document.getElementById('fixed-area-toggle').addEventListener('change', event => {
+    $('fixed-area-toggle').addEventListener('change', event => {
         if (event.target.checked && !fixedArea.area) {
             startDrawArea();  // nothing to turn on yet: draw the area first
             return;
@@ -792,305 +808,30 @@ function setupAreaDrawing() {
         socket.emit('set_fixed_area', {enabled: event.target.checked});
     });
     window.addEventListener('resize', () => {
-        if (document.getElementById('area-layer').classList.contains('is-drawing')) placeAreaLayer();
+        if (isDrawingArea()) placeAreaLayer();
     });
 }
 
-function resetFocus() {
-    console.log(logSeparator());
-    console.log("RESET FOCUS BUTTON CLICKED");
-    console.log(logSeparator());
-
-    addLog(timeNow(), 'info', 'Resetting camera focus...');
-    socket.emit('reset_focus');
-}
-
-function toggleAutoScanning() {
-    console.log(logSeparator());
-    console.log("TOGGLE AUTO SCANNING BUTTON CLICKED");
-    console.log(`Current state: autoScanningEnabled = ${autoScanningEnabled}`);
-    console.log(logSeparator());
-
-    const btn = document.getElementById('toggle-auto-scanning-btn');
-    const hint = document.getElementById('auto-scan-hint');
-
-    // Toggle the state
-    autoScanningEnabled = !autoScanningEnabled;
-    console.log(`New state: autoScanningEnabled = ${autoScanningEnabled}`);
-
-    // Update button appearance and text
-    btn.classList.toggle('is-active', autoScanningEnabled);
-    hint.classList.toggle('is-active', autoScanningEnabled);
-    if (autoScanningEnabled) {
-        btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Stop auto scanning';
-        hint.textContent = autoScanHint();
-
-        console.log('Sending toggle_auto_capture with enabled=true');
-        socket.emit('toggle_auto_capture', {enabled: true});
-        addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' - adding cards automatically' : ' - confirm each card'}`);
-    } else {
-        btn.innerHTML = '<svg class="icon"><use href="#i-play"/></svg> Start auto scanning';
-        hint.textContent = 'Click to start automatic card scanning';
-
-        console.log('Sending toggle_auto_capture with enabled=false');
-        socket.emit('toggle_auto_capture', {enabled: false});
-        addLog(timeNow(), 'info', 'Auto scanning stopped - captures in progress will complete');
-    }
-}
-
-function selectSimilarCard(cardName) {
-    console.log("Similar card selected:", cardName);
-    if (reviewItem) {
-        document.getElementById('review-name').value = cardName;
-        reviewSearch();
-        return;
-    }
-    document.getElementById('card-name').value = cardName;
-    searchCard();
-}
-
-function suggestedFinish(card, foilStatus = detectedFoilStatus) {
-    // Same rule as Game.suggested_finish on the server (automatic adds)
-    // Which finish the card in hand most likely is: 'regular' | 'foil' | 'surge', and why.
-    // Printings that only exist in one finish are certain; otherwise use the ★/• marker
-    // the AI read next to the set code on the last capture.
-    if (!gameInfo || gameInfo.id !== 'mtg') {
-        // Other games list the finishes the printing exists in; the plain one is the likely one
-        const options = card.finish_options || [defaultFinish()];
-        if (options.length === 1) return {finish: options[0], reason: `only printed as ${finishLabel(options[0]).toLowerCase()}`};
-        return {finish: options.includes(defaultFinish()) ? defaultFinish() : options[0], reason: null};
-    }
-    const finishes = card.finishes || [];
-    const hasFoil = finishes.includes('foil') || finishes.includes('etched');
-    const hasNonfoil = finishes.includes('nonfoil');
-    const foilKind = (card.treatments || []).includes('Surge Foil') ? 'surge' : 'foil';
-
-    if (hasFoil && !hasNonfoil) return {finish: foilKind, reason: 'only printed in foil'};
-    if (hasNonfoil && !hasFoil) return {finish: 'regular', reason: 'only printed non-foil'};
-    if (foilStatus === 'foil') return {finish: foilKind, reason: '★ next to the set code'};
-    if (foilStatus === 'non-foil') return {finish: 'regular', reason: '• next to the set code'};
-    return {finish: 'regular', reason: null};
-}
-
-function quantityCell(id, label, kind, value = 0) {
-    return `
-        <div class="qty-cell ${kind}">
-            <span class="qty-label"><span class="qty-dot"></span>${label}</span>
-            <div class="qty-stepper">
-                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease ${label}">−</button>
-                <input type="number" id="${id}" value="${value}" min="0" max="999" aria-label="${label} quantity">
-                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase ${label}">+</button>
-            </div>
-        </div>
-    `;
-}
-
-function displayCard(card) {
-    const suggestion = suggestedFinish(card);
-    // Only show prices that exist (e.g. foil-only printings have no regular price)
-    const prices = [];
-    if (card.prices) {
-        // [[finish label, price]] (games other than Magic)
-        card.prices.forEach(([label, price]) => prices.push(
-            `<span class="price-label">${escapeHtml(label.toLowerCase())}</span> <span class="price">$${price.toFixed(2)}</span>`));
-    } else {
-        if (card.price > 0) {
-            prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
-        }
-        if (card.price_foil > 0) {
-            prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
-        }
-    }
-    if (prices.length === 0) {
-        prices.push('<span class="price-label">No price data</span>');
-    }
-
-    const html = `
-        <div class="card-summary">
-            ${card.image_uri ? `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">` : ''}
-            <div class="card-facts">
-                <div class="card-title">${escapeHtml(card.name)}</div>
-                <div class="card-meta">${escapeHtml(card.set)} · #${escapeHtml(card.number)}</div>
-                <div class="card-meta"><span class="card-rarity">${escapeHtml(card.rarity)}</span> · ${escapeHtml(card.type)}</div>
-                ${card.treatments && card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
-                ${card.confirmed === false ? '<div class="card-warning">Printing not confirmed - check the set and number</div>' : ''}
-                <div class="card-prices">${prices.join('<span class="price-sep">·</span>')}</div>
-            </div>
-        </div>
-
-        <div class="input-group">
-            <label for="condition">Condition</label>
-            <select id="condition">
-                <option value="Mint">Mint (M)</option>
-                <option value="Near Mint" selected>Near Mint (NM)</option>
-                <option value="Excellent">Excellent (EX)</option>
-                <option value="Good">Good (GD)</option>
-                <option value="Played">Played (PL)</option>
-                <option value="Poor">Poor (P)</option>
-            </select>
-        </div>
-
-        <div class="input-group">
-            <span class="field-label">Quantity</span>
-            <div class="qty-grid">
-                ${cardFinishes(card).map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
-            </div>
-            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
-        </div>
-
-        <div class="card-actions">
-            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
-            <button class="btn" onclick="dismissCard()">Skip</button>
-        </div>
-    `;
-
-    document.getElementById('card-display').innerHTML = html;
-}
-
-function cardFinishes(card) {
-    // The game's finishes, only those the printing exists in when the game says (Pokémon)
-    return card.finish_options ? gameInfo.finishes.filter(([key]) => card.finish_options.includes(key)) : gameInfo.finishes;
-}
-
-function treatmentTagsHtml(treatments) {
-    return '<span class="treatment-tags">' +
-        treatments.map(t => `<span class="treatment-tag">${escapeHtml(t)}</span>`).join('') +
-        '</span>';
-}
-
-function displayPrintings(cardName, cards) {
-    let html = `<div class="similar-cards"><div class="list-heading">${escapeHtml(cardName)}</div>`;
-    html += `<div class="list-subheading">${cards.length} printings - pick the one you have</div><div class="printing-grid">`;
-
-    cards.forEach(card => {
-        // Scryfall's "small" image size keeps the grid light
-        const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
-        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
-        html += `
-            <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
-                ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
-                <strong>${escapeHtml(card.set)}</strong><br>
-                <span class="meta">#${escapeHtml(card.number)} &middot; ${price}</span>
-                ${card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
-            </div>
-        `;
-    });
-
-    html += '</div></div>';
-    document.getElementById('card-display').innerHTML = html;
-}
-
-function selectPrinting(cardId) {
-    console.log("Printing selected:", cardId);
-    socket.emit('select_printing', {id: cardId});
-}
-
-function displaySimilarCards(cards) {
-    let html = '<div class="similar-cards"><div class="list-heading">No exact match</div><div class="list-subheading">Did you mean:</div>';
-
-    if (cards.length === 0) {
-        html += '<div class="empty-state">No similar cards found.</div>';
-    } else {
-        cards.forEach(card => {
-            html += `
-                <div class="similar-card" onclick="selectSimilarCard('${escapeHtml(card.name.replace(/'/g, "\\'"))}')">
-                    <strong>${escapeHtml(card.name)}</strong><br>
-                    <small>${escapeHtml(card.set)} · ${card.price}</small>
-                </div>
-            `;
-        });
-    }
-    
-    html += '</div>';
-    document.getElementById('card-display').innerHTML = html;
-}
-
-function adjustQtyInput(inputId, delta) {
-    const input = document.getElementById(inputId);
-    const currentValue = parseInt(input.value) || 0;
-    const newValue = Math.max(0, Math.min(999, currentValue + delta));
-    input.value = newValue;
-}
-
-function addToInventoryBoth() {
-    if (!currentCard) {
-        addLog(timeNow(), 'error', 'No card selected');
-        return;
-    }
-
-    const condition = document.getElementById('condition').value;
-    const quantities = cardFinishes(currentCard).map(([key]) => [key, parseInt(document.getElementById(`qty-${key}`).value) || 0]);
-    if (quantities.every(([, quantity]) => quantity === 0)) {
-        addLog(timeNow(), 'warning', 'Please set at least one quantity');
-        return;
-    }
-
-    // One entry per finish with a quantity, sent together
-    const items = quantities.filter(([, quantity]) => quantity > 0).map(([finish, quantity]) => ({finish, quantity}));
-    socket.emit('add_to_inventory', {condition: condition, items: items});
-}
-
-function dismissCard() {
-    if (reviewItem) {
-        socket.emit('review_skip');  // drops the item; the next one follows
-        return;
-    }
-    console.log('Card dismissed by user');
-    currentCard = null;
-    detectedFoilStatus = 'unknown';
-
-    // Emit dismiss event to server to re-enable auto-capture
-    socket.emit('dismiss_card');
-
-    // Clear the card display
-    document.getElementById('card-display').innerHTML = `
-        <div class="empty-state">
-            Card skipped.<br>
-            Ready to scan the next card.
-        </div>
-    `;
-
-    addLog(timeNow(), 'info', 'Card dismissed - ready for next card');
-}
-
-function addLog(timestamp, level, message) {
-    const logContainer = document.getElementById('log-container');
-    const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry';
-    logEntry.innerHTML = `
-        <span class="log-timestamp">[${timestamp}]</span>
-        <span class="log-${level}">${escapeHtml(message)}</span>
-    `;
-    logContainer.appendChild(logEntry);
-    logContainer.scrollTop = logContainer.scrollHeight;
-    
-    // Keep only last 100 log entries
-    while (logContainer.children.length > 100) {
-        logContainer.removeChild(logContainer.firstChild);
-    }
-}
+// ============================================================================
+// Top bar counters and card data updates
+// ============================================================================
 
 function loadStats() {
     fetch('/api/stats')
         .then(response => response.json())
         .then(data => {
             if (data.database) {
-                document.getElementById('db-cards').textContent =
-                    data.database.total_cards.toLocaleString();
+                $('db-cards').textContent = data.database.total_cards.toLocaleString();
                 showDataUpdate(data.database.update);
             }
             setReviewCount(data.review || 0);
             if (data.inventory) {
-                document.getElementById('inv-cards').textContent =
-                    data.inventory.total_cards.toLocaleString();
-                document.getElementById('total-value').textContent =
-                    '$' + data.inventory.total_value.toFixed(2);
+                $('inv-cards').textContent = data.inventory.total_cards.toLocaleString();
+                $('total-value').textContent = '$' + data.inventory.total_value.toFixed(2);
             }
         })
-        .catch(error => {
-            console.error('Error loading stats:', error);
-            // Don't log stats error - expected when server is down
-        });
+        // Not shown in the activity log - expected when the server is down
+        .catch(error => console.error('Error loading stats:', error));
 }
 
 let dataUpdateNotified = false;
@@ -1098,7 +839,7 @@ let dataUpdateNotified = false;
 function showDataUpdate(message) {
     // Newer card data available (checked at startup and daily): a dot on the Database
     // counter, which then offers the update; one notification per page load
-    const box = document.getElementById('db-stat');
+    const box = $('db-stat');
     box.classList.toggle('has-update', !!message);
     box.classList.toggle('clickable', !!message);
     box.title = message ? `${message} - click to update` : '';
@@ -1109,7 +850,7 @@ function showDataUpdate(message) {
 }
 
 async function offerDataUpdate() {
-    const box = document.getElementById('db-stat');
+    const box = $('db-stat');
     if (!box.classList.contains('has-update')) return;
     const ok = await confirmDialog({
         title: `Update the ${gameInfo.label} card data?`,
@@ -1123,114 +864,165 @@ socket.on('database_update_available', function(data) {
     if (gameInfo && data.game === gameInfo.id) showDataUpdate(data.message);
 });
 
-function loadAIModels() {
-    fetch('/api/ai_models')
+function updateDatabase() {
+    setButton('update-database-btn', 'Updating...', true);
+    addLog(timeNow(), 'info', `Starting the ${gameInfo.label} card data update from ${gameInfo.source}...`);
+    socket.emit('update_database');
+}
+
+socket.on('database_update_progress', function(data) {
+    addLog(timeNow(), 'info', data.message);
+});
+
+socket.on('database_update_complete', function(data) {
+    audioManager.playQueueAlert();  // triple beep: a long operation finished
+    setButton('update-database-btn', 'Update card database');
+    addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
+    loadStats();
+});
+
+socket.on('database_update_error', function(data) {
+    audioManager.playError();
+    setButton('update-database-btn', 'Update card database');
+    addLog(timeNow(), 'error', `Database update failed: ${data.message}`);
+});
+
+async function rebuildDatabase() {
+    const ok = await confirmDialog({
+        title: 'Rebuild database schema?',
+        message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your inventory is not touched.',
+        confirmText: 'Rebuild'
+    });
+    if (!ok) return;
+
+    setButton('rebuild-database-btn', 'Rebuilding...', true);
+    addLog(timeNow(), 'info', 'Starting database schema rebuild...');
+    addLog(timeNow(), 'info', 'This will optimize database structure and indexes (~30 seconds)');
+    socket.emit('rebuild_database');
+}
+
+socket.on('database_rebuild_progress', function(data) {
+    addLog(timeNow(), 'info', data.message);
+});
+
+socket.on('database_rebuild_complete', function(data) {
+    audioManager.playQueueAlert();  // triple beep: a long operation finished
+    setButton('rebuild-database-btn', 'Rebuild database schema');
+    addLog(timeNow(), 'success', `Database rebuilt! ${data.cards_imported.toLocaleString()} cards migrated.`);
+    addLog(timeNow(), 'success', `Schema optimized: ${data.schema_type} (with performance indexes)`);
+    addLog(timeNow(), 'success', 'Database queries will now be faster!');
+});
+
+socket.on('database_rebuild_error', function(data) {
+    audioManager.playError();
+    setButton('rebuild-database-btn', 'Rebuild database schema');
+    addLog(timeNow(), 'error', `Database rebuild failed: ${data.message}`);
+});
+
+// ============================================================================
+// Vision AI: provider and model (Settings -> Vision AI)
+// ============================================================================
+
+function fetchAIModels() {
+    return fetch('/api/ai_models')
         .then(response => response.json())
-        .then(data => {
-            availableModels = data.models;
-            console.log('Available models loaded:', availableModels);
-        })
-        .catch(error => {
-            console.error('Error loading AI models:', error);
-        });
+        .then(data => { availableModels = data.models; });
+}
+
+function loadAIModels() {
+    return fetchAIModels().catch(error => console.error('Error loading AI models:', error));
 }
 
 function refreshAIModels() {
-    const refreshBtn = document.getElementById('refresh-models-btn');
-    const modelSelect = document.getElementById('ai-model');
     const provider = currentProvider;
-
-    // Disable button and show loading state
-    refreshBtn.disabled = true;
-    refreshBtn.textContent = '⏳';
-    modelSelect.innerHTML = '<option value="">Refreshing models...</option>';
-
+    setButton('refresh-models-btn', '⏳', true);
+    $('ai-model').innerHTML = '<option value="">Refreshing models...</option>';
     addLog(timeNow(), 'info', `Refreshing ${provider} models...`);
 
-    // For local provider, dynamically fetch from Ollama
-    if (provider === 'local') {
-        loadLocalModels(currentModel).finally(() => {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = '🔄';
+    // Local models come live from Ollama; cloud providers have a static list
+    const refreshed = provider === 'local' ? loadLocalModels(currentModel) : fetchAIModels()
+        .then(() => {
+            populateModelDropdown(provider, currentModel);
+            addLog(timeNow(), 'success', `${provider} models refreshed`);
+        })
+        .catch(error => {
+            console.error('Error refreshing models:', error);
+            addLog(timeNow(), 'error', 'Failed to refresh models');
         });
-    } else {
-        // For cloud providers, just reload from static list
-        fetch('/api/ai_models')
-            .then(response => response.json())
-            .then(data => {
-                availableModels = data.models;
-                console.log('Models refreshed:', availableModels);
-
-                // Re-populate dropdown
-                populateModelDropdown(provider, currentModel);
-
-                addLog(timeNow(), 'success', `${provider} models refreshed`);
-            })
-            .catch(error => {
-                console.error('Error refreshing models:', error);
-                addLog(timeNow(), 'error', 'Failed to refresh models');
-            })
-            .finally(() => {
-                // Reset button
-                refreshBtn.disabled = false;
-                refreshBtn.textContent = '🔄';
-            });
-    }
+    refreshed.finally(() => setButton('refresh-models-btn', '🔄'));
 }
 
 function populateModelDropdown(provider, selectedModel = null) {
-    const modelSelect = document.getElementById('ai-model');
-    modelSelect.innerHTML = ''; // Clear existing options
-
-    if (availableModels[provider]) {
-        availableModels[provider].forEach(model => {
-            const option = document.createElement('option');
-            option.value = model;
-            option.textContent = model;
-            if (selectedModel && model === selectedModel) {
-                option.selected = true;
-            }
-            modelSelect.appendChild(option);
-        });
-    } else {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No models available';
-        modelSelect.appendChild(option);
+    const modelSelect = $('ai-model');
+    modelSelect.innerHTML = '';
+    const models = availableModels[provider];
+    if (!models) {
+        modelSelect.add(new Option('No models available', ''));
+        return;
     }
+    models.forEach(model => modelSelect.add(new Option(model, model, false, model === selectedModel)));
 }
 
 function loadLocalModels(selectedModel = null) {
-    const modelSelect = document.getElementById('ai-model');
-    modelSelect.innerHTML = '<option value="">Loading models from Ollama...</option>';
+    $('ai-model').innerHTML = '<option value="">Loading models from Ollama...</option>';
 
-    // Fetch live models from Ollama and return promise
+    // Live models from Ollama; the static list when the server can't be reached
     return fetch('/api/local_ai_models')
         .then(response => response.json())
         .then(data => {
             if (data.success && data.models && data.models.length > 0) {
-                // Update available models with live Ollama models
                 availableModels['local'] = data.models;
-                console.log('Local models loaded:', data.models);
                 addLog(timeNow(), 'success', `Found ${data.models.length} local models`);
-
-                // Populate dropdown
-                populateModelDropdown('local', selectedModel);
             } else {
-                // Fall back to static list
-                console.warn('Could not fetch local models, using static list');
                 addLog(timeNow(), 'warning', 'Using static model list (local server not available)');
-                populateModelDropdown('local', selectedModel);
             }
         })
         .catch(error => {
             console.error('Error loading local models:', error);
             addLog(timeNow(), 'warning', 'Could not connect to local AI server');
-
-            // Fall back to static list
-            populateModelDropdown('local', selectedModel);
-        });
+        })
+        .then(() => populateModelDropdown('local', selectedModel));
 }
+
+function setActiveModel(provider, model) {
+    currentProvider = provider;
+    currentModel = model;
+    activeProvider = provider;
+    activeModel = model;
+}
+
+function applyProvider(provider) {
+    // Load the provider's models and switch the scanner to it; returning to the active
+    // provider keeps its model instead of jumping to the first one in the list
+    const keepModel = provider === activeProvider ? activeModel : null;
+    const loaded = provider === 'local' ? loadLocalModels(keepModel) : Promise.resolve(populateModelDropdown(provider, keepModel));
+    loaded.then(() => {
+        socket.emit('set_ai_provider', {provider: provider, model: $('ai-model').value});
+        addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
+    });
+}
+
+function loadAIProvider() {
+    return fetch('/api/ai_provider')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.provider) return;
+            $('ai-provider').value = data.provider;
+            setActiveModel(data.provider, data.model);
+            if (data.provider === 'local') {
+                loadLocalModels(data.model);
+            } else {
+                populateModelDropdown(data.provider, data.model);
+            }
+        })
+        .catch(error => console.error('Error loading AI provider:', error));
+}
+
+socket.on('ai_provider_set', function(data) {
+    setActiveModel(data.provider, data.model);
+    addLog(timeNow(), 'success', data.message);
+    loadPrompts();
+});
 
 // ============================================================================
 // API keys / local endpoint (Settings -> Vision AI)
@@ -1245,12 +1037,16 @@ const PROVIDER_INFO = {
     local: {name: 'Local AI'}
 };
 
+function providerInfo(provider) {
+    return PROVIDER_INFO[provider] || {name: provider};
+}
+
 function loadCredentials() {
     return fetch('/api/ai_credentials')
         .then(response => response.json())
         .then(data => {
             aiCredentials = data;
-            renderCredentialField(document.getElementById('ai-provider').value);
+            renderCredentialField($('ai-provider').value);
         })
         .catch(error => console.error('Error loading API key status:', error));
 }
@@ -1260,10 +1056,10 @@ function hasCredential(provider) {
 }
 
 function renderCredentialField(provider) {
-    const input = document.getElementById('ai-credential');
-    const label = document.getElementById('ai-credential-label');
-    const hint = document.getElementById('ai-credential-hint');
-    const info = PROVIDER_INFO[provider] || {name: provider};
+    const input = $('ai-credential');
+    const label = $('ai-credential-label');
+    const hint = $('ai-credential-hint');
+    const info = providerInfo(provider);
     const status = aiCredentials[provider] || {};
     input.value = '';
     hint.classList.remove('is-missing');
@@ -1290,10 +1086,8 @@ function renderCredentialField(provider) {
 }
 
 async function saveCredential() {
-    const provider = document.getElementById('ai-provider').value;
-    const input = document.getElementById('ai-credential');
-    const value = input.value.trim();
-    const info = PROVIDER_INFO[provider] || {name: provider};
+    const provider = $('ai-provider').value;
+    const value = $('ai-credential').value.trim();
 
     if (!value) {
         if (provider === 'local' || !hasCredential(provider)) {
@@ -1301,7 +1095,7 @@ async function saveCredential() {
             return;
         }
         const remove = await confirmDialog({
-            title: `Remove the ${info.name} key?`,
+            title: `Remove the ${providerInfo(provider).name} key?`,
             message: 'Removes the key saved in the web interface. A key in the .env file (if any) is used again after a restart.',
             confirmText: 'Remove key',
             danger: true
@@ -1313,8 +1107,8 @@ async function saveCredential() {
 
 socket.on('ai_credential_saved', function(data) {
     aiCredentials[data.provider] = data.status;
-    const info = PROVIDER_INFO[data.provider] || {name: data.provider};
-    const selected = document.getElementById('ai-provider').value;
+    const info = providerInfo(data.provider);
+    const selected = $('ai-provider').value;
     renderCredentialField(selected);
 
     if (data.provider === 'local') {
@@ -1327,47 +1121,6 @@ socket.on('ai_credential_saved', function(data) {
         applyProvider(selected);
     }
 });
-
-function applyProvider(provider) {
-    // Load the provider's models and switch the scanner to it; returning to the active
-    // provider keeps its model instead of jumping to the first one in the list
-    const keepModel = provider === activeProvider ? activeModel : null;
-    const loaded = provider === 'local' ? loadLocalModels(keepModel) : Promise.resolve(populateModelDropdown(provider, keepModel));
-    loaded.then(() => {
-        const model = document.getElementById('ai-model').value;
-        socket.emit('set_ai_provider', {provider: provider, model: model});
-        addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
-    });
-}
-
-function loadAIProvider() {
-    return fetch('/api/ai_provider')
-        .then(response => response.json())
-        .then(data => {
-            if (data.provider) {
-                const providerSelect = document.getElementById('ai-provider');
-                providerSelect.value = data.provider;
-                currentProvider = data.provider;
-                currentModel = data.model;
-                activeProvider = data.provider;
-                activeModel = data.model;
-
-                // For local provider, fetch live models from Ollama
-                if (data.provider === 'local') {
-                    loadLocalModels(data.model);
-                } else {
-                    // Populate model dropdown for cloud providers
-                    populateModelDropdown(data.provider, data.model);
-                }
-
-                console.log('Current AI provider:', data.provider);
-                console.log('Current AI model:', data.model);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading AI provider:', error);
-        });
-}
 
 // ============================================================================
 // Prompt editor (Settings -> Vision AI -> Edit prompts)
@@ -1389,14 +1142,14 @@ function loadPrompts() {
         .then(data => {
             promptData = data;
             updatePromptSummary();
-            if (document.getElementById('prompt-modal').classList.contains('show')) renderPromptEditor();
+            if (isOpen('prompt-modal')) renderPromptEditor();
         })
         .catch(error => console.error('Error loading prompts:', error));
 }
 
 function updatePromptSummary() {
     const custom = promptData.order.map(kind => promptData.prompts[kind]).filter(p => p.source !== 'built-in');
-    document.getElementById('prompt-summary').textContent = custom.length
+    $('prompt-summary').textContent = custom.length
         ? custom.map(p => `${p.label}: ${PROMPT_SOURCES[p.source].toLowerCase()}`).join(' · ')
         : 'What the AI is asked to read on each card - adjustable per model';
 }
@@ -1405,11 +1158,18 @@ function promptText(kind) {
     return kind in promptDrafts ? promptDrafts[kind] : promptData.prompts[kind].instructions;
 }
 
+function editedPromptText() {
+    // The text in the editor, or null (with a notice) when it is empty
+    const text = $('prompt-text').value.trim();
+    if (!text) notify('The prompt is empty', 'warning');
+    return text || null;
+}
+
 function openPromptEditor() {
     loadPrompts().then(() => {
         if (!promptData) return;
-        document.getElementById('prompt-test').hidden = true;
-        document.getElementById('prompt-modal').classList.add('show');
+        $('prompt-test').hidden = true;
+        $('prompt-modal').classList.add('show');
         renderPromptEditor();
     });
 }
@@ -1423,28 +1183,27 @@ async function closePromptEditor() {
         danger: true
     })) return;
     promptDrafts = {};
-    document.getElementById('prompt-modal').classList.remove('show');
+    $('prompt-modal').classList.remove('show');
 }
 
 function renderPromptEditor() {
     const kinds = promptData.prompts;
     if (!(promptKind in kinds)) promptKind = promptData.order[0];
-    const prompt = kinds[promptKind];
 
-    document.getElementById('prompt-model').textContent = promptData.model
+    $('prompt-model').textContent = promptData.model
         ? `In use with ${promptData.provider} / ${promptData.model}`
         : 'No AI model active - prompts can only be saved for all models';
 
-    document.getElementById('prompt-kinds').innerHTML = promptData.order.map(kind => [kind, kinds[kind]]).map(([kind, p]) => `
+    $('prompt-kinds').innerHTML = promptData.order.map(kind => `
         <label class="radio-pill">
             <input type="radio" name="prompt-kind" value="${kind}" ${kind === promptKind ? 'checked' : ''} onchange="selectPromptKind('${kind}')">
-            <span>${escapeHtml(p.label)}${kind in promptDrafts ? ' *' : ''}</span>
+            <span>${escapeHtml(kinds[kind].label)}${kind in promptDrafts ? ' *' : ''}</span>
         </label>`).join('');
 
-    const textarea = document.getElementById('prompt-text');
+    const textarea = $('prompt-text');
     if (textarea.value !== promptText(promptKind)) textarea.value = promptText(promptKind);
-    document.getElementById('prompt-format').textContent = prompt.answer_format;
-    document.getElementById('prompt-save-model-btn').disabled = !promptData.model;
+    $('prompt-format').textContent = kinds[promptKind].answer_format;
+    $('prompt-save-model-btn').disabled = !promptData.model;
     renderPromptSource();
 }
 
@@ -1454,18 +1213,18 @@ function renderPromptSource() {
     const tag = `<span class="source-tag ${prompt.source === 'built-in' ? '' : 'is-custom'}">${PROMPT_SOURCES[prompt.source]}</span>`;
     const note = edited ? '<span class="source-tag is-edited">Edited - not saved</span>'
         : prompt.source === 'model' && prompt.has_all_models ? 'overrides the prompt saved for all models' : '';
-    document.getElementById('prompt-source').innerHTML = tag + note;
-    document.getElementById('prompt-reset-btn').disabled = prompt.source === 'built-in' && !edited;
+    $('prompt-source').innerHTML = tag + note;
+    $('prompt-reset-btn').disabled = prompt.source === 'built-in' && !edited;
 }
 
 function selectPromptKind(kind) {
     promptKind = kind;
-    document.getElementById('prompt-test').hidden = true;
+    $('prompt-test').hidden = true;
     renderPromptEditor();
 }
 
 function onPromptInput() {
-    const text = document.getElementById('prompt-text').value;
+    const text = $('prompt-text').value;
     const wasEdited = promptKind in promptDrafts;
     if (text === promptData.prompts[promptKind].instructions) {
         delete promptDrafts[promptKind];
@@ -1478,12 +1237,8 @@ function onPromptInput() {
 }
 
 function savePrompt(scope) {
-    const text = document.getElementById('prompt-text').value.trim();
-    if (!text) {
-        notify('The prompt is empty', 'warning');
-        return;
-    }
-    socket.emit('save_prompt', {kind: promptKind, text: text, scope: scope});
+    const text = editedPromptText();
+    if (text) socket.emit('save_prompt', {kind: promptKind, text: text, scope: scope});
 }
 
 async function resetPrompt() {
@@ -1507,60 +1262,54 @@ socket.on('prompts_updated', function(data) {
     delete promptDrafts[promptKind];
     promptData = data;
     updatePromptSummary();
-    if (document.getElementById('prompt-modal').classList.contains('show')) {
-        document.getElementById('prompt-text').value = '';  // force a refresh with the saved text
+    if (isOpen('prompt-modal')) {
+        $('prompt-text').value = '';  // force a refresh with the saved text
         renderPromptEditor();
     }
     notify(data.message, 'success');
 });
 
 function testPrompt() {
-    const text = document.getElementById('prompt-text').value.trim();
-    if (!text) {
-        notify('The prompt is empty', 'warning');
-        return;
-    }
-    const button = document.getElementById('prompt-test-btn');
-    button.disabled = true;
-    button.textContent = 'Testing...';
-    const panel = document.getElementById('prompt-test');
+    const text = editedPromptText();
+    if (!text) return;
+    setButton('prompt-test-btn', 'Testing...', true);
+    const panel = $('prompt-test');
     panel.hidden = false;
     panel.innerHTML = `Asking ${escapeHtml(promptData.model || 'the AI')} about the last captured card...`;
     socket.emit('test_prompt', {kind: promptKind, text: text});
 }
 
+function promptTestReadHtml(data) {
+    // How the answer was parsed, and for a card the database match
+    if (data.kind === 'foil') {
+        const labels = {'foil': 'Foil (star)', 'non-foil': 'Not foil (dot)', 'unknown': 'Not recognized - answer must contain "star" or "dot"'};
+        return `<div>${escapeHtml(labels[data.result.foil] || data.result.foil)}</div>`;
+    }
+    if (!data.result) return '<div class="is-error">No card name found in the answer</div>';
+
+    const r = data.result;
+    const m = data.match;
+    return `<div>${escapeHtml(r.name)} · #${escapeHtml(r.collector_number || '?')} · ${escapeHtml(r.set_code || '?')}</div>`
+        + '<div class="test-title">Database match</div>' + (!m
+            ? '<div class="is-error">No card found in the database</div>'
+            : `<div class="${m.confirmed ? 'is-confirmed' : 'is-review'}">${escapeHtml(m.name)} · ${escapeHtml(m.set_name || m.set)} (${escapeHtml(m.set)}) #${escapeHtml(m.number || '?')}
+               - ${m.confirmed ? 'confirmed, would be added automatically' : `needs review (matched by ${escapeHtml(m.match || '?')})`}</div>`);
+}
+
 socket.on('prompt_test_result', function(data) {
-    const button = document.getElementById('prompt-test-btn');
-    button.disabled = false;
-    button.textContent = 'Test on last capture';
-    const panel = document.getElementById('prompt-test');
+    setButton('prompt-test-btn', 'Test on last capture');
+    const panel = $('prompt-test');
     panel.hidden = false;
 
     if (data.error) {
         panel.innerHTML = `<span class="is-error">${escapeHtml(data.error)}</span>`;
         return;
     }
-
-    let parsed;
-    if (data.kind === 'foil') {
-        const labels = {'foil': 'Foil (star)', 'non-foil': 'Not foil (dot)', 'unknown': 'Not recognized - answer must contain "star" or "dot"'};
-        parsed = `<div>${escapeHtml(labels[data.result.foil] || data.result.foil)}</div>`;
-    } else if (!data.result) {
-        parsed = '<div class="is-error">No card name found in the answer</div>';
-    } else {
-        const r = data.result;
-        parsed = `<div>${escapeHtml(r.name)} · #${escapeHtml(r.collector_number || '?')} · ${escapeHtml(r.set_code || '?')}</div>`;
-        const m = data.match;
-        parsed += '<div class="test-title">Database match</div>' + (!m
-            ? '<div class="is-error">No card found in the database</div>'
-            : `<div class="${m.confirmed ? 'is-confirmed' : 'is-review'}">${escapeHtml(m.name)} · ${escapeHtml(m.set_name || m.set)} (${escapeHtml(m.set)}) #${escapeHtml(m.number || '?')}
-               - ${m.confirmed ? 'confirmed, would be added automatically' : `needs review (matched by ${escapeHtml(m.match || '?')})`}</div>`);
-    }
     panel.innerHTML = `
         <div class="test-title">Answer (${data.seconds} s)</div>
         <pre>${escapeHtml(data.raw || '(empty)')}</pre>
         <div class="test-title">Read as</div>
-        ${parsed}`;
+        ${promptTestReadHtml(data)}`;
 });
 
 // ============================================================================
@@ -1570,10 +1319,10 @@ socket.on('prompt_test_result', function(data) {
 function applyGameFields() {
     // Manual search fields and the card data hint follow the game being scanned
     document.querySelector('.search-treatment').style.display = gameInfo.has_treatments ? '' : 'none';
-    if (!gameInfo.has_treatments) document.getElementById('card-treatment').value = '';
-    document.getElementById('set-code').placeholder = `e.g. ${gameInfo.set_example}`;
-    document.getElementById('collector-number').placeholder = `e.g. ${gameInfo.number_example}`;
-    document.getElementById('database-source-hint').textContent =
+    if (!gameInfo.has_treatments) $('card-treatment').value = '';
+    $('set-code').placeholder = `e.g. ${gameInfo.set_example}`;
+    $('collector-number').placeholder = `e.g. ${gameInfo.number_example}`;
+    $('database-source-hint').textContent =
         `Downloads the latest ${gameInfo.label} card data${gameInfo.id === 'mtg' ? ' and prices' : ''} from ${gameInfo.source}`
         + (gameInfo.id === 'mtg' ? ' (a few minutes)' : ' (a few seconds)');
 }
@@ -1583,7 +1332,7 @@ function loadGames() {
         .then(response => response.json())
         .then(data => {
             gameInfo = data.games.find(game => game.id === data.active);
-            const select = document.getElementById('game-select');
+            const select = $('game-select');
             select.innerHTML = data.games.map(game =>
                 `<option value="${escapeHtml(game.id)}">${escapeHtml(game.label)}</option>`).join('');
             select.value = data.active;
@@ -1596,13 +1345,12 @@ function loadGames() {
 
 socket.on('game_changed', function(data) {
     gameInfo = data;
-    document.getElementById('game-select').value = data.id;
+    $('game-select').value = data.id;
     hideReviewPanel();
     applyGameFields();
     renderExportButtons();
     currentCard = null;
-    document.getElementById('card-display').innerHTML =
-        `<div class="empty-state">Scanning ${escapeHtml(data.label)}.</div>`;
+    setCardPanel(`<div class="empty-state">Scanning ${escapeHtml(data.label)}.</div>`);
     loadStats();
     loadPrompts();
     notify(data.card_count
@@ -1611,181 +1359,7 @@ socket.on('game_changed', function(data) {
 });
 
 // ============================================================================
-// Event Listeners
-// ============================================================================
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize detection state from checkbox
-    const detectionCheckbox = document.getElementById('toggle-detection');
-    if (detectionCheckbox) {
-        detectionEnabled = detectionCheckbox.checked;
-    }
-
-    // Allow Enter key to search (both fields)
-    document.getElementById('card-name').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && !this.disabled) {
-            searchCard();
-        }
-    });
-
-    document.getElementById('set-code').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            searchCard();
-        }
-    });
-
-    document.getElementById('collector-number').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && !this.disabled) {
-            searchCard();
-        }
-    });
-
-    // Search needs a name, or the set + number
-    ['card-name', 'set-code', 'collector-number'].forEach(id => document.getElementById(id).addEventListener('input', function() {
-        const filled = field => document.getElementById(field).value.trim();
-        const number = filled('collector-number');
-        document.getElementById('search-btn').disabled = !(filled('card-name') || (number && (filled('set-code') || number.includes('/'))));
-    }));
-    
-    // Toggle detection
-    document.getElementById('toggle-detection').addEventListener('change', function(e) {
-        const enabled = e.target.checked;
-        const autoScanBtn = document.getElementById('toggle-auto-scanning-btn');
-
-        // Update global detection state
-        detectionEnabled = enabled;
-
-        socket.emit('toggle_detection', {enabled: enabled});
-        // Log message will be sent from server
-
-        // Update UI immediately (the next poll refreshes it from the server)
-        updateDetectionStatus(lastDetectionStatus);
-
-        if (!enabled) {
-            // When disabling detection, also stop auto-scanning
-            if (autoScanningEnabled) {
-                toggleAutoScanning(); // Stop auto-scanning
-            }
-            autoScanBtn.disabled = true;
-        } else {
-            // When enabling detection, enable the button
-            autoScanBtn.disabled = false;
-        }
-    });
-
-    // Toggle fast scan mode
-    document.getElementById('toggle-fast-scan').addEventListener('change', function(e) {
-        const enabled = e.target.checked;
-        fastScanMode = enabled;  // Update global state
-        socket.emit('toggle_fast_scan', {enabled: enabled});  // server logs the change
-
-        // Update hint if auto-scanning is active
-        if (autoScanningEnabled) {
-            document.getElementById('auto-scan-hint').textContent = autoScanHint();
-        }
-    });
-
-    // Continuous autofocus on/off (off = find the sharpest focus and lock it)
-    document.getElementById('toggle-autofocus').addEventListener('change', function(e) {
-        socket.emit('set_autofocus', {enabled: e.target.checked});
-    });
-
-    // Read cards with light-ocr before asking the vision AI
-    document.getElementById('toggle-ocr').addEventListener('change', function(e) {
-        socket.emit('toggle_ocr', {enabled: e.target.checked});
-    });
-    socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
-
-    // Toggle anti-glare
-    document.getElementById('toggle-anti-glare').addEventListener('change', function(e) {
-        const enabled = e.target.checked;
-        socket.emit('toggle_anti_glare', {enabled: enabled});
-        // Log message will be sent from server
-    });
-
-    // Toggle debug trace
-    document.getElementById('toggle-debug-trace').addEventListener('change', function(e) {
-        const enabled = e.target.checked;
-        socket.emit('toggle_debug_trace', {enabled: enabled});
-        addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
-    });
-
-    // Toggle audio
-    document.getElementById('toggle-audio').addEventListener('change', function(e) {
-        const enabled = e.target.checked;
-        audioManager.setEnabled(enabled);
-        addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
-
-        // Play test sound when enabling
-        if (enabled) {
-            audioManager.playSuccess();
-        }
-    });
-
-    // Volume slider
-    document.getElementById('audio-volume').addEventListener('input', function(e) {
-        const volume = e.target.value / 100; // Convert 0-100 to 0.0-1.0
-        audioManager.setVolume(volume);
-        document.getElementById('volume-value').textContent = e.target.value + '%';
-    });
-
-    // Change AI provider: show its key / address field; switch once it has a key
-    document.getElementById('ai-provider').addEventListener('change', function(e) {
-        const provider = e.target.value;
-        currentProvider = provider;
-        renderCredentialField(provider);
-
-        if (hasCredential(provider)) {
-            applyProvider(provider);
-        } else {
-            populateModelDropdown(provider);
-            document.getElementById('ai-credential').focus();
-            notify(`Enter your ${PROVIDER_INFO[provider].name} API key to use it`, 'warning');
-        }
-    });
-
-    document.getElementById('prompt-text').addEventListener('input', onPromptInput);
-
-    loadGames();
-    setupAreaDrawing();
-    setInterval(updateVideoOrientation, 1000);
-    document.getElementById('camera-rotation').addEventListener('change', function(e) {
-        socket.emit('set_camera_rotation', {rotation: parseInt(e.target.value)});
-    });
-    document.getElementById('game-select').addEventListener('change', function(e) {
-        socket.emit('set_game', {game: e.target.value});
-    });
-
-    // Enter in the key field saves it
-    document.getElementById('ai-credential').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') saveCredential();
-    });
-
-    // Change AI model
-    document.getElementById('ai-model').addEventListener('change', function(e) {
-        const model = e.target.value;
-        const provider = currentProvider;
-
-        // Send update to server
-        socket.emit('set_ai_provider', {provider: provider, model: model});
-        addLog(timeNow(), 'info', `Changing model to ${model}...`);
-    });
-    
-    // Load stats every 5 seconds
-    setInterval(loadStats, 5000);
-
-    // Initial stats load
-    loadStats();
-
-    // Load available models first, then load current provider/model
-    loadAIModels();
-    // Small delay to ensure models are loaded first; the key field needs the current provider
-    setTimeout(() => loadAIProvider().then(loadCredentials).then(loadPrompts), 100);
-
-});
-
-// ============================================================================
-// Inventory Viewer Functions
+// Scanned cards (the list behind the top bar's counter)
 // ============================================================================
 
 // The scanner page lists the cards scanned and not yet moved to the collection (common.js: areaQuery)
@@ -1801,12 +1375,12 @@ function inventoryChanged() {
 }
 
 function showInventory() {
-    document.getElementById('inventory-modal').classList.add('show');
+    $('inventory-modal').classList.add('show');
     loadInventory();
 }
 
 function closeInventory() {
-    document.getElementById('inventory-modal').classList.remove('show');
+    $('inventory-modal').classList.remove('show');
 }
 
 function loadInventory() {
@@ -1817,20 +1391,69 @@ function loadInventory() {
                 currentInventory = data.cards;
                 filterInventory();
             } else {
-                document.getElementById('inventory-list').innerHTML =
-                    '<div class="empty-state is-error">Error loading inventory</div>';
+                $('inventory-list').innerHTML = '<div class="empty-state is-error">Error loading inventory</div>';
             }
         })
         .catch(error => {
             console.error('Error loading inventory:', error);
-            document.getElementById('inventory-list').innerHTML =
-                '<div class="empty-state is-error">Failed to load inventory</div>';
+            $('inventory-list').innerHTML = '<div class="empty-state is-error">Failed to load inventory</div>';
         });
 }
 
+function inventoryStatHtml(value, label) {
+    return `
+        <div class="inventory-stat">
+            <div class="inventory-stat-value">${value}</div>
+            <div class="inventory-stat-label">${label}</div>
+        </div>`;
+}
+
+function inventoryRowHtml(card, index) {
+    const rarity = (card.rarity || '').toLowerCase();
+    const special = card.finish !== defaultFinish();
+    return `
+        <div class="inventory-card">
+            <div class="inventory-card-number">#${index + 1}</div>
+            ${card.captures && card.captures.length
+                ? `<button class="inventory-thumb" data-id="${card.id}" title="${card.captures.length} capture${card.captures.length > 1 ? 's' : ''}">
+                       <img src="${escapeHtml(card.captures[0].url)}" alt="" loading="lazy"></button>`
+                : '<div class="inventory-thumb empty" title="No capture"></div>'}
+            <div class="inventory-card-info">
+                <div class="inventory-card-name">
+                    ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
+                </div>
+                <div class="inventory-card-details">
+                    ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
+                    ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
+                </div>
+                <div class="inventory-card-meta">
+                    ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
+                    ${special ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
+                    ${card.color_identity ? `<span class="inventory-badge">${escapeHtml(card.color_identity)}</span>` : ''}
+                    ${card.location ? `<span class="inventory-badge" title="Location">${escapeHtml(card.location)}</span>` : ''}
+                    <span>${escapeHtml(card.condition)}</span>
+                </div>
+            </div>
+            <div class="inventory-card-price">
+                <div class="inventory-price-value">$${(card.price * card.quantity).toFixed(2)}</div>
+                ${card.quantity > 1 ? `<div class="inventory-price-each">$${card.price.toFixed(2)} each</div>` : ''}
+                <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
+            </div>
+            <div class="inventory-card-actions">
+                <button class="btn-edit" data-id="${card.id}" title="Edit">
+                    <svg class="icon"><use href="#i-edit"/></svg>
+                </button>
+                <button class="btn-delete" data-id="${card.id}" title="Delete">
+                    <svg class="icon"><use href="#i-trash"/></svg>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
 function renderInventory() {
-    const statsDiv = document.getElementById('inventory-stats');
-    const listDiv = document.getElementById('inventory-list');
+    const statsDiv = $('inventory-stats');
+    const listDiv = $('inventory-list');
 
     if (filteredInventory.length === 0) {
         statsDiv.innerHTML = '';
@@ -1845,67 +1468,11 @@ function renderInventory() {
     // Copies in any finish other than the default one (foil, surge foil, holo, ...)
     const specialCount = filteredInventory.reduce((sum, card) => sum + (card.finish !== defaultFinish() ? card.quantity : 0), 0);
 
-    statsDiv.innerHTML = `
-        <div class="inventory-stat">
-            <div class="inventory-stat-value">${totalCards}</div>
-            <div class="inventory-stat-label">Total Cards</div>
-        </div>
-        <div class="inventory-stat">
-            <div class="inventory-stat-value">$${totalValue.toFixed(2)}</div>
-            <div class="inventory-stat-label">Total Value</div>
-        </div>
-        <div class="inventory-stat">
-            <div class="inventory-stat-value">${specialCount}</div>
-            <div class="inventory-stat-label">Foil Cards</div>
-        </div>
-        <div class="inventory-stat">
-            <div class="inventory-stat-value">$${(totalValue / totalCards).toFixed(2)}</div>
-            <div class="inventory-stat-label">Avg. Value</div>
-        </div>
-    `;
-
-    listDiv.innerHTML = filteredInventory.map((card, index) => {
-        const rarity = (card.rarity || '').toLowerCase();
-        const special = card.finish !== defaultFinish();
-        return `
-            <div class="inventory-card">
-                <div class="inventory-card-number">#${index + 1}</div>
-                ${card.captures && card.captures.length
-                    ? `<button class="inventory-thumb" data-id="${card.id}" title="${card.captures.length} capture${card.captures.length > 1 ? 's' : ''}">
-                           <img src="${escapeHtml(card.captures[0].url)}" alt="" loading="lazy"></button>`
-                    : '<div class="inventory-thumb empty" title="No capture"></div>'}
-                <div class="inventory-card-info">
-                    <div class="inventory-card-name">
-                        ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
-                    </div>
-                    <div class="inventory-card-details">
-                        ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
-                        ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
-                    </div>
-                    <div class="inventory-card-meta">
-                        ${rarity ? `<span class="inventory-badge ${escapeHtml(rarity)}">${escapeHtml(rarity.toUpperCase())}</span>` : ''}
-                        ${special ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish).toUpperCase())}</span>` : ''}
-                        ${card.color_identity ? `<span class="inventory-badge">${escapeHtml(card.color_identity)}</span>` : ''}
-                        ${card.location ? `<span class="inventory-badge" title="Location">${escapeHtml(card.location)}</span>` : ''}
-                        <span>${escapeHtml(card.condition)}</span>
-                    </div>
-                </div>
-                <div class="inventory-card-price">
-                    <div class="inventory-price-value">$${(card.price * card.quantity).toFixed(2)}</div>
-                    ${card.quantity > 1 ? `<div class="inventory-price-each">$${card.price.toFixed(2)} each</div>` : ''}
-                    <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
-                </div>
-                <div class="inventory-card-actions">
-                    <button class="btn-edit" data-id="${card.id}" title="Edit">
-                        <svg class="icon"><use href="#i-edit"/></svg>
-                    </button>
-                    <button class="btn-delete" data-id="${card.id}" title="Delete">
-                        <svg class="icon"><use href="#i-trash"/></svg>
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
+    statsDiv.innerHTML = inventoryStatHtml(totalCards, 'Total Cards')
+        + inventoryStatHtml(`$${totalValue.toFixed(2)}`, 'Total Value')
+        + inventoryStatHtml(specialCount, 'Foil Cards')
+        + inventoryStatHtml(`$${(totalValue / totalCards).toFixed(2)}`, 'Avg. Value');
+    listDiv.innerHTML = filteredInventory.map(inventoryRowHtml).join('');
 }
 
 // Inventory sort, remembered in this browser (the server sends rows newest first)
@@ -1924,12 +1491,12 @@ function setInventorySort(value) {
 }
 
 function filterInventory() {
-    const searchTerm = document.getElementById('inventory-search').value.toLowerCase();
+    const searchTerm = $('inventory-search').value.toLowerCase();
     const rows = !searchTerm ? currentInventory : currentInventory.filter(card =>
         [card.name, card.set_name, card.rarity, card.color_identity, card.type_line]
             .some(value => (value || '').toLowerCase().includes(searchTerm)));
     const sort = inventorySort();
-    document.getElementById('inventory-sort').value = sort;
+    $('inventory-sort').value = sort;
     // Array.sort is stable: ties keep the server's newest-first order
     filteredInventory = INVENTORY_SORTS[sort] ? [...rows].sort(INVENTORY_SORTS[sort]) : rows;
     renderInventory();
@@ -1938,6 +1505,45 @@ function filterInventory() {
 function refreshInventory() {
     loadInventory();
     addLog(timeNow(), 'info', 'Scanned cards refreshed');
+}
+
+function inventoryEntry(element) {
+    // The entry a row's button (data-id) belongs to
+    return element && currentInventory.find(entry => entry.id === parseInt(element.dataset.id));
+}
+
+function setupInventoryList() {
+    const list = $('inventory-list');
+
+    list.addEventListener('click', function(event) {
+        const button = event.target.closest('.btn-edit, .btn-delete, button.inventory-thumb');
+        const card = inventoryEntry(button);
+        if (!card) return;
+        if (button.classList.contains('inventory-thumb')) {
+            openCaptures(card);
+        } else if (button.classList.contains('btn-delete')) {
+            deleteCard(card.id, card.name);
+        } else {
+            editCard(card, [...new Set(currentInventory.map(entry => entry.location).filter(Boolean))].sort(byText));
+        }
+    });
+
+    // Captures behind the entries: a grid of the copies on hover, all of them on click.
+    // Hover preview only where there is a mouse; touch screens tap the thumbnail
+    if (!window.matchMedia('(hover: hover)').matches) return;
+    let hovered = null;
+    list.addEventListener('mouseover', function(event) {
+        const row = event.target.closest('.inventory-card');
+        if (row === hovered) return;
+        hovered = row;
+        const card = inventoryEntry(row && row.querySelector('button.inventory-thumb'));
+        if (card && card.captures.length) showCapturePopover(card, row); else hideCapturePopover();
+    });
+    list.addEventListener('mouseleave', function() {
+        hovered = null;
+        hideCapturePopover();
+    });
+    list.addEventListener('scroll', hideCapturePopover, {passive: true});
 }
 
 function exportInventory(format, label) {
@@ -1955,58 +1561,22 @@ function exportInventory(format, label) {
 }
 
 function renderExportButtons() {
-    document.getElementById('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
+    $('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
         `<button class="btn btn-small" onclick="exportInventory('${escapeHtml(format)}', '${escapeHtml(label)}')">Export ${escapeHtml(label)}</button>`
     ).join('');
 }
 
-function updateDatabase() {
-    const updateBtn = document.getElementById('update-database-btn');
-
-    // Disable button and show loading state
-    updateBtn.disabled = true;
-    updateBtn.textContent = 'Updating...';
-
-    addLog(timeNow(), 'info', `Starting the ${gameInfo.label} card data update from ${gameInfo.source}...`);
-
-    // Emit the update request
-    socket.emit('update_database');
-}
-
-async function rebuildDatabase() {
-    const rebuildBtn = document.getElementById('rebuild-database-btn');
-
-    const ok = await confirmDialog({
-        title: 'Rebuild database schema?',
-        message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your inventory is not touched.',
-        confirmText: 'Rebuild'
-    });
-    if (!ok) return;
-
-    // Disable button and show loading state
-    rebuildBtn.disabled = true;
-    rebuildBtn.textContent = 'Rebuilding...';
-
-    addLog(timeNow(), 'info', 'Starting database schema rebuild...');
-    addLog(timeNow(), 'info', 'This will optimize database structure and indexes (~30 seconds)');
-
-    // Emit the rebuild request
-    socket.emit('rebuild_database');
-}
-
 async function importInventory() {
-    const fileInput = document.getElementById('import-file-input');
+    const fileInput = $('import-file-input');
     const file = fileInput.files[0];
 
     if (!file) {
         addLog(timeNow(), 'warning', 'No file selected');
         return;
     }
-
-    // Check file extension
     if (!file.name.endsWith('.csv')) {
         addLog(timeNow(), 'error', 'Only CSV files are supported');
-        fileInput.value = ''; // Clear the input
+        fileInput.value = '';
         return;
     }
 
@@ -2023,45 +1593,30 @@ async function importInventory() {
         fileInput.value = '';
         return;
     }
-    const replaceExisting = mode === 'replace';
 
-    // Show loading state
     addLog(timeNow(), 'info', `Importing ${file.name} into the scanned cards...`);
 
-    // Create form data
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('replace_existing', replaceExisting ? 'true' : 'false');
+    formData.append('replace_existing', mode === 'replace' ? 'true' : 'false');
 
-    // Upload file
-    fetch('/api/import_inventory?area=scan', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const stats = data.stats;
-            addLog(timeNow(), 'success',
-                `Import complete! Added: ${stats.added}, Updated: ${stats.updated}, Skipped: ${stats.skipped}, Errors: ${stats.errors}`
-            );
-
-            // Reload inventory and stats
-            loadInventory();
-            loadStats();
-
-            // Clear the file input
-            fileInput.value = '';
-        } else {
-            notify('Import failed: ' + (data.error || 'Unknown error'), 'error');
-            fileInput.value = '';
-        }
-    })
-    .catch(error => {
-        console.error('Import error:', error);
-        notify('Import failed - check the file format and try again (' + error + ')', 'error');
-        fileInput.value = '';
-    });
+    fetch('/api/import_inventory?area=scan', {method: 'POST', body: formData})
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const stats = data.stats;
+                addLog(timeNow(), 'success',
+                    `Import complete! Added: ${stats.added}, Updated: ${stats.updated}, Skipped: ${stats.skipped}, Errors: ${stats.errors}`);
+                inventoryChanged();
+            } else {
+                notify('Import failed: ' + (data.error || 'Unknown error'), 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Import error:', error);
+            notify('Import failed - check the file format and try again (' + error + ')', 'error');
+        })
+        .finally(() => { fileInput.value = ''; });
 }
 
 async function addToCollection() {
@@ -2091,7 +1646,7 @@ async function addToCollection() {
 }
 
 async function clearInventory() {
-    const count = document.getElementById('inv-cards').textContent;
+    const count = $('inv-cards').textContent;
     const ok = await confirmDialog({
         title: 'Clear the scanned cards?',
         message: `This deletes the ${count} scanned cards that are not in the collection yet, to start over. Your collection is not touched.`,
@@ -2100,147 +1655,70 @@ async function clearInventory() {
     });
     if (!ok) return;
 
-    // Show loading state
     addLog(timeNow(), 'warning', 'Clearing inventory...');
 
-    // Call API to clear inventory
-    fetch('/api/clear_inventory?area=scan', {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            notify(`Scanned cards cleared: ${data.deleted} entries removed`, 'success');
-
-            // Reload inventory and stats
-            loadInventory();
-            loadStats();
-        } else {
-            notify('Failed to clear inventory: ' + (data.error || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Clear inventory error:', error);
-        notify('Failed to clear inventory: ' + error, 'error');
-    });
+    fetch('/api/clear_inventory?area=scan', {method: 'POST'})
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                notify(`Scanned cards cleared: ${data.deleted} entries removed`, 'success');
+                inventoryChanged();
+            } else {
+                notify('Failed to clear inventory: ' + (data.error || 'Unknown error'), 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Clear inventory error:', error);
+            notify('Failed to clear inventory: ' + error, 'error');
+        });
 }
 
+// ============================================================================
+// Settings drawer and overlays
+// ============================================================================
+
 function openSettings() {
-    document.getElementById('settings-drawer').classList.add('show');
+    $('settings-drawer').classList.add('show');
 }
 
 function closeSettings() {
-    document.getElementById('settings-drawer').classList.remove('show');
+    $('settings-drawer').classList.remove('show');
     if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
 }
 
 // The collection page's settings link here (/#settings)
 if (window.location.hash === '#settings') openSettings();
 
-// Close the topmost overlay with Escape
+// Topmost first: Escape closes the first one open, a click on a backdrop closes that one
+const OVERLAYS = [
+    ['capture-modal', closeCaptures],
+    ['dialog-modal', () => closeDialog(null)],
+    ['edit-card-modal', closeEditCard],
+    ['prompt-modal', closePromptEditor],
+    ['inventory-modal', closeInventory],
+    ['settings-drawer', closeSettings],
+];
+
 document.addEventListener('keydown', function(event) {
     if (event.key !== 'Escape') return;
-    if (document.getElementById('area-layer').classList.contains('is-drawing')) {
+    if (isDrawingArea()) {
         cancelDrawArea();
-    } else if (document.getElementById('capture-modal').classList.contains('show')) {
-        closeCaptures();
-    } else if (document.getElementById('dialog-modal').classList.contains('show')) {
-        closeDialog(null);
-    } else if (document.getElementById('edit-card-modal').classList.contains('show')) {
-        closeEditCard();
-    } else if (document.getElementById('prompt-modal').classList.contains('show')) {
-        closePromptEditor();
-    } else if (document.getElementById('inventory-modal').classList.contains('show')) {
-        closeInventory();
-    } else {
-        closeSettings();
+        return;
     }
+    const overlay = OVERLAYS.find(([id]) => isOpen(id));
+    if (overlay) overlay[1](); else closeSettings();
 });
 
-// Close modal when clicking outside
-window.onclick = function(event) {
-    const inventoryModal = document.getElementById('inventory-modal');
-    const editModal = document.getElementById('edit-card-modal');
-
-    if (event.target === document.getElementById('settings-drawer')) {
-        closeSettings();
-    }
-    if (event.target === document.getElementById('dialog-modal')) {
-        closeDialog(null);
-    }
-    if (event.target === document.getElementById('capture-modal')) {
-        closeCaptures();
-    }
-    if (event.target === inventoryModal) {
-        closeInventory();
-    }
-    if (event.target === document.getElementById('prompt-modal')) {
-        closePromptEditor();
-    }
-    if (event.target === editModal) {
-        closeEditCard();
-    }
-}
-
-// Event delegation for inventory action buttons
-document.addEventListener('DOMContentLoaded', function() {
-    const inventoryList = document.getElementById('inventory-list');
-
-    if (inventoryList) {
-        inventoryList.addEventListener('click', function(event) {
-            const target = event.target;
-
-            const button = target.closest('.btn-edit, .btn-delete, button.inventory-thumb');
-            if (!button) return;
-            const card = currentInventory.find(entry => entry.id === parseInt(button.dataset.id));
-            if (!card) return;
-            if (button.classList.contains('inventory-thumb')) {
-                openCaptures(card);
-            } else if (button.classList.contains('btn-delete')) {
-                deleteCard(card.id, card.name);
-            } else {
-                editCard(card, [...new Set(currentInventory.map(entry => entry.location).filter(Boolean))].sort(byText));
-            }
-        });
-    }
+window.addEventListener('click', function(event) {
+    const overlay = OVERLAYS.find(([id]) => event.target === $(id));
+    if (overlay) overlay[1]();
 });
 
-// ============================================================================
-// Captures behind inventory entries: a grid of the copies on hover, all of them on click
-// ============================================================================
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Hover preview only where there is a mouse; touch screens tap the thumbnail
-    if (!window.matchMedia('(hover: hover)').matches) return;
-    const list = document.getElementById('inventory-list');
-    let hovered = null;
-    list.addEventListener('mouseover', function(event) {
-        const row = event.target.closest('.inventory-card');
-        if (row === hovered) return;
-        hovered = row;
-        const thumb = row && row.querySelector('button.inventory-thumb');
-        const card = thumb && currentInventory.find(entry => entry.id === parseInt(thumb.dataset.id));
-        if (card && card.captures.length) showCapturePopover(card, row); else hideCapturePopover();
-    });
-    list.addEventListener('mouseleave', function() {
-        hovered = null;
-        hideCapturePopover();
-    });
-    list.addEventListener('scroll', hideCapturePopover, {passive: true});
-});
-
-// Banner removed - using simple flash feedback only
-
-// Test audio function (called from HTML button)
 function testAudio() {
-    console.log('🔊 Test Audio button clicked');
     addLog(timeNow(), 'info', 'Testing audio system...');
 
-    // Ensure audio context is initialized
     audioManager.ensureAudioContext().then(() => {
-        console.log('🎵 Audio context initialized, playing test sounds...');
-
-        // Play all sounds in sequence
+        // All sounds in sequence
         audioManager.playCapture();
         addLog(timeNow(), 'info', '1/3: Capture sound');
 
@@ -2255,3 +1733,124 @@ function testAudio() {
         }, 1000);
     });
 }
+
+// ============================================================================
+// Page setup
+// ============================================================================
+
+function onToggle(id, handler) {
+    $(id).addEventListener('change', event => handler(event.target.checked));
+}
+
+function setupSearchFields() {
+    const fields = ['card-name', 'set-code', 'collector-number'];
+    fields.forEach(id => {
+        $(id).addEventListener('keypress', event => {
+            if (event.key === 'Enter') searchCard();
+        });
+        $(id).addEventListener('input', () => {
+            const [name, setCode, number] = fields.map(field => $(field).value.trim());
+            $('search-btn').disabled = !canSearch(name, setCode, number);
+        });
+    });
+}
+
+function setupScanToggles() {
+    detectionEnabled = $('toggle-detection').checked;
+
+    onToggle('toggle-detection', enabled => {
+        detectionEnabled = enabled;
+        socket.emit('toggle_detection', {enabled: enabled});  // the server logs the change
+
+        // Shown right away (the next poll refreshes it from the server)
+        updateDetectionStatus(lastDetectionStatus);
+
+        // Auto scanning needs detection
+        if (!enabled && autoScanningEnabled) toggleAutoScanning();
+        $('toggle-auto-scanning-btn').disabled = !enabled;
+    });
+
+    onToggle('toggle-fast-scan', enabled => {
+        fastScanMode = enabled;
+        socket.emit('toggle_fast_scan', {enabled: enabled});  // the server logs the change
+        if (autoScanningEnabled) $('auto-scan-hint').textContent = autoScanHint();
+    });
+
+    // Continuous autofocus on/off (off = find the sharpest focus and lock it)
+    onToggle('toggle-autofocus', enabled => socket.emit('set_autofocus', {enabled: enabled}));
+    // Read cards with light-ocr before asking the vision AI
+    onToggle('toggle-ocr', enabled => socket.emit('toggle_ocr', {enabled: enabled}));
+    onToggle('toggle-anti-glare', enabled => socket.emit('toggle_anti_glare', {enabled: enabled}));  // the server logs the change
+    onToggle('toggle-debug-trace', enabled => {
+        socket.emit('toggle_debug_trace', {enabled: enabled});
+        addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
+    });
+
+    $('camera-rotation').addEventListener('change', function(e) {
+        socket.emit('set_camera_rotation', {rotation: parseInt(e.target.value)});
+    });
+    $('game-select').addEventListener('change', function(e) {
+        socket.emit('set_game', {game: e.target.value});
+    });
+}
+
+function setupAudioControls() {
+    onToggle('toggle-audio', enabled => {
+        audioManager.setEnabled(enabled);
+        addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
+        if (enabled) audioManager.playSuccess();  // a test sound
+    });
+
+    $('audio-volume').addEventListener('input', function(e) {
+        audioManager.setVolume(e.target.value / 100);  // 0-100 -> 0.0-1.0
+        $('volume-value').textContent = e.target.value + '%';
+    });
+}
+
+function setupAIControls() {
+    // Change AI provider: show its key / address field; switch once it has a key
+    $('ai-provider').addEventListener('change', function(e) {
+        const provider = e.target.value;
+        currentProvider = provider;
+        renderCredentialField(provider);
+
+        if (hasCredential(provider)) {
+            applyProvider(provider);
+        } else {
+            populateModelDropdown(provider);
+            $('ai-credential').focus();
+            notify(`Enter your ${PROVIDER_INFO[provider].name} API key to use it`, 'warning');
+        }
+    });
+
+    $('ai-model').addEventListener('change', function(e) {
+        socket.emit('set_ai_provider', {provider: currentProvider, model: e.target.value});
+        addLog(timeNow(), 'info', `Changing model to ${e.target.value}...`);
+    });
+
+    // Enter in the key field saves it
+    $('ai-credential').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') saveCredential();
+    });
+
+    $('prompt-text').addEventListener('input', onPromptInput);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupSearchFields();
+    setupScanToggles();
+    setupAudioControls();
+    setupAIControls();
+    setupAreaDrawing();
+    setupInventoryList();
+
+    loadGames();
+    setInterval(updateVideoOrientation, 1000);
+
+    loadStats();
+    setInterval(loadStats, 5000);
+
+    // The model list first (the provider's dropdown is filled from it); the key field needs
+    // the current provider
+    loadAIModels().then(loadAIProvider).then(loadCredentials).then(loadPrompts);
+});
