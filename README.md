@@ -282,6 +282,9 @@ you have scanned and to build decks. It works on a phone too.
   year. **Open as deck** makes a deck list to change as you like; **I own it** also adds its
   cards to your inventory (the printings and foils that come in the box, Near Mint, in a
   location named after the deck unless you change it) - then upgrade the deck from there.
+- **Added by mistake?** The inventory is sorted by when cards were added to the collection, and
+  the *Added* filter lists each "Add to collection" with its time. Choose one and click
+  **Remove this batch** to take exactly those copies back out (copies you had before stay).
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
 
@@ -453,6 +456,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
 | `POST /api/scan_inventory/to_collection` | Move the scanned cards into the collection |
+| `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
 | `GET /api/export_inventory/<format>` | Download the inventory: `csv` (both games), `moxfield` (Magic) |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |

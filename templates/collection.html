@@ -45,18 +45,21 @@
                     <select id="filter-finish" class="select" title="Finish"></select>
                     <select id="filter-location" class="select" title="Location"></select>
                     <select id="filter-tag" class="select" title="Tag"></select>
+                    <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
                     <span class="price-range" title="Price of one copy (USD)">
                         $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
                         – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
                     </span>
+                    <button class="btn btn-small btn-danger" id="batch-remove" hidden title="Take these cards back out of the collection">Remove this batch</button>
                     <button class="btn btn-small btn-ghost" id="filter-clear">Clear filters</button>
                 </div>
                 <div class="filter-row">
                     <span class="summary" id="inventory-summary"></span>
                     <span class="spacer"></span>
                     <select id="inventory-sort" class="select" title="Sort">
-                        <option value="newest">Newest first</option>
-                        <option value="oldest">Oldest first</option>
+                        <option value="added">Last added to the collection</option>
+                        <option value="newest">Scanned: newest first</option>
+                        <option value="oldest">Scanned: oldest first</option>
                         <option value="name">Name A–Z</option>
                         <option value="price_desc">Price: high to low</option>
                         <option value="price_asc">Price: low to high</option>
@@ -310,7 +313,7 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=6"></script>
 </body>
 </html>

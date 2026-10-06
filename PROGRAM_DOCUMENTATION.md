@@ -714,6 +714,16 @@ joined, and the capture thumbnails follow (their rows move, the files stay). It 
 collection first and then empties the scanned cards. Decks, statistics and "owned" only look at
 the collection; the collection page shows a notice while scanned cards are waiting.
 
+Every entry records `added_at` - when it came into its inventory; one time for all entries of
+an "Add to collection" (`timestamp` stays the scan time) - and `added_quantity`, how many of
+its copies came with that (the rest were there before). The collection page sorts by it ("Last
+added to the collection", the default), filters by batch ("Added <time> (n cards)") and, with a
+batch chosen, offers **Remove this batch** (`POST /api/inventory/remove_batch`,
+`InventoryManager.remove_batch`): each entry loses only the copies that batch brought, with
+their newest captures; entries with no other copies are deleted. The cards are deleted, not
+moved back to the scanner. Both columns are added on startup (`ALTER TABLE`; `added_at` starts
+as the scan time).
+
 `/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
 game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
 and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.

@@ -858,6 +858,15 @@ def bulk_update_inventory():
     return jsonify({'success': True, 'changed': changed})
 
 
+@app.route('/api/inventory/remove_batch', methods=['POST'])
+def remove_inventory_batch():
+    """Take back the cards that were added at one time (JSON: added_at, as in the entries)"""
+    added_at = str((request.get_json(silent=True) or {}).get('added_at') or '')
+    if not added_at:
+        return jsonify({'success': False, 'error': 'added_at is missing'}), 400
+    return jsonify({'success': True, **inventory_area().remove_batch(games.active().id, added_at)})
+
+
 @app.route('/api/export_inventory/<fmt>')
 def export_inventory(fmt):
     """Download the active game's inventory in one of its export formats (Game.export_formats)"""

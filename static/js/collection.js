@@ -155,6 +155,12 @@ function fillFilterOptions() {
                Object.fromEntries(gameInfo.finishes));
     fillSelect('filter-location', 'Any location', ['(none)', ...distinct(inventory.map(card => card.location))]);
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
+    // The last times cards came into the collection (one per "Add to collection"), newest first
+    const batches = new Map();
+    inventory.forEach(card => batches.set(card.added_at, (batches.get(card.added_at) || 0) + card.added_quantity));
+    const times = [...batches.keys()].sort().reverse().slice(0, 20);
+    fillSelect('filter-added', 'Added any time', times,
+               Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
     // Color chips only where the card data has color identities (Magic)
     const hasColors = inventory.some(card => identityOf(card));
     $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
@@ -173,6 +179,7 @@ function applyFilters() {
     const text = $('filter-text').value.trim().toLowerCase();
     const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
     const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
+    const added = $('filter-added').value;
     const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         if (text && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
@@ -183,6 +190,7 @@ function applyFilters() {
         if (finish && card.finish !== finish) return false;
         if (location && card.location !== (location === '(none)' ? '' : location)) return false;
         if (tag && !card.tags.includes(tag)) return false;
+        if (added && card.added_at !== added) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
         if (filterColors.size) {
@@ -192,8 +200,9 @@ function applyFilters() {
         }
         return true;
     });
-    const sort = recall('collectionSort', 'newest');
-    $('inventory-sort').value = sort in INVENTORY_SORTS ? sort : 'newest';
+    $('batch-remove').hidden = !added;
+    const sort = recall('collectionSort', 'added');
+    $('inventory-sort').value = sort in INVENTORY_SORTS ? sort : 'added';
     shown = INVENTORY_SORTS[sort] ? [...rows].sort(INVENTORY_SORTS[sort]) : rows;
     shownLimit = PAGE_SIZE;
     renderInventory();
@@ -260,7 +269,7 @@ function renderInventory() {
                     <div class="inventory-card-price">
                         <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
                         ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
-                        <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
+                        <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
                     </div>
                     <div class="inventory-card-actions">
                         <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
@@ -348,6 +357,24 @@ async function bulkAction(action) {
     if (!data) return;
     notify(`${plural(data.changed, 'entry').replace('entrys', 'entries')} changed`, 'success');
     if (action === 'delete') selected.clear();
+    loadInventory();
+}
+
+async function removeBatch() {
+    // Undo an "Add to collection": only the copies that came with it go
+    const added = $('filter-added').value;
+    const batch = inventory.filter(card => card.added_at === added);
+    const cards = batch.reduce((sum, card) => sum + card.added_quantity, 0);
+    const kept = batch.filter(card => card.added_quantity < card.quantity).length;
+    const ok = await confirmDialog({title: `Remove the ${plural(cards, 'card')} added ${added.slice(0, 16)}?`, confirmText: 'Remove', danger: true,
+        message: `They are deleted from the collection (not moved back to the scanner).`
+            + (kept ? ` ${plural(kept, 'entry').replace('entrys', 'entries')} had copies before and keep${kept === 1 ? 's' : ''} those.` : '')
+            + " This can't be undone."});
+    if (!ok) return;
+    const data = await api('/api/inventory/remove_batch', {method: 'POST', body: {added_at: added}});
+    if (!data) return;
+    notify(`${plural(data.cards, 'card')} removed`, 'success');
+    $('filter-added').value = '';
     loadInventory();
 }
 
@@ -990,7 +1017,7 @@ function bindEvents() {
     });
 
     // Inventory filters
-    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag']
+    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added']
         .forEach(id => $(id).addEventListener('change', applyFilters));
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
     $('filter-colors').addEventListener('click', event => {
@@ -1002,7 +1029,7 @@ function bindEvents() {
     });
     $('filter-clear').addEventListener('click', () => {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
-         'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
+         'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         filterColors.clear();
         fillFilterOptions();
         applyFilters();
@@ -1024,6 +1051,7 @@ function bindEvents() {
     });
     $('import-file-input').addEventListener('change', importInventory);
     $('scanned-add').addEventListener('click', addScanned);
+    $('batch-remove').addEventListener('click', removeBatch);
 
     // Inventory rows
     $('inventory-list').addEventListener('click', event => {

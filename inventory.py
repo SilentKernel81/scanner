@@ -21,7 +21,10 @@ CAPTURES_DIR = Config.DATA_DIR / 'captures'
 CAPTURE_HEIGHT = 400  # px - ~25 KB per card
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
-# addressed by id. tags: "trade, keep" - not part of the key (see clean_tags)
+# addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
+# the card was scanned; added_at: when it came into this inventory - the same for every entry
+# of one "Add to collection", so a batch can be found again - and added_quantity: how many of the
+# entry's copies came with it (the others were there before), so it can be taken back out
 INVENTORY_TABLE = '''
     CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +46,8 @@ INVENTORY_TABLE = '''
         timestamp TEXT NOT NULL,
         location TEXT NOT NULL DEFAULT '',
         tags TEXT NOT NULL DEFAULT '',
+        added_at TEXT,
+        added_quantity INTEGER,
         UNIQUE(game, card_name, set_name, card_number, condition, finish, location)
     )
 '''
@@ -50,12 +55,15 @@ KEY_COLUMNS = ('game', 'card_name', 'set_name', 'card_number', 'condition', 'fin
 UPSERT = '''
     INSERT INTO inventory (game, card_id, card_name, set_name, set_code, card_number, rarity,
                            type_line, mana_cost, colors, color_identity, price_usd, quantity,
-                           condition, finish, timestamp, location, tags)
+                           condition, finish, timestamp, location, tags, added_at,
+                           added_quantity)
     VALUES (:game, :card_id, :card_name, :set_name, :set_code, :card_number, :rarity,
             :type_line, :mana_cost, :colors, :color_identity, :price_usd, :quantity,
-            :condition, :finish, :timestamp, :location, :tags)
+            :condition, :finish, :timestamp, :location, :tags, :added_at, :quantity)
     ON CONFLICT(game, card_name, set_name, card_number, condition, finish, location) DO UPDATE SET
         quantity = quantity + excluded.quantity,
+        added_at = excluded.added_at,
+        added_quantity = excluded.quantity,
         tags = CASE WHEN tags = '' THEN excluded.tags ELSE tags END,
         timestamp = excluded.timestamp,
         price_usd = excluded.price_usd,
@@ -103,6 +111,8 @@ def _row_dict(row):
         'timestamp': row['timestamp'],
         'location': row['location'],
         'tags': clean_tags(row['tags']),
+        'added_at': row['added_at'] or row['timestamp'],
+        'added_quantity': min(row['added_quantity'] or row['quantity'], row['quantity']),
     }
 
 
@@ -138,6 +148,12 @@ class InventoryManager:
                 self._migrate_to_multi_game(columns)
             elif 'location' not in columns:
                 self._migrate_add_location()
+            columns = {row['name'] for row in self.conn.execute("PRAGMA table_info(inventory)")}
+            if 'added_at' not in columns:  # not part of the key: no rebuild needed
+                self.conn.execute('ALTER TABLE inventory ADD COLUMN added_at TEXT')
+            if 'added_quantity' not in columns:
+                self.conn.execute('ALTER TABLE inventory ADD COLUMN added_quantity INTEGER')
+            self.conn.execute('UPDATE inventory SET added_at = timestamp WHERE added_at IS NULL')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_game_name ON inventory(game, card_name COLLATE NOCASE)')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_inventory_timestamp ON inventory(timestamp DESC)')
             # One row per captured copy: which entry it belongs to and its thumbnail file
@@ -317,6 +333,7 @@ class InventoryManager:
             'condition': condition or 'Near Mint', 'finish': finish, 'timestamp': now(),
             'location': (location or '').strip(), 'tags': '',
         }
+        values['added_at'] = values['timestamp']
         thumbnail = self._make_thumbnail(capture) if capture else None
         with self._lock:
             self.conn.execute(UPSERT, values)
@@ -572,11 +589,13 @@ class InventoryManager:
         its captures; entries that exist here already get the copies added. Returns
         {'entries', 'cards'} moved.
         """
+        added_at = now()  # one time for the whole batch (the collection page can filter by it)
         with self._lock, source._lock:
             rows = source.conn.execute('SELECT * FROM inventory WHERE game = ? ORDER BY id', (game,)).fetchall()
             for row in rows:
                 values = dict(row)
                 values.pop('id')
+                values['added_at'] = added_at
                 self.conn.execute(UPSERT, values)
                 target = self.conn.execute(
                     f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
@@ -596,6 +615,31 @@ class InventoryManager:
         moved = {'entries': len(rows), 'cards': sum(row['quantity'] for row in rows)}
         self.log(f"Added to the collection: {moved['cards']} cards ({moved['entries']} entries)", level="success")
         return moved
+
+    def remove_batch(self, game, added_at):
+        """
+        Take back what came into the inventory at one time (an "Add to collection"): each entry
+        loses the copies that came with it, with their captures (the newest); entries that had
+        no other copies are deleted. Returns {'entries', 'cards'} removed.
+        """
+        with self._lock:
+            rows = self.conn.execute('SELECT * FROM inventory WHERE game = ? AND added_at = ?', (game, added_at)).fetchall()
+            cards = 0
+            for row in rows:
+                added = min(row['added_quantity'] or row['quantity'], row['quantity'])
+                cards += added
+                if added >= row['quantity']:
+                    self.conn.execute('DELETE FROM inventory WHERE id = ?', (row['id'],))
+                else:
+                    # What is left was there before: no longer part of this batch
+                    self.conn.execute('UPDATE inventory SET quantity = quantity - ?, added_quantity = NULL, '
+                                      'added_at = timestamp WHERE id = ?', (added, row['id']))
+                    self._trim_captures(row['id'], row['quantity'] - added)
+            self._drop_orphan_captures()
+            self.conn.commit()
+            self.last_added = None
+        self.log(f"Removed the cards added {added_at}: {cards} cards ({len(rows)} entries)", level="success")
+        return {'entries': len(rows), 'cards': cards}
 
     def clear_inventory(self, game=None):
         """Delete every entry (of one game, if given)"""
@@ -682,6 +726,7 @@ class InventoryManager:
                             'location': (row.get('Location') or '').strip(),
                             'tags': ', '.join(clean_tags(row.get('Tags') or '')),
                         }
+                        values['added_at'] = values['timestamp']
                         exists = self.conn.execute(
                             f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                             [values[c] for c in KEY_COLUMNS]).fetchone()
