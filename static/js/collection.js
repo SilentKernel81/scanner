@@ -4,7 +4,9 @@
 const socket = io();
 const $ = id => document.getElementById(id);
 const money = value => '$' + (value || 0).toFixed(2);
-const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+const plural = (count, word, many = word + 's') => `${count} ${count === 1 ? word : many}`;
+const entriesText = count => plural(count, 'entry', 'entries');
+const totalQuantity = rows => rows.reduce((sum, row) => sum + row.quantity, 0);
 
 async function api(path, options = {}) {
     // JSON request; shows the server's error and returns null when it fails
@@ -45,6 +47,21 @@ function manaHtml(cost) {
 
 function closeModal(id) {
     $(id).classList.remove('show');
+}
+
+function optionsHtml(pairs) {
+    // [[value, label]]
+    return pairs.map(([value, label]) => `<option value="${escapeHtml(String(value))}">${escapeHtml(label)}</option>`).join('');
+}
+
+function searchWords(id) {
+    // What is typed in a filter field: every word must be found
+    return $(id).value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function markSwitch(id, key, value) {
+    // A row of buttons of which one is active (data-<key>)
+    document.querySelectorAll(`#${id} button`).forEach(button => button.classList.toggle('is-active', button.dataset[key] === value));
 }
 
 // ============================================================================
@@ -154,8 +171,7 @@ async function spareChanged() {
 function fillSelect(id, label, values, labels = {}) {
     const select = $(id);
     const current = select.value;
-    select.innerHTML = `<option value="">${escapeHtml(label)}</option>` + values.map(value =>
-        `<option value="${escapeHtml(value)}">${escapeHtml(labels[value] || value)}</option>`).join('');
+    select.innerHTML = optionsHtml([['', label], ...values.map(value => [value, labels[value] || value])]);
     select.value = values.includes(current) ? current : '';
     select.hidden = values.length === 0;
 }
@@ -171,7 +187,7 @@ function fillFilterOptions() {
     fillSelect('filter-set', 'Any set', distinct(inventory.map(card => card.set_name)));
     fillSelect('filter-finish', 'Any finish', gameInfo.finishes.map(([key]) => key),
                Object.fromEntries(gameInfo.finishes));
-    fillSelect('filter-location', 'Any location', ['(none)', ...distinct(inventory.map(card => card.location))]);
+    fillSelect('filter-location', 'Any location', ['(none)', ...knownLocations()]);
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
     // The last times cards came into the collection (one per "Add to collection"), newest first
     const batches = new Map();
@@ -244,66 +260,67 @@ function badgesHtml(card) {
             escapeHtml(card.decks.length === 1 ? card.decks[0] : plural(card.decks.length, 'deck'))}</span>` : ''}`;
 }
 
+function gridCardHtml(card) {
+    const image = (card.details && card.details.image_uri) || (card.captures[0] && card.captures[0].url);
+    return `
+        <div class="grid-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
+            ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">`
+                    : `<div class="no-image">${escapeHtml(card.name)}</div>`}
+            <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
+            ${card.quantity > 1 ? `<span class="grid-qty">${card.quantity}×</span>` : ''}
+            <div class="grid-name" title="${escapeHtml(card.name)}">${escapeHtml(card.name)}</div>
+            <div class="grid-meta"><span>${escapeHtml((card.set_code || card.set_name).toUpperCase())} ${escapeHtml(card.number)}</span><span>${money(card.price)}</span></div>
+            <div class="inventory-card-meta">${badgesHtml(card)}</div>
+        </div>`;
+}
+
+function listRowHtml(card) {
+    const image = (card.captures[0] && card.captures[0].url) || (card.details && card.details.image_uri);
+    return `
+        <div class="inventory-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
+            <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
+            ${image ? `<button class="inventory-thumb" title="${card.captures.length ? plural(card.captures.length, 'capture') : 'Card image'}">
+                           <img src="${escapeHtml(image)}" alt="" loading="lazy"></button>`
+                    : '<div class="inventory-thumb empty" title="No image"></div>'}
+            <div class="inventory-card-info">
+                <div class="inventory-card-name">
+                    ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
+                    ${manaHtml(card.mana_cost)}
+                </div>
+                <div class="inventory-card-details">
+                    ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
+                    ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
+                </div>
+                <div class="inventory-card-meta">${badgesHtml(card)}<span>${escapeHtml(card.condition)}</span></div>
+            </div>
+            <div class="inventory-card-price">
+                <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
+                ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
+                <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
+            </div>
+            <div class="inventory-card-actions">
+                <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
+                <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
+            </div>
+        </div>`;
+}
+
 function renderInventory() {
     const list = $('inventory-list');
-    const cards = shown.reduce((sum, card) => sum + card.quantity, 0);
+    const cards = totalQuantity(shown);
     const value = shown.reduce((sum, card) => sum + card.price * card.quantity, 0);
-    $('inventory-summary').innerHTML = `<strong>${plural(shown.length, 'entry').replace('entrys', 'entries')}</strong> · ${plural(cards, 'card')} · <strong>${money(value)}</strong>`
+    $('inventory-summary').innerHTML = `<strong>${entriesText(shown.length)}</strong> · ${plural(cards, 'card')} · <strong>${money(value)}</strong>`
         + (shown.length !== inventory.length ? ` (of ${inventory.length})` : '');
     list.classList.toggle('is-grid', inventoryView === 'grid');
-    document.querySelectorAll('#view-switch button').forEach(button =>
-        button.classList.toggle('is-active', button.dataset.view === inventoryView));
+    markSwitch('view-switch', 'view', inventoryView);
 
     if (!shown.length) {
         list.classList.remove('is-grid');
         list.innerHTML = inventory.length
             ? '<div class="empty-state">No cards match the filters.</div>'
             : '<div class="empty-state">No cards in the inventory yet.<br>Scan some cards to build your collection.</div>';
-    } else if (inventoryView === 'grid') {
-        list.innerHTML = shown.slice(0, shownLimit).map(card => {
-            const image = (card.details && card.details.image_uri) || (card.captures[0] && card.captures[0].url);
-            return `
-                <div class="grid-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
-                    ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">`
-                            : `<div class="no-image">${escapeHtml(card.name)}</div>`}
-                    <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
-                    ${card.quantity > 1 ? `<span class="grid-qty">${card.quantity}×</span>` : ''}
-                    <div class="grid-name" title="${escapeHtml(card.name)}">${escapeHtml(card.name)}</div>
-                    <div class="grid-meta"><span>${escapeHtml((card.set_code || card.set_name).toUpperCase())} ${escapeHtml(card.number)}</span><span>${money(card.price)}</span></div>
-                    <div class="inventory-card-meta">${badgesHtml(card)}</div>
-                </div>`;
-        }).join('');
     } else {
-        list.innerHTML = shown.slice(0, shownLimit).map(card => {
-            const image = (card.captures[0] && card.captures[0].url) || (card.details && card.details.image_uri);
-            return `
-                <div class="inventory-card ${selected.has(card.id) ? 'is-selected' : ''}" data-id="${card.id}">
-                    <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
-                    ${image ? `<button class="inventory-thumb" title="${card.captures.length ? plural(card.captures.length, 'capture') : 'Card image'}">
-                                   <img src="${escapeHtml(image)}" alt="" loading="lazy"></button>`
-                            : '<div class="inventory-thumb empty" title="No image"></div>'}
-                    <div class="inventory-card-info">
-                        <div class="inventory-card-name">
-                            ${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}
-                            ${manaHtml(card.mana_cost)}
-                        </div>
-                        <div class="inventory-card-details">
-                            ${escapeHtml(card.set_name)} ${card.number ? '#' + escapeHtml(card.number) : ''}
-                            ${card.type_line ? '· ' + escapeHtml(card.type_line) : ''}
-                        </div>
-                        <div class="inventory-card-meta">${badgesHtml(card)}<span>${escapeHtml(card.condition)}</span></div>
-                    </div>
-                    <div class="inventory-card-price">
-                        <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
-                        ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
-                        <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
-                    </div>
-                    <div class="inventory-card-actions">
-                        <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
-                        <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
-                    </div>
-                </div>`;
-        }).join('');
+        list.innerHTML = shown.slice(0, shownLimit).map(inventoryView === 'grid' ? gridCardHtml : listRowHtml).join('');
     }
     $('inventory-more').hidden = shown.length <= shownLimit;
     $('inventory-more').textContent = `Show more (${shown.length - shownLimit} left)`;
@@ -312,9 +329,14 @@ function renderInventory() {
 
 function renderBulkBar() {
     $('bulk-bar').hidden = selected.size === 0;
-    const copies = inventory.filter(card => selected.has(card.id)).reduce((sum, card) => sum + card.quantity, 0);
-    $('bulk-count').textContent = `${plural(selected.size, 'entry').replace('entrys', 'entries')} selected (${plural(copies, 'card')})`;
+    const copies = totalQuantity(inventory.filter(card => selected.has(card.id)));
+    $('bulk-count').textContent = `${entriesText(selected.size)} selected (${plural(copies, 'card')})`;
     $('bulk-deck').hidden = !gameInfo.deck_formats.length;
+}
+
+function rowCard(row) {
+    // The entry of a list row or grid card (data-id)
+    return row && inventory.find(entry => entry.id === parseInt(row.dataset.id));
 }
 
 function toggleSelected(id, on) {
@@ -342,7 +364,7 @@ function valueDialog({title, label, options = [], choices = null, value = ''}) {
         input.hidden = !!choices;
         select.hidden = !choices;
         if (choices) {
-            select.innerHTML = choices.map(([key, text]) => `<option value="${escapeHtml(String(key))}">${escapeHtml(text)}</option>`).join('');
+            select.innerHTML = optionsHtml(choices);
         } else {
             input.value = value;
             $('value-options').innerHTML = options.map(option => `<option value="${escapeHtml(option)}"></option>`).join('');
@@ -361,7 +383,7 @@ function closeValueDialog(value) {
 
 async function bulkAction(action) {
     const ids = [...selected];
-    const entries = plural(ids.length, 'entry').replace('entrys', 'entries');
+    const entries = entriesText(ids.length);
     let value = '';
     if (action === 'delete') {
         const ok = await confirmDialog({title: `Delete ${entries}?`, confirmText: 'Delete', danger: true,
@@ -382,7 +404,7 @@ async function bulkAction(action) {
     }
     const data = await api('/api/inventory/bulk', {method: 'POST', body: {ids, action, value}});
     if (!data) return;
-    notify(`${plural(data.changed, 'entry').replace('entrys', 'entries')} changed`, 'success');
+    notify(`${entriesText(data.changed)} changed`, 'success');
     if (action === 'delete') selected.clear();
     loadInventory();
 }
@@ -395,7 +417,7 @@ async function removeBatch() {
     const kept = batch.filter(card => card.added_quantity < card.quantity).length;
     const ok = await confirmDialog({title: `Remove the ${plural(cards, 'card')} added ${added.slice(0, 16)}?`, confirmText: 'Remove', danger: true,
         message: `They are deleted from the collection (not moved back to the scanner).`
-            + (kept ? ` ${plural(kept, 'entry').replace('entrys', 'entries')} had copies before and keep${kept === 1 ? 's' : ''} those.` : '')
+            + (kept ? ` ${entriesText(kept)} had copies before and keep${kept === 1 ? 's' : ''} those.` : '')
             + " This can't be undone."});
     if (!ok) return;
     const data = await api('/api/inventory/remove_batch', {method: 'POST', body: {added_at: added}});
@@ -411,12 +433,12 @@ async function addSelectionToDeck() {
     const choice = await valueDialog({title: 'Add to a deck', label: 'Deck (one copy of each selected card)',
         choices: [...data.decks.map(deck => [deck.id, deck.name]), ['new', 'New deck...']]});
     if (!choice) return;
-    const names = distinct(inventory.filter(card => selected.has(card.id)).map(card => card.name));
+    const text = distinct(inventory.filter(card => selected.has(card.id)).map(card => card.name)).map(name => `1 ${name}`).join('\n');
     if (choice === 'new') {
         showTab('decks');
-        return openDeckModal({text: names.map(name => `1 ${name}`).join('\n')});
+        return openDeckModal({text});
     }
-    const result = await api(`/api/decks/${choice}/import`, {method: 'POST', body: {text: names.map(name => `1 ${name}`).join('\n')}});
+    const result = await api(`/api/decks/${choice}/import`, {method: 'POST', body: {text}});
     if (result) notify(`${plural(result.added, 'card')} added to ${result.deck.name}`, 'success');
 }
 
@@ -486,15 +508,14 @@ function groupTotals(rows, keyOf, measure) {
 }
 
 function renderStats() {
-    const cards = inventory.reduce((sum, card) => sum + card.quantity, 0);
+    const cards = totalQuantity(inventory);
     const value = inventory.reduce((sum, card) => sum + card.price * card.quantity, 0);
     const tile = (number, label) => `
         <div class="inventory-stat"><div class="inventory-stat-value">${number}</div><div class="inventory-stat-label">${label}</div></div>`;
     $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
         + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
         + tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card');
-    document.querySelectorAll('#stats-measure button').forEach(button =>
-        button.classList.toggle('is-active', button.dataset.measure === statsMeasure));
+    markSwitch('stats-measure', 'measure', statsMeasure);
     const format = statsMeasure === 'value' ? money : number => number.toLocaleString();
     const chart = (title, keyOf, limit) => `
         <div class="panel"><h3 class="section-title">${title}</h3>${barsHtml(groupTotals(inventory, keyOf, statsMeasure), format, limit)}</div>`;
@@ -514,14 +535,23 @@ function renderStats() {
 let deck = null;          // the deck open in the builder (server payload)
 let deckList = [];
 
+function deckFormat(format) {
+    // [key, label, has a commander]
+    return gameInfo.deck_formats.find(([key]) => key === format);
+}
+
 function formatLabel(format) {
-    const found = gameInfo.deck_formats.find(([key]) => key === format);
+    const found = deckFormat(format);
     return found ? found[1] : format;
 }
 
 function hasCommander(format) {
-    const found = gameInfo.deck_formats.find(([key]) => key === format);
+    const found = deckFormat(format);
     return !!(found && found[2]);
+}
+
+function isCommanderCard(card) {
+    return /Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text);
 }
 
 async function loadDecks() {
@@ -533,9 +563,7 @@ async function loadDecks() {
     // The formats there are decks of; a choice that is gone falls back to all
     const formats = [...new Set(deckList.map(item => item.format))];
     const chosen = $('deck-filter-format').value;
-    $('deck-filter-format').innerHTML = '<option value="">Any format</option>' + gameInfo.deck_formats
-        .filter(([key]) => formats.includes(key))
-        .map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('deck-filter-format').innerHTML = optionsHtml([['', 'Any format'], ...gameInfo.deck_formats.filter(([key]) => formats.includes(key))]);
     $('deck-filter-format').value = formats.includes(chosen) ? chosen : '';
     $('deck-filters').hidden = deckList.length < 2;
     renderDeckList();
@@ -551,7 +579,7 @@ const DECK_SORTS = {
 };
 
 function renderDeckList() {
-    const words = $('deck-filter-text').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const words = searchWords('deck-filter-text');
     const format = $('deck-filter-format').value;
     const shown = deckList.filter(item => {
         const text = `${item.name} ${item.commanders.join(' ')}`.toLowerCase();
@@ -580,8 +608,7 @@ function openDeckModal({text = '', importInto = null} = {}) {
     $('new-deck-url').value = '';
     $('new-deck-text').value = text;
     $('new-deck-replace').checked = false;
-    $('new-deck-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
-        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('new-deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
     $('deck-modal').classList.add('show');
     (importInto ? $('new-deck-url') : $('new-deck-name')).focus();
 }
@@ -625,9 +652,11 @@ async function createDeck(body, message) {
     openDeck(data.deck);
 }
 
-// -- "What can I build?" --------------------------------------------------------
-
-const ideaTimers = {};
+function copyDeckClicked(event) {
+    // "Copy as deck" on a public deck's row
+    const button = event.target.closest('[data-import-url]');
+    if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
+}
 
 // -- Preconstructed decks: browse, open as a deck, or add as owned ----------------
 
@@ -648,7 +677,7 @@ async function loadPrecons() {
 
 function renderPrecons() {
     if (!precons) return;
-    const words = $('precon-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const words = searchWords('precon-search');
     const ranked = Object.keys(preconRank).length > 0;
     let rows = precons.filter(item => {
         const text = `${item.name} ${item.set} ${item.type} ${item.released.slice(0, 4)}`.toLowerCase();
@@ -687,6 +716,10 @@ async function ownPrecon(item) {
     loadInventory();
     openDeck(data.deck);
 }
+
+// -- "What can I build?": searches that run on the server, polled while they go ----
+
+const ideaTimers = {};
 
 function renderIdeas(kind, state) {
     if (kind === 'card') return renderAround(state);
@@ -753,7 +786,7 @@ async function loadAroundCards() {
     $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
     $('around-cards').innerHTML = data.cards.map(card => `
         <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}" data-type="${escapeHtml(card.type_line)}"
-             data-image="${escapeHtml(card.image_uri || '')}" data-commander="${/Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text) ? '1' : ''}">
+             data-image="${escapeHtml(card.image_uri || '')}" data-commander="${isCommanderCard(card) ? '1' : ''}">
             <span class="result-main">
                 <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
                 <div class="result-sub">${escapeHtml(card.type_line)}</div>
@@ -820,74 +853,6 @@ function renderAround(state = aroundState) {
 }
 
 // ============================================================================
-// Settings drawer: backups of the collection, the scanned cards and the decks
-// ============================================================================
-
-function openSettings() {
-    $('settings-drawer').classList.add('show');
-    loadBackups();
-}
-
-function closeSettings() {
-    $('settings-drawer').classList.remove('show');
-    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
-}
-
-async function loadBackups() {
-    const data = await api('/api/backups');
-    if (data) renderBackups(data.backups);
-}
-
-function renderBackups(backups) {
-    $('backup-list').innerHTML = backups.map(backup => `
-        <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
-            <div>
-                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic ? ' <span class="backup-auto">automatic</span>' : ''}</div>
-                ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
-                <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
-            </div>
-            <button class="btn btn-small" data-backup-action="restore">Restore</button>
-            <button class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
-        </div>`).join('') || '<div class="hint">No backups yet.</div>';
-}
-
-async function createBackup() {
-    const button = $('backup-create');
-    button.disabled = true;
-    const data = await api('/api/backups', {method: 'POST', body: {note: $('backup-note').value}});
-    button.disabled = false;
-    if (!data) return;
-    $('backup-note').value = '';
-    renderBackups(data.backups);
-    notify(`Backup made: ${plural(data.backup.cards, 'card')}, ${data.backup.scanned} scanned, ${plural(data.backup.decks, 'deck')}`, 'success');
-}
-
-async function backupAction(row, action) {
-    const id = row.dataset.backup, created = row.dataset.created;
-    if (action === 'restore') {
-        const ok = await confirmDialog({title: `Restore the backup of ${created}?`, confirmText: 'Restore', danger: true,
-            message: 'The collection, the scanned cards and the decks go back to how they were then - everything '
-                + 'changed since is replaced. What you have now is backed up first, so you can go back to it.'});
-        if (!ok) return;
-        const data = await api(`/api/backups/${id}/restore`, {method: 'POST'});
-        if (!data) return loadBackups();  // a backup of the state before may have been made
-        renderBackups(data.backups);
-        notify(`Backup of ${created} restored`, 'success');
-        selected.clear();
-        loadInventory();
-        loadScanned();
-        if (deck) closeDeck();  // the open deck may be gone or different
-        else loadDecks();
-    } else {
-        const ok = await confirmDialog({title: `Delete the backup of ${created}?`, confirmText: 'Delete', danger: true,
-            message: "Your cards are not changed. This can't be undone."});
-        if (!ok) return;
-        const data = await api(`/api/backups/${id}`, {method: 'DELETE'});
-        if (data) renderBackups(data.backups);
-    }
-}
-
-// ============================================================================
 // Decks: builder
 // ============================================================================
 
@@ -906,8 +871,7 @@ function openDeck(payload) {
     suggestions = null;
     $('deck-home').hidden = true;
     $('deck-builder').hidden = false;
-    $('deck-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
-        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
     renderDeck();
     showSide(hasCommander(deck.format) && commanders().length && deck.totals.cards < 30 ? 'suggestions' : 'search');
     window.scrollTo(0, 0);
@@ -924,6 +888,17 @@ function commanders() {
     return deck.cards.filter(entry => entry.board === 'commander');
 }
 
+function commanderNames() {
+    return commanders().map(entry => entry.name);
+}
+
+function updateDeck(payload) {
+    // The deck after a change, and what is shown beside it
+    deck = payload;
+    renderDeck();
+    refreshSide();
+}
+
 function sideTitle() {
     return hasCommander(deck.format) ? 'Considering (not in the deck)' : BOARD_TITLES.side;
 }
@@ -938,7 +913,7 @@ function typeGroup(entry) {
 
 function ownHtml(entry, wanted) {
     // wanted: copies of the card this deck plays over all its boards
-    const elsewhere = entry.elsewhere.reduce((sum, other) => sum + other.quantity, 0);
+    const elsewhere = totalQuantity(entry.elsewhere);
     const others = entry.elsewhere.map(other => `${other.quantity} in ${other.deck}`).join(', ');
     if (entry.owned >= wanted + elsewhere) return `<span class="own have" title="You own ${entry.owned}${others ? ' - also ' + others : ''}">✓ owned</span>`;
     if (entry.owned >= wanted) return `<span class="own shared" title="You own ${entry.owned}, but other decks want it too: ${escapeHtml(others)}">⇄ shared</span>`;
@@ -991,7 +966,7 @@ function renderDeck() {
     const sections = [];
     const section = (title, entries) => {
         if (!entries.length) return;
-        const count = entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        const count = totalQuantity(entries);
         sections.push(`<div class="category-title">${escapeHtml(title)} (${count})</div>`
             + entries.map(entry => deckRowHtml(entry, wanted[entry.name] || entry.quantity)).join(''));
     };
@@ -1066,27 +1041,20 @@ async function openPrintings(name, board) {
 async function changeDeckCards(cards) {
     const data = await api(`/api/decks/${deck.id}/cards`, {method: 'POST', body: {cards}});
     if (!data) return;
-    const before = commanders().map(entry => entry.name).join('|');
-    deck = data.deck;
-    renderDeck();
-    if (before !== commanders().map(entry => entry.name).join('|')) suggestions = null;
-    refreshSide();
+    updateDeck(data.deck);
 }
 
 async function saveDeckInfo(body) {
     const data = await api(`/api/decks/${deck.id}`, {method: 'PUT', body});
     if (!data) return;
-    deck = data.deck;
-    renderDeck();
-    refreshSide();
+    updateDeck(data.deck);
 }
 
 // -- Left side: search, suggestions, popular decks -----------------------------
 
 function showSide(panel) {
     sidePanel = panel;
-    document.querySelectorAll('#side-switch button').forEach(button =>
-        button.classList.toggle('is-active', button.dataset.side === panel));
+    markSwitch('side-switch', 'side', panel);
     $('side-search').hidden = panel !== 'search';
     $('side-suggestions-panel').hidden = panel !== 'suggestions';
     $('side-popular-panel').hidden = panel !== 'popular';
@@ -1101,16 +1069,19 @@ function refreshSide(opened = false) {
 }
 
 function inDeck(name) {
-    return deck.cards.filter(entry => entry.name === name).reduce((sum, entry) => sum + entry.quantity, 0);
+    return totalQuantity(deck.cards.filter(entry => entry.name === name));
+}
+
+function addLabelHtml(count) {
+    // On a result's add button: the copies already in the deck
+    return count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>';
 }
 
 function canCommand(card) {
-    return !!card && hasCommander(deck.format)
-        && /Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text);
+    return !!card && hasCommander(deck.format) && isCommanderCard(card);
 }
 
 function resultRowHtml(card, numbers = '') {
-    const count = inDeck(card.name);
     return `
         <div class="result-row" data-name="${escapeHtml(card.name)}" data-id="${escapeHtml(card.id)}" data-image="${escapeHtml(card.image_uri || '')}" title="${escapeHtml(card.oracle_text)}">
             <span class="result-main">
@@ -1120,7 +1091,7 @@ function resultRowHtml(card, numbers = '') {
             <span class="result-numbers">${numbers}${card.owned ? `<span class="own have">✓ ${card.owned} owned</span>` : ''}<div>${money(card.price)}</div></span>
             <span class="result-actions">
                 ${canCommand(card) ? '<button class="mini-btn" data-add="commander" title="Make it the commander">Cmdr</button>' : ''}
-                <button class="mini-btn" data-add="main" title="Add to the deck">${count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>'}</button>
+                <button class="mini-btn" data-add="main" title="Add to the deck">${addLabelHtml(inDeck(card.name))}</button>
             </span>
         </div>`;
 }
@@ -1158,13 +1129,12 @@ async function runSearch(more = false) {
 function markResults() {
     // The counts on the add buttons follow the deck
     document.querySelectorAll('#search-results .result-row').forEach(row => {
-        const count = inDeck(row.dataset.name);
-        row.querySelector('[data-add="main"]').innerHTML = count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>';
+        row.querySelector('[data-add="main"]').innerHTML = addLabelHtml(inDeck(row.dataset.name));
     });
 }
 
 async function loadSuggestions() {
-    const key = `${deck.id}:${commanders().map(entry => entry.name).join('|')}`;
+    const key = `${deck.id}:${commanderNames().join('|')}`;
     if (!suggestions || suggestions.key !== key) {
         $('suggestions-list').innerHTML = '<div class="hint">Asking EDHREC...</div>';
         $('suggestions-source').textContent = '';
@@ -1186,6 +1156,15 @@ async function loadSuggestions() {
         ? '<button class="btn btn-small btn-block" id="suggestions-average">Start from EDHREC\'s average deck</button>' : '';
     $('suggestions-list').innerHTML = (data.categories.length ? average : '') + (html
         || `<div class="empty-state">${escapeHtml(data.message || (ownedOnly ? 'You own none of the suggested cards that are not in the deck already.' : 'No suggestions left.'))}</div>`);
+}
+
+async function startFromAverage() {
+    const data = await api(`/api/decks/${deck.id}/import`, {method: 'POST',
+        body: {average: commanderNames(), replace: true}});
+    if (!data) return;
+    reportUnknown(data.unknown);
+    notify("Filled with EDHREC's average deck", 'success');
+    updateDeck(data.deck);
 }
 
 async function loadPopular() {
@@ -1228,6 +1207,74 @@ function showPreview(row) {
 }
 
 // ============================================================================
+// Settings drawer: backups of the collection, the scanned cards and the decks
+// ============================================================================
+
+function openSettings() {
+    $('settings-drawer').classList.add('show');
+    loadBackups();
+}
+
+function closeSettings() {
+    $('settings-drawer').classList.remove('show');
+    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
+}
+
+async function loadBackups() {
+    const data = await api('/api/backups');
+    if (data) renderBackups(data.backups);
+}
+
+function renderBackups(backups) {
+    $('backup-list').innerHTML = backups.map(backup => `
+        <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
+            <div>
+                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic ? ' <span class="backup-auto">automatic</span>' : ''}</div>
+                ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
+                <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
+            </div>
+            <button class="btn btn-small" data-backup-action="restore">Restore</button>
+            <button class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
+        </div>`).join('') || '<div class="hint">No backups yet.</div>';
+}
+
+async function createBackup() {
+    const button = $('backup-create');
+    button.disabled = true;
+    const data = await api('/api/backups', {method: 'POST', body: {note: $('backup-note').value}});
+    button.disabled = false;
+    if (!data) return;
+    $('backup-note').value = '';
+    renderBackups(data.backups);
+    notify(`Backup made: ${plural(data.backup.cards, 'card')}, ${data.backup.scanned} scanned, ${plural(data.backup.decks, 'deck')}`, 'success');
+}
+
+async function backupAction(row, action) {
+    const id = row.dataset.backup, created = row.dataset.created;
+    if (action === 'restore') {
+        const ok = await confirmDialog({title: `Restore the backup of ${created}?`, confirmText: 'Restore', danger: true,
+            message: 'The collection, the scanned cards and the decks go back to how they were then - everything '
+                + 'changed since is replaced. What you have now is backed up first, so you can go back to it.'});
+        if (!ok) return;
+        const data = await api(`/api/backups/${id}/restore`, {method: 'POST'});
+        if (!data) return loadBackups();  // a backup of the state before may have been made
+        renderBackups(data.backups);
+        notify(`Backup of ${created} restored`, 'success');
+        selected.clear();
+        loadInventory();
+        loadScanned();
+        if (deck) closeDeck();  // the open deck may be gone or different
+        else loadDecks();
+    } else {
+        const ok = await confirmDialog({title: `Delete the backup of ${created}?`, confirmText: 'Delete', danger: true,
+            message: "Your cards are not changed. This can't be undone."});
+        if (!ok) return;
+        const data = await api(`/api/backups/${id}`, {method: 'DELETE'});
+        if (data) renderBackups(data.backups);
+    }
+}
+
+// ============================================================================
 // Events
 // ============================================================================
 
@@ -1239,24 +1286,31 @@ function debounce(callback, delay = 250) {
     };
 }
 
-function bindEvents() {
-    $('tabs').addEventListener('click', event => {
-        const tab = event.target.closest('.tab');
-        if (tab) showTab(tab.dataset.tab);
+function bindSwitch(id, chosen) {
+    // A row of buttons of which one is active (markSwitch shows which)
+    $(id).addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (button) chosen(button);
     });
+}
 
-    // Inventory filters
+function bindColorChips(id, colors, changed) {
+    $(id).addEventListener('click', event => {
+        const chip = event.target.closest('.color-chip');
+        if (!chip) return;
+        if (colors.has(chip.dataset.color)) colors.delete(chip.dataset.color); else colors.add(chip.dataset.color);
+        chip.classList.toggle('is-active');
+        changed();
+    });
+}
+
+function bindInventoryEvents() {
+    // Filters
     ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
      'filter-free'].forEach(id => $(id).addEventListener('change', applyFilters));
     $('filter-spare').addEventListener('change', spareChanged);
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
-    $('filter-colors').addEventListener('click', event => {
-        const chip = event.target.closest('.color-chip');
-        if (!chip) return;
-        if (filterColors.has(chip.dataset.color)) filterColors.delete(chip.dataset.color); else filterColors.add(chip.dataset.color);
-        chip.classList.toggle('is-active');
-        applyFilters();
-    });
+    bindColorChips('filter-colors', filterColors, applyFilters);
     $('filter-clear').addEventListener('click', () => {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
@@ -1270,9 +1324,7 @@ function bindEvents() {
         remember('collectionSort', event.target.value);
         applyFilters();
     });
-    $('view-switch').addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (!button) return;
+    bindSwitch('view-switch', button => {
         inventoryView = button.dataset.view;
         remember('collectionView', inventoryView);
         renderInventory();
@@ -1288,8 +1340,7 @@ function bindEvents() {
     // Inventory rows
     $('inventory-list').addEventListener('click', event => {
         const row = event.target.closest('[data-id]');
-        if (!row) return;
-        const card = inventory.find(entry => entry.id === parseInt(row.dataset.id));
+        const card = rowCard(row);
         if (!card) return;
         if (event.target.closest('.btn-edit')) return editCard(card, knownLocations());
         if (event.target.closest('.btn-delete')) return deleteCard(card.id, card.name);
@@ -1300,7 +1351,7 @@ function bindEvents() {
     });
     $('inventory-list').addEventListener('dblclick', event => {
         const row = event.target.closest('.grid-card');
-        const card = row && inventory.find(entry => entry.id === parseInt(row.dataset.id));
+        const card = rowCard(row);
         if (card) {
             toggleSelected(card.id, false);
             editCard(card, knownLocations());
@@ -1321,15 +1372,9 @@ function bindEvents() {
     $('value-ok').addEventListener('click', () =>
         closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
     $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
+}
 
-    // Statistics
-    $('stats-measure').addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (!button) return;
-        statsMeasure = button.dataset.measure;
-        renderStats();
-    });
-
+function bindDeckHomeEvents() {
     // Deck list
     $('deck-new').addEventListener('click', () => openDeckModal());
     $('deck-sort').value = recall('deckSort', 'changed');
@@ -1350,8 +1395,7 @@ function bindEvents() {
         button.dataset.running ? stopIdeas(button.dataset.ideas) : pollIdeas(button.dataset.ideas, true)));
 
     // Build around a card
-    $('around-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
-        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('around-format').innerHTML = optionsHtml(gameInfo.deck_formats);
     $('around-format').addEventListener('change', () => {
         aroundCard = null;  // chosen for the other format
         renderAround();
@@ -1370,10 +1414,7 @@ function bindEvents() {
             createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name});
         }
     });
-    $('around-decks').addEventListener('click', event => {
-        const button = event.target.closest('[data-import-url]');
-        if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
-    });
+    $('around-decks').addEventListener('click', copyDeckClicked);
     $('ideas-commanders').addEventListener('click', event => {
         const button = event.target.closest('[data-start-commander]');
         if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});
@@ -1392,8 +1433,10 @@ function bindEvents() {
         $('deck-data-progress').textContent = 'Starting...';
         socket.emit('update_database');
     });
+}
 
-    // Builder header
+function bindBuilderEvents() {
+    // Header
     $('deck-back').addEventListener('click', closeDeck);
     $('deck-name').addEventListener('change', event => saveDeckInfo({name: event.target.value}));
     $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
@@ -1432,21 +1475,12 @@ function bindEvents() {
     });
 
     // Search, suggestions, popular decks
-    $('side-switch').addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (button) showSide(button.dataset.side);
-    });
+    bindSwitch('side-switch', button => showSide(button.dataset.side));
     ['search-text', 'search-type', 'search-oracle'].forEach(id => $(id).addEventListener('input', debounce(() => runSearch())));
     ['search-cmc', 'search-rarity', 'search-owned', 'search-free', 'search-legal', 'search-identity']
         .forEach(id => $(id).addEventListener('change', () => runSearch()));
     $('search-colors').innerHTML = colorChipsHtml(searchColors);
-    $('search-colors').addEventListener('click', event => {
-        const chip = event.target.closest('.color-chip');
-        if (!chip) return;
-        if (searchColors.has(chip.dataset.color)) searchColors.delete(chip.dataset.color); else searchColors.add(chip.dataset.color);
-        chip.classList.toggle('is-active');
-        runSearch();
-    });
+    bindColorChips('search-colors', searchColors, () => runSearch());
     $('search-more').addEventListener('click', () => runSearch(true));
     const addFromRow = event => {
         const row = event.target.closest('.result-row[data-name]');
@@ -1461,14 +1495,36 @@ function bindEvents() {
     });
     $('suggestions-owned').addEventListener('change', loadSuggestions);
     $('suggestions-free').addEventListener('change', loadSuggestions);
-    $('popular-list').addEventListener('click', event => {
-        const button = event.target.closest('[data-import-url]');
-        if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
-    });
+    $('popular-list').addEventListener('click', copyDeckClicked);
     $('popular-import').addEventListener('click', () => {
         const url = $('popular-url').value.trim();
         if (url) createDeck({url}, 'Deck copied');
     });
+}
+
+// Topmost first
+const OVERLAYS = [
+    ['dialog-modal', () => closeDialog(null)],
+    ['value-modal', () => closeValueDialog(null)],
+    ['capture-modal', closeCaptures],
+    ['edit-card-modal', closeEditCard],
+    ['printing-modal', () => closeModal('printing-modal')],
+    ['settings-drawer', closeSettings],
+    ['deck-modal', () => closeModal('deck-modal')],
+];
+
+function bindEvents() {
+    $('tabs').addEventListener('click', event => {
+        const tab = event.target.closest('.tab');
+        if (tab) showTab(tab.dataset.tab);
+    });
+    bindInventoryEvents();
+    bindSwitch('stats-measure', button => {
+        statsMeasure = button.dataset.measure;
+        renderStats();
+    });
+    bindDeckHomeEvents();
+    bindBuilderEvents();
 
     // Card image preview (devices with a mouse)
     if (window.matchMedia('(hover: hover)').matches) {
@@ -1485,37 +1541,16 @@ function bindEvents() {
     });
     if (window.location.hash === '#settings') openSettings();
 
-    // Overlays: Escape and a click outside close the topmost one
+    // Overlays: Escape closes the topmost one open, a click outside the one clicked
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        if ($('dialog-modal').classList.contains('show')) closeDialog(null);
-        else if ($('value-modal').classList.contains('show')) closeValueDialog(null);
-        else if ($('capture-modal').classList.contains('show')) closeCaptures();
-        else if ($('edit-card-modal').classList.contains('show')) closeEditCard();
-        else if ($('printing-modal').classList.contains('show')) closeModal('printing-modal');
-        else if ($('settings-drawer').classList.contains('show')) closeSettings();
-        else closeModal('deck-modal');
+        const overlay = OVERLAYS.find(([id]) => $(id).classList.contains('show'));
+        if (overlay) overlay[1]();
     });
     window.addEventListener('click', event => {
-        if (event.target === $('dialog-modal')) closeDialog(null);
-        else if (event.target === $('value-modal')) closeValueDialog(null);
-        else if (event.target === $('capture-modal')) closeCaptures();
-        else if (event.target === $('edit-card-modal')) closeEditCard();
-        else if (event.target === $('deck-modal')) closeModal('deck-modal');
-        else if (event.target === $('printing-modal')) closeModal('printing-modal');
-        else if (event.target === $('settings-drawer')) closeSettings();
+        const overlay = OVERLAYS.find(([id]) => event.target === $(id));
+        if (overlay) overlay[1]();
     });
-}
-
-async function startFromAverage() {
-    const data = await api(`/api/decks/${deck.id}/import`, {method: 'POST',
-        body: {average: commanders().map(entry => entry.name), replace: true}});
-    if (!data) return;
-    reportUnknown(data.unknown);
-    notify("Filled with EDHREC's average deck", 'success');
-    deck = data.deck;
-    renderDeck();
-    refreshSide();
 }
 
 // The inventory changes while scanning on another tab or device
