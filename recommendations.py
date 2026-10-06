@@ -82,7 +82,7 @@ class Recommendations:
             return json.loads(row[1])
         return None
 
-    def _get(self, url, max_age):
+    def _get(self, url, max_age, timeout=TIMEOUT):
         """JSON at a URL: from the cache, or requested (one request at a time per site, spaced out)"""
         data = self.cached(url, max_age)
         if data is not None:
@@ -98,7 +98,7 @@ class Recommendations:
             if wait > 0:
                 time.sleep(wait)
             try:
-                response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+                response = requests.get(url, headers=HEADERS, timeout=timeout)
                 self._last_request[site] = time.time()
                 if response.status_code in (403, 404):
                     data = {'_missing': True}  # remembered too: asking again won't help
@@ -208,17 +208,21 @@ class Recommendations:
 
     # -- Archidekt / Moxfield --------------------------------------------------
 
-    def popular_decks(self, commander=None, deck_format=None, limit=12):
+    def popular_decks(self, commander=None, deck_format=None, limit=12, card=None):
         """
-        Most viewed public decks with a commander (Archidekt) or of a format (Archidekt and
-        Moxfield): ([{'source', 'name', 'author', 'views', 'cards', 'url'}], [messages about
+        Most viewed public decks with a commander, with a card in a format (both Archidekt -
+        Moxfield's search can't be narrowed by card name) or of a format (Archidekt and Moxfield): ([{'source', 'name', 'author', 'views', 'cards', 'url'}], [messages about
         sites that didn't answer])
         """
         decks, problems = [], []
         try:
             query = f"commanderName={quote(commander)}&deckFormat={ARCHIDEKT_FORMATS['commander']}" if commander \
+                else f"cardName={quote(card)}&deckFormat={ARCHIDEKT_FORMATS[deck_format]}" if card \
                 else f"deckFormat={ARCHIDEKT_FORMATS[deck_format]}"
-            page = self._get(f"{ARCHIDEKT}/v3/?{query}&orderBy=-viewCount&pageSize={limit}", DAY)
+            # A search by card can take Archidekt half a minute the first time; it runs in the
+            # background (with a Stop button), so it gets the time
+            page = self._get(f"{ARCHIDEKT}/v3/?{query}&orderBy=-viewCount&pageSize={limit}", DAY,
+                             timeout=45 if card else TIMEOUT)
             for deck in page['results'][:limit]:
                 decks.append({'source': 'Archidekt', 'name': deck['name'],
                               'author': (deck.get('owner') or {}).get('username') or '',
@@ -228,7 +232,7 @@ class Recommendations:
             problems.append(str(e))
         except (KeyError, TypeError):
             problems.append("Archidekt's data has changed - its decks are not available")
-        if not commander:  # Moxfield's search can't be narrowed to a commander by name
+        if not commander and not card:  # Moxfield's search can't be narrowed to a card by name
             try:
                 page = self._get(f"{MOXFIELD}/v2/decks/search?pageNumber=1&pageSize={limit}&fmt={quote(deck_format)}"
                                  "&sortType=views&sortDirection=Descending", DAY)

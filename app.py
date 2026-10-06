@@ -1411,8 +1411,8 @@ deck_ideas = {}
 deck_ideas_lock = threading.Lock()
 
 
-def run_deck_ideas(kind, game):
-    state = deck_ideas[kind]
+def run_deck_ideas(kind, game, state):
+    """Fills state['items'] in a background thread; state['stop'] ends it early"""
     try:
         owned = inventory.owned_by_name(game.id)
         if kind == 'commanders':
@@ -1424,6 +1424,8 @@ def run_deck_ideas(kind, game):
                        and game.can_be_commander(cards[search_key(name)])]
             state['total'] = len(legends)
             for name in legends:
+                if state['stop']:
+                    break
                 found = recommend.commander_cards([name])
                 if found:
                     played = {card['name']: card['inclusion'] for category in found['categories']
@@ -1437,15 +1439,37 @@ def run_deck_ideas(kind, game):
                         'fit': round(100 * sum(played[card_name] for card_name in have) / weight) if weight else 0,
                     })
                 state['done'] += 1
-        else:
+        elif kind == 'precons':
             precons = recommend.precon_list()
             state['total'] = len(precons)
             for precon in precons:
+                if state['stop']:
+                    break
                 entries = recommend.precon(precon['file'])
                 if entries:
                     total = sum(entry['quantity'] for entry in entries)
                     have = sum(min(entry['quantity'], owned.get(search_key(entry['name']), 0)) for entry in entries)
                     state['items'].append({**precon, 'owned': have, 'total': total,
+                                           'percent': round(100 * have / total) if total else 0})
+                state['done'] += 1
+        else:
+            # Public decks that play a card in a format (Archidekt), by the share of each that is owned
+            found, problems = recommend.popular_decks(card=state['card'], deck_format=state['format'], limit=10)
+            if problems and not found:
+                state['error'] = problems[0]
+            state['total'] = len(found)
+            for item in found:
+                if state['stop']:
+                    break
+                try:
+                    played = [entry for entry in recommend.deck_from_url(item['url'])['entries']
+                              if entry['board'] in ('main', 'commander')]
+                except Unavailable:
+                    played = []  # a deck made private since it was listed
+                if played:
+                    total = sum(entry['quantity'] for entry in played)
+                    have = sum(min(entry['quantity'], owned.get(search_key(entry['name']), 0)) for entry in played)
+                    state['items'].append({**item, 'owned': have, 'total': total,
                                            'percent': round(100 * have / total) if total else 0})
                 state['done'] += 1
     except Unavailable as e:
@@ -1460,23 +1484,36 @@ def run_deck_ideas(kind, game):
 @app.route('/api/decks/ideas/<kind>', methods=['GET', 'POST'])
 def deck_ideas_state(kind):
     """
-    "What can I build?" rankings: kind 'commanders' (owned legendary creatures, by the share of
-    their EDHREC cards that is owned) or 'precons' (preconstructed decks, by the share owned).
-    POST starts a run (answers are cached, so a second run is quick); GET returns its state.
+    "What can I build?" searches, each a background run the page polls:
+      commanders  owned legendary creatures, by the share of their EDHREC cards that is owned
+      precons     preconstructed decks, by the share owned
+      card        public decks that play a card (JSON: card, format), by the share owned
+    POST starts a run - replacing one that is running (answers are cached, so a second run is
+    quick); POST with {"stop": true} ends it, keeping what was found; GET returns its state.
     """
     game = games.active()
-    if kind not in ('commanders', 'precons') or not game.deck_formats:
-        return jsonify({'success': False, 'error': 'Unknown ranking'}), 404
+    if kind not in ('commanders', 'precons', 'card') or not game.deck_formats:
+        return jsonify({'success': False, 'error': 'Unknown search'}), 404
+    data = request.get_json(silent=True) or {}
     with deck_ideas_lock:
         state = deck_ideas.get(kind)
-        if request.method == 'POST' and not (state and state['running']):
-            state = deck_ideas[kind] = {'running': True, 'done': 0, 'total': 0, 'items': [], 'error': None}
-            threading.Thread(target=run_deck_ideas, args=(kind, game), daemon=True).start()
+        if request.method == 'POST' and data.get('stop'):
+            if state:
+                state['stop'] = True
+        elif request.method == 'POST':
+            if kind == 'card' and (not data.get('card') or data.get('format') not in game.deck_formats):
+                return jsonify({'success': False, 'error': 'Choose a format and a card'}), 400
+            if state:
+                state['stop'] = True  # the run it replaces ends at its next step
+            state = deck_ideas[kind] = {'running': True, 'stop': False, 'done': 0, 'total': 0, 'items': [],
+                                        'error': None, 'card': data.get('card'), 'format': data.get('format')}
+            threading.Thread(target=run_deck_ideas, args=(kind, game, state), daemon=True).start()
     if not state:
         return jsonify({'success': True, 'started': False, 'running': False, 'items': []})
     order = 'fit' if kind == 'commanders' else 'percent'
     return jsonify({'success': True, 'started': True, 'running': state['running'], 'done': state['done'],
-                    'total': state['total'], 'error': state['error'],
+                    'total': state['total'], 'error': state['error'], 'stopped': state['stop'],
+                    'card': state['card'], 'format': state['format'],
                     'items': sorted(list(state['items']), key=lambda item: item[order], reverse=True)})
 
 

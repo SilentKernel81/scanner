@@ -275,9 +275,11 @@ you have scanned and to build decks. It works on a phone too.
   pasted decklist or a Moxfield / Archidekt deck address; export as text.
 - **Deck ideas** - for a Commander deck, *Suggestions* lists the cards played with its
   commander (EDHREC, with how often) and can show only the ones you own; *Popular decks* lists
-  public decks from Archidekt and Moxfield you can copy. *What can I build?* ranks the
-  legendary creatures you own by how much of their usual deck you already have, and the
-  preconstructed decks by how much of each you own. These read other sites, so they need
+  public decks from Archidekt and Moxfield you can copy. *What can I build?* has three
+  searches: **Build around a card** - choose a format, click one of your cards that is legal in
+  it, and get public decks that play it, the ones you own most of first, to copy as a deck;
+  the legendary creatures you own, by how much of their usual deck you already have; and the
+  preconstructed decks, by how much of each you own. A search that is running can be stopped. These read other sites, so they need
   internet; if a site doesn't answer, only that list is missing.
 - **Preconstructed decks** - search the Commander and Challenger decks by name, set code or
   year. **Open as deck** makes a deck list to change as you like; **I own it** also adds its
@@ -451,7 +453,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/decks/<id>/import`, `POST /api/decks/<id>/duplicate` | Add cards from a list, a deck address or EDHREC's average deck; copy a deck |
 | `GET /api/decks/<id>/export/<text\|buylist>` | Download the decklist, or the cards not owned |
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
-| `GET` / `POST /api/decks/ideas/<commanders\|precons>` | "What can I build?" ranking: state / start a run |
+| `GET` / `POST /api/decks/ideas/<commanders\|precons\|card>` | "What can I build?" searches: state / start a run (`card`: JSON `card`, `format`) / stop it (`{"stop": true}`) |
 | `GET /api/precons`, `POST /api/precons/<file>/own` | Preconstructed decks; add one's cards to the inventory and open it as a deck (JSON: `name`, `location`) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |

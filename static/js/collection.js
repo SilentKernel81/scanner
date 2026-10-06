@@ -60,7 +60,10 @@ function showTab(tab) {
     remember('collectionTab', tab);
     if (tab === 'decks') {
         loadDecks();
-        if (gameInfo.deck_formats.length) loadPrecons();
+        if (gameInfo.deck_formats.length) {
+            loadPrecons();
+            loadAroundCards();
+        }
     }
     if (tab === 'stats') renderStats();
 }
@@ -638,15 +641,18 @@ async function ownPrecon(item) {
 }
 
 function renderIdeas(kind, state) {
+    if (kind === 'card') return renderAround(state);
     if (kind === 'precons') {
         // The ranking fills in the browsable list
         state.items.forEach(item => { preconRank[item.file] = item; });
-        $('precon-progress').innerHTML = (state.running ? `<div class="hint">Reading the lists... ${state.done} of ${state.total || '?'}</div>` : '')
+        $('precon-progress').innerHTML = (state.running ? `<div class="hint">Reading the lists... ${state.done} of ${state.total || '?'}</div>`
+                : state.stopped ? `<div class="hint">Stopped after ${state.done} of ${state.total} lists - the rest is not ranked</div>` : '')
             + (state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '');
         return renderPrecons();
     }
     const list = $(`ideas-${kind}`);
-    const progress = state.running ? `<div class="hint">Looking... ${state.done} of ${state.total || '?'}</div>` : '';
+    const progress = state.running ? `<div class="hint">Looking... ${state.done} of ${state.total || '?'}</div>`
+        : state.stopped ? `<div class="hint">Stopped after ${state.done} of ${state.total}</div>` : '';
     const error = state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '';
     const rows = state.items.slice(0, 60).map(item => `
         <div class="idea-row" data-image="${escapeHtml(item.image_uri || '')}">
@@ -660,12 +666,82 @@ function renderIdeas(kind, state) {
     list.innerHTML = progress + error + rows + empty;
 }
 
-async function pollIdeas(kind, start = false) {
+async function pollIdeas(kind, start = false, body = {}) {
+    // start: begin a run (body: what to look for); otherwise ask how the current one is doing
     clearTimeout(ideaTimers[kind]);
-    const state = await api(`/api/decks/ideas/${kind}`, start ? {method: 'POST'} : {});
+    const state = await api(`/api/decks/ideas/${kind}`, start ? {method: 'POST', body} : {});
     if (!state) return;
+    // The button that started it stops it while it runs
+    const button = document.querySelector(`[data-ideas="${kind}"]`);
+    if (button) {
+        button.dataset.label = button.dataset.label || button.textContent;
+        button.dataset.running = state.running ? '1' : '';
+        button.textContent = state.running ? 'Stop' : button.dataset.label;
+    }
     renderIdeas(kind, state);
     if (state.running) ideaTimers[kind] = setTimeout(() => pollIdeas(kind), 1500);
+}
+
+function stopIdeas(kind) {
+    // What was found so far stays
+    return pollIdeas(kind, true, {stop: true});
+}
+
+// -- Build around a card: your cards legal in a format -> public decks that play one ----
+
+let aroundCard = null;
+let aroundRequest = 0;
+
+async function loadAroundCards() {
+    const request = ++aroundRequest;
+    const format = $('around-format').value;
+    const params = new URLSearchParams({owned: '1', format});
+    if ($('around-search').value.trim()) params.set('q', $('around-search').value.trim());
+    if ($('around-type').value.trim()) params.set('type', $('around-type').value.trim());
+    const data = await api(`/api/cards/search?${params}`);
+    if (!data || request !== aroundRequest) return;  // a later search already answered
+    $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
+    $('around-cards').innerHTML = data.cards.map(card => `
+        <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}"
+             data-image="${escapeHtml(card.image_uri || '')}" data-commander="${/Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text) ? '1' : ''}">
+            <span class="result-main">
+                <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
+                <div class="result-sub">${escapeHtml(card.type_line)}</div>
+            </span>
+            <span class="result-numbers">${card.owned} owned</span>
+        </div>`).join('') + (data.more ? '<div class="hint">More cards - type a name or type to narrow the list</div>' : '')
+        || '<div class="hint">None of your cards match. Deck data missing? Update the card database.</div>';
+}
+
+function findAround(row) {
+    aroundCard = {name: row.dataset.name, commander: !!row.dataset.commander, format: $('around-format').value};
+    document.querySelectorAll('#around-cards .result-row').forEach(other => other.classList.toggle('is-chosen', other === row));
+    $('around-decks').innerHTML = '';
+    pollIdeas('card', true, {card: aroundCard.name, format: aroundCard.format});
+}
+
+function renderAround(state) {
+    if (!state.started || !state.card) return;
+    const asCommander = aroundCard && aroundCard.name === state.card && aroundCard.commander && hasCommander(state.format);
+    $('around-decks-title').textContent = `${formatLabel(state.format)} decks with ${state.card}`;
+    $('around-progress').innerHTML = `<div class="filter-row">
+            <span class="hint">${state.running ? (state.total ? `Reading the decks... ${state.done} of ${state.total}`
+                    : 'Asking Archidekt - for a much played card this can take half a minute...')
+                : state.stopped ? `Stopped after ${state.done} of ${state.total} decks` : `${plural(state.items.length, 'deck')}, the ones you own most of first`}</span>
+            <span class="spacer"></span>
+            ${state.running ? '<button class="btn btn-small" id="around-stop">Stop</button>' : ''}
+            ${asCommander ? `<button class="btn btn-small" id="around-commander">Start a deck with it as commander</button>` : ''}
+        </div>` + (state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '');
+    $('around-decks').innerHTML = state.items.map(item => `
+        <div class="idea-row precon">
+            <div><div class="idea-name">${escapeHtml(item.name)}</div>
+                 <div class="idea-meta">${escapeHtml(item.source)}${item.author ? ' · ' + escapeHtml(item.author) : ''} · ${item.views.toLocaleString()} views · ${item.owned} of ${item.total} cards owned</div></div>
+            <div class="idea-share"><strong>${item.percent}%</strong><div class="meter" style="width: 70px"><span style="width: ${item.percent}%"></span></div></div>
+            <div class="idea-actions">
+                <a class="mini-btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener" title="Open on ${escapeHtml(item.source)}"><svg class="icon"><use href="#i-link"/></svg></a>
+                <button class="btn btn-small" data-import-url="${escapeHtml(item.url)}" title="Open a copy as a new deck here">Copy as deck</button>
+            </div>
+        </div>`).join('') || (state.running || state.error ? '' : '<div class="hint">No public decks found with this card in this format.</div>');
 }
 
 // ============================================================================
@@ -1118,8 +1194,28 @@ function bindEvents() {
         const data = await api(`/api/decks/${tile.dataset.deck}`);
         if (data) openDeck(data.deck);
     });
-    document.querySelectorAll('[data-ideas]').forEach(button =>
-        button.addEventListener('click', () => pollIdeas(button.dataset.ideas, true)));
+    document.querySelectorAll('[data-ideas]').forEach(button => button.addEventListener('click', () =>
+        button.dataset.running ? stopIdeas(button.dataset.ideas) : pollIdeas(button.dataset.ideas, true)));
+
+    // Build around a card
+    $('around-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
+        `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('around-format').addEventListener('change', loadAroundCards);
+    ['around-search', 'around-type'].forEach(id => $(id).addEventListener('input', debounce(loadAroundCards)));
+    $('around-cards').addEventListener('click', event => {
+        const row = event.target.closest('.result-row');
+        if (row) findAround(row);
+    });
+    $('around-progress').addEventListener('click', event => {
+        if (event.target.id === 'around-stop') stopIdeas('card');
+        if (event.target.id === 'around-commander') {
+            createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name});
+        }
+    });
+    $('around-decks').addEventListener('click', event => {
+        const button = event.target.closest('[data-import-url]');
+        if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
+    });
     $('ideas-commanders').addEventListener('click', event => {
         const button = event.target.closest('[data-start-commander]');
         if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});

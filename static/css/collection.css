@@ -424,6 +424,29 @@ a.btn {
     border-radius: var(--radius-sm);
 }
 
+.idea-wide {
+    grid-column: 1 / -1;
+}
+
+.around {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 16px;
+}
+
+.around .idea-list {
+    max-height: 380px;
+}
+
+.around .result-row.is-chosen {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.around .result-row {
+    cursor: pointer;
+}
+
 .idea-row.precon {
     grid-template-columns: 1fr auto auto;
 }
@@ -806,7 +829,8 @@ a.btn {
 }
 
 @media (max-width: 1024px) {
-    .builder {
+    .builder,
+    .around {
         grid-template-columns: 1fr;
     }
 

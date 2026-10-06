@@ -793,7 +793,13 @@ decks 1 day; a 403/404 is cached too), requests to one site are at least 1 s apa
 thread and the page polls `GET /api/decks/ideas/<kind>`: `commanders` ranks the legendary
 creatures in the inventory by the share (weighted by inclusion) of their EDHREC cards that is
 owned; `precons` ranks the preconstructed decks by the share of their cards owned (about 230
-lists the first time, then cached).
+lists the first time, then cached); `card` ("Build around a card": the page lists the owned
+cards legal in a format - `/api/cards/search?owned=1&format=` - and one is clicked) reads the
+ten most viewed Archidekt decks of that format with the card (`?cardName=&deckFormat=`, which
+can take Archidekt half a minute the first time for a much played card: 45 s timeout) and ranks
+them by the share of each that is owned. `POST` starts a run and replaces one that is running;
+`POST {"stop": true}` ends it at its next step, keeping what was found - the button that
+started a search stops it while it runs.
 
 **Preconstructed decks.** The Decks tab lists them from `GET /api/precons` (one cached request)
 with a search; the ranking only adds the share owned. "Open as deck" creates a deck from the
