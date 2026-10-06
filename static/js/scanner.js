@@ -683,6 +683,7 @@ function loadScanSettings() {
             addLog(timeNow(), 'info', `Debug trace: ${data.debug_trace ? 'on' : 'off'}, debug mode: ${data.debug_mode_running ? 'on' : 'off'}`);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             $('camera-rotation').value = String(data.camera_rotation || 0);
+            $('refocus-every').value = String(data.refocus_every);
             $('scan-location').value = data.scan_location || '';
             $('scan-location-options').innerHTML = (data.locations || [])
                 .map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
@@ -720,6 +721,10 @@ socket.on('fixed_area_updated', function(state) {
     if (state.enabled !== wasEnabled) {
         notify(state.enabled ? 'Fixed area on - cards are judged by the drawn area' : 'Fixed area off - cards are found by their outline', 'info');
     }
+});
+
+socket.on('refocus_every_updated', function(data) {
+    $('refocus-every').value = String(data.captures);
 });
 
 socket.on('camera_rotation_updated', function(data) {
@@ -1779,6 +1784,9 @@ function setupScanToggles() {
         addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
     });
 
+    $('refocus-every').addEventListener('change', function(e) {
+        socket.emit('set_refocus_every', {captures: parseInt(e.target.value)});
+    });
     $('camera-rotation').addEventListener('change', function(e) {
         socket.emit('set_camera_rotation', {rotation: parseInt(e.target.value)});
     });

@@ -201,6 +201,8 @@ class CardScanner:
         self.last_focus_sweep = 0.0
         self.out_of_focus_since = None
         self.captures_since_focus = 0  # Captures since the last focus sweep / probe (refocus_every)
+        # Probe the focus every this many captures (0 = never): Settings, else config.yaml
+        self.refocus_every = int(self.settings.get('refocus_every', Config.AUTO_CAPTURE_REFOCUS_EVERY) or 0)
         self.focus_probe_running = False  # Short focus probe between two drops
         self.focus_probe_direction = 1  # Probe up (+1) or down (-1) next
         self.disturbed_during_focus = False  # A card was dropped while the focus was moving
@@ -1558,10 +1560,20 @@ class CardScanner:
             self.focus_sweep_running = False
             self.out_of_focus_since = None
 
+    def set_refocus_every(self, captures):
+        """Probe the focus every this many captures while scanning (0 = never); remembered"""
+        captures = int(captures)
+        if not 0 <= captures <= 100:
+            raise ValueError("The focus check interval must be 0 to 100 captures")
+        self.refocus_every = captures
+        self.captures_since_focus = 0
+        self.settings.set('refocus_every', captures)
+        self.log(f"Focus check while scanning: every {captures} captures" if captures else "Focus check while scanning: off")
+
     def _count_capture(self):
         """After a capture (image already taken): probe the focus every refocus_every captures"""
         self.captures_since_focus += 1
-        every = Config.AUTO_CAPTURE_REFOCUS_EVERY
+        every = self.refocus_every
         if (every and self.captures_since_focus >= every and self.focus_locked_value is not None
                 and self.camera_type == 'usb' and self.focus_range
                 and not self.focus_sweep_running and not self.focus_probe_running):

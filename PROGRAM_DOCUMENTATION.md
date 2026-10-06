@@ -677,7 +677,7 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
   or restored position is approached from 30 below (`_move_focus`).
 - **Focus probe while scanning** (`_run_focus_probe`, every `auto_capture.refocus_every`
-  captures, default 3): the best position drifts - in one session it moved from 395 to 430 in
+  captures, default 10; **Settings → Check the focus every** changes it while scanning): the best position drifts - in one session it moved from 395 to 430 in
   about 45 minutes (lens warming up, pile height), and the text in the captures became ~10×
   blurrier while the card as a whole still passed `min_sharpness`, so the automatic refocus
   never started. In the gap after a capture (~1 s, the image is already taken) the probe
@@ -685,6 +685,11 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   an improvement keeps the direction for the next probe, otherwise the next one tries the other
   way. Near the peak the sharpness changes ~3× per step, far more than the noise. Probes
   approach their positions from only 15 below (instead of 30) to keep the card readable.
+  The interval was 3 captures until 2026-10-06: in a session of 489 captures the 163 probes
+  moved the focus 5 times (420 ↔ 430 ↔ 440, 1.12-1.99× sharper), OCR had read all 9 cards
+  before each move, and a capture followed by a probe held the next one back 0.9 s (2.5 s
+  to the next capture instead of 1.6 s). Every 10 captures still looks about every 20 s,
+  far more often than the position moves (one step in 10+ minutes).
 - **While the lens moves** (sweep or probe, and 0.6 s after) the new-card rules are paused: the
   blur can hide the card for a few frames and shift its outline, and the "reappeared elsewhere"
   / "card gone" rules then took the same card for a new one (a probe caused two duplicate
@@ -877,7 +882,7 @@ Socket.IO events:
 | Client → server | Server → client |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add`, `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated`, `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Flask's debug mode, for the next start), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation` | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Flask's debug mode, for the next start), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `processing_queue_update`, `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the client that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the oldest item, or `id: null` when empty), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -904,7 +909,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `config.yaml` | Camera, detection, auto-capture, vision AI defaults, web server, cleanup |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
-| `data/settings.json` | Choices made in the UI: AI provider/model, OCR first, add automatically, locked focus position, debug trace, debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log` - `enable_request_log`, since `setup_logging` silences Werkzeug; overrides `flask.debug`; taken when the server starts, always without the reloader - a second copy of the program could not open the camera) |
+| `data/settings.json` | Choices made in the UI: AI provider/model, OCR first, add automatically, locked focus position, focus probe interval (`refocus_every`, overrides `auto_capture.refocus_every`), debug trace, debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log` - `enable_request_log`, since `setup_logging` silences Werkzeug; overrides `flask.debug`; taken when the server starts, always without the reloader - a second copy of the program could not open the camera) |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |

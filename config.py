@@ -58,7 +58,7 @@ class Config:
     AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=1.0)
     AUTO_CAPTURE_STABILITY_FRAMES = config.get('auto_capture', 'stability_frames', default=5)
     AUTO_CAPTURE_MIN_SHARPNESS = config.get('auto_capture', 'min_sharpness', default=250)
-    AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=3))
+    AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=10))
 
     # Fast scan mode settings
     FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=6)

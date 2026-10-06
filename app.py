@@ -2226,6 +2226,7 @@ def get_scan_settings():
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
         'camera_rotation': scanner.rotation if scanner else 0,
+        'refocus_every': scanner.refocus_every if scanner else Config.AUTO_CAPTURE_REFOCUS_EVERY,
         'scan_location': scan_location(),
         'locations': inventory.locations(games.active_id()) if inventory else [],
     })
@@ -2343,6 +2344,21 @@ def handle_set_camera_rotation(data):
     socketio.emit('camera_rotation_updated', {'rotation': scanner.rotation, 'fixed_area_off': fixed_area_off})
     if fixed_area_off:
         socketio.emit('fixed_area_updated', {'enabled': False, 'area': scanner.fixed_area})
+
+
+@socketio.on('set_refocus_every')
+def handle_set_refocus_every(data):
+    """Check the focus every this many captures while scanning (0 = never); remembered"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    try:
+        scanner.set_refocus_every(data.get('captures', 0))
+    except (TypeError, ValueError) as e:
+        emit('error', {'message': str(e)})
+        emit('refocus_every_updated', {'captures': scanner.refocus_every})  # put the field back
+        return
+    socketio.emit('refocus_every_updated', {'captures': scanner.refocus_every})
 
 
 @socketio.on('set_fixed_area')

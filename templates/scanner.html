@@ -164,6 +164,11 @@
                         <input type="checkbox" class="switch" id="toggle-autofocus" checked>
                     </label>
                     <div class="input-group">
+                        <label for="refocus-every">Check the focus every (captures)</label>
+                        <input type="number" id="refocus-every" class="text-input" min="0" max="100" step="1" inputmode="numeric">
+                        <div class="hint">With the focus locked: after this many captures the scanner tries a focus one step away and keeps the sharper one. Each check holds the next card back about a second. 0 = never</div>
+                    </div>
+                    <div class="input-group">
                         <label for="camera-rotation">Camera rotation</label>
                         <select id="camera-rotation" class="select">
                             <option value="0">None</option>
@@ -342,6 +347,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=5"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=44"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=45"></script>
 </body>
 </html>

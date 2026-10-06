@@ -335,7 +335,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
-| `auto_capture.refocus_every` | `3` | Every this many captures, check if a focus one step away is sharper and follow it; `0` = off |
+| `auto_capture.refocus_every` | `10` | Every this many captures, check if a focus one step away is sharper and follow it (the next card waits about a second longer); `0` = off. Also in **Settings**, which wins once used |
 | `fast_scan.stability_frames` | `6` | Same, when adding cards automatically (~0.3 s, lets a dropped sleeved card stop sliding) |
 | `camera.rotate` | `0` | Rotate the image (0/90/180/270) for a camera mounted sideways - also in Settings |
 | `vision_ai.provider` | `gemini` | Default AI provider (see above) |
