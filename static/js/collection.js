@@ -512,7 +512,36 @@ async function loadDecks() {
     if (!data) return;
     deckList = data.decks;
     $('deck-data-notice').hidden = data.has_deck_data;
-    $('deck-list').innerHTML = deckList.length ? deckList.map(item => `
+    // The formats there are decks of; a choice that is gone falls back to all
+    const formats = [...new Set(deckList.map(item => item.format))];
+    const chosen = $('deck-filter-format').value;
+    $('deck-filter-format').innerHTML = '<option value="">Any format</option>' + gameInfo.deck_formats
+        .filter(([key]) => formats.includes(key))
+        .map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    $('deck-filter-format').value = formats.includes(chosen) ? chosen : '';
+    $('deck-filters').hidden = deckList.length < 2;
+    renderDeckList();
+}
+
+const DECK_SORTS = {
+    changed: (a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id,
+    name: (a, b) => a.name.localeCompare(b.name),
+    format: (a, b) => formatLabel(a.format).localeCompare(formatLabel(b.format)) || a.name.localeCompare(b.name),
+    owned: (a, b) => b.owned_percent - a.owned_percent || a.name.localeCompare(b.name),
+    missing: (a, b) => (a.cards - a.owned) - (b.cards - b.owned) || a.name.localeCompare(b.name),
+    cards: (a, b) => b.cards - a.cards || a.name.localeCompare(b.name),
+};
+
+function renderDeckList() {
+    const words = $('deck-filter-text').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const format = $('deck-filter-format').value;
+    const shown = deckList.filter(item => {
+        const text = `${item.name} ${item.commanders.join(' ')}`.toLowerCase();
+        return (!format || item.format === format) && words.every(word => text.includes(word));
+    }).sort(DECK_SORTS[$('deck-sort').value] || DECK_SORTS.changed);
+    $('deck-list').innerHTML = !shown.length && deckList.length
+        ? '<div class="empty-state">No deck matches.</div>'
+        : deckList.length ? shown.map(item => `
         <button class="deck-tile" data-deck="${item.id}">
             <span class="deck-tile-name">${escapeHtml(item.name)}</span>
             <span class="deck-tile-meta">${escapeHtml(formatLabel(item.format))} · ${plural(item.cards, 'card')}${item.commanders.length ? ' · ' + escapeHtml(item.commanders.join(' + ')) : ''}</span>
@@ -1283,6 +1312,13 @@ function bindEvents() {
 
     // Deck list
     $('deck-new').addEventListener('click', () => openDeckModal());
+    $('deck-sort').value = recall('deckSort', 'changed');
+    $('deck-sort').addEventListener('change', event => {
+        remember('deckSort', event.target.value);
+        renderDeckList();
+    });
+    $('deck-filter-format').addEventListener('change', renderDeckList);
+    $('deck-filter-text').addEventListener('input', debounce(renderDeckList, 150));
     $('deck-modal-save').addEventListener('click', saveDeckModal);
     $('deck-list').addEventListener('click', async event => {
         const tile = event.target.closest('[data-deck]');

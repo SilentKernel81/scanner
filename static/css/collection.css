@@ -1000,3 +1000,7 @@ a.btn {
     font-weight: 400;
     color: var(--text-muted);
 }
+
+.deck-filters {
+    margin-bottom: 12px;
+}

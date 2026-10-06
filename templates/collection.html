@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=31">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=9">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -113,6 +113,19 @@
                 <div class="section-head">
                     <h2>Decks</h2>
                     <button class="btn btn-primary" id="deck-new"><svg class="icon"><use href="#i-plus"/></svg> New deck</button>
+                </div>
+                <div class="filter-row deck-filters" id="deck-filters" hidden>
+                    <input type="search" id="deck-filter-text" class="text-input filter-text" placeholder="Deck or commander...">
+                    <select id="deck-filter-format" class="select" title="Format"></select>
+                    <span class="spacer"></span>
+                    <select id="deck-sort" class="select" title="Sort">
+                        <option value="changed">Last changed</option>
+                        <option value="name">Name A–Z</option>
+                        <option value="format">Format</option>
+                        <option value="owned">Most owned first</option>
+                        <option value="missing">Fewest cards missing</option>
+                        <option value="cards">Most cards first</option>
+                    </select>
                 </div>
                 <div id="deck-list" class="deck-list"></div>
 
@@ -367,6 +380,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=11"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=12"></script>
 </body>
 </html>

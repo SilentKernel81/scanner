@@ -272,7 +272,9 @@ you have scanned and to build decks. It works on a phone too.
   unfinished, its mana curve, its price and what completing it costs, and **Buy list**
   downloads the missing cards. The set code on a card's row (e.g. `MSC 1`) opens its
   printings to choose the one shown. A deck is only a list: it never changes the inventory. Import a
-  pasted decklist or a Moxfield / Archidekt deck address; export as text.
+  pasted decklist or a Moxfield / Archidekt deck address; export as text. The list of your
+  decks can be sorted (last changed, name, format, most owned, fewest cards missing, size)
+  and filtered by format or by deck / commander name.
 - **Deck ideas** - for a Commander deck, *Suggestions* lists the cards played with its
   commander (EDHREC, with how often) and can show only the ones you own; *Popular decks* lists
   public decks from Archidekt and Moxfield you can copy. *What can I build?* has three
