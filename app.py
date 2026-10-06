@@ -2228,8 +2228,30 @@ def get_scan_settings():
         'camera_rotation': scanner.rotation if scanner else 0,
         'refocus_every': scanner.refocus_every if scanner else Config.AUTO_CAPTURE_REFOCUS_EVERY,
         'scan_location': scan_location(),
+        'sound': sound_settings(),
         'locations': inventory.locations(games.active_id()) if inventory else [],
     })
+
+
+def sound_settings():
+    """Sound effects of the scanner page: {'enabled', 'volume' (0-100)}"""
+    settings = scanner.settings if scanner else None
+    return {'enabled': bool(settings.get('sound_enabled', True)) if settings else True,
+            'volume': int(settings.get('sound_volume', 30)) if settings else 30}
+
+
+@app.route('/api/sound', methods=['POST'])
+def set_sound():
+    """Remember the sound switch and / or the volume (JSON: 'enabled', 'volume' 0-100)"""
+    data = request.get_json(silent=True) or {}
+    try:
+        if 'enabled' in data:
+            scanner.settings.set('sound_enabled', bool(data['enabled']))
+        if 'volume' in data:
+            scanner.settings.set('sound_volume', max(0, min(100, int(data['volume']))))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'The volume must be a number from 0 to 100'}), 400
+    return jsonify({'success': True, 'sound': sound_settings()})
 
 
 @app.route('/api/scan_location', methods=['POST'])

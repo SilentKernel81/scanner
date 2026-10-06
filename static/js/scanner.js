@@ -684,11 +684,30 @@ function loadScanSettings() {
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             $('camera-rotation').value = String(data.camera_rotation || 0);
             $('refocus-every').value = String(data.refocus_every);
+            applySound(data.sound);
             $('scan-location').value = data.scan_location || '';
             $('scan-location-options').innerHTML = (data.locations || [])
                 .map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
         })
         .catch(error => console.error('Error loading scan settings:', error));
+}
+
+function applySound(sound) {
+    // The sound switch and volume as remembered on the server
+    if (!sound) return;
+    $('toggle-audio').checked = sound.enabled;
+    $('audio-volume').value = sound.volume;
+    $('volume-value').textContent = sound.volume + '%';
+    audioManager.setEnabled(sound.enabled);
+    audioManager.setVolume(sound.volume / 100);
+}
+
+function saveSound(change) {
+    fetch('/api/sound', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(change)
+    }).catch(error => console.error('Could not save the sound setting:', error));
 }
 
 function setScanLocation(location) {
@@ -1798,6 +1817,7 @@ function setupScanToggles() {
 function setupAudioControls() {
     onToggle('toggle-audio', enabled => {
         audioManager.setEnabled(enabled);
+        saveSound({enabled: enabled});
         addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
         if (enabled) audioManager.playSuccess();  // a test sound
     });
@@ -1806,6 +1826,8 @@ function setupAudioControls() {
         audioManager.setVolume(e.target.value / 100);  // 0-100 -> 0.0-1.0
         $('volume-value').textContent = e.target.value + '%';
     });
+    // Saved when the slider is let go, not on every step of the drag
+    $('audio-volume').addEventListener('change', e => saveSound({volume: parseInt(e.target.value)}));
 }
 
 function setupAIControls() {

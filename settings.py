@@ -20,6 +20,8 @@ class Settings:
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
         'ocr_first': True,  # light-ocr reads each card; the vision AI only when that isn't a confirmed match
         'debug_trace': False,  # Log filtered detections, save frames of slow or doubtful captures
+        'sound_enabled': True,  # Sound effects on the scanner page
+        'sound_volume': 30,  # 0-100
         'focus_value': None,  # Locked manual focus position (None = continuous autofocus)
         'detection_enabled': True,
         'fixed_area_enabled': False,  # Judge cards by a fixed area instead of their outline (sleeves)
