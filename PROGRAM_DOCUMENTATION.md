@@ -439,8 +439,8 @@ model is preloaded (`warm_up`) when auto scanning starts, because loading a 9B m
 | Step | Match | Tag |
 |---|---|---|
 | 1 | Set code + collector number (unique per printing), accepted if the name roughly matches (`names_match`: same, prefix, a double-faced card's face, ≥ 60% similar, or ≥ 75% similar to the short name before the comma - "Thands" / "Thanos, the Mad Titan") | `set_number` |
-| 2 | Name + collector number, then shortened name ("Thanos" → "Thanos, the Mad Titan") + number | `name_number` |
-| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number`), else the printing from the same set (if any) whose collector number is closest to the one read. If the name was read exactly and exactly one printing of it in the set read is one digit off the number read - a digit misread, dropped or doubled, compared as printed with leading zeros ("0189" for #188, "6186" for 0186, "017" for 0117) - that printing is certain (with two printings a digit away it goes to review) | `name_set_digit` / `name_set` / `name` / `fuzzy` |
+| 2 | Name + collector number, then shortened name ("Thanos" → "Thanos, the Mad Titan") + number. One printing → confirmed; several (the same card under the same number in more than one set - Solemn Offering #33 in M10 and M15, basic lands; ~9% of printings) → the one whose set code is closest to the one read, else the oldest, for review (`_by_name_number`) | `name_number` / `name_number_ambiguous` |
+| 3 | Name only (exact, flavor name, shortened), else fuzzy (`difflib`, cutoff 0.6, candidates sharing the first letters) - then the number to pick the printing (`name_number` / `name_number_ambiguous`, as in step 2), else the printing from the same set (if any) whose collector number is closest to the one read. If the name was read exactly and exactly one printing of it in the set read is one digit off the number read - a digit misread, dropped or doubled, compared as printed with leading zeros ("0189" for #188, "6186" for 0186, "017" for 0117) - that printing is certain (with two printings a digit away it goes to review) | `name_set_digit` / `name_set` / `name` / `fuzzy` |
 | 4 | Name unrecognizable but set + number exist: trust the printed set + number | `set_number_unverified` |
 
 Collector numbers are compared in their variants ("0014" → 14, 0014, 14s, 0014s). Names are
@@ -720,7 +720,11 @@ its copies came with that (the rest were there before). The collection page sort
 added to the collection", the default), filters by batch ("Added <time> (n cards)") and, with a
 batch chosen, offers **Remove this batch** (`POST /api/inventory/remove_batch`,
 `InventoryManager.remove_batch`): each entry loses only the copies that batch brought, with
-their newest captures; entries with no other copies are deleted. The cards are deleted, not
+their newest captures; entries with no other copies are deleted. An entry that keeps copies
+gets `added_quantity = 0`: they belong to no batch any more (shown as "Added before <time>",
+left out of the batch filter), so removing a batch again never takes them. Adds to one entry
+at the same `added_at` (two in one second, a file with repeated rows) add up in
+`added_quantity`; Undo lowers it. The cards are deleted, not
 moved back to the scanner. Both columns are added on startup (`ALTER TABLE`; `added_at` starts
 as the scan time).
 
@@ -794,7 +798,8 @@ thread and the page polls `GET /api/decks/ideas/<kind>`: `commanders` ranks the 
 creatures in the inventory by the share (weighted by inclusion) of their EDHREC cards that is
 owned; `precons` ranks the preconstructed decks by the share of their cards owned (about 230
 lists the first time, then cached); `card` ("Build around a card": the page lists the owned
-cards legal in a format - `/api/cards/search?owned=1&format=` - and one is clicked) reads the
+cards legal in a format - `/api/cards/search?owned=1&format=`; a click shows the card - `chooseAround` - and **Find
+decks** starts the run, **Stop** in its place while it runs: `findAround`, `renderAround`) reads the
 ten most viewed Archidekt decks of that format with the card (`?cardName=&deckFormat=`, which
 can take Archidekt half a minute the first time for a much played card: 45 s timeout) and ranks
 them by the share of each that is owned. `POST` starts a run and replaces one that is running;

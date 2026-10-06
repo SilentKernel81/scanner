@@ -24,7 +24,9 @@ CAPTURE_HEIGHT = 400  # px - ~25 KB per card
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
 # the card was scanned; added_at: when it came into this inventory - the same for every entry
 # of one "Add to collection", so a batch can be found again - and added_quantity: how many of the
-# entry's copies came with it (the others were there before), so it can be taken back out
+# entry's copies came with it (the others were there before), so it can be taken back out.
+# NULL: all of them (entries older than the column); 0: none - its batch was removed, what is
+# left was there before
 INVENTORY_TABLE = '''
     CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +65,9 @@ UPSERT = '''
     ON CONFLICT(game, card_name, set_name, card_number, condition, finish, location) DO UPDATE SET
         quantity = quantity + excluded.quantity,
         added_at = excluded.added_at,
-        added_quantity = excluded.quantity,
+        added_quantity = CASE WHEN added_at = excluded.added_at  -- the same batch again: it brought both
+                              THEN COALESCE(added_quantity, quantity) + excluded.quantity
+                              ELSE excluded.quantity END,
         tags = CASE WHEN tags = '' THEN excluded.tags ELSE tags END,
         timestamp = excluded.timestamp,
         price_usd = excluded.price_usd,
@@ -112,8 +116,14 @@ def _row_dict(row):
         'location': row['location'],
         'tags': clean_tags(row['tags']),
         'added_at': row['added_at'] or row['timestamp'],
-        'added_quantity': min(row['added_quantity'] or row['quantity'], row['quantity']),
+        'added_quantity': batch_quantity(row),
     }
+
+
+def batch_quantity(row):
+    """How many of an entry's copies came with its added_at (see INVENTORY_TABLE)"""
+    added = row['added_quantity']
+    return row['quantity'] if added is None else max(0, min(added, row['quantity']))
 
 
 class InventoryManager:
@@ -370,7 +380,9 @@ class InventoryManager:
             row = self.conn.execute('SELECT card_name FROM inventory WHERE id = ?', (row_id,)).fetchone()
             if not row:
                 return None
-            self.conn.execute('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', (quantity, row_id))
+            self.conn.execute('UPDATE inventory SET quantity = quantity - ?, '
+                              'added_quantity = MAX(0, COALESCE(added_quantity, quantity) - ?) WHERE id = ?',
+                              (quantity, quantity, row_id))
             self.conn.execute('DELETE FROM inventory WHERE id = ? AND quantity <= 0', (row_id,))
             if capture_id:
                 self._delete_captures('id = ?', (capture_id,))
@@ -625,21 +637,26 @@ class InventoryManager:
         with self._lock:
             rows = self.conn.execute('SELECT * FROM inventory WHERE game = ? AND added_at = ?', (game, added_at)).fetchall()
             cards = 0
+            entries = 0
             for row in rows:
-                added = min(row['added_quantity'] or row['quantity'], row['quantity'])
+                added = batch_quantity(row)
+                if not added:
+                    continue  # its batch was removed before: these copies are older
                 cards += added
+                entries += 1
                 if added >= row['quantity']:
                     self.conn.execute('DELETE FROM inventory WHERE id = ?', (row['id'],))
                 else:
-                    # What is left was there before: no longer part of this batch
-                    self.conn.execute('UPDATE inventory SET quantity = quantity - ?, added_quantity = NULL, '
-                                      'added_at = timestamp WHERE id = ?', (added, row['id']))
+                    # What is left was there before: part of no batch (when it came is not
+                    # known any more), so removing a batch again never takes it
+                    self.conn.execute('UPDATE inventory SET quantity = quantity - ?, added_quantity = 0 '
+                                      'WHERE id = ?', (added, row['id']))
                     self._trim_captures(row['id'], row['quantity'] - added)
             self._drop_orphan_captures()
             self.conn.commit()
             self.last_added = None
-        self.log(f"Removed the cards added {added_at}: {cards} cards ({len(rows)} entries)", level="success")
-        return {'entries': len(rows), 'cards': cards}
+        self.log(f"Removed the cards added {added_at}: {cards} cards ({entries} entries)", level="success")
+        return {'entries': entries, 'cards': cards}
 
     def clear_inventory(self, game=None):
         """Delete every entry (of one game, if given)"""

@@ -461,28 +461,24 @@ class CardDatabase:
                 # Step 2: Name + collector number, then shortened name ("Thanos" for
                 # "Thanos, the Mad Titan") + collector number
                 for comparison, value in (('=', key), ('LIKE', key + '%')):
-                    cursor.execute(f'''
+                    rows = cursor.execute(f'''
                         SELECT * FROM cards
                         WHERE (name_search {comparison} ? OR flavor_search {comparison} ?)
                         AND collector_number IN ({number_placeholders})
-                        LIMIT 1
-                    ''', (value, value, *number_variants))
-                    result = cursor.fetchone()
-                    if result:
-                        logger.info(f"Found name match with collector number: {result['name']} #{result['collector_number']}")
-                        return self._tagged(result, 'name_number')
+                    ''', (value, value, *number_variants)).fetchall()
+                    if rows:
+                        return self._by_name_number(rows, set_code)
 
             # Step 3: Name only
             match = self.search_card(card_name, fuzzy=True)
 
             # Fuzzy matching resolves the name; use the collector number to pick the printing
             if match and number_variants:
-                cursor.execute(f'''
-                    SELECT * FROM cards WHERE name = ? AND collector_number IN ({number_placeholders}) LIMIT 1
-                ''', (match['name'], *number_variants))
-                result = cursor.fetchone()
-                if result:
-                    return self._tagged(result, 'name_number')
+                rows = cursor.execute(f'''
+                    SELECT * FROM cards WHERE name = ? AND collector_number IN ({number_placeholders})
+                ''', (match['name'], *number_variants)).fetchall()
+                if rows:
+                    return self._by_name_number(rows, set_code)
 
             # Number didn't match (misread): prefer a printing from the same set, and the
             # printing whose collector number is closest to what was read
@@ -517,11 +513,30 @@ class CardDatabase:
                 return self._tagged(set_number_row, 'set_number_unverified')
             return match
 
+    def _by_name_number(self, rows, set_code):
+        """
+        The printing for a name + collector number: confirmed ('name_number') only when it is
+        the only one. Several sets print the same card under the same number (Solemn Offering
+        #33 in M10 and M15, basic lands), and many of those cards carry no set code - then the
+        likeliest printing is suggested for review ('name_number_ambiguous'): the set code
+        closest to the one read, else the oldest (cards before 2014 have no printed set code)
+        """
+        if len(rows) == 1:
+            logger.info(f"Found name match with collector number: {rows[0]['name']} #{rows[0]['collector_number']}")
+            return self._tagged(rows[0], 'name_number')
+        wanted_set = (set_code or '').strip().lower()
+        best = min(rows, key=lambda row: (_edit_distance(wanted_set, row['set_code'] or '') if wanted_set else 0,
+                                          row['released_at'] or ''))
+        logger.warning(f"{len(rows)} printings of {best['name']} #{best['collector_number']} "
+                       f"({', '.join(sorted({row['set_code'] or '?' for row in rows}))}) - not confirmed")
+        return self._tagged(best, 'name_number_ambiguous')
+
     def _tagged(self, row, match):
         """
         Card dict plus how it was matched: 'set_number' / 'name_number' (the printing is
         confirmed - see CONFIRMED_MATCHES), 'name_set_digit' (confirmed too: the only printing
-        of the name in the set read whose number is one digit off the one read), 'name_set', 'name', 'fuzzy' or
+        of the name in the set read whose number is one digit off the one read),
+        'name_number_ambiguous' (several printings share the name and number), 'name_set', 'name', 'fuzzy' or
         'set_number_unverified' (the printed set + number, name not recognized)
         """
         card = self._format_card_result(row)

@@ -160,7 +160,8 @@ function fillFilterOptions() {
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
     // The last times cards came into the collection (one per "Add to collection"), newest first
     const batches = new Map();
-    inventory.forEach(card => batches.set(card.added_at, (batches.get(card.added_at) || 0) + card.added_quantity));
+    // added_quantity 0: the entry's batch was removed, its copies were there before
+    inventory.filter(card => card.added_quantity).forEach(card => batches.set(card.added_at, (batches.get(card.added_at) || 0) + card.added_quantity));
     const times = [...batches.keys()].sort().reverse().slice(0, 20);
     fillSelect('filter-added', 'Added any time', times,
                Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
@@ -195,7 +196,7 @@ function applyFilters() {
         if (finish && card.finish !== finish) return false;
         if (location && card.location !== (location === '(none)' ? '' : location)) return false;
         if (tag && !card.tags.includes(tag)) return false;
-        if (added && card.added_at !== added) return false;
+        if (added && (card.added_at !== added || !card.added_quantity)) return false;
         if (free && card.decks.length) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
@@ -277,7 +278,7 @@ function renderInventory() {
                     <div class="inventory-card-price">
                         <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
                         ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
-                        <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
+                        <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
                     </div>
                     <div class="inventory-card-actions">
                         <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
@@ -371,7 +372,7 @@ async function bulkAction(action) {
 async function removeBatch() {
     // Undo an "Add to collection": only the copies that came with it go
     const added = $('filter-added').value;
-    const batch = inventory.filter(card => card.added_at === added);
+    const batch = inventory.filter(card => card.added_at === added && card.added_quantity);
     const cards = batch.reduce((sum, card) => sum + card.added_quantity, 0);
     const kept = batch.filter(card => card.added_quantity < card.quantity).length;
     const ok = await confirmDialog({title: `Remove the ${plural(cards, 'card')} added ${added.slice(0, 16)}?`, confirmText: 'Remove', danger: true,
@@ -689,7 +690,8 @@ function stopIdeas(kind) {
 
 // -- Build around a card: your cards legal in a format -> public decks that play one ----
 
-let aroundCard = null;
+let aroundCard = null;   // the card on display (clicked in the list)
+let aroundState = null;  // the last answer about the search for decks
 let aroundRequest = 0;
 
 async function loadAroundCards() {
@@ -702,7 +704,7 @@ async function loadAroundCards() {
     if (!data || request !== aroundRequest) return;  // a later search already answered
     $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
     $('around-cards').innerHTML = data.cards.map(card => `
-        <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}"
+        <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}" data-type="${escapeHtml(card.type_line)}"
              data-image="${escapeHtml(card.image_uri || '')}" data-commander="${/Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text) ? '1' : ''}">
             <span class="result-main">
                 <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
@@ -713,26 +715,51 @@ async function loadAroundCards() {
         || '<div class="hint">None of your cards match. Deck data missing? Update the card database.</div>';
 }
 
-function findAround(row) {
-    aroundCard = {name: row.dataset.name, commander: !!row.dataset.commander, format: $('around-format').value};
+function chooseAround(row) {
+    // Shows the card; looking for decks waits for "Find decks" (it asks other sites)
+    aroundCard = {name: row.dataset.name, commander: !!row.dataset.commander, format: $('around-format').value,
+                  image: row.dataset.image, type: row.dataset.type};
     document.querySelectorAll('#around-cards .result-row').forEach(other => other.classList.toggle('is-chosen', other === row));
+    renderAround();
+}
+
+function findAround() {
+    if (!aroundCard) return;
     $('around-decks').innerHTML = '';
     pollIdeas('card', true, {card: aroundCard.name, format: aroundCard.format});
 }
 
-function renderAround(state) {
-    if (!state.started || !state.card) return;
-    const asCommander = aroundCard && aroundCard.name === state.card && aroundCard.commander && hasCommander(state.format);
-    $('around-decks-title').textContent = `${formatLabel(state.format)} decks with ${state.card}`;
-    $('around-progress').innerHTML = `<div class="filter-row">
-            <span class="hint">${state.running ? (state.total ? `Reading the decks... ${state.done} of ${state.total}`
-                    : 'Asking Archidekt - for a much played card this can take half a minute...')
-                : state.stopped ? `Stopped after ${state.done} of ${state.total} decks` : `${plural(state.items.length, 'deck')}, the ones you own most of first`}</span>
-            <span class="spacer"></span>
-            ${state.running ? '<button class="btn btn-small" id="around-stop">Stop</button>' : ''}
-            ${asCommander ? `<button class="btn btn-small" id="around-commander">Start a deck with it as commander</button>` : ''}
-        </div>` + (state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '');
-    $('around-decks').innerHTML = state.items.map(item => `
+function renderAround(state = aroundState) {
+    aroundState = state;
+    const card = aroundCard;
+    const found = state && state.started && state.card ? state : null;
+    const running = !!(found && found.running);
+    const mine = found && card && found.card === card.name && found.format === card.format;
+    // A search that is running stays on display (and can be stopped) while another card is looked at
+    const shown = running || mine || !card ? found : null;
+    $('around-decks-title').textContent = shown ? `${formatLabel(shown.format)} decks with ${shown.card}` : 'Decks';
+    const status = shown ? (running ? (shown.total ? `Reading the decks... ${shown.done} of ${shown.total}`
+                : 'Asking Archidekt - for a much played card this can take half a minute...')
+            : shown.stopped ? `Stopped after ${shown.done} of ${shown.total || '?'} decks`
+            : `${plural(shown.items.length, 'deck')}, the ones you own most of first`)
+        : card ? 'Find decks looks for public decks that play it.' : '';
+    const buttons = (running ? '<button class="btn btn-small" id="around-stop">Stop</button>'
+            : card ? `<button class="btn btn-small btn-primary" id="around-find">${mine ? 'Find again' : 'Find decks'}</button>` : '')
+        + (card && card.commander && hasCommander(card.format)
+            ? '<button class="btn btn-small" id="around-commander">Start a deck with it as commander</button>' : '');
+    $('around-progress').innerHTML = (card ? `<div class="around-card">
+            ${card.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)}">` : ''}
+            <div>
+                <div class="idea-name">${escapeHtml(card.name)}</div>
+                <div class="idea-meta">${escapeHtml(card.type || '')}</div>
+                <div class="filter-row">${buttons}</div>
+                <div class="hint">${status}</div>
+            </div>
+        </div>` : buttons || status ? `<div class="filter-row"><span class="hint">${status}</span><span class="spacer"></span>${buttons}</div>` : '')
+        + (shown && shown.error ? `<div class="callout warning">${escapeHtml(shown.error)}</div>` : '');
+    $('around-decks').innerHTML = !shown
+        ? (card ? '' : '<div class="hint">Click one of your cards to see it, then Find decks to look for decks that play it.</div>')
+        : shown.items.map(item => `
         <div class="idea-row precon">
             <div><div class="idea-name">${escapeHtml(item.name)}</div>
                  <div class="idea-meta">${escapeHtml(item.source)}${item.author ? ' · ' + escapeHtml(item.author) : ''} · ${item.views.toLocaleString()} views · ${item.owned} of ${item.total} cards owned</div></div>
@@ -741,7 +768,7 @@ function renderAround(state) {
                 <a class="mini-btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener" title="Open on ${escapeHtml(item.source)}"><svg class="icon"><use href="#i-link"/></svg></a>
                 <button class="btn btn-small" data-import-url="${escapeHtml(item.url)}" title="Open a copy as a new deck here">Copy as deck</button>
             </div>
-        </div>`).join('') || (state.running || state.error ? '' : '<div class="hint">No public decks found with this card in this format.</div>');
+        </div>`).join('') || (running || shown.error ? '' : '<div class="hint">No public decks found with this card in this format.</div>');
 }
 
 // ============================================================================
@@ -1200,13 +1227,18 @@ function bindEvents() {
     // Build around a card
     $('around-format').innerHTML = gameInfo.deck_formats.map(([key, label]) =>
         `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
-    $('around-format').addEventListener('change', loadAroundCards);
+    $('around-format').addEventListener('change', () => {
+        aroundCard = null;  // chosen for the other format
+        renderAround();
+        loadAroundCards();
+    });
     ['around-search', 'around-type'].forEach(id => $(id).addEventListener('input', debounce(loadAroundCards)));
     $('around-cards').addEventListener('click', event => {
         const row = event.target.closest('.result-row');
-        if (row) findAround(row);
+        if (row) chooseAround(row);
     });
     $('around-progress').addEventListener('click', event => {
+        if (event.target.id === 'around-find') findAround();
         if (event.target.id === 'around-stop') stopIdeas('card');
         if (event.target.id === 'around-commander') {
             createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name});

@@ -447,6 +447,24 @@ a.btn {
     cursor: pointer;
 }
 
+.around-card {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.around-card img {
+    width: 190px;
+    max-width: 45%;
+    height: auto;
+    border-radius: 9px;
+}
+
+.around-card .filter-row {
+    margin: 10px 0 6px;
+}
+
 .idea-row.precon {
     grid-template-columns: 1fr auto auto;
 }

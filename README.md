@@ -277,7 +277,8 @@ you have scanned and to build decks. It works on a phone too.
   commander (EDHREC, with how often) and can show only the ones you own; *Popular decks* lists
   public decks from Archidekt and Moxfield you can copy. *What can I build?* has three
   searches: **Build around a card** - choose a format, click one of your cards that is legal in
-  it, and get public decks that play it, the ones you own most of first, to copy as a deck;
+  it to see it, then **Find decks** for public decks that play it, the ones you own most of
+  first, to copy as a deck (the button becomes **Stop** while it looks);
   the legendary creatures you own, by how much of their usual deck you already have; and the
   preconstructed decks, by how much of each you own. A search that is running can be stopped. These read other sites, so they need
   internet; if a site doesn't answer, only that list is missing.
