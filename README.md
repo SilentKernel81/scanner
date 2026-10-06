@@ -344,6 +344,7 @@ Settings live in `config.yaml`. The most useful ones:
 | `vision_ai.image_size` | `1024` | Longest side of the card image sent for identification (larger = slower, not more accurate) |
 | `vision_ai.local.endpoint` | | Local AI server (the model is chosen in Settings) |
 | `flask.host` / `port` | `0.0.0.0` / `5000` | Web server address |
+| `flask.debug` | `false` | The web server's debug mode (debugger pages, and every request logged to `data/logs/requests.log`) - also **Settings → Debug mode**, which wins once used; applies after a restart. Anyone on your network can reach the debugger while it is on |
 | `cleanup.enabled` / `days` | `true` / `7` | Delete scanned images older than N days on startup |
 
 Environment variables `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override the matching
@@ -372,6 +373,7 @@ Logs are written to `data/logs/`:
 | `scanner.log` | Camera, detection, captures |
 | `database.log` | Database queries |
 | `scanned_cards.log` | One CSV line per identified card |
+| `requests.log` | Every request the web server answered - only with **Debug mode** on |
 
 ## Troubleshooting
 

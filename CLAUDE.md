@@ -126,4 +126,4 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   from scanning code paths.
 - **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
   in PROGRAM_DOCUMENTATION.md.
-- **Logs**: `data/logs/app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log`.
+- **Logs**: `data/logs/app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log`; `requests.log` (web requests) only with Debug mode on.

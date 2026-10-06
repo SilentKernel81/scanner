@@ -170,6 +170,20 @@ def setup_logging():
 # Initialize logging
 logger = setup_logging()
 
+
+def enable_request_log():
+    """
+    Debug mode: every request the web server answers goes to data/logs/requests.log
+    (setup_logging silences Werkzeug, and its console handler shows warnings only - the page
+    asks for the detection status several times a second, too much for the console)
+    """
+    handler = RotatingFileHandler(Path(__file__).parent / 'data' / 'logs' / 'requests.log',
+                                  maxBytes=10*1024*1024, backupCount=2)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    requests_logger = logging.getLogger('werkzeug')
+    requests_logger.setLevel(logging.INFO)
+    requests_logger.addHandler(handler)
+
 # Get scanned cards logger for tracking all scanned cards
 scanned_cards_logger = logging.getLogger('scanned_cards')
 
@@ -207,6 +221,7 @@ SCAN_INVENTORY_FILE = Config.DATA_DIR / 'scan_inventory.db'
 
 # Global instances
 scanner = None
+debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
 database = None
 inventory = None           # the collection (table inventory in the card database file)
 scan_inventory = None      # what the scanner page adds to, until it is moved to the collection
@@ -2192,6 +2207,11 @@ def set_auto_add(enabled):
     scanner.auto_capture_delay = Config.AUTO_CAPTURE_DELAY
 
 
+def saved_debug_mode():
+    """Flask's debug mode for the next start: the switch in Settings, else flask.debug in config.yaml"""
+    return bool(scanner.settings.get('debug_mode', Config.DEBUG)) if scanner else bool(Config.DEBUG)
+
+
 @app.route('/api/scan_settings')
 def get_scan_settings():
     """Scanning preferences the page needs on load"""
@@ -2200,6 +2220,8 @@ def get_scan_settings():
         'ocr_first': bool(scanner.ocr_enabled) if scanner else True,
         'ocr_installed': CardOcr.installed(),
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
+        'debug_mode': saved_debug_mode(),
+        'debug_mode_running': bool(debug_mode_running),
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
@@ -2261,6 +2283,20 @@ def handle_toggle_debug_trace(data):
     scanner.settings.set('debug_trace', enabled)
     emit('debug_trace_toggled', {'enabled': enabled})
     logger.info(f"Debug trace toggled: {enabled}")
+
+
+@socketio.on('toggle_debug_mode')
+def handle_toggle_debug_mode(data):
+    """Flask's debug mode on/off (remembered; the server takes it when it starts)"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    enabled = bool(data.get('enabled', False))
+    scanner.settings.set('debug_mode', enabled)
+    emit('debug_mode_toggled', {'enabled': enabled, 'running': bool(debug_mode_running)})
+    logger.info(f"Debug mode toggled: {enabled} (running: {debug_mode_running})")
+    if enabled != bool(debug_mode_running):
+        log_to_client(f"Debug mode: {'on' if enabled else 'off'} after the next restart", level="info")
 
 
 @socketio.on('reset_focus')
@@ -2702,6 +2738,14 @@ def main():
         print(f"⚠ Vision AI disabled")
         print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
 
+    global debug_mode_running
+    debug_mode_running = saved_debug_mode()
+    if debug_mode_running:
+        enable_request_log()
+    logger.info(f"Debug trace: {'on' if scanner.debug_trace_enabled else 'off'}, debug mode: {'on' if debug_mode_running else 'off'} (Settings)")
+    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {'on - frames go to data/debug_frames' if scanner.debug_trace_enabled else 'off'}")
+    print(f"{'✓' if debug_mode_running else '-'} Debug mode: {'on - requests go to data/logs/requests.log' if debug_mode_running else 'off'}")
+
     print("\n" + "="*60)
     print("Web Interface Starting...")
     print("="*60)
@@ -2720,7 +2764,10 @@ def main():
             app,
             host=Config.HOST,
             port=Config.PORT,
-            debug=Config.DEBUG,
+            debug=debug_mode_running,
+            # Never the reloader: it starts the program a second time, and only one process
+            # can open the camera
+            use_reloader=False,
             allow_unsafe_werkzeug=True  # Allow development server for local use
         )
     except KeyboardInterrupt:

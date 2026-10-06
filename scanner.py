@@ -185,6 +185,7 @@ class CardScanner:
         min_ratio = self.card_aspect_ratio_target * (1 - self.aspect_ratio_tolerance)
         max_ratio = self.card_aspect_ratio_target * (1 + self.aspect_ratio_tolerance)
         self.log(f"Aspect ratio detection: {min_ratio:.2f}-{max_ratio:.2f} (tolerance: {self.aspect_ratio_tolerance*100:.0f}%)", level="info")
+        self.log(f"Debug trace: {'on' if self.debug_trace_enabled else 'off'} (Settings; frames of slow or doubtful captures go to data/debug_frames)", level="info")
 
         # Bounding box smoothing to eliminate flicker
         self.smoothed_bbox = None  # Smoothed bounding box coordinates

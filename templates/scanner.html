@@ -180,6 +180,13 @@
                         </span>
                         <input type="checkbox" class="switch" id="toggle-debug-trace">
                     </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Debug mode</span>
+                            <span class="switch-desc" id="debug-mode-desc">The web server's debugger, and a request log in data/logs/requests.log; applies after a restart</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-debug-mode">
+                    </label>
                 </div>
 
                 <div class="settings-section">
@@ -335,6 +342,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=5"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=42"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=44"></script>
 </body>
 </html>

@@ -659,6 +659,17 @@ function applyOcrState(enabled, installed) {
 
 socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
 
+// "Debug mode" is the web server's: the switch is what the next start will use
+const DEBUG_MODE_DESC = $('debug-mode-desc').textContent;
+
+function applyDebugMode(enabled, running) {
+    $('toggle-debug-mode').checked = Boolean(enabled);
+    $('debug-mode-desc').textContent = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
+        : `Now ${running ? 'on' : 'off'}: restart the scanner to turn it ${enabled ? 'on' : 'off'}`;
+}
+
+socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running));
+
 function loadScanSettings() {
     fetch('/api/scan_settings')
         .then(response => response.json())
@@ -668,6 +679,8 @@ function loadScanSettings() {
             $('toggle-autofocus').checked = data.autofocus;
             applyOcrState(data.ocr_first, data.ocr_installed);
             $('toggle-debug-trace').checked = Boolean(data.debug_trace);
+            applyDebugMode(data.debug_mode, data.debug_mode_running);
+            addLog(timeNow(), 'info', `Debug trace: ${data.debug_trace ? 'on' : 'off'}, debug mode: ${data.debug_mode_running ? 'on' : 'off'}`);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             $('camera-rotation').value = String(data.camera_rotation || 0);
             $('scan-location').value = data.scan_location || '';
@@ -1760,6 +1773,7 @@ function setupScanToggles() {
     onToggle('toggle-autofocus', enabled => socket.emit('set_autofocus', {enabled: enabled}));
     // Read cards with light-ocr before asking the vision AI
     onToggle('toggle-ocr', enabled => socket.emit('toggle_ocr', {enabled: enabled}));
+    onToggle('toggle-debug-mode', enabled => socket.emit('toggle_debug_mode', {enabled: enabled}));
     onToggle('toggle-debug-trace', enabled => {
         socket.emit('toggle_debug_trace', {enabled: enabled});
         addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
