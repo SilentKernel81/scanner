@@ -769,11 +769,20 @@ def inventory_area():
     return scan_inventory if request.args.get('area') == 'scan' else inventory
 
 
-@app.route('/api/scan_inventory/to_collection', methods=['POST'])
+@app.route('/api/scan_inventory/to_collection', methods=['GET', 'POST'])
 def scan_to_collection():
-    """Move every scanned card of the active game into the collection (merging with what is there)"""
+    """
+    Move every scanned card of the active game into the collection (merging with what is there);
+    JSON 'location': where they all go ('' = each keeps the location it was scanned into).
+    GET: what the page asks first - how many cards wait, and the locations in use.
+    """
     game = games.active()
-    moved = inventory.take_from(scan_inventory, game.id)
+    if request.method == 'GET':
+        locations = set(inventory.locations(game.id)) | set(scan_inventory.locations(game.id))
+        return jsonify({'success': True, 'cards': scan_inventory.get_stats(game.id)['total_cards'],
+                        'locations': sorted(locations, key=str.lower)})
+    location = str((request.get_json(silent=True) or {}).get('location') or '').strip()[:60]
+    moved = inventory.take_from(scan_inventory, game.id, location=location)
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')
     return jsonify({'success': True, **moved, 'stats': scan_inventory.get_stats(game.id)})
 

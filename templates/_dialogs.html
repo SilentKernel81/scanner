@@ -65,6 +65,33 @@
     </div>
 </div>
 
+<!-- Add the scanned cards to the collection (addScannedToCollection) -->
+<div id="to-collection-modal" class="modal">
+    <div class="modal-content narrow">
+        <div class="modal-header">
+            <h2>Add to the collection?</h2>
+            <span class="close" onclick="closeToCollection(null)">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p id="to-collection-message" class="dialog-message"></p>
+            <div class="input-group">
+                <label for="to-collection-location">Location</label>
+                <select id="to-collection-used" aria-label="Locations already in use"
+                        onchange="document.getElementById('to-collection-location').value = this.value"></select>
+                <input type="text" id="to-collection-location" maxlength="60"
+                       placeholder="Box #1, a binder... (optional)" autocomplete="off"
+                       oninput="document.getElementById('to-collection-used').value = ''"
+                       onkeydown="if (event.key === 'Enter') closeToCollection(this.value)">
+                <div class="hint">Choose a location you already use, or type a new one: every card added goes there. Leave it empty to keep the locations the cards were scanned into.</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="closeToCollection(document.getElementById('to-collection-location').value)">Add to collection</button>
+                <button class="btn" onclick="closeToCollection(null)">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Captures kept with an inventory entry: preview on hover, viewer on click / tap -->
 <div id="capture-popover" class="capture-popover" hidden></div>
 <div id="capture-modal" class="modal">

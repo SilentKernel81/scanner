@@ -1621,28 +1621,7 @@ async function importInventory() {
 
 async function addToCollection() {
     // Move what was scanned into the collection (the Collection page); the list here empties
-    const cards = currentInventory.reduce((sum, card) => sum + card.quantity, 0);
-    if (!cards) {
-        notify('No scanned cards to add', 'info');
-        return;
-    }
-    const ok = await confirmDialog({
-        title: 'Add to the collection?',
-        message: `The ${cards} scanned card${cards > 1 ? 's' : ''} move to your collection (cards you already have there get the copies added) and this list is emptied.`,
-        confirmText: 'Add to collection'
-    });
-    if (!ok) return;
-    fetch('/api/scan_inventory/to_collection', {method: 'POST'})
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                notify(`${data.cards} card${data.cards === 1 ? '' : 's'} added to the collection`, 'success');
-                inventoryChanged();
-            } else {
-                notify('Could not add to the collection: ' + (data.error || 'Unknown error'), 'error');
-            }
-        })
-        .catch(error => notify('Could not add to the collection: ' + error.message, 'error'));
+    if (await addScannedToCollection()) inventoryChanged();
 }
 
 async function clearInventory() {

@@ -241,7 +241,7 @@ Pokémon support was tested on official card images; camera scans still need rea
 ### Scanned cards
 
 What you scan is kept apart from your collection until you say so: the **Scanned** count in the
-top bar opens the list. Check it, fix what is wrong, then click **Add to collection** - or
+top bar opens the list. Check it, fix what is wrong, then click **Add to collection** (you can choose one of your locations or type a new one - *Box #1*, a binder - before they are added) - or
 **Clear all** to throw the session away and start over, which never touches the collection.
 
 Open it from the Scanned count in the top bar. Each entry shows a thumbnail of what was
@@ -468,7 +468,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
-| `POST /api/scan_inventory/to_collection` | Move the scanned cards into the collection |
+| `GET` / `POST /api/scan_inventory/to_collection` | Cards waiting and locations in use; move the scanned cards into the collection (JSON: `location`, optional - where they all go) |
 | `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
 | `GET /api/export_inventory/<format>` | Download the inventory: `csv` (both games), `moxfield` (Magic) |
 | `GET /api/ai_provider` | Current AI provider and model |

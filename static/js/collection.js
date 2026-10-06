@@ -117,10 +117,7 @@ async function loadScanned() {
 }
 
 async function addScanned() {
-    const data = await api('/api/scan_inventory/to_collection', {method: 'POST'});
-    if (!data) return;
-    notify(`${plural(data.cards, 'card')} added to the collection`, 'success');
-    loadInventory();
+    if (await addScannedToCollection()) loadInventory();
 }
 
 async function loadInventory() {

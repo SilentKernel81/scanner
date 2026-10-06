@@ -710,7 +710,11 @@ and "Clear all" work on that one only (`?area=scan` on the `/api/inventory*` end
 the collection. **Add to collection** (`POST /api/scan_inventory/to_collection`,
 `InventoryManager.take_from`) moves every scanned entry of the active game into the collection
 (`inventory` in `cards_database.db`): entries that exist there get the copies added, tags are
-joined, and the capture thumbnails follow (their rows move, the files stay). It commits the
+joined, and the capture thumbnails follow (their rows move, the files stay). Both pages ask
+first, with one dialog (`addScannedToCollection` in common.js; `GET` on the same address gives
+the number of cards waiting and the locations in use, offered in a dropdown): a **location** chosen or typed there (JSON
+`location`) is given to every card moved, in place of the one it was scanned into; empty keeps
+those. It commits the
 collection first and then empties the scanned cards - two files, so two commits. A crash
 between them must not leave the cards in both (a second "Add to collection" would double
 them): the move is first noted in the scanned cards' file (`pending_moves`: game, a move id),

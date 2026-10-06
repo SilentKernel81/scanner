@@ -614,10 +614,11 @@ class InventoryManager:
         self.log(f"Inventory: {action.replace('_', ' ')}{' ' + value if value else ''} - {changed} entries", level="success")
         return changed
 
-    def take_from(self, source, game):
+    def take_from(self, source, game, location=None):
         """
         Move every entry of a game from another inventory (the scanner's) into this one, with
-        its captures; entries that exist here already get the copies added. Returns
+        its captures; entries that exist here already get the copies added. With a location,
+        every entry arrives there, whatever location it was scanned into. Returns
         {'entries', 'cards'} moved.
         """
         added_at = now()  # one time for the whole batch (the collection page can filter by it)
@@ -640,6 +641,8 @@ class InventoryManager:
                     values = dict(row)
                     values.pop('id')
                     values['added_at'] = added_at
+                    if location:
+                        values['location'] = location
                     self.conn.execute(UPSERT, values)
                     target = self.conn.execute(
                         f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",

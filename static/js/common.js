@@ -291,6 +291,57 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// Scanned cards -> collection, from either page: asks for a location first
+
+let toCollectionResolve = null;
+
+function closeToCollection(location) {
+    // location: what was typed ('' = none), or null when cancelled
+    document.getElementById('to-collection-modal').classList.remove('show');
+    const resolve = toCollectionResolve;
+    toCollectionResolve = null;
+    if (resolve) resolve(location === null ? null : location.trim());
+}
+
+async function addScannedToCollection() {
+    // Resolves true when the cards were moved (the page then reloads its lists)
+    try {
+        const waiting = await (await fetch('/api/scan_inventory/to_collection')).json();
+        if (!waiting.cards) {
+            notify('No scanned cards to add', 'info');
+            return false;
+        }
+        document.getElementById('to-collection-message').textContent =
+            `The ${waiting.cards} scanned card${waiting.cards > 1 ? 's' : ''} move to your collection (cards you already have there get the copies added) and the scanned list is emptied.`;
+        // The locations in use, to pick from; a new one is typed in the field below
+        const used = document.getElementById('to-collection-used');
+        used.innerHTML = '<option value="">Locations you already use...</option>' +
+            waiting.locations.map(location => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join('');
+        used.hidden = !waiting.locations.length;
+        const input = document.getElementById('to-collection-location');
+        input.value = '';
+        const location = await new Promise(resolve => {
+            if (toCollectionResolve) toCollectionResolve(null);
+            toCollectionResolve = resolve;
+            document.getElementById('to-collection-modal').classList.add('show');
+            input.focus();
+        });
+        if (location === null) return false;
+        const response = await fetch('/api/scan_inventory/to_collection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({location: location})
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Unknown error');
+        notify(`${data.cards} card${data.cards === 1 ? '' : 's'} added to the collection${location ? ` in ${location}` : ''}`, 'success');
+        return true;
+    } catch (error) {
+        notify('Could not add to the collection: ' + error.message, 'error');
+        return false;
+    }
+}
+
 function notify(message, level = 'info') {
     // Shows a short notification and records it in the activity log
     logLine(level, message);
