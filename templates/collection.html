@@ -129,6 +129,7 @@
                             <select id="around-format" class="select" title="Format"></select>
                             <input type="search" id="around-search" class="text-input filter-text" placeholder="One of your cards...">
                             <input type="search" id="around-type" class="text-input" placeholder="Type (creature elf)">
+                            <label class="chip-toggle" title="Hide the cards that a deck already uses"><input type="checkbox" id="around-free"><span>Not in a deck</span></label>
                         </div>
                         <div class="around">
                             <div>
@@ -366,6 +367,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=10"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=11"></script>
 </body>
 </html>

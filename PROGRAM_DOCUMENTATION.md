@@ -826,7 +826,7 @@ thread and the page polls `GET /api/decks/ideas/<kind>`: `commanders` ranks the 
 creatures in the inventory by the share (weighted by inclusion) of their EDHREC cards that is
 owned; `precons` ranks the preconstructed decks by the share of their cards owned (about 230
 lists the first time, then cached); `card` ("Build around a card": the page lists the owned
-cards legal in a format - `/api/cards/search?owned=1&format=`; a click shows the card - `chooseAround` - and **Find
+cards legal in a format - `/api/cards/search?owned=1&format=`, with `free=1` for the "Not in a deck" tick; a click shows the card - `chooseAround` - and **Find
 decks** starts the run, **Stop** in its place while it runs: `findAround`, `renderAround`) reads the
 ten most viewed Archidekt decks of that format with the card (`?cardName=&deckFormat=`, which
 can take Archidekt half a minute the first time for a much played card: 45 s timeout) and ranks

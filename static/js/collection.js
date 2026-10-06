@@ -700,6 +700,7 @@ async function loadAroundCards() {
     const params = new URLSearchParams({owned: '1', format});
     if ($('around-search').value.trim()) params.set('q', $('around-search').value.trim());
     if ($('around-type').value.trim()) params.set('type', $('around-type').value.trim());
+    if ($('around-free').checked) params.set('free', '1');
     const data = await api(`/api/cards/search?${params}`);
     if (!data || request !== aroundRequest) return;  // a later search already answered
     $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
@@ -1301,6 +1302,7 @@ function bindEvents() {
         loadAroundCards();
     });
     ['around-search', 'around-type'].forEach(id => $(id).addEventListener('input', debounce(loadAroundCards)));
+    $('around-free').addEventListener('change', loadAroundCards);
     $('around-cards').addEventListener('click', event => {
         const row = event.target.closest('.result-row');
         if (row) chooseAround(row);
