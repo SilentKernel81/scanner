@@ -509,6 +509,7 @@ body {
 
 .input-group + .input-group,
 .form-row + .input-group,
+.dialog-message + .input-group,
 .input-group + .form-row {
     margin-top: 14px;
 }
