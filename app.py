@@ -789,13 +789,15 @@ def scan_to_collection():
     """
     Move every scanned card of the active game into the collection (merging with what is there);
     JSON 'location': where they all go ('' = each keeps the location it was scanned into).
-    GET: what the page asks first - how many cards wait, and the locations in use.
+    GET: what the page asks first - how many cards wait, the locations in use and the decks' names.
     """
     game = games.active()
     if request.method == 'GET':
         locations = set(inventory.locations(game.id)) | set(scan_inventory.locations(game.id))
         return jsonify({'success': True, 'cards': scan_inventory.get_stats(game.id)['total_cards'],
-                        'locations': sorted(locations, key=str.lower)})
+                        'locations': sorted(locations, key=str.lower),
+                        # the page lists the locations named after a deck apart
+                        'decks': [deck['name'] for deck in deck_store.list_decks(game.id)] if game.deck_formats else []})
     location = str((request.get_json(silent=True) or {}).get('location') or '').strip()[:60]
     moved = inventory.take_from(scan_inventory, game.id, location=location)
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')

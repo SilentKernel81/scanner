@@ -325,8 +325,13 @@ async function addScannedToCollection() {
             `The ${waiting.cards} scanned card${waiting.cards > 1 ? 's' : ''} move to your collection (cards you already have there get the copies added) and the scanned list is emptied.`;
         // The locations in use, to pick from; a new one is typed in the field below
         const used = document.getElementById('to-collection-used');
+        // Boxes and binders first, the locations named after a deck under their own heading
+        const decks = new Set((waiting.decks || []).map(name => name.toLowerCase()));
+        const option = location => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`;
+        const inDecks = waiting.locations.filter(location => decks.has(location.toLowerCase()));
         used.innerHTML = '<option value="">Locations you already use...</option>' +
-            waiting.locations.map(location => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join('');
+            waiting.locations.filter(location => !inDecks.includes(location)).map(option).join('') +
+            (inDecks.length ? `<optgroup label="──── Decks ────">${inDecks.map(option).join('')}</optgroup>` : '');
         used.hidden = !waiting.locations.length;
         const input = document.getElementById('to-collection-location');
         input.value = '';

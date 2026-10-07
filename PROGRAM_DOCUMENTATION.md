@@ -732,7 +732,7 @@ the collection. **Add to collection** (`POST /api/scan_inventory/to_collection`,
 (`inventory` in `cards_database.db`): entries that exist there get the copies added, tags are
 joined, and the capture thumbnails follow (their rows move, the files stay). Both pages ask
 first, with one dialog (`addScannedToCollection` in common.js; `GET` on the same address gives
-the number of cards waiting and the locations in use, offered in a dropdown): a **location** chosen or typed there (JSON
+the number of cards waiting, the locations in use - offered in a dropdown, the ones named after a deck under a "Decks" heading - and the decks' names): a **location** chosen or typed there (JSON
 `location`) is given to every card moved, in place of the one it was scanned into; empty keeps
 those. It commits the
 collection first and then empties the scanned cards - two files, so two commits. A crash
