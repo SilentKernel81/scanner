@@ -137,10 +137,14 @@ function editCard(card, locations = [], list = null) {
 }
 
 function loadEditPrintings(rowId) {
-    // The other printings the entry can be changed to; hidden when the card has only one
-    // (or the game has no list of printings)
+    // The printings the entry can be changed to, with the scan beside the one chosen. A card
+    // with one printing shows it too (nothing to choose, but the scan can be compared); a game
+    // without a list of printings shows the scan alone
     const group = document.getElementById('edit-printing-group'), select = document.getElementById('edit-printing');
-    group.hidden = true;
+    const label = document.getElementById('edit-printing-label');
+    group.hidden = !editScans.length;
+    label.textContent = 'Your scan';
+    select.hidden = true;
     select.innerHTML = '';
     originalPrinting = '';
     editPrintings = [];
@@ -148,7 +152,7 @@ function loadEditPrintings(rowId) {
     fetch(`/api/inventory/${rowId}/printings${areaQuery()}`)
         .then(response => response.json())
         .then(data => {
-            if (currentEditId !== rowId || !data.success || data.printings.length < 2) return;
+            if (currentEditId !== rowId || !data.success || !data.printings.length) return;
             const price = value => value ? `$${Number(value).toFixed(2)}` : '';
             select.innerHTML = data.printings.map(printing => {
                 const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : ''].filter(Boolean).join(' / ');
@@ -160,6 +164,9 @@ function loadEditPrintings(rowId) {
             select.value = originalPrinting = current ? current.id : '';
             editPrintings = data.printings;
             showEditPrintingImage();
+            label.textContent = data.printings.length > 1 ? 'Printing' : 'Printing (the only one)';
+            select.disabled = data.printings.length < 2;
+            select.hidden = false;
             group.hidden = false;
         })
         .catch(() => {});  // the dialog works without the list
