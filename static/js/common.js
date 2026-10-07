@@ -56,6 +56,10 @@ let originalFinish = null;
 let originalLocation = '';
 let originalQuantity = 0;
 let originalPrinting = '';   // card id of the entry's printing ('' = not in the list)
+let originalCondition = '', originalTags = '';
+let editLocations = [];      // locations offered while typing
+let editList = null;         // () => the entries of the list the card was opened from, in its order
+let editSession = 0;         // changes whenever the dialog opens or closes (see stepEditCard)
 let editPrintings = [];      // the printings offered in the Edit card dialog
 let editScans = [], editScanIndex = 0;  // the entry's photos, and the one shown beside the printing
 
@@ -89,12 +93,22 @@ function renderEditFinishes(selected) {
         </label>`).join('');
 }
 
-function editCard(card, locations = []) {
-    // locations: the ones already in use, offered while typing
+function editCard(card, locations = [], list = null) {
+    // locations: the ones already in use, offered while typing; list: a function giving the
+    // entries of the list the card is in, as shown - the arrows step through them
+    editLocations = locations;
+    editList = list;
+    editSession++;
     currentEditId = card.id;
     originalQuantity = card.quantity;
     originalFinish = card.finish;
     originalLocation = card.location || '';
+    originalCondition = card.condition;
+    originalTags = (card.tags || []).join(', ');
+    // Scanned cards get their location and tags in the collection: fewer fields while checking them
+    const scanned = typeof inventoryArea === 'string' && inventoryArea === 'scan';
+    document.getElementById('edit-location-group').hidden = scanned;
+    document.getElementById('edit-tags-group').hidden = scanned;
 
     document.getElementById('edit-card-name').textContent = card.name;
     document.getElementById('edit-quantity').value = card.quantity;
@@ -116,6 +130,7 @@ function editCard(card, locations = []) {
     splitInput.oninput = updateSplitPreview;
     document.getElementById('split-quantity-section').style.display = 'none';
 
+    showEditPosition();
     document.getElementById('edit-card-modal').classList.add('show');
 }
 
@@ -193,6 +208,7 @@ function stepNumber(id, delta) {
 
 function closeEditCard() {
     document.getElementById('edit-card-modal').classList.remove('show');
+    editSession++;
     currentEditId = null;
     originalFinish = null;
     originalLocation = '';
@@ -252,53 +268,127 @@ function updateSplitMaxQuantity() {
     }
 }
 
-function saveEditCard() {
-    if (currentEditId === null) {
-        notify('No card selected for editing', 'error');
-        return;
-    }
-
+function editRequest() {
+    // What the dialog asks for, or null (after a notice) when a number is out of range
     const quantity = parseInt(document.getElementById('edit-quantity').value);
-    const condition = document.getElementById('edit-condition').value;
-
     if (isNaN(quantity) || quantity < 1 || quantity > 999) {
         notify('Please enter a quantity between 1 and 999', 'warning');
-        return;
+        return null;
     }
-
-    const requestBody = {quantity: quantity, condition: condition, finish: editedFinish(),
+    const requestBody = {quantity: quantity, condition: document.getElementById('edit-condition').value, finish: editedFinish(),
                          location: editedLocation(), tags: parseTags(document.getElementById('edit-tags').value)};
     if (editedPrinting()) requestBody.card_id = editedPrinting();
     if (editSplits()) {
         const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
         if (splitQuantity < 1 || splitQuantity > originalQuantity) {
             notify(`Split quantity must be between 1 and ${originalQuantity}`, 'warning');
-            return;
+            return null;
         }
         requestBody.split_quantity = splitQuantity;
     }
+    return requestBody;
+}
 
+function editChanged() {
+    // Has anything in the dialog been changed?
+    return parseInt(document.getElementById('edit-quantity').value) !== originalQuantity
+        || document.getElementById('edit-condition').value !== originalCondition
+        || editedFinish() !== originalFinish || editedLocation() !== originalLocation
+        || parseTags(document.getElementById('edit-tags').value).join(', ') !== parseTags(originalTags).join(', ')
+        || editedPrinting() !== '';
+}
+
+async function sendEdit(rowId, cardName, requestBody) {
+    // Resolves true when the entry was updated
+    logLine('info', `Updating ${cardName}...`);
+    try {
+        const response = await fetch(`/api/inventory/update/${rowId}${areaQuery()}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestBody)
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || data.message || 'Unknown error');
+        logLine('success', `${cardName} updated` + (data.split ? ' (entry split)' : ''));
+        return true;
+    } catch (error) {
+        notify('Failed to update card: ' + error.message, 'error');
+        return false;
+    }
+}
+
+async function saveEditCard() {
+    if (editStepping) return;  // an arrow is saving this very card: a second request would repeat a split
+    if (currentEditId === null) {
+        notify('No card selected for editing', 'error');
+        return;
+    }
+    const requestBody = editRequest();
+    if (!requestBody) return;
     const cardName = document.getElementById('edit-card-name').textContent;
     const rowId = currentEditId;
     closeEditCard();
-    logLine('info', `Updating ${cardName}...`);
-
-    fetch(`/api/inventory/update/${rowId}${areaQuery()}`, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(requestBody)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            logLine('success', `${cardName} updated` + (data.split ? ' (entry split)' : ''));
-            inventoryChanged();
-        } else {
-            notify('Failed to update card: ' + (data.error || data.message || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => notify('Failed to update card: ' + error.message, 'error'));
+    if (await sendEdit(rowId, cardName, requestBody)) inventoryChanged();
 }
+
+function editEntries() {
+    return editList ? editList() : [];
+}
+
+function showEditPosition() {
+    // "3 of 19" and the two arrows; hidden when the card wasn't opened from a list of several
+    const entries = editEntries();
+    const index = entries.findIndex(entry => entry.id === currentEditId);
+    document.getElementById('edit-nav').hidden = index < 0 || entries.length < 2;
+    document.getElementById('edit-position').textContent = `${index + 1} of ${entries.length}`;
+    document.getElementById('edit-previous').disabled = index <= 0;
+    document.getElementById('edit-next').disabled = index >= entries.length - 1;
+}
+
+let editStepping = false;
+
+async function stepEditCard(delta) {
+    // The previous / next card of the list, without closing the dialog. Changes made to the
+    // card in view are saved first (the list is then loaded again: an entry can split or merge)
+    if (editStepping || currentEditId === null) return;
+    let entries = editEntries();
+    const index = entries.findIndex(entry => entry.id === currentEditId);
+    const target = entries[index + delta];
+    if (index < 0 || !target) return;
+    editStepping = true;
+    document.getElementById('edit-save').disabled = true;
+    try {
+        if (editChanged()) {
+            const requestBody = editRequest();
+            if (!requestBody) return;
+            // Closing the dialog, or opening another card, while the save or the reload is under
+            // way starts another session: the change is saved, but this step must not open
+            // its target over whatever is shown by then
+            const session = editSession;
+            const saved = await sendEdit(currentEditId, document.getElementById('edit-card-name').textContent, requestBody);
+            if (saved) await inventoryChanged();
+            if (!saved || session !== editSession) return;
+            entries = editEntries();
+        }
+        // The same entry after a reload, or the one now at its place in the list
+        const next = entries.find(entry => entry.id === target.id)
+            || entries[Math.min(index + Math.max(delta, 0), entries.length - 1)];
+        if (next) editCard(next, editLocations, editList); else closeEditCard();
+    } finally {
+        editStepping = false;
+        document.getElementById('edit-save').disabled = false;
+    }
+}
+
+document.addEventListener('keydown', event => {
+    // Left / right arrows step through the cards while the dialog is open (not while typing)
+    if (!document.getElementById('edit-card-modal').classList.contains('show')) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (document.getElementById('edit-nav').hidden) return;
+    event.preventDefault();
+    stepEditCard(event.key === 'ArrowLeft' ? -1 : 1);
+});
 
 async function deleteCard(rowId, cardName) {
     const ok = await confirmDialog({

@@ -103,8 +103,9 @@ let suggested = null;       // {card name: [decks whose commander it is played w
 let inventoryView = recall('collectionView', 'list');
 
 function inventoryChanged() {
-    // After an edit or delete (common.js), a bulk action or a change made while scanning
-    loadInventory();
+    // After an edit or delete (common.js), a bulk action or a change made while scanning;
+    // the promise resolves when the list is loaded again
+    return loadInventory();
 }
 
 function identityOf(card) {
@@ -1363,7 +1364,7 @@ function bindInventoryEvents() {
         const row = event.target.closest('[data-id]');
         const card = rowCard(row);
         if (!card) return;
-        if (event.target.closest('.btn-edit')) return editCard(card, knownLocations());
+        if (event.target.closest('.btn-edit')) return editCard(card, knownLocations(), () => shown);
         if (event.target.closest('.btn-delete')) return deleteCard(card.id, card.name);
         if (event.target.closest('.inventory-thumb') && card.captures.length) return openCaptures(card);
         if (event.target.classList.contains('row-check')) return toggleSelected(card.id, event.target.checked);
@@ -1375,7 +1376,7 @@ function bindInventoryEvents() {
         const card = rowCard(row);
         if (card) {
             toggleSelected(card.id, false);
-            editCard(card, knownLocations());
+            editCard(card, knownLocations(), () => shown);
         }
     });
     $('bulk-bar').addEventListener('click', event => {

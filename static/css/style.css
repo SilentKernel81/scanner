@@ -1136,6 +1136,43 @@ input[type="radio"] {
     font-weight: 600;
 }
 
+/* Edit card: previous / next through the list */
+.edit-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    margin-right: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.edit-nav[hidden] {
+    display: none;
+}
+
+.edit-nav button {
+    width: 40px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.edit-nav button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.edit-nav button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
 .close {
     display: grid;
     place-items: center;

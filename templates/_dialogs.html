@@ -4,6 +4,12 @@
     <div class="modal-content narrow">
         <div class="modal-header">
             <h2>Edit card</h2>
+            <!-- Through the list the card was opened from, without closing (stepEditCard) -->
+            <div class="edit-nav" id="edit-nav" hidden>
+                <button type="button" id="edit-previous" onclick="stepEditCard(-1)" title="Previous card (saves your changes)" aria-label="Previous card">&#8249;</button>
+                <span id="edit-position"></span>
+                <button type="button" id="edit-next" onclick="stepEditCard(1)" title="Next card (saves your changes)" aria-label="Next card">&#8250;</button>
+            </div>
             <span class="close" onclick="closeEditCard()">&times;</span>
         </div>
         <div class="modal-body">
@@ -46,14 +52,14 @@
                 </select>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" id="edit-location-group">
                 <label for="edit-location">Location</label>
                 <input type="text" id="edit-location" list="edit-location-options" maxlength="60"
                        placeholder="Binder, box, deck box..." autocomplete="off" oninput="updateSplitQuantityVisibility()">
                 <datalist id="edit-location-options"></datalist>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" id="edit-tags-group">
                 <label for="edit-tags">Tags</label>
                 <input type="text" id="edit-tags" maxlength="200" placeholder="trade, keep (separated by commas)" autocomplete="off">
             </div>
@@ -82,7 +88,7 @@
             </div>
 
             <div class="modal-actions">
-                <button class="btn btn-success" onclick="saveEditCard()">Save changes</button>
+                <button class="btn btn-success" id="edit-save" onclick="saveEditCard()">Save changes</button>
                 <button class="btn" onclick="closeEditCard()">Cancel</button>
             </div>
         </div>

@@ -1407,9 +1407,9 @@ let currentInventory = [];
 let filteredInventory = [];
 
 function inventoryChanged() {
-    // After an edit or delete (common.js)
-    loadInventory();
+    // After an edit or delete (common.js); the promise resolves when the list is loaded again
     loadStats();
+    return loadInventory();
 }
 
 function showInventory() {
@@ -1422,7 +1422,7 @@ function closeInventory() {
 }
 
 function loadInventory() {
-    fetch('/api/inventory?area=scan')
+    return fetch('/api/inventory?area=scan')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1562,7 +1562,8 @@ function setupInventoryList() {
         } else if (button.classList.contains('btn-delete')) {
             deleteCard(card.id, card.name);
         } else {
-            editCard(card, [...new Set(currentInventory.map(entry => entry.location).filter(Boolean))].sort(byText));
+            editCard(card, [...new Set(currentInventory.map(entry => entry.location).filter(Boolean))].sort(byText),
+                     () => filteredInventory);
         }
     });
 
