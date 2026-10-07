@@ -25,6 +25,7 @@
             <div class="panel filter-panel">
                 <div class="filter-row">
                     <input type="search" id="filter-text" class="text-input filter-text" placeholder="Name, set, type...">
+                    <label class="chip-toggle" title="Turn the search around: show the cards that do NOT match what is typed (type HOB to see everything that is not from that set)"><input type="checkbox" id="filter-text-not"><span>Not</span></label>
                     <div class="color-chips" id="filter-colors" title="Color identity"></div>
                     <select id="filter-type" class="select" title="Type"></select>
                     <select id="filter-rarity" class="select" title="Rarity"></select>
@@ -369,6 +370,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=14"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=21"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=23"></script>
 </body>
 </html>

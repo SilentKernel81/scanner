@@ -230,6 +230,7 @@ function knownLocations() {
 
 function applyFilters() {
     const text = $('filter-text').value.trim().toLowerCase();
+    const textNot = $('filter-text-not').checked;
     const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
     const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
     const added = $('filter-added').value;
@@ -237,8 +238,9 @@ function applyFilters() {
     const spare = $('filter-spare').checked && suggested;
     const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
-        if (text && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
-            .some(value => (value || '').toLowerCase().includes(text))) return false;
+        // "Not" turns the text search around: the cards that don't have the text anywhere
+        if (text && [card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
+            .some(value => (value || '').toLowerCase().includes(text)) === textNot) return false;
         if (type && mainType(card) !== type) return false;
         if (rarity && card.rarity !== rarity) return false;
         if (set && card.set_name !== set) return false;
@@ -262,6 +264,9 @@ function applyFilters() {
     $('inventory-sort').value = sort in INVENTORY_SORTS ? sort : 'added';
     shown = INVENTORY_SORTS[sort] ? [...rows].sort(INVENTORY_SORTS[sort]) : rows;
     shownLimit = PAGE_SIZE;
+    // Only cards the filters show can be selected: a bulk action must not reach cards out of sight
+    const visible = new Set(rows.map(card => card.id));
+    selected = new Set([...selected].filter(id => visible.has(id)));
     renderInventory();
 }
 
@@ -426,7 +431,9 @@ async function bulkAction(action) {
     const data = await api('/api/inventory/bulk', {method: 'POST', body: {ids, action, value}});
     if (!data) return;
     notify(`${entriesText(data.changed)} changed`, 'success');
-    if (action === 'delete') selected.clear();
+    // Done with these cards: left selected, they went along with the next "Select all" and its
+    // move (59 cards put in one box ended up in another, 2026-10-06)
+    selected.clear();
     loadInventory();
 }
 
@@ -1332,7 +1339,7 @@ function bindColorChips(id, colors, changed) {
 function bindInventoryEvents() {
     // Filters
     ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
-     'filter-free'].forEach(id => $(id).addEventListener('change', applyFilters));
+     'filter-free', 'filter-text-not'].forEach(id => $(id).addEventListener('change', applyFilters));
     $('filter-spare').addEventListener('change', spareChanged);
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(applyFilters, 150)));
     bindColorChips('filter-colors', filterColors, applyFilters);
@@ -1340,6 +1347,7 @@ function bindInventoryEvents() {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         $('filter-free').checked = false;
+        $('filter-text-not').checked = false;
         $('filter-spare').checked = false;
         filterColors.clear();
         fillFilterOptions();
