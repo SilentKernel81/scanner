@@ -332,6 +332,11 @@ function renderBulkBar() {
     const copies = totalQuantity(inventory.filter(card => selected.has(card.id)));
     $('bulk-count').textContent = `${entriesText(selected.size)} selected (${plural(copies, 'card')})`;
     $('bulk-deck').hidden = !gameInfo.deck_formats.length;
+    // "Select all": ticked when every card the filters show is selected, a dash when some are
+    const chosen = shown.filter(card => selected.has(card.id)).length;
+    $('select-all').checked = shown.length > 0 && chosen === shown.length;
+    $('select-all').indeterminate = chosen > 0 && chosen < shown.length;
+    $('select-all').disabled = !shown.length;
 }
 
 function rowCard(row) {
@@ -1360,6 +1365,11 @@ function bindInventoryEvents() {
     $('bulk-bar').addEventListener('click', event => {
         const button = event.target.closest('[data-bulk]');
         if (button) bulkAction(button.dataset.bulk);
+    });
+    $('select-all').addEventListener('change', event => {
+        // Every card the filters show (also the ones further down the list), or none of them
+        shown.forEach(card => event.target.checked ? selected.add(card.id) : selected.delete(card.id));
+        renderInventory();
     });
     $('bulk-all').addEventListener('click', () => {
         shown.forEach(card => selected.add(card.id));

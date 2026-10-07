@@ -43,6 +43,7 @@
                     <button class="btn btn-small btn-ghost" id="filter-clear">Clear filters</button>
                 </div>
                 <div class="filter-row">
+                    <label class="chip-toggle" id="select-all-label" title="Select every card the filters show, to move, tag or delete them together"><input type="checkbox" id="select-all"><span>Select all</span></label>
                     <span class="summary" id="inventory-summary"></span>
                     <span class="spacer"></span>
                     <select id="inventory-sort" class="select" title="Sort">
@@ -367,6 +368,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=6"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=17"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=18"></script>
 </body>
 </html>
