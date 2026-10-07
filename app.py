@@ -871,7 +871,8 @@ def inventory_entry_printings(row_id):
         printings = []
     return jsonify({'success': True, 'printings': [
         {'id': card['id'], 'set': card['set'], 'set_code': card['set_code'], 'number': card['number'],
-         'price': card['price'], 'price_foil': card['price_foil'], 'current': same_printing(entry, card)}
+         'price': card['price'], 'price_foil': card['price_foil'], 'image_uri': card.get('image_uri'),
+         'current': same_printing(entry, card)}
         for card in printings]})
 
 

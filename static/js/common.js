@@ -56,6 +56,8 @@ let originalFinish = null;
 let originalLocation = '';
 let originalQuantity = 0;
 let originalPrinting = '';   // card id of the entry's printing ('' = not in the list)
+let editPrintings = [];      // the printings offered in the Edit card dialog
+let editScans = [], editScanIndex = 0;  // the entry's photos, and the one shown beside the printing
 
 function areaQuery() {
     // The scanner page works on the scanned cards (it sets inventoryArea = 'scan'), the
@@ -103,6 +105,9 @@ function editCard(card, locations = []) {
     document.getElementById('edit-tags').value = (card.tags || []).join(', ');
     renderEditFinishes(card.finish);
 
+    editScans = card.captures || [];
+    editScanIndex = 0;
+    showEditScan();
     loadEditPrintings(card.id);
 
     const splitInput = document.getElementById('edit-split-quantity');
@@ -121,6 +126,7 @@ function loadEditPrintings(rowId) {
     group.hidden = true;
     select.innerHTML = '';
     originalPrinting = '';
+    editPrintings = [];
     fetch(`/api/inventory/${rowId}/printings${areaQuery()}`)
         .then(response => response.json())
         .then(data => {
@@ -134,9 +140,37 @@ function loadEditPrintings(rowId) {
             // An entry whose printing the card data doesn't have (an old import): no choice made yet
             if (!current) select.insertAdjacentHTML('afterbegin', '<option value="">Keep as it is</option>');
             select.value = originalPrinting = current ? current.id : '';
+            editPrintings = data.printings;
+            showEditPrintingImage();
             group.hidden = false;
         })
         .catch(() => {});  // the dialog works without the list
+}
+
+function showEditPrintingImage() {
+    // The picture of the printing chosen, beside the scan
+    const printing = editPrintings.find(item => item.id === document.getElementById('edit-printing').value);
+    const figure = document.getElementById('edit-printing-figure');
+    figure.hidden = !(printing && printing.image_uri);
+    if (!figure.hidden) document.getElementById('edit-printing-image').src = printing.image_uri;
+}
+
+function showEditScan() {
+    // One of the photos taken of the entry's copies; a click shows the next one
+    const figure = document.getElementById('edit-scan-figure');
+    figure.hidden = !editScans.length;
+    if (figure.hidden) return;
+    const scan = editScans[editScanIndex];
+    document.getElementById('edit-scan-image').src = scan.url;
+    document.getElementById('edit-scan-image').classList.toggle('is-clickable', editScans.length > 1);
+    document.getElementById('edit-scan-caption').textContent = editScans.length > 1
+        ? `Your scan ${editScanIndex + 1} of ${editScans.length} - click for the next` : 'Your scan';
+}
+
+function nextEditScan() {
+    if (editScans.length < 2) return;
+    editScanIndex = (editScanIndex + 1) % editScans.length;
+    showEditScan();
 }
 
 function editedPrinting() {

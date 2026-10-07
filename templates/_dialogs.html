@@ -11,7 +11,18 @@
 
             <div class="input-group" id="edit-printing-group" hidden>
                 <label for="edit-printing">Printing</label>
-                <select id="edit-printing" onchange="updateSplitQuantityVisibility()"></select>
+                <select id="edit-printing" onchange="updateSplitQuantityVisibility(); showEditPrintingImage()"></select>
+                <!-- The scan beside the printing chosen, to tell printings apart -->
+                <div class="printing-compare">
+                    <figure id="edit-scan-figure" hidden>
+                        <img id="edit-scan-image" alt="Your scan" onclick="nextEditScan()">
+                        <figcaption id="edit-scan-caption"></figcaption>
+                    </figure>
+                    <figure id="edit-printing-figure" hidden>
+                        <img id="edit-printing-image" alt="The printing chosen">
+                        <figcaption>This printing</figcaption>
+                    </figure>
+                </div>
             </div>
 
             <div class="input-group">
