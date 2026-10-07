@@ -187,7 +187,7 @@ function fillFilterOptions() {
     fillSelect('filter-set', 'Any set', distinct(inventory.map(card => card.set_name)));
     fillSelect('filter-finish', 'Any finish', gameInfo.finishes.map(([key]) => key),
                Object.fromEntries(gameInfo.finishes));
-    fillSelect('filter-location', 'Any location', ['(none)', ...knownLocations()]);
+    fillLocationFilter();
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
     // The last times cards came into the collection (one per "Add to collection"), newest first
     const batches = new Map();
@@ -206,6 +206,21 @@ function fillFilterOptions() {
 function colorChipsHtml(active) {
     return COLORS.map(([key, label]) =>
         `<button class="color-chip mana-${key} ${active.has(key) ? 'is-active' : ''}" data-color="${key}" title="${label}">${key}</button>`).join('');
+}
+
+function fillLocationFilter() {
+    // Boxes and binders first; the locations named after one of the decks under their own
+    // heading at the bottom (a deck's cards are usually kept under the deck's name)
+    const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
+    const places = knownLocations();
+    const inDecks = places.filter(place => decks.has(place.toLowerCase()));
+    const select = $('filter-location');
+    const current = select.value;
+    select.innerHTML = optionsHtml([['', 'Any location'], ['(none)', '(none)'],
+                                    ...places.filter(place => !inDecks.includes(place)).map(place => [place, place])])
+        + (inDecks.length ? `<optgroup label="──── Decks ────">${optionsHtml(inDecks.map(place => [place, place]))}</optgroup>` : '');
+    select.value = current === '(none)' || places.includes(current) ? current : '';
+    select.hidden = false;
 }
 
 function knownLocations() {
@@ -564,6 +579,7 @@ async function loadDecks() {
     const data = await api('/api/decks');
     if (!data) return;
     deckList = data.decks;
+    fillLocationFilter();
     $('deck-data-notice').hidden = data.has_deck_data;
     // The formats there are decks of; a choice that is gone falls back to all
     const formats = [...new Set(deckList.map(item => item.format))];
@@ -1592,6 +1608,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderExportButtons();
     bindEvents();
     await loadInventory();
+    loadDecks();  // the location filter lists the decks' locations apart
     const tab = recall('collectionTab', 'inventory');
     showTab(tab === 'decks' && !gameInfo.deck_formats.length ? 'inventory' : tab);
 });
