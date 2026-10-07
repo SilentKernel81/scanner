@@ -109,6 +109,8 @@ function editCard(card, locations = [], list = null) {
     const scanned = typeof inventoryArea === 'string' && inventoryArea === 'scan';
     document.getElementById('edit-location-group').hidden = scanned;
     document.getElementById('edit-tags-group').hidden = scanned;
+    document.getElementById('edit-split-note').textContent = `Changing the printing${scanned ? ' or finish' : ', finish or location'}`
+        + ' of several copies splits this entry - choose how many change.';
 
     document.getElementById('edit-card-name').textContent = card.name;
     document.getElementById('edit-quantity').value = card.quantity;
