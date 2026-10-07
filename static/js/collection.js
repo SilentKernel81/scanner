@@ -803,6 +803,9 @@ async function loadAroundCards() {
     if ($('around-search').value.trim()) params.set('q', $('around-search').value.trim());
     if ($('around-type').value.trim()) params.set('type', $('around-type').value.trim());
     if ($('around-free').checked) params.set('free', '1');
+    // Only offered for a format that has a commander
+    $('around-commanders-label').hidden = !hasCommander(format);
+    if ($('around-commanders').checked && hasCommander(format)) params.set('commander', '1');
     const data = await api(`/api/cards/search?${params}`);
     if (!data || request !== aroundRequest) return;  // a later search already answered
     $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
@@ -1430,6 +1433,7 @@ function bindDeckHomeEvents() {
     });
     ['around-search', 'around-type'].forEach(id => $(id).addEventListener('input', debounce(loadAroundCards)));
     $('around-free').addEventListener('change', loadAroundCards);
+    $('around-commanders').addEventListener('change', loadAroundCards);
     $('around-cards').addEventListener('click', event => {
         const row = event.target.closest('.result-row');
         if (row) chooseAround(row);

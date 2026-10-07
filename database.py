@@ -742,7 +742,8 @@ class CardDatabase:
         return result
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
-                     cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, limit=60, offset=0):
+                     cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, commander=False,
+                     limit=60, offset=0):
         """
         Cards (one per name) for the deck builder, by name.
 
@@ -754,6 +755,8 @@ class CardDatabase:
             legal_in: Scryfall format key ("commander", "modern") the card is legal or restricted in
             names: only these card names (the "owned only" filter)
             exclude_names: not these card names (cards other decks already use)
+            commander: only cards that can be a commander (as games.mtg_decks.can_be_commander:
+                a legendary creature on the front face, or "can be your commander")
         Returns:
             (cards, whether there are more)
         """
@@ -790,6 +793,10 @@ class CardDatabase:
         if rarity:
             where.append('rarity = ?')
             params.append(rarity)
+        if commander:
+            front = "CASE WHEN instr(type_line, ' // ') > 0 THEN substr(type_line, 1, instr(type_line, ' // ') - 1) ELSE type_line END"
+            where.append(f"(({front} LIKE '%Legendary%' AND {front} LIKE '%Creature%') "
+                         "OR COALESCE(oracle_text, '') LIKE '%can be your commander%')")
         if legal_in:
             if not re.fullmatch(r'[a-z]+', legal_in):
                 raise ValueError(f"Unknown format: {legal_in}")

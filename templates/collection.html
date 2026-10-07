@@ -131,6 +131,7 @@
                             <input type="search" id="around-search" class="text-input filter-text" placeholder="One of your cards...">
                             <input type="search" id="around-type" class="text-input" placeholder="Type (creature elf)">
                             <label class="chip-toggle" title="Hide the cards that a deck already uses"><input type="checkbox" id="around-free"><span>Not in a deck</span></label>
+                            <label class="chip-toggle" id="around-commanders-label" title="Only the cards that can be a commander: legendary creatures (and the few cards that say they can be your commander)"><input type="checkbox" id="around-commanders"><span>Commanders only</span></label>
                         </div>
                         <div class="around">
                             <div>
@@ -368,6 +369,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=14"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=20"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=21"></script>
 </body>
 </html>
