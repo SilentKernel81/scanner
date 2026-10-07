@@ -111,6 +111,16 @@ function editCard(card, locations = []) {
     document.getElementById('edit-card-modal').classList.add('show');
 }
 
+function stepNumber(id, delta) {
+    // The - / + buttons beside a number field (.number-stepper): within its min and max,
+    // and the field's own oninput runs as if the number had been typed
+    const input = document.getElementById(id);
+    const low = input.min === '' ? -Infinity : Number(input.min);
+    const high = input.max === '' ? Infinity : Number(input.max);
+    input.value = Math.max(low, Math.min(high, (parseInt(input.value) || 0) + delta));
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+}
+
 function closeEditCard() {
     document.getElementById('edit-card-modal').classList.remove('show');
     currentEditId = null;

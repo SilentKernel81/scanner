@@ -11,7 +11,11 @@
 
             <div class="input-group">
                 <label for="edit-quantity">Quantity</label>
-                <input type="number" id="edit-quantity" min="1" max="999" value="1" oninput="updateSplitMaxQuantity()">
+                <div class="number-stepper">
+                    <button type="button" onclick="stepNumber('edit-quantity', -1)" aria-label="One less">&minus;</button>
+                    <input type="number" id="edit-quantity" min="1" max="999" value="1" oninput="updateSplitMaxQuantity()">
+                    <button type="button" onclick="stepNumber('edit-quantity', 1)" aria-label="One more">+</button>
+                </div>
             </div>
 
             <div class="input-group">
@@ -47,7 +51,11 @@
 
             <div id="split-quantity-section" class="callout" style="display: none;">
                 <label for="edit-split-quantity">How many copies change?</label>
-                <input type="number" id="edit-split-quantity" class="text-input" min="1" value="1">
+                <div class="number-stepper">
+                    <button type="button" onclick="stepNumber('edit-split-quantity', -1)" aria-label="One less">&minus;</button>
+                    <input type="number" id="edit-split-quantity" class="text-input" min="1" value="1">
+                    <button type="button" onclick="stepNumber('edit-split-quantity', 1)" aria-label="One more">+</button>
+                </div>
                 <div id="split-preview">
                     
                 </div>

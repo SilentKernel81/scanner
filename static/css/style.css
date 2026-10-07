@@ -837,6 +837,50 @@ input[type="radio"] {
     margin: 0;
 }
 
+/* A number field with - / + buttons as tall as the field (the browser's own arrows are tiny) */
+.number-stepper {
+    display: flex;
+    gap: 6px;
+}
+
+.callout .number-stepper {
+    margin-bottom: 8px;  /* the space a callout's field keeps below it */
+}
+
+.callout .number-stepper input {
+    margin: 0;
+}
+
+.number-stepper input {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+
+.number-stepper input::-webkit-outer-spin-button,
+.number-stepper input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.number-stepper button {
+    flex: 0 0 52px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.number-stepper button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .finish-hint {
     margin-top: 4px;
     font-size: 12px;
