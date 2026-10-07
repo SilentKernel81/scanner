@@ -451,7 +451,8 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `GET /api/inventory` | The active game's inventory (each entry has an `id` and its `captures`) |
 | `GET /captures/<file>` | Thumbnail of a capture kept with an inventory entry |
 | `GET /review_images/<file>` | Capture of a review queue item |
-| `POST /api/inventory/update/<id>` | Update an entry (JSON: `quantity`, `condition`, `finish`, `location`, `tags`, `split_quantity`) |
+| `POST /api/inventory/update/<id>` | Update an entry (JSON: `quantity`, `condition`, `finish`, `location`, `tags`, `split_quantity`; `card_id`: another printing of the same card) |
+| `GET /api/inventory/<id>/printings` | The printings an entry can be changed to (the one it is marked `current`) |
 | `POST /api/inventory/bulk` | One change to several entries (JSON: `ids`, `action`: `delete` / `condition` / `location` / `add_tag` / `remove_tag`, `value`) |
 | `POST /api/scan_location` | Inventory location for the cards scanned next (JSON: `location`) |
 | `POST /api/sound` | Remember the sound switch and volume (JSON: `enabled`, `volume` 0-100) |

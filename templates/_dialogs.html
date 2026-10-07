@@ -9,6 +9,11 @@
         <div class="modal-body">
             <div id="edit-card-name" class="edit-card-name"></div>
 
+            <div class="input-group" id="edit-printing-group" hidden>
+                <label for="edit-printing">Printing</label>
+                <select id="edit-printing" onchange="updateSplitQuantityVisibility()"></select>
+            </div>
+
             <div class="input-group">
                 <label for="edit-quantity">Quantity</label>
                 <div class="number-stepper">
@@ -62,7 +67,7 @@
             </div>
 
             <div class="callout warning">
-                Changing the finish or location of several copies splits this entry - choose how many change.
+                Changing the printing, finish or location of several copies splits this entry - choose how many change.
             </div>
 
             <div class="modal-actions">

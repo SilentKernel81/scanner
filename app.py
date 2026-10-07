@@ -848,9 +848,37 @@ def delete_inventory_card(row_id):
     return jsonify({'error': 'Inventory not initialized'}), 500
 
 
+def same_printing(entry, card):
+    """Is this card the printing an inventory entry is? (entries from a CSV have no card id)"""
+    if entry['card_id']:
+        return entry['card_id'] == card['id']
+    return (entry['set_name'] or '') == (card.get('set') or '') and (entry['card_number'] or '') == (card.get('number') or '')
+
+
+@app.route('/api/inventory/<int:row_id>/printings')
+def inventory_entry_printings(row_id):
+    """
+    The printings an entry can be changed to (Edit card): every printing of its card, newest
+    first, the one it is now marked 'current'. Empty for a game without that list.
+    """
+    entry = inventory_area().get_entry(row_id)
+    if not entry:
+        return jsonify({'success': False, 'error': 'Card not found'}), 404
+    game = games.get(entry['game']) or games.active()
+    try:
+        printings = game.printings(entry['card_name'])
+    except NotImplementedError:
+        printings = []
+    return jsonify({'success': True, 'printings': [
+        {'id': card['id'], 'set': card['set'], 'set_code': card['set_code'], 'number': card['number'],
+         'price': card['price'], 'price_foil': card['price_foil'], 'current': same_printing(entry, card)}
+        for card in printings]})
+
+
 @app.route('/api/inventory/update/<int:row_id>', methods=['PUT', 'POST'])
 def update_inventory_card(row_id):
-    """Update an inventory entry by its id (quantity, condition, finish)"""
+    """Update an inventory entry by its id (quantity, condition, finish, location, tags;
+    card_id: another printing of the same card)"""
     if inventory:
         try:
             # Get data from request
@@ -866,8 +894,25 @@ def update_inventory_card(row_id):
 
             # A new finish takes the printing's price in that finish (foil / holo / reverse)
             finish_price = None
-            entry = inventory_area().get_entry(row_id) if finish else None
-            if entry and finish != entry['finish'] and entry['card_id']:
+            printing = None
+            card_id = data.get('card_id')
+            entry = inventory_area().get_entry(row_id) if finish or card_id else None
+            if entry and card_id:
+                # Another printing of the same card: its set, number, rarity and price
+                game = games.get(entry['game']) or games.active()
+                card = game.get_card(card_id)
+                if not card or search_key(card['name']) != search_key(entry['card_name']):
+                    return jsonify({'success': False, 'split': False,
+                                    'error': f"Not a printing of {entry['card_name']}"}), 400
+                if not same_printing(entry, card):
+                    fields = game.inventory_fields(card, finish or entry['finish'])
+                    printing = {'card_id': fields.get('card_id'), 'card_name': fields['name'],
+                                'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
+                                'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
+                                'type_line': fields.get('type_line'), 'mana_cost': fields.get('mana_cost'),
+                                'colors': fields.get('colors'), 'color_identity': fields.get('color_identity')}
+                    finish_price = float(fields.get('price') or 0)
+            if entry and not printing and finish and finish != entry['finish'] and entry['card_id']:
                 game = games.get(entry['game']) or games.active()
                 card = game.get_card(entry['card_id'])
                 if card:
@@ -878,7 +923,7 @@ def update_inventory_card(row_id):
                                            finish=finish, split_quantity=split_quantity,
                                            finish_price=finish_price,
                                            location=str(location)[:60] if location is not None else None,
-                                           tags=tags)
+                                           tags=tags, printing=printing)
 
             if result['success']:
                 return jsonify(result)

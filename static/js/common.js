@@ -55,6 +55,7 @@ let currentEditId = null;
 let originalFinish = null;
 let originalLocation = '';
 let originalQuantity = 0;
+let originalPrinting = '';   // card id of the entry's printing ('' = not in the list)
 
 function areaQuery() {
     // The scanner page works on the scanned cards (it sets inventoryArea = 'scan'), the
@@ -102,6 +103,8 @@ function editCard(card, locations = []) {
     document.getElementById('edit-tags').value = (card.tags || []).join(', ');
     renderEditFinishes(card.finish);
 
+    loadEditPrintings(card.id);
+
     const splitInput = document.getElementById('edit-split-quantity');
     splitInput.value = 1;
     splitInput.max = originalQuantity;
@@ -109,6 +112,37 @@ function editCard(card, locations = []) {
     document.getElementById('split-quantity-section').style.display = 'none';
 
     document.getElementById('edit-card-modal').classList.add('show');
+}
+
+function loadEditPrintings(rowId) {
+    // The other printings the entry can be changed to; hidden when the card has only one
+    // (or the game has no list of printings)
+    const group = document.getElementById('edit-printing-group'), select = document.getElementById('edit-printing');
+    group.hidden = true;
+    select.innerHTML = '';
+    originalPrinting = '';
+    fetch(`/api/inventory/${rowId}/printings${areaQuery()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (currentEditId !== rowId || !data.success || data.printings.length < 2) return;
+            const price = value => value ? `$${Number(value).toFixed(2)}` : '';
+            select.innerHTML = data.printings.map(printing => {
+                const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : ''].filter(Boolean).join(' / ');
+                return `<option value="${escapeHtml(printing.id)}">${escapeHtml(printing.set)} (${escapeHtml((printing.set_code || '').toUpperCase())}) #${escapeHtml(printing.number)}${prices ? ' - ' + prices : ''}</option>`;
+            }).join('');
+            const current = data.printings.find(printing => printing.current);
+            // An entry whose printing the card data doesn't have (an old import): no choice made yet
+            if (!current) select.insertAdjacentHTML('afterbegin', '<option value="">Keep as it is</option>');
+            select.value = originalPrinting = current ? current.id : '';
+            group.hidden = false;
+        })
+        .catch(() => {});  // the dialog works without the list
+}
+
+function editedPrinting() {
+    // The printing chosen, '' when it is the one the entry already is
+    const select = document.getElementById('edit-printing');
+    return select.value !== originalPrinting ? select.value : '';
 }
 
 function stepNumber(id, delta) {
@@ -139,7 +173,7 @@ function editedLocation() {
 
 function editSplits() {
     // Several copies and a new finish or location: ask how many get it
-    return originalQuantity > 1 && (editedFinish() !== originalFinish || editedLocation() !== originalLocation);
+    return originalQuantity > 1 && (editedFinish() !== originalFinish || editedLocation() !== originalLocation || editedPrinting() !== '');
 }
 
 function updateSplitQuantityVisibility() {
@@ -158,7 +192,9 @@ function updateSplitPreview() {
     const preview = document.getElementById('split-preview');
     if (!preview) return;
     const describe = (finish, location) => escapeHtml(finishLabel(finish) + (location ? `, ${location}` : ''));
+    // "2 Foil, Box #1, other printing + 1 stay Regular"
     preview.innerHTML = `<strong>${splitQuantity}</strong> ${describe(editedFinish(), editedLocation())}`
+        + (editedPrinting() ? ', other printing' : '')
         + ` + <strong>${remaining}</strong> stay ${describe(originalFinish, originalLocation)}`;
 }
 
@@ -196,6 +232,7 @@ function saveEditCard() {
 
     const requestBody = {quantity: quantity, condition: condition, finish: editedFinish(),
                          location: editedLocation(), tags: parseTags(document.getElementById('edit-tags').value)};
+    if (editedPrinting()) requestBody.card_id = editedPrinting();
     if (editSplits()) {
         const splitQuantity = parseInt(document.getElementById('edit-split-quantity').value) || 1;
         if (splitQuantity < 1 || splitQuantity > originalQuantity) {

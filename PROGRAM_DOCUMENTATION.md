@@ -577,7 +577,11 @@ number + condition + finish + location (`UNIQUE`); adding an existing combinatio
 `location` ('' = none) says where the copies are (a binder, a box), so copies of one printing
 can be in two places; `tags` ("trade, keep") belong to the entry and are not part of the key -
 entries that merge keep both sets. Moving part of a stack to another location splits the row,
-like a finish change (`split_quantity`). `bulk_update` applies one change (delete, condition,
+like a finish change (`split_quantity`). **Edit card → Printing** changes an entry to another
+printing of the same card (`update_card(printing=...)`, `card_id` in `/api/inventory/update`;
+the choices come from `GET /api/inventory/<id>/printings`, i.e. `Game.printings` - Magic only so
+far): the set, number, rarity, card id and price change, the photos stay with the copies, and
+several copies split the same way. `bulk_update` applies one change (delete, condition,
 location - whole stacks -, add / remove a tag) to several entries. Cards added while scanning
 get the `scan_location` setting (Settings → Scan into location). Inventories from before
 locations are rebuilt once on startup (the key changed): backup in

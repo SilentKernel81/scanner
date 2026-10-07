@@ -491,10 +491,16 @@ class InventoryManager:
         if merged != row['tags']:
             self.conn.execute('UPDATE inventory SET tags = ? WHERE id = ?', (merged, row_id))
 
-    def _copy_with(self, row, quantity, condition, finish, price=None, location=None, tags=None):
-        """Add `quantity` copies of an entry under another condition/finish/location (merging),
-        with the newest `quantity` of its captures; returns the id of the entry they went to"""
+    # What says which printing an entry is (update_card's `printing`)
+    PRINTING_COLUMNS = ('card_id', 'card_name', 'set_name', 'set_code', 'card_number', 'rarity', 'type_line',
+                        'mana_cost', 'colors', 'color_identity')
+
+    def _copy_with(self, row, quantity, condition, finish, price=None, location=None, tags=None, printing=None):
+        """Add `quantity` copies of an entry under another condition/finish/location/printing
+        (merging), with the newest `quantity` of its captures; returns the id of the entry they
+        went to"""
         values = dict(row)
+        values.update(printing or {})
         values.update(quantity=quantity, condition=condition, finish=finish)
         if location is not None:
             values['location'] = location
@@ -512,13 +518,15 @@ class InventoryManager:
         return target
 
     def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None,
-                    finish_price=None, location=None, tags=None, quiet=False):
+                    finish_price=None, location=None, tags=None, quiet=False, printing=None):
         """
-        Change an entry's quantity, condition, finish, location or tags. Changing the finish or
-        location of an entry with several copies moves split_quantity of them (default 1) to
-        the new finish / location. An entry that ends up identical to another one is merged
-        into it. finish_price: the printing's price in the new finish (used when the finish
-        changes; None keeps the price). location: '' = none; tags: list or "a, b" text.
+        Change an entry's quantity, condition, finish, location, tags or printing. Changing the
+        finish, location or printing of an entry with several copies moves split_quantity of
+        them (default 1) to the new one. An entry that ends up identical to another one is
+        merged into it. finish_price: the printing's price in the new finish (used when the
+        finish or the printing changes; None keeps the price). location: '' = none; tags: list
+        or "a, b" text. printing: the PRINTING_COLUMNS of another printing of the card (the
+        photos taken of the copies stay with them).
 
         Returns:
             dict: {'success': bool, 'split': bool, 'message': str}
@@ -532,17 +540,22 @@ class InventoryManager:
             new_finish = finish or row['finish']
             new_location = location.strip() if location is not None else row['location']
             new_tags = ', '.join(clean_tags(tags)) if tags is not None else row['tags']
-            new_price = finish_price if finish_price is not None and new_finish != row['finish'] else row['price_usd']
+            if printing is not None:
+                printing = {column: printing.get(column) for column in self.PRINTING_COLUMNS}
+                if all(printing[column] == row[column] for column in ('card_name', 'set_name', 'card_number')):
+                    printing = None  # the printing it already is
+            new_price = finish_price if finish_price is not None and (new_finish != row['finish'] or printing) \
+                else row['price_usd']
             if new_quantity < 1:
                 return {'success': False, 'split': False, 'message': 'Quantity must be at least 1'}
 
-            if (new_finish != row['finish'] or new_location != row['location']) and row['quantity'] > 1:
+            if (new_finish != row['finish'] or new_location != row['location'] or printing) and row['quantity'] > 1:
                 moved = int(split_quantity) if split_quantity is not None else 1
                 if not 1 <= moved <= row['quantity']:
                     return {'success': False, 'split': False,
                             'message': f"Split quantity must be 1-{row['quantity']}"}
                 remaining = row['quantity'] - moved
-                self._copy_with(row, moved, new_condition, new_finish, new_price, new_location, new_tags)
+                self._copy_with(row, moved, new_condition, new_finish, new_price, new_location, new_tags, printing)
                 if remaining:
                     self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (remaining, row_id))
                     self._trim_captures(row_id, remaining)
@@ -551,7 +564,8 @@ class InventoryManager:
                     self._drop_orphan_captures()
                 self.conn.commit()
                 if not quiet:
-                    where = ', '.join(part for part in (new_finish, new_location) if part)
+                    where = ', '.join(part for part in (
+                        f"{printing['set_name']} #{printing['card_number']}" if printing else '', new_finish, new_location) if part)
                     self.log(f"{row['card_name']}: {moved} moved to {where}"
                              + (f", {remaining} stay" if remaining else ''), level="success")
                 return {'success': True, 'split': bool(remaining), 'message': 'Card updated and split' if remaining else 'Card updated'}
@@ -559,8 +573,8 @@ class InventoryManager:
             # An entry that becomes identical to another one is merged into it
             twin = self.conn.execute(f'''
                 SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)} AND id != ?''',
-                (row['game'], row['card_name'], row['set_name'], row['card_number'], new_condition, new_finish,
-                 new_location, row_id)).fetchone()
+                (row['game'], *((printing or row)[column] for column in ('card_name', 'set_name', 'card_number')),
+                 new_condition, new_finish, new_location, row_id)).fetchone()
             if twin:
                 self._trim_captures(row_id, new_quantity)
                 self._move_captures(row_id, twin['id'])
@@ -571,11 +585,15 @@ class InventoryManager:
                 self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ?, price_usd = ?, '
                                   'location = ?, tags = ? WHERE id = ?',
                                   (new_quantity, new_condition, new_finish, new_price, new_location, new_tags, row_id))
+                if printing:
+                    self.conn.execute(f"UPDATE inventory SET {', '.join(c + ' = ?' for c in self.PRINTING_COLUMNS)} WHERE id = ?",
+                                      (*(printing[c] for c in self.PRINTING_COLUMNS), row_id))
                 self._trim_captures(row_id, new_quantity)
             self.conn.commit()
         if not quiet:
             self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}"
-                     + (f", {new_location}" if new_location else ''), level="success")
+                     + (f", {new_location}" if new_location else '')
+                     + (f", now {printing['set_name']} #{printing['card_number']}" if printing else ''), level="success")
         return {'success': True, 'split': False, 'message': 'Card updated'}
 
     BULK_ACTIONS = ('delete', 'condition', 'location', 'add_tag', 'remove_tag')
