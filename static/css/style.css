@@ -507,6 +507,11 @@ body {
     gap: 6px;
 }
 
+/* .input-group sets display, which would beat the hidden attribute */
+.input-group[hidden] {
+    display: none;
+}
+
 .input-group + .input-group,
 .form-row + .input-group,
 .dialog-message + .input-group,

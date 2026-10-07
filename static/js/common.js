@@ -127,6 +127,7 @@ function loadEditPrintings(rowId) {
     select.innerHTML = '';
     originalPrinting = '';
     editPrintings = [];
+    showEditPrintingImage();  // no picture left over from the card edited before
     fetch(`/api/inventory/${rowId}/printings${areaQuery()}`)
         .then(response => response.json())
         .then(data => {
@@ -152,7 +153,8 @@ function showEditPrintingImage() {
     const printing = editPrintings.find(item => item.id === document.getElementById('edit-printing').value);
     const figure = document.getElementById('edit-printing-figure');
     figure.hidden = !(printing && printing.image_uri);
-    if (!figure.hidden) document.getElementById('edit-printing-image').src = printing.image_uri;
+    const image = document.getElementById('edit-printing-image');
+    if (figure.hidden) image.removeAttribute('src'); else image.src = printing.image_uri;
 }
 
 function showEditScan() {
