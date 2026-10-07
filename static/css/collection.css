@@ -213,14 +213,14 @@ a.btn {
 
 /* Inventory rows: a checkbox, the card image, then as in the scanner's inventory */
 .collection-list .inventory-card {
-    grid-template-columns: 20px 60px 1fr auto auto;
+    grid-template-columns: 20px 72px 1fr auto auto;
 }
 
 /* The photo of the card, big enough to recognize it (the scanner's list keeps the small one) */
 .collection-list .inventory-thumb {
-    width: 60px;
-    height: 84px;
-    border-radius: 5px;
+    width: 72px;
+    height: 100px;
+    border-radius: 6px;
 }
 
 .collection-list .inventory-card.is-selected {
