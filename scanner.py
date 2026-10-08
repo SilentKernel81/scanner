@@ -6,6 +6,8 @@ Camera and card scanning logic with real-time object detection.
 
 import cv2
 import numpy as np
+import os
+import sys
 import time
 import threading
 import subprocess
@@ -28,6 +30,11 @@ logger = logging.getLogger('scanner')
 # OpenCV spreads each small operation over all CPU cores and its idle workers spin-wait:
 # with 8 threads the capture loop used 121% of a core, with 2 it uses 59% at the same speed
 cv2.setNumThreads(2)
+
+# A camera that is not there (not plugged in, taken by another program, unplugged while
+# running) is said once and then looked for quietly - the rest of the app needs no camera
+CAMERA_RETRY_SECONDS = 3
+CAMERA_LOST_AFTER = 20  # failed reads in a row (~2 s) before the camera counts as gone
 
 
 def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_step=10, settle=0.2):
@@ -81,6 +88,8 @@ class CardScanner:
         self.log_callback = log_callback
         self.camera = None
         self.camera_type = None
+        self.camera_error = None  # Why there is no camera image (shown on the scanner page), or None
+        self.failed_reads = 0  # Frames in a row that could not be read
         self.current_frame = None  # Live frame (RGB) - half resolution with a raw-JPEG camera
         self.current_raw = None  # The camera's JPEG of current_frame (full-resolution source), or None
         self.raw_mjpeg = False  # Camera delivers raw JPEG: decode at half size live, full size on capture
@@ -753,12 +762,21 @@ class CardScanner:
             elif self._test_picamera():
                 return 'picamera'
             else:
-                raise Exception("No camera detected. Please check camera connection.")
+                raise Exception(f"No camera found (USB camera {Config.USB_CAMERA_INDEX} or a Pi camera)")
         else:
             raise Exception(f"Unknown camera type: {camera_type}")
     
+    def _usb_camera_present(self):
+        """False when the USB camera's device is missing (opening it would only make OpenCV complain)"""
+        index = Config.USB_CAMERA_INDEX
+        if not sys.platform.startswith('linux') or not isinstance(index, int):
+            return True
+        return os.path.exists(f'/dev/video{index}')
+
     def _test_usb_camera(self):
         """Test if USB camera is available"""
+        if not self._usb_camera_present():
+            return False
         try:
             cap = cv2.VideoCapture(Config.USB_CAMERA_INDEX)
             if cap.isOpened():
@@ -780,24 +798,74 @@ class CardScanner:
             return False
     
     def initialize_camera(self):
-        """Initialize the camera"""
+        """
+        Open the camera and start the capture thread. Without a camera the app still starts
+        (the collection pages need none): the thread keeps looking for it.
+        """
+        self._open_camera()
+        self.running = True
+        self.capture_thread = threading.Thread(target=self._capture_frames, daemon=True)
+        self.capture_thread.start()
+
+    def _open_camera(self):
+        """Open the configured camera. False, with camera_error set, when it is not available"""
         try:
             self.camera_type = self.detect_camera_type()
-            self.log(f"Detected camera type: {self.camera_type}")
-            
+
             if self.camera_type == 'usb':
                 self._initialize_usb_camera()
             elif self.camera_type == 'picamera':
                 self._initialize_picamera()
-            
-            self.running = True
-            self.capture_thread = threading.Thread(target=self._capture_frames, daemon=True)
-            self.capture_thread.start()
-            
-            self.log("Camera initialized successfully", level="success")
+
+            self.failed_reads = 0
+            self.camera_error = None
+            self.log(f"Camera initialized successfully ({self.camera_type})", level="success")
+            return True
         except Exception as e:
-            self.log(f"Failed to initialize camera: {e}", level="error")
-            raise
+            self._close_camera()
+            if self.camera_error is None:  # said once, not at every retry
+                self.log(f"No camera: {e} - the scanner waits for it; the collection works without it",
+                         level="warning")
+            self.camera_error = str(e)
+            return False
+
+    def _close_camera(self):
+        camera, self.camera = self.camera, None
+        if camera is None:
+            return
+        try:
+            if self.camera_type == 'usb':
+                camera.release()
+            elif self.camera_type == 'picamera':
+                camera.stop()
+                camera.close()
+        except Exception as e:
+            logger.debug(f"Closing the camera: {e}")
+
+    def _read_failed(self, reason="The camera stopped sending images (unplugged?)"):
+        """
+        A frame could not be read. One can be a hiccup; CAMERA_LOST_AFTER in a row and the
+        camera is closed and looked for again (instead of an error per frame in the log).
+        """
+        self.failed_reads += 1
+        if self.failed_reads < CAMERA_LOST_AFTER:
+            time.sleep(0.1)
+            return
+        self.log(f"{reason} - waiting for the camera to come back", level="warning")
+        self._close_camera()
+        with self.frame_lock:
+            self.camera_error = reason
+            self.current_frame = self.current_raw = self.annotated_frame = None
+            self.card_detected = False
+            self.stable_frames = 0
+
+    def _wait_for_camera(self):
+        """No camera: try to open it again every CAMERA_RETRY_SECONDS"""
+        deadline = time.time() + CAMERA_RETRY_SECONDS
+        while self.running and time.time() < deadline:
+            time.sleep(0.1)
+        if self.running:
+            self._open_camera()
 
     def set_ai_provider(self, provider, model=None):
         """
@@ -863,10 +931,14 @@ class CardScanner:
         """Initialize USB camera using OpenCV, setting high resolution and focus settings"""
         # CRITICAL: Use V4L2 backend directly instead of GStreamer
         # GStreamer has issues with format changes on Raspberry Pi
+        if not self._usb_camera_present():
+            raise Exception(f"USB camera {Config.USB_CAMERA_INDEX} is not connected "
+                            f"(/dev/video{Config.USB_CAMERA_INDEX} not found)")
         self.camera = cv2.VideoCapture(Config.USB_CAMERA_INDEX, cv2.CAP_V4L2)
 
         if not self.camera.isOpened():
-            raise Exception(f"Failed to open USB camera at index {Config.USB_CAMERA_INDEX}")
+            raise Exception(f"Failed to open USB camera at index {Config.USB_CAMERA_INDEX} "
+                            f"(in use by another program?)")
 
         width = Config.CAMERA_RESOLUTION[0]
         height = Config.CAMERA_RESOLUTION[1]
@@ -889,20 +961,24 @@ class CardScanner:
         self.focus_range = self._query_focus_range()
         if self.focus_locked_value is not None and self.focus_range:
             self._set_manual_focus(self.focus_locked_value)
-            self.log(f"Camera settings: sharpness=50, zoom=100, focus locked at {self.focus_locked_value}")
+            focus = f"focus locked at {self.focus_locked_value}"
         else:
             self._run_v4l2_command('-c', 'focus_automatic_continuous=1')
-            self.log("Camera settings: sharpness=50, zoom=100, continuous autofocus")
-
-        self.log(f"Resolution: {width}x{height} @ {fps} FPS")
+            focus = "continuous autofocus"
 
         # Give camera time to initialize
         time.sleep(2)
 
         # Ask OpenCV for the camera's raw JPEG instead of decoded frames: live frames are
         # then decoded at half size (detection, preview) and full size only for captures
+        self.raw_mjpeg = self.half_size_decode = False
         self.camera.set(cv2.CAP_PROP_CONVERT_RGB, 0)
         ret, raw = self.camera.read()
+        if not ret:
+            # Not the scanner's camera (another video device at this index), or it is busy
+            raise Exception(f"USB camera at index {Config.USB_CAMERA_INDEX} opened but sends no images")
+        self.log(f"Camera settings: sharpness=50, zoom=100, {focus}")
+        self.log(f"Resolution: {width}x{height} @ {fps} FPS")
         if ret and raw is not None and raw.ndim == 2 and raw.size > 2 and bytes(raw.ravel()[:2]) == b'\xff\xd8':
             full = cv2.imdecode(raw.ravel(), cv2.IMREAD_COLOR)
             self.raw_mjpeg = full is not None
@@ -934,15 +1010,18 @@ class CardScanner:
     def _capture_frames(self):
         """Continuously capture frames and perform object detection"""
         while self.running:
+            if self.camera_error:
+                self._wait_for_camera()
+                continue
             try:
                 raw = None
                 if self.camera_type == 'usb' and self.raw_mjpeg:
                     # grab() takes every frame off the camera (so the next one is fresh, no
                     # stale buffered frames) without decoding; only CAMERA_FPS are decoded
                     if not self.camera.grab():
-                        self.log("Failed to read frame from USB camera", level="error")
-                        time.sleep(0.1)
+                        self._read_failed()
                         continue
+                    self.failed_reads = 0
                     now = time.time()
                     if now < self.next_retrieve:
                         continue
@@ -960,13 +1039,18 @@ class CardScanner:
                 elif self.camera_type == 'usb':
                     ret, frame = self.camera.read()
                     if not ret:
-                        self.log("Failed to read frame from USB camera", level="error")
-                        time.sleep(0.1)
+                        self._read_failed()
                         continue
+                    self.failed_reads = 0
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                 elif self.camera_type == 'picamera':
-                    frame = self.camera.capture_array()
+                    try:
+                        frame = self.camera.capture_array()
+                    except Exception as e:
+                        self._read_failed(f"The camera stopped sending images ({e})")
+                        continue
+                    self.failed_reads = 0
                     if len(frame.shape) == 3 and frame.shape[2] == 4:
                         frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
                     elif len(frame.shape) == 3 and frame.shape[2] == 3:
@@ -1321,7 +1405,8 @@ class CardScanner:
                 'awaiting_new_card': self.awaiting_new_card and self.auto_capture_enabled,
                 'in_focus': self.card_in_focus,
                 'focusing': self.focus_sweep_running,
-                'capturing': self.capture_pending
+                'capturing': self.capture_pending,
+                'camera_error': self.camera_error
             }
 
     def capture_card_image_only(self, card_number, settle=0.3):
@@ -1525,6 +1610,9 @@ class CardScanner:
         Returns:
             bool: False if the camera has no manual focus or a sweep is already running
         """
+        if self.camera_error:
+            self.log("No camera to focus", level="warning")
+            return False
         if self.camera_type != 'usb' or not self.focus_range:
             self.log("This camera has no manual focus control", level="warning")
             return False
@@ -1659,10 +1747,5 @@ class CardScanner:
         if self.capture_thread:
             self.capture_thread.join(timeout=2)
 
-        if self.camera:
-            if self.camera_type == 'usb':
-                self.camera.release()
-            elif self.camera_type == 'picamera':
-                self.camera.stop()
-
+        self._close_camera()
         self.log("Camera stopped")

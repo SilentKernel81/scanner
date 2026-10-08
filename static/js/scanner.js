@@ -83,6 +83,7 @@ function addLog(timestamp, level, message) {
 
 function detectionState(status) {
     // [status class, icon, text, capture allowed]
+    if (status.camera_error) return ['status-stabilizing', '🚫', 'No camera', false];
     // Detection off: the capture button takes the full frame
     if (!detectionEnabled) return ['', '📷', 'Manual Mode - Click Capture', true];
     // Focus sweep in progress (Refocus button, or automatic when the card stays blurry)
@@ -107,6 +108,9 @@ function updateDetectionStatus(status) {
     statusDiv.querySelector('.status-icon').textContent = icon;
     statusDiv.querySelector('.status-text').textContent = text;
     $('capture-btn').disabled = !canCapture;
+    // Without a camera the video box says why (the server keeps looking for it)
+    $('camera-missing').hidden = !status.camera_error;
+    $('camera-missing-reason').textContent = status.camera_error || '';
 }
 
 let detectionPolling = null;

@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=37">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=38">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -72,6 +72,11 @@
                         <!-- Drawing the fixed capture area (positioned over the image, see placeAreaLayer) -->
                         <div class="area-layer" id="area-layer">
                             <div class="area-rect" id="area-rect" hidden></div>
+                        </div>
+                        <div class="camera-missing" id="camera-missing" hidden>
+                            <strong>No camera</strong>
+                            <span id="camera-missing-reason"></span>
+                            <span class="camera-missing-hint">Connect it and the image appears here - no restart needed. The <a href="{{ url_for('collection') }}">collection</a> works without a camera.</span>
                         </div>
                         <div class="detection-status" id="detection-status">
                             <div class="status-indicator" id="status-indicator">
@@ -347,6 +352,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=15"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=47"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=48"></script>
 </body>
 </html>

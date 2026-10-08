@@ -79,6 +79,16 @@ Design choices:
 Frames and detection state are shared under `scanner.frame_lock`; the card database and
 inventory use a re-entrant lock each around a shared SQLite connection (WAL mode).
 
+**No camera.** The app starts without one (the collection page needs none):
+`CardScanner._open_camera` logs one warning and sets `camera_error`, and the capture thread
+tries again every `CAMERA_RETRY_SECONDS` (3 s), silently, until it opens - no restart. On Linux
+a missing `/dev/videoN` is seen before OpenCV is asked (which would print its own errors at
+each try); a device that opens but sends no first frame counts as no camera too. While
+running, `CAMERA_LOST_AFTER` (20, ~2 s) failed reads in a row (`_read_failed`: unplugged)
+close the camera, clear the frame and go back to waiting - one warning instead of an error
+per frame. `camera_error` is part of `/api/detection_status`: the scanner page covers the
+video with the reason ("No camera") and disables the capture button.
+
 ### Flow of a card
 
 ```
@@ -879,7 +889,8 @@ to find them again - filter by that location to move or delete them. Undo does n
 `templates/scanner.html` + `static/js/scanner.js` + `static/css/style.css` (dark/light theme via
 CSS variables). Top bar with statistics; search bar and camera on the left, card panel on the
 right, activity log below; settings in a slide-out drawer. The page polls
-`/api/detection_status` every 500 ms for the status pill and talks to the server over Socket.IO.
+`/api/detection_status` every 500 ms for the status pill (and `camera_error`, the "No camera"
+message over the video) and talks to the server over Socket.IO.
 
 Socket.IO events:
 

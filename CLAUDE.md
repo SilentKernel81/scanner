@@ -45,7 +45,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Area | Code |
 |---|---|
 | Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline` (+ `_track_outline` following the previous card, `_outline_from_edge_groups` for broken outlines, `_card_inside_box` when the largest outline is the box itself), `warp_card`, `ObjectDetector.detect` |
-| Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames`, `_is_card_settled`, `_new_card_arrived`, `_mark_captured`; fixed area (sleeves): `_fixed_area_step`, `set_fixed_area` |
+| Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`; fixed area (sleeves): `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe` (drift tracking between drops), `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | OCR first (light-ocr reader process, parsers, AI fallback) | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `scanner.py`: `identify_card_from_image`; `Game.confirmed_read` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
@@ -85,6 +85,9 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **The camera is exclusive**: only one process can open it; stop the running app before
   testing with the real camera. Camera *controls* (`v4l2-ctl -c ...`) can be changed while
   another process streams - handy for focus experiments measured through `/video_feed`.
+- **The camera may be missing**: the app must start and serve the collection without it.
+  `scanner.camera_error` says why (also in `/api/detection_status`); `scanner.camera` is `None`
+  then and the capture thread retries (`_open_camera`). Don't log per failed frame or retry.
 - **Frame sizes**: with a raw-JPEG camera ≥ 1920 px wide, `current_frame`, detections, corners
   and the stream are **half size**; only captures decode full size (`get_detected_card`,
   `get_full_frame`). Don't crop captures from `current_frame` directly.

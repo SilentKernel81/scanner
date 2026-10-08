@@ -1839,6 +1839,10 @@ def handle_capture(data):
         emit('error', {'message': 'Scanner not initialized'})
         return
 
+    if scanner.camera_error:
+        emit('error', {'message': f'No camera: {scanner.camera_error}'})
+        return
+
     card_number = data.get('card_number', 1)
 
     try:
@@ -2387,7 +2391,11 @@ def handle_reset_focus():
     elif scanner.focus_sweep_running:
         emit('focus_reset', {'message': 'Already focusing...'})
     else:
-        emit('error', {'message': 'This camera has no manual focus control'})
+        emit('error', {'message': no_focus_message()})
+
+
+def no_focus_message():
+    return 'No camera connected' if scanner.camera_error else 'This camera has no manual focus control'
 
 
 @socketio.on('set_autofocus')
@@ -2397,7 +2405,7 @@ def handle_set_autofocus(data):
         emit('error', {'message': 'Scanner not initialized'})
         return
     if not scanner.set_continuous_autofocus(bool(data.get('enabled'))):
-        emit('error', {'message': 'This camera has no manual focus control'})
+        emit('error', {'message': no_focus_message()})
 
 
 @socketio.on('set_camera_rotation')
@@ -2823,6 +2831,12 @@ def main():
         logger.warning("Vision AI disabled - no API key configured")
         print(f"⚠ Vision AI disabled")
         print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
+
+    if scanner.camera_error:
+        print(f"⚠ No camera: {scanner.camera_error}")
+        print("  The collection works without it; the scanner page starts when the camera is connected")
+    else:
+        print(f"✓ Camera ready ({scanner.camera_type})")
 
     global debug_mode_running
     debug_mode_running = saved_debug_mode()

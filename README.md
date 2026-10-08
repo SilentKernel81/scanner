@@ -378,7 +378,9 @@ Logs are written to `data/logs/`:
 ## Troubleshooting
 
 **No camera found / black video** - check the device number with `v4l2-ctl --list-devices`
-and set `camera.usb_index`. Only one program can use the camera at a time.
+and set `camera.usb_index`. Only one program can use the camera at a time. Without a camera
+the app still starts: the scanner page shows **No camera** with the reason and picks the camera
+up when it is connected (no restart), and the collection page works as usual.
 
 **Auto scanning never captures** - the status tells you why: *Focusing* (image not sharp
 enough - click **Refocus**, or lower `auto_capture.min_sharpness`), *Stabilizing* (card still

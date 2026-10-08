@@ -333,6 +333,27 @@ body {
     100% { box-shadow: 0 0 0 12px rgba(255, 255, 255, 0); filter: brightness(1); }
 }
 
+/* Shown instead of the image while there is no camera */
+.camera-missing {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    background: #0b0d12;
+    color: #e7e9ee;
+    text-align: center;
+    font-size: 14px;
+}
+
+.camera-missing[hidden] { display: none; }
+.camera-missing strong { font-size: 18px; }
+.camera-missing-hint { color: #9aa3b2; font-size: 13px; max-width: 420px; }
+.camera-missing a { color: #7dd3fc; }
+
 /* Detection status pill, overlaid on the video */
 .detection-status {
     position: absolute;
