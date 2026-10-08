@@ -261,5 +261,8 @@ data/.ultralytics/
 # API keys entered in the web interface
 data/api_keys.env
 
+# Claude Code local settings (allowed commands can contain API keys)
+.claude/settings.local.json
+
 # light-ocr reader (npm install in ocr/)
 node_modules/
