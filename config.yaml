@@ -16,28 +16,8 @@ camera:
 
 # Detection Settings
 detection:
-  # auto    = find the card by its outline (fast, tight, perspective-corrected crop),
-  #           fall back to YOLO when no outline is found (e.g. white border on white)
-  # contour = outline only, yolo = YOLO only (COCO model - it has no "card" class)
-  method: contour
-  allow_landscape: false  # Accept sideways cards (outline mode). Off: a card's art box can look like a sideways card
-  confidence_threshold: 0.05  # Low threshold to detect cards (YOLO sees them as "bottle"/"cell phone")
-
-  # Card aspect ratio filtering (Magic cards are 88mm x 63mm = 1.397 ratio)
-  aspect_ratio_tolerance: 0.30  # 30% tolerance (accepts 0.98 to 1.82)
-  # Increased to 30% for borderless cards (they appear more square to YOLO)
-  # Standard bordered cards: use 0.15-0.20
-  # Borderless/full-art cards: use 0.25-0.35
-
-  # Card size filtering (improves accuracy for foil cards)
-  card_size_filter:
-    enabled: false  # Disabled - aspect ratio check is more reliable
-    min_width: 200
-    max_width: 2500  # Increased to allow cards filling frame
-    min_height: 280
-    max_height: 1680
-    min_area: 56000
-    max_area: 4000000  # Increased for close-up cards
+  # The card is found by its outline (fast, tight, perspective-corrected crop)
+  allow_landscape: false  # Accept sideways cards. Off: a card's art box can look like a sideways card
 
 # Auto-capture Settings (now controlled via UI button)
 auto_capture:

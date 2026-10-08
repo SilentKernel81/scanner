@@ -84,7 +84,7 @@ def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_st
 class CardScanner:
     """Handles camera operations and card scanning"""
     
-    def __init__(self, log_callback=None, model_path=None):
+    def __init__(self, log_callback=None):
         self.log_callback = log_callback
         self.camera = None
         self.camera_type = None
@@ -104,12 +104,7 @@ class CardScanner:
         self.frame_lock = threading.Lock()
         self.capture_thread = None
         self.running = False
-        self.object_detector = ObjectDetector(
-            # Only used by the optional YOLO detector; downloaded here on first use
-            model_path=model_path or str(Config.DATA_DIR / 'yolov8n.pt'),
-            method=Config.DETECTION_METHOD,
-            allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE
-        )
+        self.object_detector = ObjectDetector(allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE)
 
         # Frame stability tracking (for auto-capture)
         self.stable_frames = 0
@@ -180,20 +175,6 @@ class CardScanner:
         # miss 1-2 frames of a card lying still; shorter gaps are judged by where the
         # card reappears, see _new_card_arrived)
         self.missing_frames_for_new_card = 6
-        self.card_aspect_ratio_target = 88.0 / 63.0  # Magic card: 88mm x 63mm = 1.397
-        self.aspect_ratio_tolerance = Config.ASPECT_RATIO_TOLERANCE  # Load from config (adjustable in config.yaml)
-
-        # Card size filtering
-        if Config.CARD_SIZE_FILTER_ENABLED:
-            self.log(f"Card size filtering enabled: {Config.CARD_MIN_WIDTH}-{Config.CARD_MAX_WIDTH}px width, "
-                    f"{Config.CARD_MIN_HEIGHT}-{Config.CARD_MAX_HEIGHT}px height", level="info")
-        else:
-            self.log("Card size filtering disabled (using aspect ratio only)", level="info")
-
-        # Aspect ratio detection
-        min_ratio = self.card_aspect_ratio_target * (1 - self.aspect_ratio_tolerance)
-        max_ratio = self.card_aspect_ratio_target * (1 + self.aspect_ratio_tolerance)
-        self.log(f"Aspect ratio detection: {min_ratio:.2f}-{max_ratio:.2f} (tolerance: {self.aspect_ratio_tolerance*100:.0f}%)", level="info")
         self.log(f"Debug trace: {'on' if self.debug_trace_enabled else 'off'} (Settings; frames of slow or doubtful captures go to data/debug_frames)", level="info")
 
         # Bounding box smoothing to eliminate flicker
@@ -252,65 +233,13 @@ class CardScanner:
         if self.log_callback:
             self.log_callback(message, level)
 
-    def is_card_sized(self, bbox):
-        """
-        Check if bounding box matches Magic card dimensions
-        Uses both aspect ratio AND pixel size filtering
-
-        Args:
-            bbox: Tuple of (x1, y1, x2, y2)
-
-        Returns:
-            bool: True if both aspect ratio and size match card dimensions
-        """
-        x1, y1, x2, y2 = bbox
-        width = x2 - x1
-        height = y2 - y1
-
-        if width == 0 or height == 0:
-            return False
-
-        # Calculate area
-        area = width * height
-
-        # Step 1: Size filtering (if enabled)
-        if Config.CARD_SIZE_FILTER_ENABLED:
-            # Check width range
-            if not (Config.CARD_MIN_WIDTH <= width <= Config.CARD_MAX_WIDTH):
-                return False
-
-            # Check height range
-            if not (Config.CARD_MIN_HEIGHT <= height <= Config.CARD_MAX_HEIGHT):
-                return False
-
-            # Check area range (prevents very small or very large detections)
-            if not (Config.CARD_MIN_AREA <= area <= Config.CARD_MAX_AREA):
-                return False
-
-        # Step 2: Aspect ratio check (Magic card: 88mm x 63mm = 1.397)
-        aspect_ratio = max(width, height) / min(width, height)
-
-        # Check if aspect ratio matches card (with tolerance)
-        min_ratio = self.card_aspect_ratio_target * (1 - self.aspect_ratio_tolerance)
-        max_ratio = self.card_aspect_ratio_target * (1 + self.aspect_ratio_tolerance)
-
-        is_match = min_ratio <= aspect_ratio <= max_ratio
-
-        # Debug logging (controlled by UI toggle)
-        if self.debug_trace_enabled and not is_match:
-            if not hasattr(self, '_last_aspect_log_time') or time.time() - self._last_aspect_log_time > 2:
-                self.log(f"Aspect ratio rejected: {aspect_ratio:.3f} (need {min_ratio:.3f}-{max_ratio:.3f}) | Size: {width:.0f}x{height:.0f}px", level="debug")
-                self._last_aspect_log_time = time.time()
-
-        return is_match
-
     def smooth_bounding_box(self, new_bbox):
         """
         Apply exponential moving average smoothing to bounding box coordinates
         This eliminates flickering when card is physically still
 
         Args:
-            new_bbox: Tuple of (x1, y1, x2, y2) from YOLO detection
+            new_bbox: Tuple of (x1, y1, x2, y2) of the detected card
 
         Returns:
             Smoothed bounding box tuple (x1, y1, x2, y2)
@@ -701,8 +630,7 @@ class CardScanner:
 
         # Outline inside the area -> flat, tight crop for the photo
         _, _, _, corners = self.object_detector.detect(
-            frame, conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD,
-            previous=self.tracked_outline if self.missing_frames <= 2 else None)
+            frame, previous=self.tracked_outline if self.missing_frames <= 2 else None)
         if corners is not None:
             self.tracked_outline, self.missing_frames = corners, 0
             cx1, cy1 = corners.min(axis=0)
@@ -1082,7 +1010,6 @@ class CardScanner:
                     # hiccup of up to 2 frames)
                     bounding_box, card_name, confidence, corners = self.object_detector.detect(
                         frame,
-                        conf_threshold=Config.DETECTION_CONFIDENCE_THRESHOLD,
                         previous=self.tracked_outline if self.missing_frames <= 2 else None
                     )
                     self.tracked_outline = corners if bounding_box else self.tracked_outline
@@ -1091,9 +1018,7 @@ class CardScanner:
                         gap = self.missing_frames  # frames without a card just before this one
                         self.missing_frames = 0
                         # Measure movement on the raw detection, before smoothing
-                        raw_points = corners if corners is not None else np.array(
-                            [[bounding_box[0], bounding_box[1]], [bounding_box[2], bounding_box[1]],
-                             [bounding_box[2], bounding_box[3]], [bounding_box[0], bounding_box[3]]], dtype=np.float32)
+                        raw_points = corners
 
                         # Apply smoothing to eliminate flicker
                         smoothed_box = self.smooth_bounding_box(bounding_box)
@@ -1105,76 +1030,61 @@ class CardScanner:
                             width = x2 - x1
                             height = y2 - y1
 
-                            # Outline detections are already validated as card-shaped
-                            # (and may be rotated, which skews the bounding box ratio)
-                            if corners is not None or self.is_card_sized(bounding_box):
-                                # Store this as a valid card detection
-                                self.last_card_detection = {
-                                    'bbox': bounding_box,
-                                    'corners': corners,
-                                    'name': card_name,
-                                    'confidence': confidence,
-                                    'time': time.time(),
-                                    'frame': frame,
-                                    'raw': raw
-                                }
-                                display_bbox = bounding_box
-                                display_corners = corners
+                            # Store this as a valid card detection
+                            self.last_card_detection = {
+                                'bbox': bounding_box,
+                                'corners': corners,
+                                'name': card_name,
+                                'confidence': confidence,
+                                'time': time.time(),
+                                'frame': frame,
+                                'raw': raw
+                            }
+                            display_bbox = bounding_box
+                            display_corners = corners
 
-                                # Card is detected - reset lost frames counter
-                                self.frames_since_card_lost = 0
+                            # Card is detected - reset lost frames counter
+                            self.frames_since_card_lost = 0
 
-                                # Count consecutive frames where the card is still and in focus
-                                if self._is_card_settled(frame, raw_points):
-                                    self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
-                                else:
-                                    self.stable_frames = 0
-                                self._trace_waiting(detected=True)
-
-                                self._check_focus_drift()
-
-                                # While the lens moves, the blur can hide the card for a few frames and
-                                # shift its outline (a probe once looked like a 1.9% jump and caused a
-                                # second capture of the same card): no new-card rules until 0.6 s after.
-                                # A real drop then is still seen by its big jump - the card counts as new
-                                # once the focus is done (and spoils a probe's measurement)
-                                focus_moving = self._focus_moving()
-                                self._rebaseline_after_focus(focus_moving)
-                                movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
-                                if focus_moving and not self.focus_sweep_running and movement > 0.03:
-                                    self.disturbed_during_focus = True
-                                if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
-                                    self.disturbed_during_focus = False
-                                    self.awaiting_new_card = False
-                                    self.tracked_outline = None
-                                    self.stable_frames = 0
-                                    if self.auto_capture_enabled:
-                                        self.log("New card detected (dropped while focusing)")
-                                elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
-                                    self.awaiting_new_card = False
-                                    self.stable_frames = 0  # the new card must settle first
-                                    # Find the new card afresh: following the old outline could latch
-                                    # onto edges of the new card that happen to lie where the old one's
-                                    # were (a foil's inner frame - the photo then cut off its set line)
-                                    self.tracked_outline = None
-                                    if self.auto_capture_enabled:
-                                        movement, image_change = getattr(self, 'last_frame_change', (0, 0))
-                                        self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
-                                        if time.time() - self.last_auto_capture_time < 2.0:
-                                            self._start_debug_dump('new_card_soon_after_capture')
+                            # Count consecutive frames where the card is still and in focus
+                            if self._is_card_settled(frame, raw_points):
+                                self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
                             else:
-                                # Not card-sized - ignore this detection
-                                # Log occasionally for debugging (throttled to avoid spam, controlled by UI toggle)
-                                if self.debug_trace_enabled:
-                                    if not hasattr(self, '_last_filter_log_time') or time.time() - self._last_filter_log_time > 5:
-                                        self.log(f"Filtered detection: {width:.0f}x{height:.0f}px (outside card size range)", level="debug")
-                                        self._last_filter_log_time = time.time()
-
-                                display_bbox = None  # Don't show non-card boxes
-                                # Reset stability counter since this isn't a valid card
                                 self.stable_frames = 0
+                            self._trace_waiting(detected=True)
 
-                            # Keep the card (only if it passed the card checks) for capture
+                            self._check_focus_drift()
+
+                            # While the lens moves, the blur can hide the card for a few frames and
+                            # shift its outline (a probe once looked like a 1.9% jump and caused a
+                            # second capture of the same card): no new-card rules until 0.6 s after.
+                            # A real drop then is still seen by its big jump - the card counts as new
+                            # once the focus is done (and spoils a probe's measurement)
+                            focus_moving = self._focus_moving()
+                            self._rebaseline_after_focus(focus_moving)
+                            movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
+                            if focus_moving and not self.focus_sweep_running and movement > 0.03:
+                                self.disturbed_during_focus = True
+                            if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
+                                self.disturbed_during_focus = False
+                                self.awaiting_new_card = False
+                                self.tracked_outline = None
+                                self.stable_frames = 0
+                                if self.auto_capture_enabled:
+                                    self.log("New card detected (dropped while focusing)")
+                            elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
+                                self.awaiting_new_card = False
+                                self.stable_frames = 0  # the new card must settle first
+                                # Find the new card afresh: following the old outline could latch
+                                # onto edges of the new card that happen to lie where the old one's
+                                # were (a foil's inner frame - the photo then cut off its set line)
+                                self.tracked_outline = None
+                                if self.auto_capture_enabled:
+                                    movement, image_change = getattr(self, 'last_frame_change', (0, 0))
+                                    self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
+                                    if time.time() - self.last_auto_capture_time < 2.0:
+                                        self._start_debug_dump('new_card_soon_after_capture')
+                            # Keep the card for capture
                             if display_bbox:
                                 with self.frame_lock:
                                     self.detected_card = (frame, display_bbox, corners, raw)
@@ -1258,7 +1168,7 @@ class CardScanner:
                         else:
                             box_color = (255, 165, 0)  # Orange when stabilizing
 
-                        # Draw the card outline (or bounding box for YOLO detections)
+                        # Draw the card outline (the fixed area has a box without one)
                         if display_corners is not None:
                             cv2.polylines(annotated, [display_corners.astype(np.int32)], True, box_color, 3)
                         else:
@@ -1292,7 +1202,6 @@ class CardScanner:
                             not self.awaiting_new_card and  # Still the card from the last capture
                             not self.focus_sweep_running and  # Frames are blurry while the lens moves
                             not self.focus_probe_running and
-                            (display_corners is not None or self.is_card_sized(display_bbox)) and
                             self.stable_frames >= self.required_stable_frames):
 
                             # Check if enough time has passed since last auto-capture

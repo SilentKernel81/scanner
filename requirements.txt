@@ -1,5 +1,4 @@
 # Card Scanner dependencies (Python 3.10+)
-# Optional YOLO fallback detector: see requirements-yolo.txt
 
 # Web server (SocketIO runs in threading mode - no eventlet/gevent needed)
 flask>=3.0

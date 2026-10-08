@@ -31,9 +31,8 @@ venv/bin/python setup_database.py         # (re)download the Scryfall card datab
 venv/bin/python cleanup.py --stats        # scanned images; --days N / --dry-run / --all
 ```
 
-Dependencies: `requirements.txt` (core, ~300 MB, Python 3.10+); `requirements-yolo.txt` adds
-the optional YOLO fallback detector + PyTorch (~1 GB; PyTorch may lag the newest Python). The
-dev venv on this machine is Python 3.12 with YOLO installed.
+Dependencies: `requirements.txt` (~300 MB, Python 3.10+). The dev venv on this machine is
+Python 3.12.
 
 There is no automated test suite. Verify changes by running the app (or a copy of it on another
 port with a copy of the database - never test adds against the real `data/cards_database.db`
@@ -44,7 +43,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 
 | Area | Code |
 |---|---|
-| Outline detection, warp, YOLO fallback | `object_detector.py`: `find_card_outline` (+ `_track_outline` following the previous card, `_outline_from_edge_groups` for broken outlines, `_card_inside_box` when the largest outline is the box itself), `warp_card`, `ObjectDetector.detect` |
+| Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline` following the previous card, `_outline_from_edge_groups` for broken outlines, `_card_inside_box` when the largest outline is the box itself), `warp_card`, `ObjectDetector.detect` |
 | Capture loop, stability, auto-capture, new-card detection | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`; fixed area (sleeves): `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / automatic refocus | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe` (drift tracking between drops), `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | OCR first (light-ocr reader process, parsers, AI fallback) | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `scanner.py`: `identify_card_from_image`; `Game.confirmed_read` |

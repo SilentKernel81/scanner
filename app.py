@@ -537,11 +537,11 @@ def initialize_components():
     logger.info("Initializing database...")
     database = CardDatabase()
 
-    # Initialize scanner (CPU-based YOLOv8)
+    # Initialize scanner
     logger.info("Initializing scanner...")
     scanner = CardScanner(log_callback=log_to_client)
     set_auto_add(scanner.settings.get('auto_add', True))  # remembered in data/settings.json
-    log_to_client("Scanner initialized with YOLOv8 detection", level="info")
+    log_to_client("Scanner initialized", level="info")
 
     # Card games (Magic, ...) - each wraps its card data; the saved one is scanned
     games.init(database, scanner.settings, log_callback=log_to_client)

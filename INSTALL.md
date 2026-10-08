@@ -52,7 +52,7 @@ Each step is skipped when it's already done, so it's safe to run again at any ti
    focus/zoom controls) and, with `--picamera`, `python3-picamera2`. Uses `sudo` only here and
    for the service.
 3. **Python environment**: creates `venv/` with Python 3.10+ and installs `requirements.txt`
-   (about 300 MB; `--with-yolo` adds the optional YOLO detector and PyTorch, about 1 GB more).
+   (about 300 MB).
 4. **OCR reader** (optional): if Node.js 22+ with npm is installed, installs
    [light-ocr](https://github.com/arcships/light-ocr) into `ocr/` (about 130 MB), which reads
    most cards without an AI request. Without Node.js this step is skipped and every card goes
@@ -76,7 +76,6 @@ Each step is skipped when it's already done, so it's safe to run again at any ti
 | `--update` | Pull the latest code first, then update packages and restart the service |
 | `--camera N` | Use USB camera `/dev/videoN` (sets `camera.usb_index` in `config.yaml`) |
 | `--picamera` | Raspberry Pi camera module |
-| `--with-yolo` | Also install the optional YOLO fallback detector (~1 GB) |
 | `--skip-database` | Don't download the card database |
 | `--refresh-cards` | Re-download the card database (latest cards and prices) |
 
@@ -162,6 +161,4 @@ change `flask.port` in `config.yaml`.
 **"Vision AI disabled"** - no API key for the selected provider: check `.env`, or switch to a
 local model in Settings.
 
-**Package installation fails** - run the script again (it resumes). For `--with-yolo` on a
-very new Python, install [uv](https://docs.astral.sh/uv/): the script then uses Python 3.12 for
-PyTorch.
+**Package installation fails** - run the script again (it resumes).

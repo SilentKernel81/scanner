@@ -47,7 +47,7 @@ Design choices:
 | `app.py` | Flask + Socket.IO server: routes, events, capture orchestration, AI worker queue |
 | `backups.py` | Backups of the collection, the scanned cards and the decks, made and restored on the collection page |
 | `scanner.py` | Camera (USB via OpenCV/V4L2 or Pi camera), capture thread, detection state, stability, auto-capture |
-| `object_detector.py` | Outline detection (`find_card_outline`), perspective warp (`warp_card`), optional YOLO fallback |
+| `object_detector.py` | Outline detection (`find_card_outline`), perspective warp (`warp_card`) |
 | `card_ocr.py`, `ocr/server.mjs` | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
 | `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
@@ -204,12 +204,6 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
 the same place.
-
-**YOLO fallback** (`detection.method: auto` or `yolo`, requires `requirements-yolo.txt`): the
-pre-trained COCO YOLOv8n model has no card class, so it only gives a rough bounding box (it
-labels cards "cell phone" or "book"); boxes are filtered by aspect ratio and smoothed. The model
-(`yolov8n.pt`, AGPL-3.0) is downloaded into `data/` on first use. If
-ultralytics isn't installed, the detector logs a warning and uses outlines only.
 
 For display, the last detection is held for 6 s when the card is briefly lost ("HOLD"), but a
 held detection never counts as a still card.
@@ -944,7 +938,7 @@ Measured on an x86-64 laptop with an Anker PowerConf C200 at 2560 × 1440 and a 
 | Camera | 27–29 fps at 2560 × 1440 (MJPEG); 20 fps processed (`camera.fps`) |
 | Per processed frame | ~10 ms (half-size decode, detection, stability) - was ~24 ms at full size |
 | App CPU while scanning | ~20–25% of one core - was ~120% (full-size decode, 8 OpenCV threads) |
-| Outline detection | ~3 ms per frame (YOLO on CPU: ~550 ms) |
+| Outline detection | ~3 ms per frame |
 | Card landed → capture | ~0.15–0.5 s (settling) |
 | OCR identification | ~0.17 s (light-ocr on the GPU; ~0.8 s on the CPU) - 88% of cards need nothing more |
 | AI identification | ~0.9 s (qwen3.5:9b, 1024 px image); the foil check runs in parallel (+~0.3 s with Ollama); ~10 s once if the model has to load |
@@ -963,7 +957,7 @@ The 9B doesn't fit in a 6 GB GPU (it would be split with the CPU); the 4B is a u
 ## Known limitations
 
 - **White-bordered cards on a white background** have no visible outline; use
-  `detection.method: auto` (YOLO fallback) or capture them manually with detection off.
+  a darker background or capture them manually with detection off.
 - **An identical copy landing within ~0.7 mm of the previous card** without the fall hiding the
   card for 6 frames isn't recognized as new - press Capture.
 - **Cards without the ★/• marker** (older printings) get their finish from printing data only.

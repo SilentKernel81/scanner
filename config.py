@@ -38,19 +38,7 @@ class Config:
     CAMERA_ROTATE = int(config.get('camera', 'rotate', default=0))
 
     # Object detection settings
-    DETECTION_METHOD = config.get('detection', 'method', default='auto')
     DETECTION_ALLOW_LANDSCAPE = config.get('detection', 'allow_landscape', default=False)
-    DETECTION_CONFIDENCE_THRESHOLD = config.get('detection', 'confidence_threshold', default=0.3)
-    ASPECT_RATIO_TOLERANCE = config.get('detection', 'aspect_ratio_tolerance', default=0.15)
-
-    # Card size filtering
-    CARD_SIZE_FILTER_ENABLED = config.get('detection', 'card_size_filter', 'enabled', default=False)
-    CARD_MIN_WIDTH = config.get('detection', 'card_size_filter', 'min_width', default=200)
-    CARD_MAX_WIDTH = config.get('detection', 'card_size_filter', 'max_width', default=2500)
-    CARD_MIN_HEIGHT = config.get('detection', 'card_size_filter', 'min_height', default=280)
-    CARD_MAX_HEIGHT = config.get('detection', 'card_size_filter', 'max_height', default=1680)
-    CARD_MIN_AREA = config.get('detection', 'card_size_filter', 'min_area', default=56000)
-    CARD_MAX_AREA = config.get('detection', 'card_size_filter', 'max_area', default=4000000)
 
     # Focus settings
 

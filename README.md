@@ -88,7 +88,6 @@ Then add your AI key to `.env` (see below) and open `http://<device-ip>:5000`. U
 | `--service` / `--remove-service` | Install / remove the systemd service |
 | `--update` | Pull the latest code, update packages, restart the service |
 | `--refresh-cards` | Re-download the card database (new cards and prices) |
-| `--with-yolo` | Also install the optional YOLO fallback detector (~1 GB) |
 
 The script is safe to run again at any time - it only does what is missing, and uses `sudo`
 only to install missing system packages or the service. [INSTALL.md](INSTALL.md) has the
@@ -106,12 +105,6 @@ cp .env.example .env                  # then add your API key(s)
 Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number
 (`v4l2-ctl --list-devices`, package `v4l-utils`). For the Raspberry Pi camera module, install
 `python3-picamera2` with apt and create the venv with `--system-site-packages`.
-
-The optional YOLO fallback detector (`detection.method: auto` or `yolo`) needs
-`requirements-yolo.txt`, which pulls in PyTorch; its model (`yolov8n.pt`) is downloaded into
-`data/` on first use. With the default outline detection it is not
-needed; if it's configured but not installed, the scanner logs a warning and uses outline
-detection.
 
 ## Choosing a vision AI provider
 
@@ -306,7 +299,7 @@ Deck building needs card data downloaded with this version: the Decks tab offers
 
 - **Contrast**: a light, plain background (e.g. a white box) makes the card's dark border
   easy to find. White-bordered cards on a white background have no visible outline - use
-  `detection.method: auto` (YOLO fallback) or capture them with auto-detection turned off.
+  a darker background, or capture them with auto-detection turned off.
 - **Keep the whole card in view** with a small margin. If an edge is cut off, the card isn't
   detected - and the foil marker in the bottom-left corner can't be read.
 - **Focus**: click **Refocus** once with a card in the box. The scanner sweeps through the
@@ -330,7 +323,6 @@ Settings live in `config.yaml`. The most useful ones:
 | `camera.type` | `auto` | `auto`, `usb` or `picamera` |
 | `camera.usb_index` | | `/dev/videoN` number of the USB camera |
 | `camera.resolution` / `fps` | `[2560, 1440]` / `20` | Capture resolution and frame rate |
-| `detection.method` | `contour` | `contour` (outline only), `auto` (outline, then YOLO), `yolo` |
 | `detection.allow_landscape` | `false` | Accept cards lying sideways (a card's art box can look like a sideways card) |
 | `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
@@ -388,8 +380,7 @@ moving), or *Captured - drop the next card* (it's waiting for a new card to land
 shows *New card detected* with the measured jump and image change for each drop.
 
 **Card not detected** - make sure the whole card is visible with some margin and the
-background contrasts with the border (see *Tips*). For cards without a clear outline, set
-`detection.method: auto` to fall back to YOLO.
+background contrasts with the border (see *Tips*). A card without a clear outline can be captured with auto-detection turned off.
 
 **"Vision AI disabled"** - no API key was found for the selected provider. Check `.env`, or
 switch provider in Settings.
@@ -402,10 +393,6 @@ a capture); correct them there and search again, or pick the printing from the g
 keeps misreading the same thing, adjust its prompt in **Settings → Vision AI → Edit prompts**
 and check it with **Test on last capture**.
 
-**The YOLO extras fail to install** - PyTorch wheels can lag the newest Python. With
-[uv](https://docs.astral.sh/uv/) installed, `deploy.sh --with-yolo` creates a Python 3.12
-environment automatically; otherwise create one yourself (`uv venv --python 3.12 venv`).
-
 **The service doesn't start** - `journalctl -u mtg-scanner -n 50` shows why (most often the
 card database is missing or another program has the camera).
 
@@ -414,7 +401,7 @@ card database is missing or another program has the camera).
 ```
 app.py               Flask + Socket.IO web app, routes and event handlers
 scanner.py           Camera capture thread, detection, stability, auto-capture
-object_detector.py   Card outline detection + perspective correction (YOLO fallback)
+object_detector.py   Card outline detection + perspective correction
 card_ocr.py, ocr/    OCR first: light-ocr reader (Node.js) and the parser for what it reads
 card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
@@ -431,7 +418,7 @@ config.yaml          Settings (loaded by config.py / config_loader.py)
 settings.py          UI preferences saved in data/settings.json
 templates/, static/  Web interface
 scripts/             deploy.sh (install/update), mtg-scanner.service (template), start.sh, backup.sh
-requirements*.txt    Python dependencies (requirements-yolo.txt: optional YOLO detector)
+requirements.txt     Python dependencies
 data/                Card database, settings, logs (created at runtime)
 scanned_cards/       Captured card images (created at runtime)
 ```
@@ -487,14 +474,12 @@ Scanning, searching and settings go through Socket.IO events (`capture_card`, `s
 ## License
 
 [MIT](LICENSE) - free to use, modify and share, including commercially, as long as the
-copyright notice is kept. The optional YOLO detector (Ultralytics library and model) is not part
-of this repository and is licensed separately under AGPL-3.0.
+copyright notice is kept.
 
 ## Acknowledgments
 
 - Card data, prices and images: [Scryfall](https://scryfall.com) (Magic), [TCGdex](https://tcgdex.dev) (Pokémon)
-- Computer vision: [OpenCV](https://opencv.org); optional detection fallback:
-  [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
+- Computer vision: [OpenCV](https://opencv.org)
 - Web: [Flask](https://flask.palletsprojects.com) and
   [Flask-SocketIO](https://flask-socketio.readthedocs.io)
 

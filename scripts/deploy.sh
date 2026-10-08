@@ -20,7 +20,6 @@ MIN_PYTHON="3.10"
 INSTALL_SERVICE=0
 REMOVE_SERVICE=0
 UPDATE=0
-WITH_YOLO=0
 PICAMERA=0
 SKIP_DATABASE=0
 REFRESH_CARDS=0
@@ -48,7 +47,6 @@ Options:
   --update            Pull the latest code (git) before installing; restarts the service
   --camera N          Use USB camera /dev/videoN (sets camera.usb_index in config.yaml)
   --picamera          Raspberry Pi camera module (installs python3-picamera2)
-  --with-yolo         Also install the optional YOLO fallback detector (~1 GB)
   --skip-database     Don't download the card database
   --refresh-cards     Re-download the card database (latest cards and prices)
   -h, --help          Show this help
@@ -62,7 +60,6 @@ while [ $# -gt 0 ]; do
         --update) UPDATE=1 ;;
         --camera) [ $# -ge 2 ] || die "--camera needs a number"; CAMERA_INDEX="$2"; shift ;;
         --picamera) PICAMERA=1 ;;
-        --with-yolo) WITH_YOLO=1 ;;
         --skip-database) SKIP_DATABASE=1 ;;
         --refresh-cards) REFRESH_CARDS=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -173,8 +170,6 @@ else
         # picamera2 comes from apt, so the venv must see the system packages
         version_ok python3 || die "Python ${MIN_PYTHON}+ is required ($(python3 --version))"
         python3 -m venv --system-site-packages venv
-    elif [ "$WITH_YOLO" -eq 1 ] && [ "$HAVE_UV" -eq 1 ]; then
-        uv venv -q --python 3.12 venv      # PyTorch wheels can lag the newest Python
     elif command -v python3 >/dev/null && version_ok python3; then
         python3 -m venv venv
     elif [ "$HAVE_UV" -eq 1 ]; then
@@ -197,16 +192,9 @@ pip_install() {
 
 echo "  Installing Python packages (first run takes a few minutes)..."
 pip_install -r requirements.txt
-if [ "$WITH_YOLO" -eq 1 ]; then
-    if [ "$(uname -m)" = "x86_64" ] && ! venv/bin/python -c "import torch" 2>/dev/null; then
-        # CPU-only PyTorch: far smaller than the default CUDA build
-        pip_install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    fi
-    pip_install -r requirements-yolo.txt
-fi
 venv/bin/python -c "import flask, flask_socketio, cv2, numpy, PIL, yaml, dotenv, requests" \
     || die "Python packages are not importable - see the errors above"
-ok "Python packages installed$([ "$WITH_YOLO" -eq 1 ] && echo " (with YOLO)")"
+ok "Python packages installed"
 
 # ----------------------------------------------------------------------------
 step "OCR reader (optional)"
