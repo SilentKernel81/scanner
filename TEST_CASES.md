@@ -1,0 +1,325 @@
+# Card Scanner test cases
+
+Prepared from the current README, Flask routes and Socket.IO handlers, Python managers, game adapters, and browser code. This is a proposed test plan; cases have not been executed. No existing automated test suite was found in the repository.
+
+Each row is a test case with setup/action and an observable expected result. Parameter lists mean separate executions for each value. Expected results describe intended behavior; failures should be recorded as defects, not assumed to be supported already. Resilience, accessibility, and malicious-input cases are quality requirements to verify, rather than claims about implemented protections.
+
+Priority: **P0** = release-blocking data integrity or core workflow; **P1** = normal feature coverage; **P2** = robustness or usability. Suggested layers: **U** = isolated Python/JavaScript test; **I** = Flask/Socket.IO/database integration; **E** = browser end-to-end; **H** = physical camera test.
+
+## Setup and reusable fixtures
+
+Use a disposable instance with separate databases, settings, capture directories, credentials, and backups. Never run delete, replace-import, restore, rebuild, or interruption cases against the user's collection. Reset fixtures between cases unless the case explicitly tests persistence.
+
+- **MTG cards:** one exact set/number match; a name with multiple printings; regular/foil/surge printings with distinct prices; a foil-only printing; borderless and alternate art; leading-zero and letter-suffix collector numbers; a double-faced card; accented/punctuated names; a basic land; an unlimited-copy card; a limited-copy exception; banned, restricted, and illegal cards; a valid commander, compatible commander pair, and incompatible pair.
+- **Pokémon cards:** `012/193` and a known set abbreviation; same name/number in different sets; normal/holo/reverse/first-edition variants; ex/V/VMAX/VSTAR/GX names; basic Energy; secret rare above the printed total; a card with no price/image.
+- **Inventory:** three copies of printing A, Near Mint, regular, Box 1, price $2; two copies of A, foil, Binder, price $5; one copy of printing B, price $3; at least one Pokémon row. Include rows with no location, multiple tags, captures, and imported rows without a card ID. The six MTG copies have value $19 before other fixtures are added.
+- **Scanned:** two copies matching the collection's A/regular/Box 1 row, one distinct printing, and a Pokémon row; keep their capture thumbnails distinguishable.
+- **Decks:** an empty deck; Commander decks at 99/100/101 total cards; a 60-card deck with 15/16 sideboard cards; two decks sharing a card; unresolved card names; an explicit printing selection.
+- **Review:** one suggested match, one ambiguous match, one unreadable capture, one missing image, and one item per game.
+- **Services:** stub AI, OCR, Scryfall/MTG data, TCGdex/prices, EDHREC, Archidekt, Moxfield, and local model discovery. Provide success, empty, timeout, rate-limit, malformed, and unavailable responses. Freeze prices/time for deterministic assertions.
+- **Camera:** recorded frame sequences plus real USB and Raspberry Pi cameras where available; plain/sleeved cards, identical consecutive copies, motion, glare, low light, and portrait/landscape frames.
+
+For data-changing tests compare database rows, summed quantities, per-finish prices, captures, batch attribution, and game/area before and after. UI counters alone are insufficient evidence.
+
+## 1. Startup, navigation, and game selection
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| BOOT-01 | P0 I/E | Start with empty disposable data; open `/` and `/collection`. | Required stores initialize; both pages load and show sensible empty states. |
+| BOOT-02 | P1 I/E | Restart an instance containing inventory, scanned cards, decks, and review items. | Stored data and remembered preferences survive without duplication. |
+| BOOT-03 | P1 I/E | Start without an available camera; use collection and manual search. | Camera failure is visible; non-camera features remain usable. |
+| BOOT-04 | P1 E | Navigate scanner → collection → scanner and open Scanned/Review from the top bar. | Correct page/dialog and counts appear; navigation does not mutate data. |
+| GAME-01 | P0 I/E | Switch MTG → Pokémon → MTG with both games populated. | Search, finishes, exports, counts, inventory, and review show only the active game's data. |
+| GAME-02 | P1 I/E | Select Pokémon with no Pokémon data installed. | One background download starts; progress/completion are shown and search becomes usable. |
+| GAME-03 | P0 I/H | Switch game during auto scanning with a current card displayed. | Auto scanning stops; current selection is cleared; the old card cannot be added to the new game. |
+| GAME-04 | P0 I | Switch game while AI work is queued/running; complete the old work. | Capture is kept in the original game's review queue, without trusting a reading made under the changed game. |
+| GAME-05 | P1 I | Submit an unknown game ID. | Error is returned; active game and all data remain unchanged. |
+| GAME-06 | P1 E/I | Select Pokémon and attempt deck-builder APIs directly. | Unsupported deck features are hidden or rejected with a useful error; no MTG deck is changed. |
+
+## 2. Camera, detection, focus, and fixed area
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| CAM-01 | P0 H/E | Open video feed with each supported camera type. | Live MJPEG frames render with correct orientation and no stalled UI. |
+| CAM-02 | P1 H/U | Present a correctly sized card, then remove it. | Outline/status transitions between detected and no-card states accurately. |
+| CAM-03 | P1 H/U | Present a hand, sleeve edge, background rectangle, and partial card. | False detections do not trigger an automatic capture of a non-card. |
+| CAM-04 | P0 H/U | Move a card, hold it still, then introduce blur. | Focusing/stabilizing/ready statuses track readiness; capture waits for configured stability. |
+| CAM-05 | P1 H/U | Exercise contour detection and optional YOLO fallback with/without its model/dependencies. | Available detector works; unavailable optional fallback produces a useful status without breaking supported detection. |
+| CAM-06 | P1 H/E | Toggle detection off/on; manually capture while it is off. | Detection state updates; manual full-frame capture still works; re-enable resumes detection. |
+| CAM-07 | P1 H/E | Set rotation to 0/90/180/270; capture at each setting; reload. | Stream and saved image match selected rotation; preference persists. |
+| CAM-08 | P1 I | Submit unsupported rotation, nonnumeric rotation, and missing scanner. | Useful errors; previous rotation/data stay valid. |
+| CAM-09 | P1 H/E | Reset focus on a supported camera; repeat while a sweep is running. | Background sweep reports progress/result; repeated request reports already focusing rather than overlapping sweeps. |
+| CAM-10 | P1 H/E | Toggle continuous autofocus, then lock focus and restart. | Camera uses selected focus behavior; saved locked position is restored where supported. |
+| CAM-11 | P1 H/I | Request focus controls on a camera without manual focus. | Unsupported-control error; camera feed/scanning continues. |
+| CAM-12 | P1 H/U | Set refocus interval to 0, 1, and N; capture N+1 cards. | 0 disables periodic probes; positive intervals refocus at the configured capture boundary. |
+| CAM-13 | P1 I | Set negative/nonnumeric refocus interval; restart after a valid change. | Invalid input is rejected and previous value returned; valid interval persists. |
+| CAM-14 | P0 H/E | Draw fixed area around a sleeved card; enable it and capture. | Readiness uses the selected region and saved AI image is exactly that region. |
+| CAM-15 | P1 H/E | Choose Use detected card, then repeat without a detection. | First action derives a region with margin; second reports no detected card. |
+| CAM-16 | P1 I/E | Enable fixed area before drawing; draw reversed/tiny/malformed/out-of-bounds coordinates. | Missing/tiny/invalid areas are rejected; bounds are clamped when a valid region remains. |
+| CAM-17 | P1 H/E | Redraw fixed area; toggle off/on; reload/restart. | New area takes effect and persists; disabling returns to outline detection. |
+| CAM-18 | P0 H/E | Rotate camera while fixed area is enabled. | Fixed area is disabled as required; client is notified and stale coordinates cannot crop the wrong region. |
+| CAM-19 | P2 H/E | Disconnect camera during streaming/capture, then restart with it restored. | Failure is visible, no bogus card is added, and restarting restores usable capture. |
+
+## 3. Capture, automatic scanning, and sounds
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| SCAN-01 | P0 I/H/E | Manually capture a detected card. | Image is saved; capture event, recognized fields, printing, finish, and price appear. |
+| SCAN-02 | P1 I/H | Manually capture with no outline. | Full frame is captured; unreadable input is handled without inventing a confirmed match. |
+| SCAN-03 | P1 I | Simulate image-save/capture failure. | Error is emitted; no inventory/review entry falsely claims a successful capture. |
+| SCAN-04 | P0 H/U | Enable auto capture; leave one card stationary through multiple capture delays. | Exactly one capture occurs until a new-card arrival is detected. |
+| SCAN-05 | P0 H/U | Drop two visually identical copies successively after the capture signal. | Two captures occur, resulting in two copies rather than one or a duplicate burst. |
+| SCAN-06 | P0 H/U | Introduce a hand, outline flicker, focus movement, and lighting change without replacing the card. | No extra capture of the same physical card. |
+| SCAN-07 | P0 H/E | Disable automatic adds; auto capture a card, drop the next before Add, then Add/Skip. | Scanning waits for disposition; next settled card is captured after disposition. |
+| SCAN-08 | P0 I/E | Enable automatic adds; process exact matches alongside ambiguous/unreadable cards. | Confirmed cards add one Near Mint copy to Scanned; uncertain cards queue for review; capture continues. |
+| SCAN-09 | P0 I/E | Delay AI while capturing several cards. | Processing counter reflects pending work; results map to their own captures; each image is processed once. |
+| SCAN-10 | P1 I/E | Stop/restart auto capture while waiting, focusing, and processing. | Stop prevents new automatic captures and resets waiting state; already captured work is accounted for. |
+| SCAN-11 | P1 I/E | Toggle automatic adds and OCR-first, then reload/restart. | Saved choices are restored; stability policy changes with automatic-add mode. |
+| SCAN-12 | P0 I/E | Set Scan into location; scan more cards; change location and scan again. | Each addition uses its capture workflow's applicable location; existing entries retain their locations. |
+| SCAN-13 | P1 I/E | Set location to blank, whitespace, and more than 60 characters. | Blank clears location; whitespace is trimmed and accepted length is limited consistently. |
+| SCAN-14 | P0 H/E | Capture with focus check enabled; observe beep timing. | Capture signal occurs after the image is taken; dropping next card after the signal cannot alter that image. |
+| SOUND-01 | P1 E | Enable/disable sound; set volume 0/30/100; reload/restart. | Preference persists; muted/zero volume is silent; enabled effects use chosen volume. |
+| SOUND-02 | P2 E | Use a browser with suspended/unsupported Web Audio. | User interaction enables supported audio; audio failure does not block scanning. |
+| SOUND-03 | P1 I/E | Submit volume below 0, above 100, and malformed values. | Values are bounded or rejected; stored sound state remains usable. |
+
+## 4. OCR, AI identification, search, and finishes
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| READ-01 | P0 U/I | OCR returns an exact confirmed printing with OCR-first enabled. | Printing resolves without a vision AI identification call; reading source is reported correctly. |
+| READ-02 | P0 U/I | OCR returns ambiguous/unknown text, or service is unavailable. | Vision AI fallback is attempted where configured; uncertainty is never silently auto-added. |
+| READ-03 | P1 I | Disable OCR; capture a card. | Identification goes through vision AI; unavailable OCR is not required. |
+| READ-04 | P1 U | Parse labeled, markdown-wrapped, unlabeled, partial, empty, and malformed AI responses. | Supported forms normalize fields; unreadable/missing values remain unknown rather than guessed. |
+| READ-05 | P0 U/I | Provide name + number, set + number, conflicting fields, and name-only matches. | Only match types that confirm a printing auto-add; ambiguous/conflicting evidence is reviewed. |
+| READ-06 | P1 U/I | Search with leading zeros, suffix numbers, case variation, punctuation, accents, and a double-faced front name. | Intended card/printing resolves without stripping meaningful identifying characters. |
+| READ-07 | P0 I/E | Leave name empty; manually search a valid set code + number. | Exact printing can be found from printed identifiers alone. |
+| READ-08 | P0 I/H | Capture an unreadable name with readable set/number. | Identifier-only reading is either resolved safely or queued with capture intact; no capture is lost. |
+| READ-09 | P1 E/I | Search by name alone, name + number, name + set + number, and treatment. | Appropriate matching printings appear; treatment filters variants correctly. |
+| READ-10 | P1 E | Press Enter separately in each search field; correct prefilled capture fields. | Search runs consistently and the corrected selection replaces the previous candidate. |
+| READ-11 | P1 E/I | Search an unknown/partial/misspelled name; select a similar suggestion. | No-match/suggestions are clear; selected result becomes the current card. |
+| READ-12 | P0 I/E | Select one of multiple printing thumbnails; add it. | Stored ID/set/number/image/price match selected printing exactly. |
+| READ-13 | P0 U/I | Read star, dot, unclear, and cropped-away foil markers; use foil-only printing. | Suggested finish and reason follow marker/printing availability; unknown does not imply foil. |
+| READ-14 | P0 E/I | Select every supported finish on representative MTG/Pokémon printings. | Only available finishes are offered; price and stored finish follow the selected variant. |
+| READ-15 | P1 E/I | Identify Pokémon `012/193` with name, with set abbreviation, and without name. | Unique set+number or name+number+total confirms printing; leading zeros are normalized safely. |
+| READ-16 | P0 U/I | Use Pokémon name/number shared by multiple sets, missing total, and conflicting set. | No ambiguous printing is automatically added; review/manual correction is available. |
+| READ-17 | P1 U/I | Identify Pokémon suffix cards, basic Energy, and secret rare above set total. | Suffix/type and printed number remain meaningful; correct candidate or explicit uncertainty results. |
+| READ-18 | P1 E/H | Capture Pokémon reverse holo; manually select reverse holo before add. | UI does not promise image recognition of reverse holo; manual selection persists with its price. |
+| READ-19 | P1 I | Simulate missing, null, zero, and failed price fetches for both games. | Missing price is shown honestly; card identification/add remains usable without fabricated value. |
+| READ-20 | P0 I | Delay price fetch; split/edit/delete the added row before fetch completes. | Late update affects only applicable surviving rows; it cannot change another printing/finish or resurrect a deletion. |
+
+## 5. Review queue and undo
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| REVIEW-01 | P0 I/E | Queue ambiguous, not-found, and unreadable captures. | Queue count increases once per capture; AI fields, suggested match, and image are retained. |
+| REVIEW-02 | P1 I/E | Open review with multiple items. | Oldest active-game item appears with total/count and capture beside candidate. |
+| REVIEW-03 | P0 E/I | Correct a review item's search/printing/finish/quantity and Add. | Corrected card enters Scanned once; resolved item/image copy is removed; next item opens. |
+| REVIEW-04 | P1 E/I | Skip/Delete an item; close queue midway; reopen/restart. | Skipped item is removed; unresolved items persist in order across close and restart. |
+| REVIEW-05 | P0 I/E | Capture another card while review is open. | New result queues rather than overwriting the reviewed item or its image. |
+| REVIEW-06 | P1 I/E | Review an item with missing capture or stale card ID. | Item remains correctable/skippable with clear missing content; no crash or silent discard. |
+| REVIEW-07 | P0 I/E | Open review in client A; attempt to resolve from client B; disconnect A. | Review ownership behavior is explicit; no double resolution; disconnect clears stale client ownership. |
+| REVIEW-08 | P1 E/I | Open an empty review queue or resolve its final item. | Empty state/count and scanner review state reset cleanly. |
+| UNDO-01 | P0 I/E | Add a new row, then Undo. | Exactly the last addition and its associated capture are removed. |
+| UNDO-02 | P0 I/E | Add two copies into an existing three-copy row, then Undo. | Original three copies and captures remain; only the two added copies are reversed. |
+| UNDO-03 | P1 I/E | Undo with no prior addition; repeat Undo; delete/transfer/restore after an add and then Undo. | No unrelated row is modified; unavailable/stale undo is handled explicitly. |
+
+## 6. Scanned inventory and collection transfers
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| TRANSFER-01 | P0 I/E | Scan/add a card; inspect Scanned and Collection separately. | Card exists only in Scanned until transferred; collection totals are unchanged. |
+| TRANSFER-02 | P0 I/E | Add Scanned to Collection with no location override. | Active-game rows merge by printing/condition/finish/location; scanned locations/captures are preserved. |
+| TRANSFER-03 | P0 I/E | Transfer with an existing or new location override. | All moved copies use chosen location; matching target rows merge; other games stay untouched. |
+| TRANSFER-04 | P1 I/E | Cancel transfer dialog; transfer empty scanned area; repeat successful transfer. | Cancel changes nothing; empty/repeated transfer cannot add duplicates. |
+| TRANSFER-05 | P0 I | Interrupt transfer between target write and source removal; restart and run recovery. | Each copy exists exactly once after recovery; no lost or double-counted batch/capture. |
+| TRANSFER-06 | P0 I | Scan/add concurrently with transfer. | Defined transfer boundary preserves every addition exactly once in Scanned or Collection. |
+| TRANSFER-07 | P0 I/E | Transfer into an existing row, select its Added batch, Remove this batch. | Only batch-attributed copies are removed; pre-existing copies remain. |
+| TRANSFER-08 | P0 I | Split/merge/delete some batch copies, then remove that batch. | Only remaining attributable copies are removed; counts never become negative or affect unrelated batches. |
+| TRANSFER-09 | P0 I/E | Clear Scanned, then clear Collection with another game populated. | Each clear affects only selected area/active game; other area and game remain intact. |
+
+## 7. Inventory editing, filtering, bulk actions, and captures
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| INV-01 | P0 U/I | Add same printing/condition/finish/location twice; vary each key separately. | Exact keys merge quantities; differing printing, condition, finish, or location create separate rows. |
+| INV-02 | P1 E/I | Edit quantity, condition, location, and tags; reload. | Values persist and totals update; tags normalize/deduplicate consistently. |
+| INV-03 | P0 I/E | Set quantity to 0/negative; submit fractional/nonnumeric/very large values. | UI/API behavior is consistent and explicit; invalid input cannot corrupt counts or silently add copies. |
+| INV-04 | P0 U/I/E | From three regular copies, change finish on one copy. | Two regular remain and one new-finish copy exists; appropriate finish price and capture follow it. |
+| INV-05 | P0 U/I/E | Move one of three copies to Binder; move all remaining copies afterward. | First edit splits 2+1; full move leaves no empty source and merges compatible destination rows. |
+| INV-06 | P0 I | Change finish/location without split quantity; submit split 0/negative/above stack size. | Default one-copy split is consistent; invalid splits are rejected or bounded without quantity loss. |
+| INV-07 | P0 I/E | Change an entry to another printing of the same card, including an imported row without ID. | Set/number/ID/rarity/image/price update; transferred copies keep their captured evidence. |
+| INV-08 | P0 I | Attempt printing change to another card, unknown ID, or unsupported finish. | Request is rejected; original row and quantities are unchanged. |
+| INV-09 | P0 U/I | Edit a row until it matches another row. | Rows merge quantities and tags, preserve captures, and do not double-count value. |
+| INV-10 | P1 E | Navigate previous/next in edit dialog with unsaved changes; cancel and save. | Unsaved-change choice is honored; correct filtered row is edited and navigation remains valid after a merge. |
+| INV-11 | P1 E/I | Delete a row; cancel deletion; delete missing ID. | Confirmation cancellation preserves data; confirmed deletion removes only target; missing ID gives useful failure. |
+| INV-12 | P1 E | Apply text search to name/set/type/rarity/location/tag; vary case and enable Not. | Correct rows match; Not reverses text matching; blank text does not hide everything. |
+| INV-13 | P1 E | Filter color identity, type, rarity, set, finish, location including none, tag, and Added individually and together. | Filter intersection matches fixtures; option lists and totals update correctly. |
+| INV-14 | P1 E | Apply price min/max equal to a card's price, one-sided bounds, and min greater than max. | Boundary inclusion is consistent; contradictory range has a clear empty result. |
+| INV-15 | P1 E/I | Enable Not in a deck; then No use in my decks with EDHREC success/partial failure. | Deck-used cards are excluded; recommendations are excluded only with available data and unknown coverage is visible. |
+| INV-16 | P1 E | Exercise every offered sort in each direction with ties/empty prices; reload. | Numeric values/numbers sort correctly; remembered sort is restored without losing rows. |
+| INV-17 | P1 E | Toggle list/grid; clear filters; use empty inventory/no matches. | Both views show same rows; clear restores all; empty states are actionable. |
+| INV-18 | P0 E/I | Select filtered rows; bulk condition/location/add tag/remove tag/delete, including canceled dialogs. | Only selected IDs change; merging keeps totals; cancellation changes nothing. |
+| INV-19 | P1 I/E | Bulk action with no IDs, duplicate IDs, missing IDs, or unknown action. | Useful result/error; no duplicate application or unrelated mutation. |
+| INV-20 | P0 E/I | Select inventory rows and Add to deck. | Correct names/quantities enter chosen deck; inventory quantities stay unchanged. |
+| INV-21 | P1 E/I | Hover/tap capture thumbnail; open a merged stack and navigate captures. | All retained captured copies render in popover/large view in expected order. |
+| INV-22 | P0 U/I | Reduce quantity, split, merge, move, and delete rows with multiple captures. | Capture associations follow copies; trimmed/deleted rows leave no broken references or unrelated deletions. |
+| INV-23 | P2 E | Disable browser storage, then sort/switch views/reload. | Interface stays usable even when preferences cannot be saved. |
+
+## 8. CSV import and exports
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| IO-01 | P0 I/E | Export CSV from each game/area; import into an empty matching game/area. | Names, set/number, quantity, condition, finish, prices, locations, and tags round-trip; captures are not expected in CSV. |
+| IO-02 | P0 U/I | Import CSV matching an existing row, plus a distinct row. | Matching quantity increases; distinct row is added; added/updated counters are accurate. |
+| IO-03 | P0 I/E | Import with replace enabled, keeping another area/game populated. | Only chosen game/area is replaced; canceling UI confirmation changes nothing. |
+| IO-04 | P1 U/I | Import legacy Foil/Surge columns and CSV without optional fields. | Legacy flags map correctly; defaults apply to missing quantity/condition/finish/location/tags. |
+| IO-05 | P1 U/I | Include missing name/set, unsupported finish, and malformed rows among valid rows. | Bad rows are skipped/count as errors as appropriate; valid rows and summary remain accurate. |
+| IO-06 | P1 U/I | Import blank/nonnumeric/zero/negative quantity and malformed currency. | Documented current fallback applies: quantity at least 1/default 1 and unparseable price 0; no crash. |
+| IO-07 | P1 I | Upload no file, empty filename, non-CSV file, empty CSV, UTF-8/BOM CSV, quoted commas/newlines. | Upload validation is clear; valid CSV escaping is preserved; encoding/header failures are visible. |
+| IO-08 | P0 I | Fail during a replace import or run two uploads with same filename/time. | No silent loss from partial replacement or upload collisions; report failures and verify recovery. |
+| IO-09 | P1 E/I | Export MTG Moxfield format across finishes/conditions; try it for Pokémon and unknown format. | Supported output follows game exporter; unsupported formats fail clearly without mutation. |
+| IO-10 | P1 E | Download empty/nonempty exports. | Valid filename/content type and readable headers/output; downloading does not change data. |
+
+## 9. Deck management, search, ownership, and rules
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| DECK-01 | P0 I/E | Create an empty deck in each of Commander/Standard/Pioneer/Modern/Legacy/Vintage/Pauper. | Selected format/name persists; deck appears in active game's list. |
+| DECK-02 | P1 I/E | Create with commander; rename/change format/notes; duplicate; delete/cancel delete. | Changes persist; duplicate has independent rows; deletion/cancellation affects only intended deck. |
+| DECK-03 | P1 I | Submit invalid format/board, nonexistent deck ID, and malformed quantity. | Useful errors and no unintended deck/inventory mutation. |
+| DECK-04 | P0 I/E | Add, increment, decrement, set quantity, and remove a card in each board. | Board quantities are correct; zero removes a row; repeated names merge appropriately. |
+| DECK-05 | P0 I/E | Move cards main ↔ side ↔ commander with same card already at destination. | Destination combines counts correctly; no loss/duplication; size/issues recalculate. |
+| DECK-06 | P0 I/E | Choose another printing from row set code; reload/export/duplicate deck. | Choice persists and drives displayed printing/price without changing collection ownership. |
+| DECK-07 | P1 I/E | Search name/type/rules text/mana value/rarity/colors/identity/format independently and combined. | Results satisfy requested filters and contain usable card details. |
+| DECK-08 | P1 I/E | Search owned-only, commander colors, and Not in other decks. | Owned printing preference is correct; color constraints and other-deck exclusions match fixtures. |
+| DECK-09 | P1 I/E | Load further search pages; change filters before delayed previous search returns. | No duplicate/skipped result pages; stale response cannot replace current search. |
+| DECK-10 | P1 I/E | Use old card data lacking deck fields. | Update card database prompt appears; unsupported search/rule data is not falsely presented as complete. |
+| DECK-11 | P0 I/E | Request four copies while owning two in multiple finishes/locations. | Owned 2, missing 2; ownership is summed correctly and never exceeds requested copies. |
+| DECK-12 | P0 I/E | Put same card in two decks with limited inventory; add/remove it in one. | Shared-demand indicators update in both; inventory is never reserved, decremented, or increased by deck edits. |
+| DECK-13 | P1 E/I | Sort decks by every offered order; filter format and deck/commander name. | Order/filter matches metadata, size, owned percentage, and missing counts, including empty decks. |
+| RULE-01 | P0 U/I | Check Commander decks at 99/100/101 cards, including commander. | 99 warns incomplete; 100 has no size issue; 101 reports excess; edits remain allowed. |
+| RULE-02 | P1 U/I | Check constructed main decks at 59/60/61 and sideboards 15/16. | Below 60 warns; 60+ accepted for size; 16 sideboard reports excess. |
+| RULE-03 | P0 U | Check singleton/4-copy boundaries over main and side; repeat with basic lands, unlimited and limited-copy text. | Limits and card-specific exceptions are applied; Commander considering board is excluded. |
+| RULE-04 | P1 U/I | Add banned/not-legal/restricted cards in corresponding formats. | Correct issues; restricted limit is one; legality issues inform rather than block editing. |
+| RULE-05 | P1 U/I | Use no commander, unsuitable commander, supported pair, unsupported pair, and more than two. | Appropriate warnings/errors; supported pairing avoids generic pairing warning. |
+| RULE-06 | P0 U/I | Add an outside-color card, colorless card, and cards under paired commanders' combined colors. | Identity check uses combined commander identity; valid cards pass and outside colors are listed. |
+| RULE-07 | P1 U/I | Include unknown names and cards without legality/oracle data. | Unknowns are flagged as unchecked; missing data does not falsely prove deck legality. |
+| RULE-08 | P1 E/I | Inspect mana curve, deck price, ownership, and completion cost; change printing/quantity. | Charts/totals update from the correct playable boards and per-copy prices; no NaN for missing values. |
+
+## 10. Deck import/export, recommendations, and preconstructed decks
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| DECKIO-01 | P0 U/I/E | Paste plain, `4x`, Arena/Moxfield-style lists with section headings, set/number, foil/tags/comments. | Names/quantities/boards/printing references parse correctly; notes are not part of card names. |
+| DECKIO-02 | P1 U/I | Parse blank-line sideboard separation in constructed and Commander lists. | Constructed sideboard is recognized; Commander blank lines do not misclassify main cards. |
+| DECKIO-03 | P0 I/E | Import into a new/existing deck using append and replace modes. | Correct merging/replacement; unresolved names are reported; inventory unchanged. |
+| DECKIO-04 | P1 I/E | Import supported Moxfield and Archidekt deck URLs. | Deck name/format/boards/cards map correctly; printing references resolve when available. |
+| DECKIO-05 | P1 I/E | Import unsupported/private/deleted URLs or simulate timeout/malformed response. | Clear failure, no misleading success or half-created deck. |
+| DECKIO-06 | P0 U/I/E | Export text and reimport; download Buy list with fully/partly/unowned cards. | Text preserves deck counts/boards supported by format; Buy list includes only missing quantities. |
+| REC-01 | P1 I/E | Open Commander suggestions with one or paired commanders. | Categories/inclusion frequencies appear; owned-only filter and add-to-deck work. |
+| REC-02 | P1 I/E | Import EDHREC average deck. | Correct entries populate deck; unknowns reported; inventory remains unchanged. |
+| REC-03 | P1 I/E | Load Popular decks with both providers healthy, one failed, and both failed. | Available results remain visible; source-specific errors are understandable. |
+| REC-04 | P1 I/E | Run commander ideas with owned legal commanders, no commanders, and duplicated inventory rows. | Candidates deduplicate; weighted fit/ranking reflects owned recommendations; empty result is clear. |
+| REC-05 | P1 I/E | Run precon ideas where a deck needs four copies but only two are owned. | Owned fraction uses min(required, owned), not name presence alone. |
+| REC-06 | P1 I/E | Build around an owned card with format and Not in a deck filter. | Legal owned candidates appear; returned public decks rank by owned proportion. |
+| REC-07 | P1 I/E | Start/stop/restart each idea search; poll during and after; replace a running search. | Progress/state is consistent; stopped results remain; old workers cannot mix into the new run. |
+| REC-08 | P1 I | Submit unknown idea kind, missing card, invalid format, or switch game during a run. | Useful validation; no result silently attributed to a different game/card/format. |
+| REC-09 | P2 I | Repeat recommendations with fresh/expired cache; simulate rate-limit/empty/malformed responses. | Cache avoids redundant work where intended; failure does not disable local collection/deck features. |
+| PRECON-01 | P1 E/I | Search precons by name/set code/year; Open as deck. | Correct deck list is copied independently; collection does not change. |
+| PRECON-02 | P0 I/E | Choose I own it with default and custom location. | Exact supplied printings/foils and quantities add Near Mint inventory; deck opens; counts/prices reflect contents. |
+| PRECON-03 | P0 I/E | Own same precon twice; cancel own dialog; encounter unresolved printing or failed source. | Repeated ownership represents another box with intentional quantity increase; cancel changes nothing; unresolved/partial load is reported accurately. |
+| PRECON-04 | P1 I | Request unknown precon file and traversal-like filename. | Invalid source is rejected without reading arbitrary files or creating inventory/deck data. |
+
+## 11. Statistics
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| STATS-01 | P0 I/E | Load the six-copy/$19 MTG fixture; inspect stats and inventory summary. | Copies total 6 and value $19; distinct entry count is not confused with quantity. |
+| STATS-02 | P1 E/U | Switch statistics between card count and value. | Color/type/rarity/finish/set/location groups sum correct quantities or quantity × price. |
+| STATS-03 | P1 E/U | Use multi-tag, untagged, multicolor/colorless, unknown type/rarity rows. | Buckets are labeled meaningfully; multi-tag membership may count a row in multiple tag groups and is not mistaken for global total. |
+| STATS-04 | P1 E | View Most valuable with ties, missing prices, and more than ten rows. | Up to ten highest unit-price rows appear in correct order with finish/set labels. |
+| STATS-05 | P1 I/E | Add/edit/split/delete/import/transfer/clear and switch games. | Stats refresh to active collection/game; empty stats contain zeros rather than NaN. |
+
+## 12. Backups and restore
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| BACKUP-01 | P0 I/E | Back up populated collection, Scanned, decks, and captures with note. | Backup includes all three stores across games, metadata/counts/note, and capture files. |
+| BACKUP-02 | P1 I/E | Create two backups in same second; list with long note. | IDs are unique; list newest first; note is trimmed/limited to 80 characters. |
+| BACKUP-03 | P0 I/E | Edit/delete all backed-up data/captures; restore backup. | Saved rows and captures return; pre-restore state is automatically backed up; undo pointer is reset. |
+| BACKUP-04 | P0 I/E | Restore the automatic pre-restore backup. | The state replaced by previous restore is recovered accurately. |
+| BACKUP-05 | P1 I | Restore older schema backup after adding columns. | Shared columns restore; new columns retain defaults; valid foreign associations survive. |
+| BACKUP-06 | P0 I | Inject write/space/lock failure during create and during each restore stage. | No incomplete backup is listed; partial restore is explicitly reported with prior-state backup available. |
+| BACKUP-07 | P1 I/E | Delete/cancel deletion; use missing/corrupt/traversal backup IDs. | Cancel preserves backup; valid deletion affects only that backup; invalid IDs fail safely; corrupt entries do not break list. |
+| BACKUP-08 | P1 I | Make more than five automatic backups and several manual backups. | Only newest five automatic backups remain; manual backups persist until explicitly deleted. |
+| BACKUP-09 | P0 I | Change settings/card data/review after snapshot, then restore. | Collection backup restores its documented scope; settings, downloaded card data, and review queue are not rolled back. |
+| BACKUP-10 | P1 I | Simulate unsupported hard links and absent capture file during create/restore. | Copy fallback works; missing images do not invalidate unaffected inventory; restoration limitations are visible. |
+
+## 13. AI settings, credentials, prompts, and debugging
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| AI-01 | P1 I/E | Select Gemini/OpenAI/Anthropic/local with valid stub credential/endpoint and model; restart. | Selected provider/model is used and persisted; model lists/status match settings. |
+| AI-02 | P1 I/E | Select unknown provider/model or cloud provider without credential. | Useful failure; previously working scanner configuration remains usable. |
+| AI-03 | P1 I/E | Discover local models via supported Ollama/OpenAI-compatible endpoints; return empty/timeout/malformed list. | Available models display; failures/empty list do not hang settings. |
+| AI-04 | P1 I | Warm up local model when auto capture starts; simulate slow/failed warm-up. | Successful warm-up reduces first-use delay; failure is visible and does not falsely add a card. |
+| KEY-01 | P0 I/E | Save/change/remove each key; inspect credential-status response and saved file permissions. | Runtime changes apply; cloud keys are masked; file permissions are owner-only; full keys are not returned. |
+| KEY-02 | P1 I | Save unknown provider, multiline key, invalid local endpoint, and blank value. | Invalid values rejected; valid HTTP(S) endpoint accepted; blank clears saved override. |
+| KEY-03 | P1 I | Configure base `.env` plus saved override; clear override and restart. | Saved value takes precedence; base key may reappear after restart, matching documented behavior. |
+| PROMPT-01 | P1 I/E | Open prompts for each game/provider/model. | Correct tabs, effective instructions, source, built-in text, and fixed answer format appear. |
+| PROMPT-02 | P1 U/I/E | Save all-model instructions, then model override; switch model/game. | Lookup is model → all-model → built-in; edits remain scoped to correct game/kind. |
+| PROMPT-03 | P1 U/I/E | Reset model override, then all-model edit, then reset again. | Each reset exposes next fallback; final reset is a harmless built-in state. |
+| PROMPT-04 | P1 I | Save empty text, unknown kind, text over 8,000 characters, and model scope without active model. | Validation errors; saved prompt remains intact and fixed answer format cannot be overwritten. |
+| PROMPT-05 | P0 I/E | Test unsaved identification prompt on last capture. | Raw answer, parsed fields, timing, and match confidence return only to requesting client; no prompt/inventory mutation. |
+| PROMPT-06 | P1 I/E | Test with no AI, no capture, empty prompt, or foil prompt without outline crop. | Specific errors; no background task claims success. |
+| PROMPT-07 | P1 I | Test foil prompt with star/dot/unclear and simulate API failure. | Foil parse or useful error returns; existing card/review data stays intact. |
+| DEBUG-01 | P1 I/E | Toggle trace and saved Flask debug mode; reload/restart. | Trace persists; debug UI distinguishes saved preference from running mode and restart requirement. |
+| DEBUG-02 | P2 I/H | Cause slow/doubtful capture with tracing enabled; inspect logs/debug frames. | Useful traces/frame dumps are produced with bounded retention and do not interfere with scanning. |
+
+## 14. Card database, migrations, configuration, and maintenance
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| DATA-01 | P0 I | Download initial MTG/Pokémon data with progress stubs. | Searchable counts/details/indexes initialize; deck fields are available for supported MTG data. |
+| DATA-02 | P0 I | Update existing data successfully; fail download/parse/write mid-update. | Success replaces data coherently; failure retains usable previous data and collection/decks. |
+| DATA-03 | P1 I/E | Run scheduled/startup update check with newer/no-change/unavailable source. | New-data notice is accurate; unavailable check does not prevent app startup. |
+| DATA-04 | P1 I/E | Start update repeatedly and rebuild while update is active. | Conflicting jobs are prevented or serialized; progress/completion reflects actual operation. |
+| DATA-05 | P0 I | Rebuild card database with both games, inventories, decks, review, and settings populated. | Intended card-data reset/redownload succeeds; user-created data is preserved. |
+| DATA-06 | P0 I | Open legacy inventory schemas lacking game/location/captures fields; repeat startup. | Migration preserves quantities/finishes, makes migration backups where implemented, and is repeatable without duplicates. |
+| DATA-07 | P1 U/I | Load valid/missing/malformed YAML, environment substitutions, corrupt/missing settings JSON. | Configuration errors are actionable; settings fall back to defaults as implemented; valid preferences override configured defaults. |
+| DATA-08 | P0 I | Interrupt settings/prompt save and restart; simulate disk full/read-only data. | Atomic-file writes preserve last complete file; write failure is visible instead of falsely reporting persistence. |
+| CLEAN-01 | P1 U/I | Clean images older than cutoff; include newer files, other extensions, and subdirectories. | Only eligible old image files are removed; count/freed space are correct. |
+| CLEAN-02 | P1 U/I | Run dry-run, clean-all, missing directory, and deletion-error cases. | Dry-run changes nothing; clean-all affects designated images; per-file errors do not abort other cleanup. |
+| CLEAN-03 | P0 I | Clean original scans while inventory captures, review copies, and backups reference them. | Preserved thumbnails/review/backup evidence remains usable after original scans expire. |
+| OPS-01 | P1 I | In disposable deployment, run start/service scripts and archive backup script. | App starts with intended working directory/config and logs; archive covers documented full backup scope. |
+| OPS-02 | P1 I | Shut down/restart during queued processing and compare capture/accounting totals. | No duplicate additions; any nonpersistent in-flight work is identified as a recovery limitation rather than counted as completed. |
+
+## 15. API, browser robustness, accessibility, and workload
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| API-01 | P1 I | Exercise every documented route with valid method/query/body, plus wrong methods. | Correct content types and success payloads; unsupported methods fail without side effects. |
+| API-02 | P0 I | Repeat row mutation by ID across wrong active game and `area=scan`/collection. | Mutations cannot unintentionally target another game/area; record any missing scope validation as a defect. |
+| API-03 | P1 I | Send missing/null/wrong-type JSON fields, malformed JSON, invalid query offsets, and unavailable components. | Actionable errors; no uncaught exception or corrupted state. |
+| API-04 | P0 I/E | Submit HTML/script-like card names, tags, locations, deck names, notes, and AI text. | Values render as text, never execute script or break dialogs. |
+| API-05 | P0 I | Request traversal paths in capture/review routes and malicious upload filenames. | Files outside designated directories are inaccessible and unwritable. |
+| API-06 | P1 I/E | Disconnect/reconnect Socket.IO during capture, add, review, and settings changes. | Client refreshes actual state; retries do not silently double-add; failed actions are visible. |
+| API-07 | P0 I | Concurrent add/update/delete/transfer/backup operations using distinct clients. | Database locks protect quantities/associations; no deadlock, lost update, or mixed snapshot. |
+| UI-01 | P1 E | Use scanner/collection on desktop and narrow phone viewport. | Controls, tables/grid, dialogs, capture viewer, and deck panels remain usable without blocked actions. |
+| UI-02 | P2 E | Operate search, tabs, dialogs, switches, quantity buttons, and confirmation with keyboard only. | Focus is visible and logical; dialogs can be exited; controls have meaningful accessible names. |
+| UI-03 | P2 E | Test slow/failed fetch, missing card images, empty results, and long labels. | Loading/error/empty states are understandable; layout remains usable; failed requests do not appear successful. |
+| UI-04 | P1 E | Perform collection edits in one tab while scanner is open in another. | Counts/data refresh coherently on notification or reload; stale UI cannot conceal data loss. |
+| LOAD-01 | P1 I/E | Load 10,000+ inventory rows and large decks; filter/sort/render/import/export. | Operations complete within agreed device-specific budgets with correct totals and responsive controls. |
+| LOAD-02 | P0 I/H | Scan a counted stack of 100 cards with repeated/ambiguous copies and delayed AI. | Captured = added + unresolved review + explicitly skipped/failed work; no unexplained losses or duplicate copies. |
+| LOAD-03 | P2 I/H | Run a prolonged scan session with trace, price fetches, and repeated review. | Memory, worker count, disk use, and queue latency stay within measured deployment budgets. |
+
+## Suggested execution order and automation
+
+1. **Smoke:** BOOT-01, GAME-01, CAM-01, SCAN-01, READ-12, SCAN-08, REVIEW-03, TRANSFER-02, INV-04, IO-01, DECK-01, BACKUP-03.
+2. **Data integrity gate:** remaining P0 cases, with before/after database snapshots and distinguishable capture files.
+3. **Feature regression:** P1 cases, parameterized across supported games, finishes, areas, and formats where applicable.
+4. **Hardware/usability:** camera cases on USB and Pi hardware, browser/mobile coverage, then P2 and workload measurements.
+
+Automate parsers, finish selection, matching, quantity/split/merge/undo/batch logic, and deck rules as unit tests. Use Flask and Socket.IO test clients with temporary SQLite stores and stubbed services for integration tests. Use browser tests for filters, dialogs, persistence, selection, and downloads. Keep camera readiness/beep/drop/focus validation as recorded-frame tests plus physical acceptance tests. Agree performance targets on the intended device before marking workload cases pass or fail.
+
+For each execution record: case ID and parameter values, application revision, device/browser, fixture version, actual result, pass/fail/blocked, and defect/evidence link. External live-site checks are separate smoke checks; deterministic regression tests must not rely on changing prices, deck listings, model output, or API availability.
