@@ -813,12 +813,13 @@ def get_inventory():
             cards = inventory_area().get_all_cards(game.id)
             # What the collection page shows and filters with beyond the stored columns
             details = game.card_details([card['card_id'] for card in cards])
-            # The decks that use each card (by name; not for the scanned cards)
+            # The decks that use each card (not for the scanned cards)
             in_decks = deck_store.needed_by_name(game.id, commander_formats(game)) \
                 if game.deck_formats and inventory_area() is inventory else {}
+            placed = copies_by_location(cards)
             for card in cards:
                 card['details'] = details.get(card['card_id'], {})
-                card['decks'] = [used['deck'] for used in in_decks.get(search_key(card['name']), [])]
+                card['decks'] = decks_using(card, in_decks, placed)
 
             return jsonify({
                 'success': True,
@@ -1114,6 +1115,28 @@ def clear_inventory():
 
 def commander_formats(game):
     return [key for key, rules in game.deck_formats.items() if rules.get('commander')]
+
+
+def copies_by_location(cards):
+    """{(search_key(card name), location in lower case): copies} of inventory entries"""
+    placed = {}
+    for card in cards:
+        key = (search_key(card['name']), card['location'].strip().lower())
+        placed[key] = placed.get(key, 0) + card['quantity']
+    return placed
+
+
+def decks_using(card, in_decks, placed):
+    """
+    Names of the decks an inventory entry counts for. A deck lists card names, not copies, so the
+    location tells them apart: a deck whose cards are all at the location named after it (a
+    precon added with "I own it", a deck sorted into its own box) uses those copies, and the same
+    card in another place is free. A deck without its copies there uses the card wherever it is.
+    """
+    key, location = search_key(card['name']), card['location'].strip().lower()
+    return [used['deck'] for used in in_decks.get(key, [])
+            if location == used['deck'].strip().lower()
+            or placed.get((key, used['deck'].strip().lower()), 0) < used['quantity']]
 
 
 def deck_format_for(game, site_format, entries):

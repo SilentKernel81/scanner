@@ -798,9 +798,13 @@ and the statistics are computed in the browser from that one response; rows rend
 time. Selected entries get the bulk bar (`POST /api/inventory/bulk`). Rows also carry `decks`:
 the names of the decks that use the card (by name, `DeckManager.needed_by_name`; a Commander
 deck's considered cards don't count) - shown as a badge, and hidden by the **Not in a deck**
-tick. The deck builder has the same idea as **Not in other decks** on the card search
-(`free=1&deck_id=` → `search_cards(exclude_names=)`) and on the suggestions (`elsewhere`). It
-goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
+tick. A deck lists names, not copies, so the location decides which copies are its own
+(`decks_using` in `app.py`): when the location named after the deck holds as many copies as the
+deck plays, only the entries there count for it and the same card elsewhere is free (the basic
+lands in a box, next to the ones in ten precons); with fewer copies there - or no such
+location - every entry of the card counts. The deck builder has the same idea as **Not in other decks** on the card search
+(`free=1&deck_id=` → `search_cards(exclude_names=)`) and on the suggestions (`elsewhere`). The deck
+builder goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
 **No use in my decks** goes further, to find what can be sold or given away: it also hides the
 cards EDHREC lists for the commander of one of the decks (`GET /api/inventory/suggested` →
 `Recommendations.commander_cards` per deck with a commander, matched to the owned names by front
