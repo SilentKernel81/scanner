@@ -485,6 +485,18 @@ function closeToCollection(location) {
     if (resolve) resolve(location === null ? null : location.trim());
 }
 
+function decksHeadingHtml(select, labels) {
+    // The "Decks" heading of a location dropdown: a line as wide as the widest entry, so the
+    // word sits in the middle of the list (browsers don't center an <optgroup> label, and
+    // indent the entries under it)
+    const context = document.createElement('canvas').getContext('2d');
+    context.font = getComputedStyle(select).font;
+    const width = text => context.measureText(text).width;
+    const widest = Math.max(...labels.map(width));
+    const dashes = Math.max(4, Math.floor((widest - width(' Decks ')) / (2 * width('─'))));
+    return `<option disabled>${'─'.repeat(dashes)} Decks ${'─'.repeat(dashes)}</option>`;
+}
+
 async function addScannedToCollection() {
     // Resolves true when the cards were moved (the page then reloads its lists)
     try {
@@ -501,9 +513,10 @@ async function addScannedToCollection() {
         const decks = new Set((waiting.decks || []).map(name => name.toLowerCase()));
         const option = location => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`;
         const inDecks = waiting.locations.filter(location => decks.has(location.toLowerCase()));
-        used.innerHTML = '<option value="">Locations you already use...</option>' +
+        const heading = 'Locations you already use...';
+        used.innerHTML = `<option value="">${heading}</option>` +
             waiting.locations.filter(location => !inDecks.includes(location)).map(option).join('') +
-            (inDecks.length ? `<optgroup label="──── Decks ────">${inDecks.map(option).join('')}</optgroup>` : '');
+            (inDecks.length ? decksHeadingHtml(used, [heading, ...waiting.locations]) + inDecks.map(option).join('') : '');
         used.hidden = !waiting.locations.length;
         const input = document.getElementById('to-collection-location');
         input.value = '';

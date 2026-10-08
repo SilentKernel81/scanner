@@ -219,7 +219,7 @@ function fillLocationFilter() {
     const current = select.value;
     select.innerHTML = optionsHtml([['', 'Any location'], ['(none)', '(none)'],
                                     ...places.filter(place => !inDecks.includes(place)).map(place => [place, place])])
-        + (inDecks.length ? `<optgroup label="──── Decks ────">${optionsHtml(inDecks.map(place => [place, place]))}</optgroup>` : '');
+        + (inDecks.length ? decksHeadingHtml(select, ['Any location', ...places]) + optionsHtml(inDecks.map(place => [place, place])) : '');
     select.value = current === '(none)' || places.includes(current) ? current : '';
     select.hidden = false;
 }
