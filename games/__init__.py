@@ -16,9 +16,8 @@ def init(database, settings, log_callback=None):
     """Create the game objects and restore the saved game"""
     global _settings, _active_id
     from games.mtg import Magic
-    from games.pokemon import Pokemon
     _games.clear()
-    for game_class in (Magic, Pokemon):
+    for game_class in (Magic,):
         game = game_class(database, log_callback)
         _games[game.id] = game
     _settings = settings

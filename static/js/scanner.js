@@ -308,7 +308,7 @@ socket.on('inventory_updated', function(data) {
     currentCard = null;
 });
 
-// Prices fetched after an add (Pokémon): new totals, and the list if it is open
+// Prices fetched after an add (games with Game.fetches_prices): new totals, and the list if it is open
 socket.on('inventory_prices_updated', function() {
     loadStats();
     if (isOpen('inventory-modal')) loadInventory();
@@ -353,7 +353,7 @@ function suggestedFinish(card, foilStatus = detectedFoilStatus) {
 }
 
 function cardFinishes(card) {
-    // The game's finishes, only those the printing exists in when the game says (Pokémon)
+    // The game's finishes, only those the printing exists in when the game says
     return card.finish_options ? gameInfo.finishes.filter(([key]) => card.finish_options.includes(key)) : gameInfo.finishes;
 }
 

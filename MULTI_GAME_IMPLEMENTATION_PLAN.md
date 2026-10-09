@@ -1,6 +1,9 @@
 # Multi-Game Support - Implementation Plan
 
-**Status:** phases 1-3 done (Pokémon 2026-09-25), phases 4-5 planned. Replaces the 2025-11 plan, which predated the current
+**Status:** phases 1-2 done. Pokémon (phase 3) was built on 2026-09-25 and removed from this
+project on 2026-10-08, to continue as its own project: its code is in the git history
+(`games/pokemon.py` up to commit 7359f88). Phases 4-5 are not planned here; the `games/`
+interface stays, with Magic as the only game. Replaces the 2025-11 plan, which predated the current
 architecture (online API lookup per scan, YOLO-first detection).
 
 ## Goals

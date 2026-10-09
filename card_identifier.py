@@ -241,7 +241,7 @@ class CardIdentifier:
 
         card_name = values.get('NAME', '')
         number = values.get('NUMBER', '')
-        # A number with the set total ("016/131", Pokémon) anywhere in the value
+        # A number with the set total ("016/131": games that print one) anywhere in the value
         with_total = re.search(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', number)
         collector_number = self._clean_number(with_total.group().replace(' ', '') if with_total else number)
         # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"), maybe followed by the language

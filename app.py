@@ -1954,7 +1954,7 @@ def handle_search(data):
     set_code = (data.get('set_code') or '').strip() or None
     treatment = (data.get('treatment') or '').strip() or None
 
-    # Without a name: set code + number, or a number with the set total ("199/165", Pokémon)
+    # Without a name: set code + number, or a number with the set total ("199/165": games that print one)
     if not card_name and not (collector_number and (set_code or '/' in collector_number)):
         emit('error', {'message': 'Enter a card name, or the set code and number'})
         return

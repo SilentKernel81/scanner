@@ -27,7 +27,6 @@ class Config:
 
     # API URLs
     SCRYFALL_BULK_URL = config.get('api', 'scryfall_bulk', default="https://api.scryfall.com/bulk-data/default-cards")
-    TCGDEX_URL = config.get('api', 'tcgdex', default="https://api.tcgdex.net/v2/en")
 
     # Camera settings
     CAMERA_TYPE = config.get('camera', 'type', default='auto')

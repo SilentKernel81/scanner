@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Camera-based scanner for Magic: The Gathering cards, and Pokémon (Flask + Socket.IO web app). Cards are
+Camera-based scanner for Magic: The Gathering cards (Flask + Socket.IO web app). Cards are
 dropped onto a pile in a box; each new card is found by its outline (OpenCV), captured once,
 identified by a vision AI (Gemini / OpenAI / Anthropic / local Ollama: name, collector number,
 set code, ★/• foil marker), matched to the exact printing in a local Scryfall SQLite database,
@@ -49,7 +49,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | OCR first (light-ocr reader process, parsers, AI fallback) | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `scanner.py`: `identify_card_from_image`; `Game.confirmed_read` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
 | Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `app.py` (`save_prompt`, `test_prompt`) |
-| Card games (the active one drives search, finishes, exports / imports per site: `export_formats`, `import_rows`) | `games/`: `base.Game`, `mtg.Magic`, `pokemon.Pokemon` (TCGdex), `games.active()`; plan in `MULTI_GAME_IMPLEMENTATION_PLAN.md` |
+| Card games (the active one drives search, finishes, exports / imports per site: `export_formats`, `import_rows`) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `MULTI_GAME_IMPLEMENTATION_PLAN.md` |
 | Card data updates (staged import, update check) | `database.py`: `replace_table`, `card_data_info`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
 | Card search / printing match / confidence (Magic) | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add`; automatic adds on the server (`add_automatically`, `Game.suggested_finish`) |
