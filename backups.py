@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sqlite3
+import zipfile
 from datetime import datetime
 
 from config import Config
@@ -27,6 +28,9 @@ INVENTORY_TABLES = ('inventory', 'inventory_captures')
 DECK_TABLES = ('decks', 'deck_cards')
 KEEP_AUTOMATIC = 5  # backups made before a restore; the ones the user makes are kept until deleted
 KEEP_DAILY = 7      # backups made when the app starts (one per day, see create_daily)
+# A backup as one file (archive / add_archive), to take the cards to another computer or data folder
+ARCHIVE_MEMBER = re.compile(r'^(backup\.db|captures/[\w.-]+)$')
+ARCHIVE_LIMIT = 4 * 1024 ** 3  # bytes unpacked
 
 
 class BackupError(Exception):
@@ -189,6 +193,65 @@ def restore(backup_id, inventory, scan_inventory, deck_store):
         source.close()
     logger.info(f"Restored backup {backup_id} (the state before it: backup {previous['id']})")
     return {'restored': {**info, 'id': backup_id}, 'previous': previous}
+
+
+def archive(backup_id):
+    """A backup as one zip file; returns its path (the caller deletes it once sent)"""
+    folder = _folder(backup_id)
+    path = BACKUPS_DIR / f'.{backup_id}.zip'
+    with zipfile.ZipFile(path, 'w') as target:
+        target.write(folder / 'backup.db', 'backup.db', compress_type=zipfile.ZIP_DEFLATED)
+        for capture in sorted((folder / 'captures').glob('*')):
+            target.write(capture, f'captures/{capture.name}')  # JPEGs: stored as they are
+    return path
+
+
+def add_archive(file):
+    """
+    Add a backup downloaded elsewhere (archive) to the list, from where it can be restored;
+    returns its info. It counts as made by the user: the automatic ones never push it out.
+    """
+    created = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    work = BACKUPS_DIR / f'.upload-{created}.tmp'
+    not_a_backup = BackupError('This file is not a Card Scanner backup')
+    try:
+        try:
+            with zipfile.ZipFile(file) as source:
+                members = [member for member in source.infolist() if not member.is_dir()]
+                if ('backup.db' not in {member.filename for member in members}
+                        or not all(ARCHIVE_MEMBER.match(member.filename) for member in members)):
+                    raise not_a_backup
+                if sum(member.file_size for member in members) > ARCHIVE_LIMIT:
+                    raise BackupError('This backup is too large')
+                (work / 'captures').mkdir(parents=True)
+                for member in members:
+                    with source.open(member) as packed, open(work / member.filename, 'wb') as unpacked:
+                        shutil.copyfileobj(packed, unpacked)
+        except zipfile.BadZipFile:
+            raise not_a_backup
+        try:
+            saved = sqlite3.connect(str(work / 'backup.db'))
+            info = json.loads(saved.execute('SELECT value FROM info').fetchone()[0])
+            for prefix, _manager, tables in _parts(None, None, None):
+                for table in tables:
+                    saved.execute(f'SELECT 1 FROM {prefix}{table} LIMIT 1')
+            # Its own time when free here, so it sorts where it belongs
+            base = info['id'][:19] if BACKUP_ID.match(str(info.get('id') or '')) else created
+            backup_id, number = base, 1
+            while (BACKUPS_DIR / backup_id).exists():
+                number += 1
+                backup_id = f'{base}-{number}'
+            info.update(id=backup_id, automatic=False, daily=False, note=info.get('note') or 'Uploaded')
+            saved.execute('UPDATE info SET value = ?', (json.dumps(info),))
+            saved.commit()
+            saved.close()
+        except (sqlite3.Error, TypeError, ValueError, KeyError):
+            raise not_a_backup
+        os.replace(work, BACKUPS_DIR / backup_id)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    logger.info(f"Backup {backup_id} uploaded: {info.get('cards')} cards, {info.get('scanned')} scanned, {info.get('decks')} decks")
+    return info
 
 
 def delete(backup_id):

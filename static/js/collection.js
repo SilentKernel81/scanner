@@ -130,6 +130,7 @@ async function loadScanned() {
     // Cards scanned on the scanner page wait there until they are added to the collection
     const data = await api('/api/stats');
     const waiting = data && data.inventory ? data.inventory.total_cards : 0;
+    if (data) notifyDataMissing(data.database, gameInfo ? gameInfo.label : '');
     $('scanned-notice').hidden = !waiting;
     $('scanned-text').textContent = `${plural(waiting, 'scanned card')} ${waiting === 1 ? 'is' : 'are'} waiting on the scanner page.`;
 }
@@ -1298,6 +1299,7 @@ function renderBackups(backups) {
                 <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
             </div>
             <button class="btn btn-small" data-backup-action="restore">Restore</button>
+            <a class="mini-btn" href="/api/backups/${encodeURIComponent(backup.id)}/download" title="Download this backup (to upload it on another computer)"><svg class="icon"><use href="#i-download"/></svg></a>
             <button class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
         </div>`).join('') || '<div class="hint">No backups yet.</div>';
 }
@@ -1311,6 +1313,18 @@ async function createBackup() {
     $('backup-note').value = '';
     renderBackups(data.backups);
     notify(`Backup made: ${plural(data.backup.cards, 'card')}, ${data.backup.scanned} scanned, ${plural(data.backup.decks, 'deck')}`, 'success');
+}
+
+async function uploadBackup(event) {
+    const file = event.target.files[0];
+    event.target.value = '';  // the same file can be chosen again
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    const data = await api('/api/backups/upload', {method: 'POST', body: form});
+    if (!data) return;
+    renderBackups(data.backups);
+    notify(`Backup of ${data.backup.created.slice(0, 16)} uploaded (${plural(data.backup.cards, 'card')}) - Restore puts it in place`, 'success');
 }
 
 async function backupAction(row, action) {
@@ -1606,6 +1620,8 @@ function bindEvents() {
     // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
     $('settings-close').addEventListener('click', closeSettings);
     $('backup-create').addEventListener('click', createBackup);
+    $('backup-upload').addEventListener('click', () => $('backup-upload-file').click());
+    $('backup-upload-file').addEventListener('change', uploadBackup);
     $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');

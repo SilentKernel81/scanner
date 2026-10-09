@@ -674,6 +674,62 @@ function applyDebugMode(enabled, running) {
 
 socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running));
 
+// "Reachable from other devices" is the web server's too
+const NETWORK_ACCESS_DESC = $('network-access-desc').textContent;
+
+function applyNetworkAccess(enabled, running) {
+    $('toggle-network-access').checked = Boolean(enabled);
+    $('network-access-desc').textContent = Boolean(enabled) === Boolean(running) ? NETWORK_ACCESS_DESC
+        : `Now ${running ? 'on' : 'off'}: restart the scanner to turn it ${enabled ? 'on' : 'off'}`;
+}
+
+function setNetworkAccess(enabled) {
+    fetch('/api/network_access', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify({enabled: enabled})})
+        .then(response => response.json())
+        .then(data => applyNetworkAccess(data.enabled, data.running))
+        .catch(error => notify(`Could not save the setting: ${error.message}`, 'error'));
+}
+
+// The camera to scan with: the cameras connected now, "Automatic", and the chosen one even
+// when it is unplugged
+function applyCameras(data) {
+    const select = $('camera-choice');
+    const cameras = data.cameras.slice();
+    if (data.choice !== null && !cameras.some(camera => camera.index === data.choice)) {
+        cameras.push({index: data.choice, name: 'not connected'});
+    }
+    const automatic = data.choice === null && data.current !== null ? ` (now /dev/video${data.current})` : '';
+    select.innerHTML = '';
+    select.add(new Option(`Automatic${automatic}`, ''));
+    cameras.forEach(camera => select.add(new Option(`${camera.name} (/dev/video${camera.index})`, String(camera.index))));
+    select.value = data.choice === null ? '' : String(data.choice);
+}
+
+function loadCameras() {
+    fetch('/api/cameras')
+        .then(response => response.json())
+        .then(applyCameras)
+        .catch(error => console.error('Error loading the cameras:', error));
+}
+
+function setCamera(value) {
+    fetch('/api/camera', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                          body: JSON.stringify({index: value === '' ? null : parseInt(value)})})
+        .then(response => response.json())
+        .then(data => {
+            if (data.success === false) throw new Error(data.error);
+            notify('Camera changed - opening it', 'info');
+            setTimeout(() => {
+                loadCameras();  // "Automatic (now ...)" once it is open
+                // A focus locked for the other camera is dropped
+                fetch('/api/scan_settings').then(response => response.json())
+                    .then(settings => { $('toggle-autofocus').checked = settings.autofocus; });
+            }, 3000);
+        })
+        .catch(error => notify(`Could not change the camera: ${error.message}`, 'error'));
+}
+
 function loadScanSettings() {
     fetch('/api/scan_settings')
         .then(response => response.json())
@@ -684,6 +740,7 @@ function loadScanSettings() {
             applyOcrState(data.ocr_first, data.ocr_installed);
             $('toggle-debug-trace').checked = Boolean(data.debug_trace);
             applyDebugMode(data.debug_mode, data.debug_mode_running);
+            applyNetworkAccess(data.network_access, data.network_access_running);
             addLog(timeNow(), 'info', `Debug trace: ${data.debug_trace ? 'on' : 'off'}, debug mode: ${data.debug_mode_running ? 'on' : 'off'}`);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             $('camera-rotation').value = String(data.camera_rotation || 0);
@@ -704,6 +761,14 @@ function applySound(sound) {
     $('volume-value').textContent = sound.volume + '%';
     audioManager.setEnabled(sound.enabled);
     audioManager.setVolume(sound.volume / 100);
+    $('toggle-audio-capture').checked = audioManager.captureEnabled = sound.capture;
+    $('toggle-audio-added').checked = audioManager.addedEnabled = sound.added;
+    showSoundSwitches();
+}
+
+function showSoundSwitches() {
+    // With all sound off the two sounds' own switches have nothing to switch
+    ['toggle-audio-capture', 'toggle-audio-added'].forEach(id => { $(id).disabled = !audioManager.enabled; });
 }
 
 function saveSound(change) {
@@ -892,18 +957,10 @@ function showDataUpdate(message) {
     }
 }
 
-let dataMissingNotified = false;
-
 function showDataMissing(database) {
-    // First start: the card data downloads in the background (or failed to - no connection);
-    // one notification per page load
-    if (database.total_cards || dataMissingNotified) return;
-    dataMissingNotified = true;
-    if (database.updating) {
+    // First start: the card data downloads in the background (notifyDataMissing says so)
+    if (notifyDataMissing(database, gameInfo ? gameInfo.label : '') && database.updating) {
         setButton('update-database-btn', 'Updating...', true);
-        notify(`Downloading the ${gameInfo ? gameInfo.label + ' ' : ''}card data - cards can be scanned when it finishes (a few minutes)`, 'info');
-    } else {
-        notify('No card data yet: download it with Settings → Update card database', 'error');
     }
 }
 
@@ -941,6 +998,7 @@ socket.on('database_update_complete', function(data) {
 
 socket.on('database_update_error', function(data) {
     audioManager.playError();
+    // A first download is tried again by itself (data.retrying): the button stays for a try right now
     setButton('update-database-btn', 'Update card database');
     addLog(timeNow(), 'error', `Database update failed: ${data.message}`);
 });
@@ -1642,6 +1700,7 @@ async function clearInventory() {
 
 function openSettings() {
     $('settings-drawer').classList.add('show');
+    loadCameras();  // one may have been plugged in since
 }
 
 function closeSettings() {
@@ -1683,11 +1742,11 @@ function testAudio() {
     audioManager.ensureAudioContext().then(() => {
         // All sounds in sequence
         audioManager.playCapture();
-        addLog(timeNow(), 'info', '1/3: Capture sound');
+        addLog(timeNow(), 'info', `1/3: Capture sound${audioManager.captureEnabled ? '' : ' (switched off)'}`);
 
         setTimeout(() => {
             audioManager.playSuccess();
-            addLog(timeNow(), 'info', '2/3: Success sound');
+            addLog(timeNow(), 'info', `2/3: Card added sound${audioManager.addedEnabled ? '' : ' (switched off)'}`);
         }, 400);
 
         setTimeout(() => {
@@ -1744,6 +1803,8 @@ function setupScanToggles() {
     // Read cards with light-ocr before asking the vision AI
     onToggle('toggle-ocr', enabled => socket.emit('toggle_ocr', {enabled: enabled}));
     onToggle('toggle-debug-mode', enabled => socket.emit('toggle_debug_mode', {enabled: enabled}));
+    onToggle('toggle-network-access', setNetworkAccess);
+    $('camera-choice').addEventListener('change', event => setCamera(event.target.value));
     onToggle('toggle-debug-trace', enabled => {
         socket.emit('toggle_debug_trace', {enabled: enabled});
         addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
@@ -1766,6 +1827,18 @@ function setupAudioControls() {
         saveSound({enabled: enabled});
         addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
         if (enabled) audioManager.playSuccess();  // a test sound
+        showSoundSwitches();
+    });
+    // Each plays itself when switched on
+    onToggle('toggle-audio-capture', enabled => {
+        audioManager.captureEnabled = enabled;
+        saveSound({capture: enabled});
+        audioManager.playCapture();
+    });
+    onToggle('toggle-audio-added', enabled => {
+        audioManager.addedEnabled = enabled;
+        saveSound({added: enabled});
+        audioManager.playSuccess();
     });
 
     $('audio-volume').addEventListener('input', function(e) {

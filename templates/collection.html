@@ -7,7 +7,7 @@
     <title>Collection - Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=41">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=13">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -354,13 +354,16 @@
                         <button class="btn btn-primary" id="backup-create">Back up now</button>
                     </div>
                     <div id="backup-list" class="backup-list"></div>
+                    <button class="btn btn-block backup-upload" id="backup-upload">Upload a backup</button>
+                    <input type="file" id="backup-upload-file" accept=".zip" hidden>
+                    <div class="hint">To take your cards to another computer: download a backup here, upload it there and restore it</div>
                 </div>
                 <div class="settings-section">
                     <h3>Scanner</h3>
                     <a class="btn btn-block" href="{{ url_for('index') }}#settings">Camera, AI, sound and card database</a>
                     <div class="hint">These settings are on the scanner page</div>
                 </div>
-                {% include '_quit.html' %}
+                {% include '_program.html' %}
             </div>
         </aside>
     </div>
@@ -370,7 +373,7 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=16"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=26"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=27"></script>
 </body>
 </html>

@@ -99,6 +99,8 @@ the card database. Stop it with **Settings → Quit Card Scanner** (or `--quit`)
 starts it without opening a page. Your cards and settings are kept in
 `~/.local/share/mtg-scanner` (API keys: Settings → Vision AI, or a `.env` there; a
 `config.yaml` there overrides settings). Install `v4l-utils` for focus lock and focus sweeps.
+To bring cards from another installation: download a backup there (collection page →
+Settings), then upload and restore it here.
 
 Publishing a release on GitHub builds the AppImage and attaches it to the release
 (`.github/workflows/appimage.yml`).
@@ -112,8 +114,8 @@ venv/bin/python setup_database.py     # download the card database (a few minute
 cp .env.example .env                  # then add your API key(s)
 ```
 
-Set `camera.usb_index` in `config.yaml` to your camera's `/dev/videoN` number
-(`v4l2-ctl --list-devices`, package `v4l-utils`). For the Raspberry Pi camera module, install
+The camera is chosen automatically; pick another in **Settings → Camera** (or set
+`camera.usb_index` in `config.yaml` to its `/dev/videoN` number). For the Raspberry Pi camera module, install
 `python3-picamera2` with apt and create the venv with `--system-site-packages`.
 
 ## Choosing a vision AI provider
@@ -290,6 +292,8 @@ you have scanned and to build decks. It works on a phone too.
   scanned cards and your decks as they are (with an optional note) - do it before a big load,
   like adding a pile of scanned cards or importing a file. **Restore** puts all three back as
   they were; what you had at that moment is backed up first, so a restore can be taken back.
+  The download button of a backup saves it as one file, and **Upload a backup** adds such a
+  file to the list - the way to take your cards to another computer.
   Card data and settings are not part of these backups (`scripts/backup.sh` archives
   everything).
 
@@ -324,9 +328,10 @@ there overrides the settings it lists. The most useful ones:
 | Setting | Default | Description |
 |---|---|---|
 | `camera.type` | `auto` | `auto`, `usb` or `picamera` |
-| `camera.usb_index` | | `/dev/videoN` number of the USB camera |
+| `camera.usb_index` | `auto` | USB camera: `auto` (the first that is not a laptop's own) or its `/dev/videoN` number. **Settings → Camera** overrides it |
 | `camera.resolution` / `fps` | `[2560, 1440]` / `20` | Capture resolution and frame rate |
 | `detection.allow_landscape` | `false` | Accept cards lying sideways (a card's art box can look like a sideways card) |
+| `flask.allowed_hosts` | `[]` | Extra names the pages may be opened under (besides localhost, IP addresses and the computer's own name), e.g. behind a reverse proxy |
 | `auto_capture.delay` | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | `5` | Still, in-focus frames required before capturing |
 | `auto_capture.min_sharpness` | `250` | Minimum sharpness for auto-capture; lower it if cards stay on *Focusing* |
@@ -338,7 +343,7 @@ there overrides the settings it lists. The most useful ones:
 | `ocr.provider` | `auto` | Where light-ocr runs: `auto` (GPU when available), `cpu`, `webgpu`. Switch OCR on/off in Settings |
 | `vision_ai.image_size` | `1024` | Longest side of the card image sent for identification (larger = slower, not more accurate) |
 | `vision_ai.local.endpoint` | | Local AI server (the model is chosen in Settings) |
-| `flask.host` / `port` | `0.0.0.0` / `5000` | Web server address |
+| `flask.host` / `port` | `auto` / `5000` | Web server address. `auto`: reachable from the whole network (there is no login), but from this computer only when started as a desktop program (the AppImage). **Settings → Reachable from other devices** overrides it, after a restart |
 | `flask.debug` | `false` | The web server's debug mode (debugger pages, and every request logged to `data/logs/requests.log`) - also **Settings → Debug mode**, which wins once used; applies after a restart. Anyone on your network can reach the debugger while it is on |
 | `cleanup.enabled` / `days` | `true` / `7` | Delete scanned images older than N days on startup |
 
@@ -372,8 +377,7 @@ Logs are written to `data/logs/`:
 
 ## Troubleshooting
 
-**No camera found / black video** - check the device number with `v4l2-ctl --list-devices`
-and set `camera.usb_index`. Only one program can use the camera at a time. Without a camera
+**No camera found / black video** - pick the camera in **Settings → Camera**. Only one program can use the camera at a time. Without a camera
 the app still starts: the scanner page shows **No camera** with the reason and picks the camera
 up when it is connected (no restart), and the collection page works as usual.
 

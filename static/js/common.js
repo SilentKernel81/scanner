@@ -473,6 +473,52 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// No card data yet (first start): said once per page load - it downloads in the background,
+// or the download has to be started. Returns whether there is none.
+
+let dataMissingNotified = false;
+
+function notifyDataMissing(database, label) {
+    if (!database || database.total_cards) return false;
+    if (!dataMissingNotified) {
+        dataMissingNotified = true;
+        if (database.updating) {
+            notify(`Downloading the ${label ? label + ' ' : ''}card data - cards can be scanned and added when it finishes (a few minutes)`, 'info');
+        } else {
+            notify('No card data yet: download it on the scanner page with Settings → Update card database', 'error');
+        }
+    }
+    return true;
+}
+
+// Settings -> Restart: the page comes back by itself when the program answers again
+
+async function restartProgram() {
+    const ok = await confirmDialog({
+        title: 'Restart Card Scanner?',
+        message: 'The program stops and starts again (a few seconds). Scanning stops meanwhile.',
+        confirmText: 'Restart'
+    });
+    if (!ok) return;
+    try {
+        const response = await fetch('/api/restart', {method: 'POST'});
+        if (!response.ok) throw new Error((await response.json()).error);
+    } catch (error) {
+        notify(`Could not restart: ${error.message}`, 'error');
+        return;
+    }
+    notify('Restarting - the page reloads when the program is back', 'info');
+    await new Promise(resolve => setTimeout(resolve, 2000));  // it is still answering while it stops
+    for (let attempt = 0; attempt < 90; attempt++) {
+        try {
+            if ((await fetch('/api/stats', {cache: 'no-store'})).ok) return window.location.reload();
+        } catch (error) { /* not back yet */ }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    // E.g. "Reachable from other devices" was switched off and this is another device
+    notify('The program did not come back at this address', 'error');
+}
+
 // Settings -> Quit (only there when the program was started as a desktop program)
 
 async function quitProgram() {

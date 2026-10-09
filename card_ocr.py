@@ -163,7 +163,7 @@ class CardOcr:
         except queue.Empty:
             ready = None
         if not ready or not ready.get('ready'):
-            return self._failed("light-ocr did not start (needs Node.js 22 or newer; see data/logs/ocr.log)")
+            return self._failed(f"light-ocr did not start (needs Node.js 22 or newer; see {Config.shown('logs', 'ocr.log')})")
         self.provider = ready.get('provider')
         self._failed_at = None
         self.log(f"light-ocr ready ({self.provider or 'unknown provider'})")
@@ -216,7 +216,7 @@ class CardOcr:
                 while True:
                     answer = self._answers.get(timeout=max(0.1, deadline - time.time()))
                     if answer is None:
-                        return self._failed("light-ocr stopped (see data/logs/ocr.log)") or None
+                        return self._failed(f"light-ocr stopped (see {Config.shown('logs', 'ocr.log')})") or None
                     if answer.get('id') == self._next_id:
                         break
             except (OSError, ValueError, queue.Empty) as e:

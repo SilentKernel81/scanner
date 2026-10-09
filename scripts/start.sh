@@ -165,8 +165,7 @@ if [ -f "$PROJECT_DIR/data/cards_database.db" ]; then
     DB_SIZE=$(du -h "$PROJECT_DIR/data/cards_database.db" | cut -f1)
     echo -e "${GREEN}✓ Card database:${NC} $DB_SIZE"
 else
-    echo -e "${YELLOW}⚠ Card database not found${NC}"
-    echo -e "  Run: python3 setup_database.py"
+    echo -e "${YELLOW}⚠ Card database not found${NC} - the app downloads it when it starts (a few minutes)"
 fi
 
 # Check YAML config

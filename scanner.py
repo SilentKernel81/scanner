@@ -90,6 +90,8 @@ class CardScanner:
         self.camera = None
         self.camera_type = None
         self.camera_error = None  # Why there is no camera image (shown on the scanner page), or None
+        self.usb_index = 0  # /dev/videoN of the USB camera (_choose_usb_index, at each attempt to open it)
+        self._camera_changed = False  # Another camera was chosen: the capture thread reopens it
         self.failed_reads = 0  # Frames in a row that could not be read
         self.current_frame = None  # Live frame (RGB) - half resolution with a raw-JPEG camera
         self.current_raw = None  # The camera's JPEG of current_frame (full-resolution source), or None
@@ -176,7 +178,7 @@ class CardScanner:
         # miss 1-2 frames of a card lying still; shorter gaps are judged by where the
         # card reappears, see _new_card_arrived)
         self.missing_frames_for_new_card = 6
-        self.log(f"Debug trace: {'on' if self.debug_trace_enabled else 'off'} (Settings; frames of slow or doubtful captures go to data/debug_frames)", level="info")
+        self.log(f"Debug trace: {'on' if self.debug_trace_enabled else 'off'} (Settings; frames of slow or doubtful captures go to {Config.shown('debug_frames')})", level="info")
 
         # Bounding box smoothing to eliminate flicker
         self.smoothed_bbox = None  # Smoothed bounding box coordinates
@@ -678,6 +680,65 @@ class CardScanner:
         # right after its capture (Arwen captured twice, 2026-09-25; also 2026-09-24 19:09)
         self.disturbed_during_focus = False
 
+    @staticmethod
+    def list_cameras():
+        """USB cameras of this computer, without opening them: [{'index': N, 'name': ...}]"""
+        cameras = []
+        for device in os.listdir('/sys/class/video4linux') if os.path.isdir('/sys/class/video4linux') else []:
+            match = re.fullmatch(r'video(\d+)', device)
+            if not match:
+                continue
+            try:
+                # A camera has several devices: the first (index 0) is the one with the images
+                with open(f'/sys/class/video4linux/{device}/index') as f:
+                    if f.read().strip() != '0':
+                        continue
+                with open(f'/sys/class/video4linux/{device}/name') as f:
+                    name = f.read().strip()
+            except OSError:
+                continue
+            cameras.append({'index': int(match.group(1)), 'name': name})
+        return sorted(cameras, key=lambda camera: camera['index'])
+
+    def _choose_usb_index(self):
+        """
+        The USB camera to open: the one chosen in Settings, else camera.usb_index. 'auto' takes
+        the first camera that is not a laptop's own (the scanner's looks down at a box), else
+        the first one.
+        """
+        choice = self.settings.get('camera_index')
+        if choice is None:
+            choice = Config.USB_CAMERA_INDEX
+        if isinstance(choice, int):
+            return choice
+        cameras = self.list_cameras()
+        external = [camera for camera in cameras
+                    if not re.search(r'integrated|built-?in|facetime|\bir\b', camera['name'], re.IGNORECASE)]
+        return (external or cameras or [{'index': 0}])[0]['index']
+
+    def set_camera(self, index):
+        """Choose the USB camera (/dev/videoN; None = as configured) - the capture thread opens it"""
+        if index is not None and (not isinstance(index, int) or isinstance(index, bool) or index < 0):
+            raise ValueError("The camera must be a /dev/videoN number")
+        self.settings.set('camera_index', index)
+        self._camera_changed = True
+
+    def _reopen_camera(self):
+        """Capture thread: close the camera and open the one chosen now"""
+        self._camera_changed = False
+        self._close_camera()
+        if self._choose_usb_index() != self.usb_index and self.focus_locked_value is not None:
+            # The locked position was found for the other camera's lens
+            self.focus_locked_value = None
+            self.settings.set('focus_value', None)
+            self.log("Another camera: its focus is automatic until locked again")
+        with self.frame_lock:
+            self.camera_error = None  # a failure to open the new one is said again
+            self.current_frame = self.current_raw = self.annotated_frame = None
+            self.card_detected = False
+            self.stable_frames = 0
+        self._open_camera()
+
     def detect_camera_type(self):
         """Auto-detect available camera"""
         camera_type = Config.CAMERA_TYPE.lower()
@@ -692,13 +753,13 @@ class CardScanner:
             elif self._test_picamera():
                 return 'picamera'
             else:
-                raise Exception(f"No camera found (USB camera {Config.USB_CAMERA_INDEX} or a Pi camera)")
+                raise Exception(f"No camera found (USB camera {self.usb_index} or a Pi camera)")
         else:
             raise Exception(f"Unknown camera type: {camera_type}")
     
     def _usb_camera_present(self):
         """False when the USB camera's device is missing (opening it would only make OpenCV complain)"""
-        index = Config.USB_CAMERA_INDEX
+        index = self.usb_index
         if not sys.platform.startswith('linux') or not isinstance(index, int):
             return True
         return os.path.exists(f'/dev/video{index}')
@@ -708,7 +769,7 @@ class CardScanner:
         if not self._usb_camera_present():
             return False
         try:
-            cap = cv2.VideoCapture(Config.USB_CAMERA_INDEX)
+            cap = cv2.VideoCapture(self.usb_index)
             if cap.isOpened():
                 ret, _ = cap.read()
                 cap.release()
@@ -740,6 +801,7 @@ class CardScanner:
     def _open_camera(self):
         """Open the configured camera. False, with camera_error set, when it is not available"""
         try:
+            self.usb_index = self._choose_usb_index()
             self.camera_type = self.detect_camera_type()
 
             if self.camera_type == 'usb':
@@ -792,9 +854,9 @@ class CardScanner:
     def _wait_for_camera(self):
         """No camera: try to open it again every CAMERA_RETRY_SECONDS"""
         deadline = time.time() + CAMERA_RETRY_SECONDS
-        while self.running and time.time() < deadline:
+        while self.running and time.time() < deadline and not self._camera_changed:
             time.sleep(0.1)
-        if self.running:
+        if self.running and not self._camera_changed:
             self._open_camera()
 
     def set_ai_provider(self, provider, model=None):
@@ -862,12 +924,12 @@ class CardScanner:
         # CRITICAL: Use V4L2 backend directly instead of GStreamer
         # GStreamer has issues with format changes on Raspberry Pi
         if not self._usb_camera_present():
-            raise Exception(f"USB camera {Config.USB_CAMERA_INDEX} is not connected "
-                            f"(/dev/video{Config.USB_CAMERA_INDEX} not found)")
-        self.camera = cv2.VideoCapture(Config.USB_CAMERA_INDEX, cv2.CAP_V4L2)
+            raise Exception(f"USB camera {self.usb_index} is not connected "
+                            f"(/dev/video{self.usb_index} not found)")
+        self.camera = cv2.VideoCapture(self.usb_index, cv2.CAP_V4L2)
 
         if not self.camera.isOpened():
-            raise Exception(f"Failed to open USB camera at index {Config.USB_CAMERA_INDEX} "
+            raise Exception(f"Failed to open USB camera at index {self.usb_index} "
                             f"(in use by another program?)")
 
         width = Config.CAMERA_RESOLUTION[0]
@@ -906,7 +968,7 @@ class CardScanner:
         ret, raw = self.camera.read()
         if not ret:
             # Not the scanner's camera (another video device at this index), or it is busy
-            raise Exception(f"USB camera at index {Config.USB_CAMERA_INDEX} opened but sends no images")
+            raise Exception(f"USB camera at index {self.usb_index} opened but sends no images")
         self.log(f"Camera settings: sharpness=50, zoom=100, {focus}")
         self.log(f"Resolution: {width}x{height} @ {fps} FPS")
         if ret and raw is not None and raw.ndim == 2 and raw.size > 2 and bytes(raw.ravel()[:2]) == b'\xff\xd8':
@@ -918,7 +980,7 @@ class CardScanner:
         self.log("Frames: " + ("raw JPEG, live view decoded at half size" if self.half_size_decode
                                else "raw JPEG" if self.raw_mjpeg else "decoded by OpenCV"))
 
-        self.log(f"USB camera initialized (index: {Config.USB_CAMERA_INDEX})")
+        self.log(f"USB camera initialized (index: {self.usb_index})")
     
     def _initialize_picamera(self):
         """Initialize Raspberry Pi Camera using Picamera2"""
@@ -940,6 +1002,9 @@ class CardScanner:
     def _capture_frames(self):
         """Continuously capture frames and perform object detection"""
         while self.running:
+            if self._camera_changed:
+                self._reopen_camera()
+                continue
             if self.camera_error:
                 self._wait_for_camera()
                 continue
@@ -1456,7 +1521,7 @@ class CardScanner:
         if not program:
             return False
         try:
-            video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
+            video_device = f'/dev/video{self.usb_index}'
             cmd = [program, '-d', video_device] + list(args)
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if result.returncode != 0:
@@ -1476,7 +1541,7 @@ class CardScanner:
         if not program:
             return None
         try:
-            video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
+            video_device = f'/dev/video{self.usb_index}'
             output = subprocess.run([program, '-d', video_device, '--list-ctrls'],
                                     capture_output=True, text=True, timeout=2).stdout
         except Exception:

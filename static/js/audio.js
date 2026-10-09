@@ -8,6 +8,9 @@ class AudioManager {
     constructor() {
         this.audioContext = null;
         this.enabled = true;
+        // Two sounds have their own switch (Settings): the capture beep and the ding of a card found / added
+        this.captureEnabled = true;
+        this.addedEnabled = true;
         this.volume = 0.3; // Default 30% volume
         this.initAudioContext();
     }
@@ -103,6 +106,7 @@ class AudioManager {
      * Play capture sound (camera shutter click)
      */
     async playCapture() {
+        if (!this.captureEnabled) return;
         // VERY loud double-click for immediate feedback
         await this.playBeep(1200, 0.10, 'square');
         setTimeout(() => this.playBeep(1000, 0.08, 'square'), 100);
@@ -112,6 +116,7 @@ class AudioManager {
      * Play success sound (pleasant ding)
      */
     async playSuccess() {
+        if (!this.addedEnabled) return;
         // Two-tone ding: low to high (louder for batch mode)
         await this.playBeep(523, 0.12, 'sine'); // C5
         setTimeout(() => this.playBeep(659, 0.20, 'sine'), 100); // E5

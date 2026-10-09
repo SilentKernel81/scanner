@@ -174,6 +174,11 @@
                         <div class="hint">With the focus locked: after this many captures the scanner tries a focus one step away and keeps the sharper one. Each check holds the next card back about a second. 0 = never</div>
                     </div>
                     <div class="input-group">
+                        <label for="camera-choice">Camera</label>
+                        <select id="camera-choice" class="select"></select>
+                        <div class="hint">Automatic takes the first camera that is not a laptop's own</div>
+                    </div>
+                    <div class="input-group">
                         <label for="camera-rotation">Camera rotation</label>
                         <select id="camera-rotation" class="select">
                             <option value="0">None</option>
@@ -186,16 +191,23 @@
                     <label class="switch-row">
                         <span class="switch-text">
                             <span class="switch-title">Debug trace</span>
-                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames</span>
+                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to {{ shown('debug_frames') }}</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-debug-trace">
                     </label>
                     <label class="switch-row">
                         <span class="switch-text">
                             <span class="switch-title">Debug mode</span>
-                            <span class="switch-desc" id="debug-mode-desc">The web server's debugger, and a request log in data/logs/requests.log; applies after a restart</span>
+                            <span class="switch-desc" id="debug-mode-desc">The web server's debugger, and a request log in {{ shown('logs', 'requests.log') }}; applies after a restart</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-debug-mode">
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Reachable from other devices</span>
+                            <span class="switch-desc" id="network-access-desc">Phones and other computers on your network can open these pages (there is no login); applies after a restart</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-network-access">
                     </label>
                 </div>
 
@@ -206,6 +218,20 @@
                             <span class="switch-title">Sound effects</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-audio" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Capture sound</span>
+                            <span class="switch-desc">The beep when a card is captured</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-audio-capture" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Card added sound</span>
+                            <span class="switch-desc">The ding when a card is found or added to the inventory</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-audio-added" checked>
                     </label>
                     <div class="volume-row">
                         <label for="audio-volume">Volume</label>
@@ -272,7 +298,7 @@
                     <a class="btn btn-block" href="{{ url_for('collection') }}#settings">Back up or restore your cards</a>
                     <div class="hint">The collection, the scanned cards and the decks - on the collection page</div>
                 </div>
-                {% include '_quit.html' %}
+                {% include '_program.html' %}
             </div>
         </aside>
     </div>
@@ -348,8 +374,8 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=16"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=50"></script>
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=54"></script>
 </body>
 </html>

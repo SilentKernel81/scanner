@@ -251,6 +251,8 @@ gunicorn.pid
 
 # API keys entered in the web interface
 data/api_keys.env
+data/secret_key
+data/app.lock
 
 # Claude Code local settings (allowed commands can contain API keys)
 .claude/settings.local.json

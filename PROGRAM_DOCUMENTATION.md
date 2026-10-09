@@ -721,6 +721,14 @@ row (time, note, counts) - every game - and `captures/`, hard links to the thumb
 entries point at (no extra space; they survive the app deleting its own). It is written to a
 `.tmp` folder and moved into place, under the three managers' locks.
 
+**Taking the cards to another computer** (or from a checkout to the AppImage's folder): the
+download button of a backup (`GET /api/backups/<id>/download`, `backups.archive`) sends it as
+one zip - `backup.db` and `captures/` - written beside the backups and unlinked before it is
+sent. **Upload a backup** (`POST /api/backups/upload`, `backups.add_archive`) accepts only
+those member names, checks that `backup.db` has the `info` row and the tables, and adds it to
+the list under its own time (numbered when taken), marked as made by the user so the automatic
+ones never push it out; restoring it is the usual second step.
+
 **At startup** `backups.create_daily` (from `initialize_components`) makes the day's backup,
 marked `daily` (note "Application start"): a later start the same day finds it and makes
 none, an empty collection makes none, and the last `KEEP_DAILY` (7) are kept. A failure is
@@ -876,8 +884,14 @@ so it only needs the settings that differ. All code reaches these folders throug
 `Config.DATA_DIR` / `Config.IMAGES_DIR` (`app.py`, before `config` is imported: `paths.USER_DIR`).
 
 The app starts without card data: `main` then downloads the active game's in the background
-(`start_card_data_update`), and the scanner page says so (`showDataMissing`, from
-`/api/stats`: `total_cards` 0 and `updating`) - or, when the download failed, where to start it.
+(`start_card_data_update`), and both pages say so (`notifyDataMissing` in common.js, from
+`/api/stats`: `total_cards` 0 and `updating`). A failed download of a game without card data is
+tried again by itself (`retry_first_download`: after 30 s, doubling up to 10 minutes; the first
+failure is a `database_update_error`, later ones `database_update_progress`, both with
+`retrying`), and `updating` stays true meanwhile.
+
+Messages name files in `data/` through `Config.shown()` (also in templates: `shown`):
+`data/logs/app.log` in a checkout, the whole path (`~/.local/share/...`) elsewhere.
 
 ### AppImage and running as a desktop program
 
@@ -894,19 +908,52 @@ settings it has - no focus lock, sweeps or refocus.
 
 `app.py` options: `--app` opens the page in the browser once the server answers
 (`open_browser_when_ready`; not with `--no-browser`) and shows **Settings → Quit Card Scanner**
-on both pages (`templates/_quit.html` → `POST /api/quit`, 403 without `--app`), since a program
+on both pages (`templates/_program.html` → `POST /api/quit`, 403 without `--app`), since a program
 started by double click has no terminal for Ctrl+C. `--quit` asks the running program to stop.
 Quit and `SIGTERM` (`systemctl stop`) end the server like Ctrl+C (`stop_on_signal`), so the
-camera is released and the database closed. A start while the port already answers
-(`port_answers`) does not start a second copy - it could not open the camera - and with `--app`
-opens the page of the one that runs.
+camera is released and the database closed. One copy runs per data folder: `lock_instance`
+holds `data/app.lock` (flock) from the start of `main`, so a second start - also while the
+first is still starting - ends at once, and with `--app` waits for the first to answer and opens
+its page. A port taken by another program (`port_answers`) ends the start too.
+
+**Settings → Restart Card Scanner** (both pages, every way of running; `POST /api/restart`)
+shuts down the same way and then `main` replaces the process with the same command
+(`os.execv` with `sys.orig_argv`, plus `--no-browser` under `--app`): the process id stays, so a
+service or the AppImage's mount are not disturbed. The page waits for `/api/stats` to answer
+again and reloads (`restartProgram` in common.js).
+
+### Camera choice and network access
+
+`CardScanner._choose_usb_index` picks the USB camera at every attempt to open it: `camera_index`
+from Settings, else `camera.usb_index`; `auto` takes the first camera whose name does not say it
+is a laptop's own (integrated, built-in, FaceTime, IR), else the first. `list_cameras` reads
+them from `/sys/class/video4linux` (the device with `index` 0 of each camera) without opening
+any. `set_camera` only saves the choice and sets `_camera_changed`: the capture thread closes
+and reopens the camera itself (`_reopen_camera`) - closing it from another thread while a frame
+is being read is not safe.
+
+The server listens on `listen_host()`: 127.0.0.1 unless `network_access()` - the switch in
+Settings, else `flask.host`, where `auto` means the whole network except with `--app`. An
+address of one's own in `flask.host` is kept while access is on.
+
+**Only the app's own pages may use it** - there is no login, and a browser sends any web page's
+requests to localhost, whatever the server listens on. `reject_other_sites` (`before_request`)
+answers 403 when a request that changes something names another `Origin` than the page it was
+sent to, when an `/api/` request says `Sec-Fetch-Site: cross-site`, and when the `Host` is not a
+name of this computer (`host_allowed`: localhost, an IP address, the computer's own name with
+any domain, `flask.allowed_hosts`) - the last one stops a page reaching in through its own
+domain (DNS rebinding). Socket.IO connections get the same test (`socket_origin_allowed`, its
+`cors_allowed_origins`). Requests without an `Origin` (curl, `--quit`) are not from a browser
+and pass. Switching cameras drops a locked focus position (`_reopen_camera`): it was found for
+the other lens.
 
 | Where | What |
 |---|---|
 | `config.yaml` | Camera, detection, auto-capture, vision AI defaults, web server, cleanup |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER` and `LOCAL_AI_ENDPOINT` override `config.yaml` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The UI only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
-| `data/settings.json` | Choices made in the UI: AI provider/model, OCR first, add automatically, locked focus position, sound effects on/off and volume (`sound_enabled`, `sound_volume`; `POST /api/sound`), focus probe interval (`refocus_every`, overrides `auto_capture.refocus_every`), debug trace, debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log` - `enable_request_log`, since `setup_logging` silences Werkzeug; overrides `flask.debug`; taken when the server starts, always without the reloader - a second copy of the program could not open the camera) |
+| `data/secret_key` | Random key that signs Flask's cookies, made on the first start (`app.py` `secret_key`; `flask.secret_key` in `config.yaml` replaces it) |
+| `data/settings.json` | Choices made in the UI: camera (`camera_index`, overrides `camera.usb_index`; `GET /api/cameras`, `POST /api/camera`), reachable from other devices (`network_access`, overrides `flask.host`; `POST /api/network_access`, taken when the server starts), AI provider/model, OCR first, add automatically, locked focus position, sound effects on/off and volume (`sound_enabled`, `sound_volume`; `POST /api/sound`), the capture beep and the found / added ding each with a switch of their own (`sound_capture`, `sound_added`: `AudioManager.captureEnabled` / `addedEnabled`, checked in `playCapture` / `playSuccess`), focus probe interval (`refocus_every`, overrides `auto_capture.refocus_every`), debug trace, debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log` - `enable_request_log`, since `setup_logging` silences Werkzeug; overrides `flask.debug`; taken when the server starts, always without the reloader - a second copy of the program could not open the camera) |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |

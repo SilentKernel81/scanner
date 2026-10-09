@@ -57,11 +57,11 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Inventory add/merge/undo/split/export, locations and tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `app.py` `pending_capture`, `card['capture']`; `scan_location` |
 | Collection page (`/collection`: inventory filters / grid / bulk bar, deck builder, statistics) | `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css`; shared with the scanner page: `static/js/common.js`, `templates/_topbar.html` (the header of both pages), `templates/_dialogs.html`, `templates/_icons.html` |
-| Backups of the collection, scanned cards and decks (collection page's settings drawer) | `backups.py`: `create`, `create_daily` (at startup, one per day), `restore`, `list_backups` (`data/backups/<date_time>/`); `app.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups`, `backupAction` |
+| Backups of the collection, scanned cards and decks (collection page's settings drawer) | `backups.py`: `create`, `create_daily` (at startup, one per day), `restore`, `list_backups`, `archive` / `add_archive` (download / upload as a zip) (`data/backups/<date_time>/`); `app.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups`, `backupAction` |
 | Decks (lists; ownership computed from the inventory), deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| AppImage, running as a desktop program | `scripts/build-appimage.sh` (run by `.github/workflows/appimage.yml` when a release is published), `packaging/` (`AppRun`, desktop entry, icon); `paths.py`: `USER_DIR`, `tool`; `app.py`: `--app` / `--no-browser` / `--quit` (`parse_arguments`, `open_browser_when_ready`, `quit_program`); `templates/_quit.html`, `common.js`: `quitProgram` |
+| AppImage, running as a desktop program | `scripts/build-appimage.sh` (run by `.github/workflows/appimage.yml` when a release is published), `packaging/` (`AppRun`, desktop entry, icon); `paths.py`: `USER_DIR`, `tool`; `app.py`: `--app` / `--no-browser` / `--quit` (`parse_arguments`, `open_browser_when_ready`, `quit_program`); restart (`restart_program`, `os.execv` in `main`); `templates/_program.html`, `common.js`: `quitProgram`, `restartProgram` |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
@@ -70,7 +70,8 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   `ocr/`, default `config.yaml`) from `USER_DIR` (`data/`, `scanned_cards/`, `.env`, the user's
   `config.yaml` overlay) - the same folder in a checkout, `~/.local/share/mtg-scanner` when
   packaged, `MTG_SCANNER_HOME` to choose. Never write under `BASE_DIR` or build a data path
-  from `__file__`: use `Config.DATA_DIR` / `Config.IMAGES_DIR`. Programs the app starts
+  from `__file__`: use `Config.DATA_DIR` / `Config.IMAGES_DIR`; name such a file in a message
+  with `Config.shown('logs', 'app.log')`, not a literal `data/...`. Programs the app starts
   (`node`, `v4l2-ctl`) are found with `paths.tool()` (the AppImage's `bin/` first, then PATH);
   `v4l2-ctl` may be missing - the camera then runs without focus control.
 - **Schema**: cards columns are defined once in `database.py:CARD_COLUMNS`; missing columns are
@@ -93,6 +94,11 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **The camera is exclusive**: only one process can open it; stop the running app before
   testing with the real camera. Camera *controls* (`v4l2-ctl -c ...`) can be changed while
   another process streams - handy for focus experiments measured through `/video_feed`.
+- **Machine-specific values don't belong in `config.yaml`**: it ships in the AppImage. The
+  camera (`usb_index: auto`), the Ollama endpoint (localhost) and the listen address
+  (`host: auto`) are neutral there; a setup's own values go in Settings (`data/settings.json`,
+  `data/api_keys.env`). The capture thread alone opens and closes the camera (`set_camera`
+  only flags the change).
 - **The camera may be missing**: the app must start and serve the collection without it.
   `scanner.camera_error` says why (also in `/api/detection_status`); `scanner.camera` is `None`
   then and the capture thread retries (`_open_camera`). Don't log per failed frame or retry.
@@ -113,6 +119,9 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
   `answer_format`); the parser relies on the answer format, which the editor cannot change.
   A user's saved prompt in `data/prompts.json` overrides built-in edits - check it when a prompt
   change seems to have no effect.
+- **Requests from other web pages are refused** (`reject_other_sites`, `socket_origin_allowed`
+  in `app.py`): never set `cors_allowed_origins="*"` or add CORS headers, and keep changes
+  behind POST/DELETE (a GET from another site is only stopped under `/api/`).
 - **Never send full API keys to the browser** (no login on the web UI): `api_keys.credential_status()`
   masks them; the UI can only replace or remove a key.
 - **No native `confirm()` / `alert()`** in the web UI: browsers can silently block them ("prevent

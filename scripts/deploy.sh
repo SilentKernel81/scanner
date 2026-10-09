@@ -233,7 +233,7 @@ print(sys.argv[2] if value is None else value)' "$1" "${2:-}"
 }
 
 if [ -n "$CAMERA_INDEX" ]; then
-    sed -i -E "s/^(  usb_index:)[[:space:]]*[0-9]+/\1 ${CAMERA_INDEX}/" config.yaml
+    sed -i -E "s/^(  usb_index:)[[:space:]]*[0-9a-z]+/\1 ${CAMERA_INDEX}/" config.yaml
     ok "Set camera.usb_index to ${CAMERA_INDEX}"
 fi
 
@@ -256,11 +256,13 @@ esac
 step "Camera"
 
 camera_type=$(config_get camera.type auto)
-usb_index=$(config_get camera.usb_index 0)
+usb_index=$(config_get camera.usb_index auto)
 if [ "$PICAMERA" -eq 1 ] || [ "$camera_type" = "picamera" ]; then
     ok "Raspberry Pi camera module (camera.type: ${camera_type})"
 else
-    if [ -e "/dev/video${usb_index}" ]; then
+    if [ "$usb_index" = "auto" ]; then
+        ok "USB camera: chosen automatically (or in the web interface: Settings -> Camera)"
+    elif [ -e "/dev/video${usb_index}" ]; then
         name=$(cat "/sys/class/video4linux/video${usb_index}/name" 2>/dev/null || echo "unknown")
         ok "USB camera /dev/video${usb_index}: ${name}"
     else

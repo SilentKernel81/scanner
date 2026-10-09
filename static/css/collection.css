@@ -971,6 +971,10 @@ a.btn {
     min-width: 0;
 }
 
+.backup-upload {
+    margin-top: 12px;
+}
+
 .backup-list {
     display: flex;
     flex-direction: column;
@@ -979,7 +983,7 @@ a.btn {
 
 .backup-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 8px;
     padding: 10px 12px;

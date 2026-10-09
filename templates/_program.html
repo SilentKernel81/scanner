@@ -1,0 +1,11 @@
+{# Last section of each page's settings drawer: restart (the settings that say "after a
+   restart"), and Quit when started as a desktop program (--app: no terminal to stop it in) #}
+<div class="settings-section">
+    <h3>Program</h3>
+    <button class="btn btn-block" onclick="restartProgram()">Restart Card Scanner</button>
+    <div class="hint">Stops and starts the program where it runs (a few seconds); your cards are saved</div>
+    {% if app_mode %}
+    <button class="btn btn-block" onclick="quitProgram()">Quit Card Scanner</button>
+    <div class="hint">Stops the program on the computer it runs on; your cards are saved</div>
+    {% endif %}
+</div>

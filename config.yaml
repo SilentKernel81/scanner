@@ -5,7 +5,9 @@
 # Camera Settings
 camera:
   type: auto  # Options: 'auto', 'picamera', 'usb'
-  usb_index: 2  # /dev/videoN - check with: v4l2-ctl --list-devices
+  # USB camera: auto (the first one that is not a laptop's own), or N for /dev/videoN.
+  # Choosing a camera in Settings overrides this
+  usb_index: auto
   resolution: [2560, 1440]
   preview_resolution: [640, 480]
   fps: 20
@@ -51,15 +53,21 @@ vision_ai:
 
   # Local AI Settings (self-hosted models)
   local:
-    endpoint: http://192.168.1.23:11434/v1/chat/completions
+    endpoint: http://localhost:11434/v1/chat/completions  # or enter it in Settings -> Vision AI
     model: qwen3.5:9b  # default until a model is chosen in Settings
 
 # Flask Settings
 flask:
-  host: 0.0.0.0
+  # auto: the whole network (0.0.0.0; there is no login), but this computer only (127.0.0.1)
+  # when started as a desktop program (the AppImage, --app). Or an address to listen on.
+  # The switch in Settings overrides this
+  host: auto
   port: 5000
+  # Names the pages may be opened under, besides localhost, IP addresses and this computer's
+  # own name (e.g. behind a reverse proxy): [cards.example.org]
+  allowed_hosts: []
   debug: false
-  secret_key: card_scanner_secret_key_change_in_production
+  # secret_key: signs Flask's cookies; by default a random one is made in data/secret_key
 
 # API URLs
 api:

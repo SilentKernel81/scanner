@@ -230,7 +230,7 @@ class InventoryManager:
         finally:
             conn.close()
         self.log(f"Inventory upgraded for locations and tags ({before[0]} entries, {before[1]} cards; "
-                 f"backup: data/backups/{backup_file.name})", level="success")
+                 f"backup: {Config.shown('backups', backup_file.name)})", level="success")
 
     def _migrate_to_multi_game(self, columns):
         """
@@ -272,7 +272,7 @@ class InventoryManager:
         finally:
             conn.close()
         self.log(f"Inventory upgraded for multiple games ({before[0]} entries, {before[1]} cards; "
-                 f"backup: data/backups/{backup_file.name})", level="success")
+                 f"backup: {Config.shown('backups', backup_file.name)})", level="success")
 
     # ------------------------------------------------------------------------
     # Adding and undo

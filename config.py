@@ -31,7 +31,7 @@ class Config:
 
     # Camera settings
     CAMERA_TYPE = config.get('camera', 'type', default='auto')
-    USB_CAMERA_INDEX = config.get('camera', 'usb_index', default=0)
+    USB_CAMERA_INDEX = config.get('camera', 'usb_index', default='auto')  # N, or 'auto'
     CAMERA_RESOLUTION = tuple(config.get('camera', 'resolution', default=[2560, 1440]))
     CAMERA_PREVIEW_RESOLUTION = tuple(config.get('camera', 'preview_resolution', default=[640, 480]))
     CAMERA_FPS = config.get('camera', 'fps', default=20)
@@ -52,9 +52,10 @@ class Config:
     FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=6)
 
     # Flask settings
-    SECRET_KEY = config.get('flask', 'secret_key', default='card_scanner_secret_key_change_in_production')
-    HOST = config.get('flask', 'host', default='0.0.0.0')
+    SECRET_KEY = config.get('flask', 'secret_key', default=None)  # None: data/secret_key (app.py)
+    HOST = config.get('flask', 'host', default='auto')
     PORT = config.get('flask', 'port', default=5000)
+    ALLOWED_HOSTS = config.get('flask', 'allowed_hosts', default=None) or []
     DEBUG = config.get('flask', 'debug', default=False)
 
     # Vision AI settings - Environment variables take precedence
@@ -68,12 +69,24 @@ class Config:
     OCR_PROVIDER = config.get('ocr', 'provider', default='auto')
 
     # Local AI settings
-    LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://192.168.1.60:11434/v1/chat/completions')
+    LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')
     LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL') or config.get('vision_ai', 'local', 'model', default='llava:13b')
 
     # Cleanup settings
     CLEANUP_ENABLED = config.get('cleanup', 'enabled', default=True)
     CLEANUP_DAYS = config.get('cleanup', 'days', default=7)
+
+    @staticmethod
+    def shown(*parts):
+        """
+        A file or folder in data/ as messages name it: data/logs/app.log in a checkout, the
+        whole path (~/.local/share/...) when the data lives elsewhere
+        """
+        if Config.USER_DIR == Config.BASE_DIR:
+            return '/'.join(('data',) + parts)
+        path = str(Config.DATA_DIR.joinpath(*parts))
+        home = os.path.expanduser('~')
+        return '~' + path[len(home):] if path.startswith(home + os.sep) else path
 
     @staticmethod
     def create_directories():

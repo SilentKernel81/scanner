@@ -8,14 +8,18 @@ from flask import Flask, render_template, Response, jsonify, request, send_file,
 from flask_socketio import SocketIO, emit
 import argparse
 import csv
+import fcntl
 import cv2
 import io
+import ipaddress
 import os
+import secrets
 import signal
 import socket
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 import sys
 import time
 import logging
@@ -212,12 +216,81 @@ from card_ocr import CardOcr
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = Config.SECRET_KEY
+
+
+def secret_key():
+    """Signs Flask's cookies: flask.secret_key if set, else a random one kept in data/secret_key"""
+    if Config.SECRET_KEY:
+        return Config.SECRET_KEY
+    key_file = Config.DATA_DIR / 'secret_key'
+    try:
+        key = key_file.read_text().strip()
+    except OSError:
+        key = ''
+    if not key:
+        key = secrets.token_hex(32)
+        Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+            f.write(key + '\n')
+    return key
+
+
+app.config['SECRET_KEY'] = secret_key()
 
 # Initialize SocketIO with proper configuration
+
+# ----------------------------------------------------------------------------
+# Only the app's own pages may use it. There is no login, and a browser sends any web page's
+# requests to localhost: without these checks a page open in another tab could scan, delete
+# cards or restore a backup.
+# ----------------------------------------------------------------------------
+
+def host_allowed(host):
+    """
+    Whether `host` (a Host header) is a name the pages are opened under: localhost, an IP
+    address, this computer's name (with any domain: scanner, scanner.local) or one of
+    flask.allowed_hosts. Another name that resolves here is a web page reaching in through
+    its own domain (DNS rebinding).
+    """
+    name = (urlsplit(f'//{host}').hostname or '').lower()
+    if name == 'localhost' or name in (allowed.lower() for allowed in Config.ALLOWED_HOSTS):
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    own = socket.gethostname().lower().split('.')[0]
+    return bool(own) and name.split('.')[0] == own
+
+
+def same_origin(origin, host):
+    """Whether a request's Origin header is the page it was sent to (`host`: its Host header)"""
+    return urlsplit(origin).netloc.lower() == (host or '').lower()
+
+
+def socket_origin_allowed(origin, environ=None):
+    # Engine.IO asks when a connection names its origin (browsers always do)
+    host = (environ or {}).get('HTTP_HOST', '')
+    return host_allowed(host) and same_origin(origin or '', host)
+
+
+@app.before_request
+def reject_other_sites():
+    if not host_allowed(request.host):
+        return jsonify({'success': False, 'error': f'{request.host} is not a name of this Card Scanner '
+                                                   '(flask.allowed_hosts in config.yaml)'}), 403
+    origin = request.headers.get('Origin')
+    changes = request.method not in ('GET', 'HEAD', 'OPTIONS')
+    # Sec-Fetch-Site covers the requests browsers send without an Origin (a GET from another site)
+    if (changes and origin and not same_origin(origin, request.host)) or (
+            request.path.startswith('/api/') and request.headers.get('Sec-Fetch-Site') == 'cross-site'):
+        return jsonify({'success': False, 'error': 'Requests from other web pages are not accepted'}), 403
+
+
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=socket_origin_allowed,
     async_mode='threading',
     logger=False,
     engineio_logger=False,
@@ -231,6 +304,7 @@ SCAN_INVENTORY_FILE = Config.DATA_DIR / 'scan_inventory.db'
 # Global instances
 scanner = None
 debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
+network_access_running = False   # Whether other devices can reach this process (main)
 database = None
 inventory = None           # the collection (table inventory in the card database file)
 daily_backup_status = ''    # the startup banner's line about the day's backup
@@ -746,7 +820,7 @@ def initialize_components():
 
 @app.context_processor
 def template_globals():
-    return {'app_mode': app_mode}
+    return {'app_mode': app_mode, 'shown': Config.shown}
 
 
 @app.route('/')
@@ -796,7 +870,7 @@ def get_stats():
         game = games.active()
         return jsonify({
             'database': {'total_cards': game.card_count(), 'update': data_update_notices.get(game.id),
-                         'updating': game.id in data_updates_running},
+                         'updating': game.id in data_updates_running or game.id in data_update_failures},
             'review': review.count(game.id) if review else 0,
             # The scanner page's counters: what was scanned and not moved to the collection yet
             'inventory': scan_inventory.get_stats(game.id),
@@ -1018,6 +1092,40 @@ def restore_backup(backup_id):
     # Every open page shows the restored cards
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(games.active().id)}, namespace='/')
     return jsonify({'success': True, **result, 'backups': backups.list_backups()})
+
+
+@app.route('/api/backups/<backup_id>/download')
+def download_backup(backup_id):
+    """A backup as one file, to take the cards to another computer"""
+    try:
+        path = backups.archive(backup_id)
+    except backups.BackupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 404
+    # Sent from the open file, which is gone from the folder already: nothing is left behind
+    # when the download is cut short
+    packed = open(path, 'rb')
+    size = path.stat().st_size
+    path.unlink()
+    response = send_file(packed, mimetype='application/zip', as_attachment=True,
+                         download_name=f'card-scanner-backup-{backup_id}.zip')
+    response.content_length = size
+    return response
+
+
+@app.route('/api/backups/upload', methods=['POST'])
+def upload_backup():
+    """Add a downloaded backup to the list (form: file); restoring it is a second step"""
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+    try:
+        added = backups.add_archive(file.stream)
+    except backups.BackupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Uploading a backup failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': f'The upload failed: {e}'}), 500
+    return jsonify({'success': True, 'backup': added, 'backups': backups.list_backups()})
 
 
 @app.route('/api/backups/<backup_id>', methods=['DELETE'])
@@ -1709,7 +1817,7 @@ def run_deck_ideas(kind, game, state):
         state['error'] = str(e)
     except Exception as e:
         logger.exception(f"Deck ideas ({kind}) failed: {e}")
-        state['error'] = 'Something went wrong - see data/logs/app.log'
+        state['error'] = f"Something went wrong - see {Config.shown('logs', 'app.log')}"
     finally:
         state['running'] = False
 
@@ -2336,6 +2444,8 @@ def get_scan_settings():
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'debug_mode': saved_debug_mode(),
         'debug_mode_running': bool(debug_mode_running),
+        'network_access': network_access(),
+        'network_access_running': bool(network_access_running),
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
@@ -2348,19 +2458,80 @@ def get_scan_settings():
 
 
 def sound_settings():
-    """Sound effects of the scanner page: {'enabled', 'volume' (0-100)}"""
+    """
+    Sound effects of the scanner page: {'enabled', 'volume' (0-100), and the sounds with a
+    switch of their own: 'capture' (the beep), 'added' (the ding of a card found / added)}
+    """
     settings = scanner.settings if scanner else None
     return {'enabled': bool(settings.get('sound_enabled', True)) if settings else True,
-            'volume': int(settings.get('sound_volume', 30)) if settings else 30}
+            'volume': int(settings.get('sound_volume', 30)) if settings else 30,
+            'capture': bool(settings.get('sound_capture', True)) if settings else True,
+            'added': bool(settings.get('sound_added', True)) if settings else True}
+
+
+def network_access():
+    """
+    Whether other devices on the network may open the pages (there is no login): the switch
+    in Settings, else flask.host - 'auto' means yes, except as a desktop program (--app)
+    """
+    saved = scanner.settings.get('network_access') if scanner else None
+    if saved is not None:
+        return bool(saved)
+    if Config.HOST == 'auto':
+        return not app_mode
+    return Config.HOST not in LOCAL_HOSTS
+
+
+def listen_host():
+    """The address the server listens on (taken when it starts)"""
+    if not network_access():
+        return '127.0.0.1'
+    # An address of one's own in config.yaml stays; 'auto' and local ones open up
+    return '0.0.0.0' if Config.HOST == 'auto' or Config.HOST in LOCAL_HOSTS else Config.HOST
+
+
+@app.route('/api/network_access', methods=['POST'])
+def set_network_access():
+    """Remember whether other devices may open the pages (JSON: 'enabled'); the next start takes it"""
+    enabled = bool((request.get_json(silent=True) or {}).get('enabled'))
+    scanner.settings.set('network_access', enabled)
+    logger.info(f"Network access: {enabled} (running: {network_access_running})")
+    return jsonify({'success': True, 'enabled': enabled, 'running': bool(network_access_running)})
+
+
+def camera_settings():
+    return {
+        'cameras': CardScanner.list_cameras(),
+        'choice': scanner.settings.get('camera_index'),  # None: automatic (camera.usb_index)
+        'current': scanner.usb_index if scanner.camera is not None and scanner.camera_type == 'usb' else None,
+    }
+
+
+@app.route('/api/cameras')
+def get_cameras():
+    """The cameras Settings offers, the chosen one and the one in use"""
+    return jsonify(camera_settings())
+
+
+@app.route('/api/camera', methods=['POST'])
+def set_camera():
+    """Choose the USB camera (JSON: 'index' - a /dev/videoN number, or null for automatic)"""
+    try:
+        scanner.set_camera((request.get_json(silent=True) or {}).get('index'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info(f"Camera chosen: {scanner.settings.get('camera_index')}")
+    return jsonify({'success': True, **camera_settings()})
 
 
 @app.route('/api/sound', methods=['POST'])
 def set_sound():
-    """Remember the sound switch and / or the volume (JSON: 'enabled', 'volume' 0-100)"""
+    """Remember the sound switches and / or the volume (JSON: 'enabled', 'capture', 'added', 'volume' 0-100)"""
     data = request.get_json(silent=True) or {}
     try:
-        if 'enabled' in data:
-            scanner.settings.set('sound_enabled', bool(data['enabled']))
+        for key in ('enabled', 'capture', 'added'):
+            if key in data:
+                scanner.settings.set(f'sound_{key}', bool(data[key]))
         if 'volume' in data:
             scanner.settings.set('sound_volume', max(0, min(100, int(data['volume']))))
     except (TypeError, ValueError):
@@ -2693,6 +2864,32 @@ def handle_test_prompt(data):
 # Newer card data found by the update check: game id -> message (shown on the page)
 data_update_notices = {}
 data_updates_running = set()
+# Failed downloads in a row of a game without card data (tried again by themselves): game id -> count
+data_update_failures = {}
+FIRST_DOWNLOAD_RETRY = (30, 600)  # seconds until the first retry, doubling up to the second value
+
+
+def retry_first_download(game):
+    """
+    Without card data nothing can be scanned or added, so a failed first download (no
+    connection yet, Scryfall down) is tried again by itself. Returns the wait in seconds, or
+    None when the game has card data (an update that failed is started again by the user).
+    """
+    if game.card_count():
+        data_update_failures.pop(game.id, None)
+        return None
+    failures = data_update_failures.get(game.id, 0)
+    data_update_failures[game.id] = failures + 1
+    first, longest = FIRST_DOWNLOAD_RETRY
+    wait = min(first * 2 ** failures, longest)
+
+    def again():
+        if not game.card_count():
+            start_card_data_update(game)
+    timer = threading.Timer(wait, again)
+    timer.daemon = True
+    timer.start()
+    return wait
 
 
 def start_card_data_update(game):
@@ -2711,11 +2908,22 @@ def start_card_data_update(game):
             game.download(progress_callback)
             total = game.card_count()
             data_update_notices.pop(game.id, None)
+            data_update_failures.pop(game.id, None)
             socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
             logger.info(f"{game.label} card data updated: {total} cards")
         except Exception as e:
             logger.exception(f"Database update failed: {e}")
-            socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
+            repeated = game.id in data_update_failures
+            wait = retry_first_download(game)
+            if wait is None:
+                socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
+            else:
+                after = f"{wait} seconds" if wait < 120 else f"{wait // 60} minutes"
+                message = f"{e} - trying again in {after}"
+                logger.info(f"{game.label} card data: next attempt in {after}")
+                # Said as an error once; the attempts after it only show as progress
+                socketio.emit('database_update_progress' if repeated else 'database_update_error',
+                              {'game': game.id, 'message': message, 'retrying': True})
         finally:
             data_updates_running.discard(game.id)
 
@@ -2819,6 +3027,8 @@ def handle_rebuild_database():
 # Running as a desktop program (--app: what the AppImage starts)
 # ============================================================================
 
+LOCAL_HOSTS = ('127.0.0.1', 'localhost', '::1')
+
 # Started by double click there is no terminal to press Ctrl+C in: the page opens in the
 # browser by itself and Settings offers Quit
 app_mode = False
@@ -2831,6 +3041,26 @@ def parse_arguments():
     parser.add_argument('--no-browser', action='store_true', help="with --app: don't open the browser")
     parser.add_argument('--quit', action='store_true', help='stop the program started with --app')
     return parser.parse_args()
+
+
+instance_lock = None  # the open data/app.lock, held while this copy runs
+
+
+def lock_instance():
+    """
+    False when another copy runs on this data folder - also one that is still starting and
+    does not answer on its port yet (two quick double clicks)
+    """
+    global instance_lock
+    Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    instance_lock = open(Config.DATA_DIR / 'app.lock', 'w')
+    try:
+        fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        instance_lock.close()
+        instance_lock = None
+        return False
 
 
 def port_answers(port):
@@ -2855,6 +3085,19 @@ def open_browser_when_ready(url):
 def stop_on_signal(signum, frame):
     # Ends socketio.run like Ctrl+C does, so main releases the camera and closes the database
     raise KeyboardInterrupt
+
+
+restart_requested = False  # main starts the program again after shutting down
+
+
+@app.route('/api/restart', methods=['POST'])
+def restart_program():
+    """Stop and start the program again - what the settings that apply "after a restart" wait for"""
+    global restart_requested
+    restart_requested = True
+    logger.info("Restart requested from the web interface")
+    threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGTERM)).start()  # after the answer is sent
+    return jsonify({'success': True})
 
 
 @app.route('/api/quit', methods=['POST'])
@@ -2927,8 +3170,17 @@ def main():
         return
 
     # A second copy could not open the camera or the port: show the one that runs instead
+    if not lock_instance():
+        print(f"Card Scanner is running already: {url}")
+        if app_mode and not args.no_browser:
+            for _ in range(120):  # it may still be starting
+                if port_answers(Config.PORT):
+                    break
+                time.sleep(0.5)
+            webbrowser.open(url)
+        return
     if port_answers(Config.PORT):
-        print(f"Port {Config.PORT} is in use - Card Scanner is probably running already: {url}")
+        print(f"Port {Config.PORT} is in use by another program (or a Card Scanner with another data folder): {url}")
         if app_mode and not args.no_browser:
             webbrowser.open(url)
         return
@@ -2976,25 +3228,30 @@ def main():
         print(f"✓ Camera ready ({scanner.camera_type})")
     print(daily_backup_status)
 
-    global debug_mode_running
+    global debug_mode_running, network_access_running
     debug_mode_running = saved_debug_mode()
+    network_access_running = network_access()
+    host = listen_host()
     if debug_mode_running:
         enable_request_log()
     logger.info(f"Debug trace: {'on' if scanner.debug_trace_enabled else 'off'}, debug mode: {'on' if debug_mode_running else 'off'} (Settings)")
-    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {'on - frames go to data/debug_frames' if scanner.debug_trace_enabled else 'off'}")
-    print(f"{'✓' if debug_mode_running else '-'} Debug mode: {'on - requests go to data/logs/requests.log' if debug_mode_running else 'off'}")
+    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {f"on - frames go to {Config.shown('debug_frames')}" if scanner.debug_trace_enabled else 'off'}")
+    print(f"{'✓' if debug_mode_running else '-'} Debug mode: {f"on - requests go to {Config.shown('logs', 'requests.log')}" if debug_mode_running else 'off'}")
 
     print("\n" + "="*60)
     print("Web Interface Starting...")
     print("="*60)
     print(f"\n✓ Access the scanner at:")
     print(f"  • Local:   http://localhost:{Config.PORT}")
-    print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
-    print(f"\n✓ Logs are being written to: {'data/logs/app.log' if Config.USER_DIR == Config.BASE_DIR else Config.DATA_DIR / 'logs' / 'app.log'}")
+    if network_access_running:
+        print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
+    else:
+        print("  • This computer only (Settings -> Reachable from other devices)")
+    print(f"\n✓ Logs are being written to: {Config.shown('logs', 'app.log')}")
     print("\nPress Ctrl+C to stop" + (" (or Settings -> Quit)" if app_mode else ""))
     print("="*60 + "\n")
 
-    logger.info(f"Starting Flask server on {Config.HOST}:{Config.PORT}")
+    logger.info(f"Starting Flask server on {host}:{Config.PORT}")
 
     # Flask's own two start lines (" * Serving Flask app", " * Debug mode") repeat what the
     # banner above says
@@ -3010,7 +3267,7 @@ def main():
         # Start Flask app with SocketIO
         socketio.run(
             app,
-            host=Config.HOST,
+            host=host,
             port=Config.PORT,
             debug=debug_mode_running,
             # Never the reloader: it starts the program a second time, and only one process
@@ -3028,6 +3285,18 @@ def main():
             database.close()
         logger.info("Scanner stopped successfully")
         print("Scanner stopped.")
+
+    if restart_requested:
+        # The same command in this very process: a service or the AppImage keep their program,
+        # the lock on the data folder and the port are released by the exec. The page that
+        # asked reloads by itself, so no second browser tab
+        command = [sys.executable] + sys.orig_argv[1:]
+        if app_mode and '--no-browser' not in command:
+            command.append('--no-browser')
+        logger.info("Restarting")
+        print("Restarting...\n")
+        sys.stdout.flush()
+        os.execv(sys.executable, command)
 
 
 if __name__ == "__main__":
