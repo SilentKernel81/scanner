@@ -1380,7 +1380,6 @@ function loadGames() {
             select.value = data.active;
             select.hidden = data.games.length < 2;
             applyGameFields();
-            renderExportButtons();
         })
         .catch(error => console.error('Error loading games:', error));
 }
@@ -1390,7 +1389,6 @@ socket.on('game_changed', function(data) {
     $('game-select').value = data.id;
     hideReviewPanel();
     applyGameFields();
-    renderExportButtons();
     currentCard = null;
     setCardPanel(`<div class="empty-state">Scanning ${escapeHtml(data.label)}.</div>`);
     loadStats();
@@ -1587,79 +1585,6 @@ function setupInventoryList() {
         hideCapturePopover();
     });
     list.addEventListener('scroll', hideCapturePopover, {passive: true});
-}
-
-function exportInventory(format, label) {
-    // The server sends the file as a download
-    const downloadLink = document.createElement('a');
-    downloadLink.href = `/api/export_inventory/${encodeURIComponent(format)}?area=scan`;
-    downloadLink.download = '';
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-    addLog(timeNow(), 'success', `${label} export started - check your downloads folder`);
-    if (format === 'moxfield') {
-        addLog(timeNow(), 'info', 'Import it at moxfield.com/account/collection');
-    }
-}
-
-function renderExportButtons() {
-    $('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
-        `<button class="btn btn-small" onclick="exportInventory('${escapeHtml(format)}', '${escapeHtml(label)}')">Export ${escapeHtml(label)}</button>`
-    ).join('');
-}
-
-async function importInventory() {
-    const fileInput = $('import-file-input');
-    const file = fileInput.files[0];
-
-    if (!file) {
-        addLog(timeNow(), 'warning', 'No file selected');
-        return;
-    }
-    if (!file.name.endsWith('.csv')) {
-        addLog(timeNow(), 'error', 'Only CSV files are supported');
-        fileInput.value = '';
-        return;
-    }
-
-    const mode = await choiceDialog({
-        title: `Import ${file.name}`,
-        message: 'Add the cards in this file to the scanned cards (quantities of matching cards are added up), or replace the scanned cards with this file? Your collection is not changed.',
-        choices: [
-            {label: 'Cancel', value: null},
-            {label: 'Replace scanned cards', value: 'replace', style: 'danger'},
-            {label: 'Add to scanned cards', value: 'merge', style: 'primary'}
-        ]
-    });
-    if (!mode) {
-        fileInput.value = '';
-        return;
-    }
-
-    addLog(timeNow(), 'info', `Importing ${file.name} into the scanned cards...`);
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('replace_existing', mode === 'replace' ? 'true' : 'false');
-
-    fetch('/api/import_inventory?area=scan', {method: 'POST', body: formData})
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                const stats = data.stats;
-                addLog(timeNow(), 'success',
-                    `Import complete! Added: ${stats.added}, Updated: ${stats.updated}, Skipped: ${stats.skipped}, Errors: ${stats.errors}`);
-                inventoryChanged();
-            } else {
-                notify('Import failed: ' + (data.error || 'Unknown error'), 'error');
-            }
-        })
-        .catch(error => {
-            console.error('Import error:', error);
-            notify('Import failed - check the file format and try again (' + error + ')', 'error');
-        })
-        .finally(() => { fileInput.value = ''; });
 }
 
 async function addToCollection() {

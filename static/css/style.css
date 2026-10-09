@@ -1628,10 +1628,6 @@ input[type="radio"] {
     display: none;
 }
 
-.export-buttons {
-    display: contents;
-}
-
 /* A rotated (portrait) camera image */
 .video-container.portrait {
     aspect-ratio: 9 / 16;

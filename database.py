@@ -550,9 +550,13 @@ class CardDatabase:
             SELECT * FROM cards WHERE set_code = ? AND collector_number IN ({placeholders}) LIMIT 1
         ''', (set_code.strip().lower(), *number_variants)).fetchone()
 
-    def get_card_by_set_number(self, set_code, collector_number):
-        """Card dict for a set code + collector number, or None"""
-        number_variants = collector_number_variants(collector_number)
+    def get_card_by_set_number(self, set_code, collector_number, exact=False):
+        """
+        Card dict for a set code + collector number, or None. exact: the number as written
+        ("M19-128", "12a": from another app's file) instead of what a read number may stand for
+        """
+        number_variants = [collector_number.strip()] if exact and collector_number \
+            else collector_number_variants(collector_number)
         if not set_code or not number_variants:
             return None
         with self._lock:

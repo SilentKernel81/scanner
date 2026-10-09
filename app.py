@@ -6,7 +6,9 @@ Main Flask application with SocketIO - COMPLETE VERSION
 
 from flask import Flask, render_template, Response, jsonify, request, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
+import csv
 import cv2
+import io
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -1023,60 +1025,71 @@ def export_inventory(fmt):
 
 @app.route('/api/import_inventory', methods=['POST'])
 def import_inventory():
-    """Import inventory from CSV file upload"""
+    """Import a collection file: another app's (Game.import_rows) or one in the app's own columns"""
     if not inventory:
         return jsonify({'error': 'Inventory not initialized'}), 500
 
     # Check if file was uploaded
     if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
 
     file = request.files['file']
 
     # Check if filename is empty
     if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
 
     # Check file extension
-    if not file.filename.endswith('.csv'):
-        return jsonify({'error': 'Only CSV files are supported'}), 400
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({'success': False, 'error': 'Only CSV files are supported'}), 400
 
     try:
-        # Get replace_existing flag from form data (default: False)
         replace_existing = request.form.get('replace_existing', 'false').lower() == 'true'
-
-        # Save uploaded file temporarily
-        upload_dir = Config.DATA_DIR / 'uploads'
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        temp_file_path = upload_dir / f'import_{timestamp}_{file.filename}'
-
-        file.save(str(temp_file_path))
-        logger.info(f"CSV file uploaded: {temp_file_path}")
-
-        # Import the CSV
         game = games.active()
-        stats = inventory_area().import_csv(temp_file_path, game.id, list(game.finishes),
-                                     replace_existing=replace_existing)
+        content = file.read().decode('utf-8-sig', errors='replace')
+        reader = csv.DictReader(io.StringIO(content))
+        columns = {(name or '').strip().lower() for name in reader.fieldnames or []}
 
-        # Clean up temporary file
-        temp_file_path.unlink()
+        # Another app's collection file (Game.import_formats), matched to the card database
+        parsed = game.import_rows(columns, ({(key or '').strip().lower(): value for key, value in row.items()
+                                             if isinstance(value, str)} for row in reader))
+        if parsed is not None:
+            if not parsed['entries']:
+                # Nothing is replaced by a file with no card that could be matched
+                return jsonify({'success': False, 'error': f"No card in this {parsed['format']} file was found "
+                                                           f"in the {game.label} card database"}), 400
+            stats = inventory_area().import_entries(parsed['entries'], game.id, replace_existing=replace_existing)
+            stats.update(format=parsed['format'], by_name=parsed['by_name'],
+                         skipped=len(parsed['not_found']), not_found=parsed['not_found'][:10])
+            if parsed['not_found']:
+                logger.warning(f"Import: {len(parsed['not_found'])} cards not found: "
+                               + ', '.join(parsed['not_found'][:50]))
+        elif {'card name', 'set'} <= columns:
+            # The app's own columns (the "Card Scanner" export, and CSVs written before it)
+            upload_dir = Config.DATA_DIR / 'uploads'
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            temp_file_path = upload_dir / f"import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            temp_file_path.write_text(content, newline='')
+            try:
+                stats = inventory_area().import_csv(temp_file_path, game.id, list(game.finishes),
+                                                    replace_existing=replace_existing)
+            finally:
+                temp_file_path.unlink()
+            stats.update(format='Card Scanner', by_name=0, not_found=[])
+        else:
+            # Refused before anything is replaced
+            formats = ' or '.join([*game.import_formats, 'Card Scanner'])
+            return jsonify({'success': False,
+                            'error': f"The columns of this file are not those of a {formats} CSV"}), 400
 
         if stats['success']:
-            inv_stats = inventory_area().get_stats(game.id)
-
             return jsonify({
                 'success': True,
                 'stats': stats,
-                'inventory_stats': inv_stats,
+                'inventory_stats': inventory_area().get_stats(game.id),
                 'message': f"Import complete: {stats['added']} added, {stats['updated']} updated"
             })
-        else:
-            return jsonify({
-                'success': False,
-                'error': stats.get('error', 'Import failed')
-            }), 400
+        return jsonify({'success': False, 'error': stats.get('error', 'Import failed')}), 400
 
     except Exception as e:
         logger.exception(f"Import failed: {e}")
@@ -2205,6 +2218,7 @@ def game_info(game):
         'number_example': game.number_example,
         'finishes': [[key, label] for key, label in game.finishes.items()],
         'exports': [[key, label] for key, (label, _prefix, _writer) in game.export_formats().items()],
+        'imports': list(game.import_formats),
         # Deck builder formats: [[id, label, has a commander]] (none: the game has no deck builder)
         'deck_formats': [[key, rules['label'], bool(rules.get('commander'))]
                          for key, rules in game.deck_formats.items()],

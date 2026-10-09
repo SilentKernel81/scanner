@@ -1,24 +1,18 @@
 """
 Magic: The Gathering - Scryfall card data (database.CardDatabase, table `cards`), set code +
 collector number matching (card_search.CardSearcher), regular / foil / surge foil finishes,
-CSV and Moxfield exports.
+Moxfield collection export and import.
 """
 import csv
 from datetime import datetime
 
 from card_search import CardSearcher
 from config import Config
-from database import CONFIRMED_MATCHES
+from database import CONFIRMED_MATCHES, search_key
 from games.base import Game
 from games import mtg_decks
 
 COLOR_NAMES = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green'}
-
-# Column order of the CSV export (also what import_csv reads back)
-CSV_COLUMNS = ['Card Name', 'Set', 'Card Number', 'Rarity', 'Type', 'Mana Cost', 'Colors',
-               'Color Identity', 'Price (USD)', 'Quantity', 'Condition', 'Foil', 'Surge', 'Timestamp',
-               'Location', 'Tags']
-
 
 def color_identity(colors):
     if not colors:
@@ -28,18 +22,13 @@ def color_identity(colors):
     return 'Multicolor'
 
 
-def write_csv(rows, file):
-    writer = csv.writer(file)
-    writer.writerow(CSV_COLUMNS)
-    for row in rows:
-        writer.writerow([
-            row['name'], row['set_name'], row['number'], row['rarity'], row['type_line'],
-            row['mana_cost'], row['colors'], row['color_identity'], f"${row['price']:.2f}",
-            row['quantity'], row['condition'],
-            'Yes' if row['finish'] == 'foil' else 'No',
-            'Yes' if row['finish'] == 'surge' else 'No',
-            row['timestamp'], row.get('location', ''), ', '.join(row.get('tags') or []),
-        ])
+# Moxfield's condition names (and the short forms its import takes) -> the conditions used here
+MOXFIELD_CONDITIONS = {
+    'mint': 'Mint', 'm': 'Mint', 'near mint': 'Near Mint', 'nm': 'Near Mint',
+    'lightly played': 'Excellent', 'lp': 'Excellent', 'good (lightly played)': 'Excellent',
+    'moderately played': 'Good', 'mp': 'Good', 'played': 'Played',
+    'heavily played': 'Played', 'hp': 'Played', 'damaged': 'Poor', 'poor': 'Poor', 'dmg': 'Poor',
+}
 
 
 def write_moxfield(rows, file):
@@ -213,7 +202,46 @@ class Magic(Game):
         return mtg_decks.format_decklist(entries, deck_format)
 
     def export_formats(self):
-        return {
-            'csv': ('CSV', 'card_inventory_export', write_csv),
-            'moxfield': ('Moxfield CSV', 'moxfield_export', write_moxfield),
-        }
+        return {'moxfield': ('Moxfield', 'moxfield_export', write_moxfield), **super().export_formats()}
+
+    import_formats = ('Moxfield',)
+
+    def import_rows(self, columns, rows):
+        # Moxfield's collection CSV: Count, Name, Edition (set code), Condition, Foil
+        # (foil / etched / empty), Collector Number, Tags
+        if not {'count', 'name', 'edition'} <= columns:
+            return None
+        result = {'format': 'Moxfield', 'entries': [], 'by_name': 0, 'not_found': []}
+        front = lambda card_name: search_key(card_name.split(' // ')[0])
+        for row in rows:
+            name = (row.get('name') or '').strip()
+            if not name:
+                continue
+            # The printing by set code + collector number; a card the database has under
+            # another number (or a row without one) is still taken, by its name
+            edition, number = (row.get('edition') or '').strip(), (row.get('collector number') or '').strip()
+            card = self.db.get_card_by_set_number(edition, number, exact=True)
+            if not card:
+                # Written another way ("007" for 7) - only when it is the card the row names
+                card = self.db.get_card_by_set_number(edition, number)
+                if card and front(card['name']) != front(name):
+                    card = None
+            if not card:
+                card = self.db.search_card(name, fuzzy=False)
+                if not card:
+                    result['not_found'].append(name)
+                    continue
+                result['by_name'] += 1
+            try:
+                quantity = max(1, int(float(row.get('count') or 1)))
+            except ValueError:
+                quantity = 1
+            # Moxfield has no surge foil: it is the foil of a surge foil printing (write_moxfield)
+            finish = 'regular' if not (row.get('foil') or '').strip() \
+                else 'surge' if 'Surge Foil' in (card.get('treatments') or []) else 'foil'
+            result['entries'].append({
+                'fields': self.inventory_fields(card, finish), 'finish': finish, 'quantity': quantity,
+                'condition': MOXFIELD_CONDITIONS.get((row.get('condition') or '').strip().lower(), 'Near Mint'),
+                'tags': row.get('tags') or row.get('tag') or '',
+            })
+        return result

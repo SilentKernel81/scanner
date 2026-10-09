@@ -14,7 +14,6 @@ since Scarlet & Violet; older cards only have a set symbol):
 2. name + number, narrowed by the set total ("/193") to one card -> name_number (confirmed)
 3. otherwise the newest printing of the name (review)
 """
-import csv
 import json
 import re
 import threading
@@ -69,9 +68,6 @@ COLUMN_NAMES = [name for name, _ in COLUMNS]
 CARDS_QUERY = ('{ cards { id localId name rarity category image hp types stage trainerType energyType '
                'variants { normal reverse holo firstEdition } set { id } } }')
 SETS_QUERY = '{ sets { id name releaseDate serie { id } cardCount { official } } }'
-
-CSV_COLUMNS = ['Card Name', 'Set', 'Card Number', 'Rarity', 'Type', 'Finish', 'Price (USD)',
-               'Quantity', 'Condition', 'Timestamp', 'Location', 'Tags']
 
 
 def number_key(text):
@@ -131,15 +127,6 @@ def names_match(query, name):
     # must not match "Energy Retrieval"
     short, long = sorted((query_key, key), key=len)
     return long.startswith(short + ' ') and long[len(short) + 1:].replace('-', ' ') in NAME_SUFFIXES
-
-
-def write_csv(rows, file):
-    writer = csv.writer(file)
-    writer.writerow(CSV_COLUMNS)
-    for row in rows:
-        writer.writerow([row['name'], row['set_name'], row['number'], row['rarity'], row['type_line'],
-                         row['finish'], f"${row['price']:.2f}", row['quantity'], row['condition'],
-                         row['timestamp'], row.get('location', ''), ', '.join(row.get('tags') or [])])
 
 
 class Pokemon(Game):
@@ -541,6 +528,3 @@ class Pokemon(Game):
             # A finish without a price: the first priced one, in finish order
             'price': float(prices.get(finish) or next((prices[k] for k in self.finishes if prices.get(k)), 0.0)),
         }
-
-    def export_formats(self):
-        return {'csv': ('CSV', 'pokemon_inventory_export', write_csv)}

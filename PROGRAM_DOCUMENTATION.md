@@ -616,10 +616,23 @@ Inventories from before multi-game support (`foil`/`surge` flags) are rebuilt on
 the old table is first copied to `data/backups/inventory_before_multigame_<time>.db`, the
 migration checks that the card count is unchanged, and it runs in one transaction.
 
-Exports are per game (`Game.export_formats`; Magic: CSV with the classic columns, Moxfield CSV -
-`Edition` is the set code, which Moxfield matches; with the set name it took the alphabetically
-first set of the card; surge foils go out as `foil`; Pokémon: CSV with a `Finish` column); CSV import reads the `Finish` column or the older
-`Foil`/`Surge` columns and merges duplicates.
+Exports and imports are on the collection page only, per game and per site / app, so more can
+be added: `Game.export_formats` fills the **Export…** menu (Magic: Moxfield CSV - `Edition` is
+the set code, which Moxfield matches; with the set name it took the alphabetically first set of
+the card; surge foils go out as `foil`; every game: "Card Scanner (everything)",
+`games.base.write_collection_csv` - all the columns of an entry, with `Card ID`, `Set Code` and
+`Timestamp`, so `import_csv` puts each entry back as it was), `Game.import_rows`
+reads another app's file (`import_formats` names them). `POST /api/import_inventory` picks by
+the file's columns: Moxfield (`Count`, `Name`, `Edition`) → `Magic.import_rows` matches each row
+to its printing by set code + collector number as written (`get_card_by_set_number(exact=True)`:
+"M19-128" of The List), then the number's variants if the name agrees, then the name alone
+(counted as `by_name`: maybe another printing); `foil`/`etched` become foil, or surge for a
+surge foil printing; Moxfield's conditions map to the ones here (Lightly Played → Excellent,
+Moderately → Good, Heavily → Played, Damaged → Poor); tags are kept, the location is empty
+(Moxfield has none - entries that differ only by location merge) → `inventory.import_entries`.
+The app's own columns (`Card Name`, `Set`) → `import_csv`; CSVs written before the `Card ID` /
+`Set Code` columns existed import without a link to their printing. Any other
+file, or one where no card is found, is refused before "replace" deletes anything.
 
 **`pokemon_cards`** / **`pokemon_sets`** (created by `games/pokemon.py`) - TCGdex data: one
 GraphQL request returns every card (~21k paper cards, a few MB); the printed set abbreviations

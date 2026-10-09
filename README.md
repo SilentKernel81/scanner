@@ -2,7 +2,7 @@
 
 A camera-based scanner for Magic: The Gathering cards. Put a card under the camera, and the
 scanner finds it in the video feed, identifies the exact printing with a vision AI, tells you
-whether it's foil, and adds it to a local inventory you can export to CSV or Moxfield.
+whether it's foil, and adds it to a local collection you can export to Moxfield.
 
 It also scans **Pokémon** cards (one game at a time - pick it in the top bar); see
 [Pokémon](#pokémon) below.
@@ -49,8 +49,8 @@ USB webcam or Raspberry Pi camera, and is used from a browser on the same networ
   retro frame, etched, surge foil. When several printings match, pick the one you have from
   a grid of thumbnails.
 - **Inventory** with automatic duplicate merging, condition, regular / foil / surge foil,
-  prices, filtering, sorting, editing, CSV import, and export to CSV or
-  [Moxfield](https://moxfield.com).
+  prices, filtering, sorting, editing, and export to / import from
+  [Moxfield](https://moxfield.com) on the collection page.
 - Sound effects, and a dark/light interface that follows your system theme.
 - **Housekeeping** - scanned images older than 7 days are cleaned up automatically. The app
   checks for newer card data when it starts (and daily) and marks the Database counter with
@@ -241,8 +241,13 @@ Open it from the Scanned count in the top bar. Each entry shows a thumbnail of w
 captured: hover over an entry to see all its captured copies side by side, or click (tap) the
 thumbnail to open them larger - handy to check what a scan actually added. You can filter, sort (newest / oldest, name,
 price, total value, quantity, rarity, set and number - the choice is remembered in the browser),
-edit quantity / condition / finish (changing the finish of part of a stack splits it; the price follows the finish), delete, clear, import a CSV, and
-export to **CSV** or **Moxfield**. Adding a card that is already in the inventory with the same
+edit quantity / condition / finish (changing the finish of part of a stack splits it; the price follows the finish), delete and clear. Exporting and importing
+are on the collection page: the **Export…** menu lists the sites the collection can be written for
+(Magic: Moxfield) and **Card Scanner (everything)** - the app's own CSV with every entry's
+location, tags, finish and printing, which **Import** reads back exactly as it was (capture
+thumbnails and decks are not in it - the backups have those). **Import** also adds a Moxfield
+collection CSV to the collection or replaces it - each row is matched to its printing by set code and collector number
+(by name when that fails, which is reported). Moxfield has no locations, so an import has none. Adding a card that is already in the inventory with the same
 condition, finish and location increases its quantity instead of creating a duplicate.
 
 ### Collection page
@@ -459,11 +464,11 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `GET /api/precons`, `POST /api/precons/<file>/own` | Preconstructed decks; add one's cards to the inventory and open it as a deck (JSON: `name`, `location`) |
 | `GET /api/inventory/suggested` | The owned cards EDHREC lists for the decks' commanders (`cards`: name → decks; `unknown`: decks without data) |
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
-| `POST /api/import_inventory` | Import a CSV into the active game (multipart `file`) |
+| `POST /api/import_inventory` | Import a collection CSV into the active game (multipart `file`, `replace_existing`): Moxfield (Magic), or the app's own columns |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
 | `GET` / `POST /api/scan_inventory/to_collection` | Cards waiting and locations in use; move the scanned cards into the collection (JSON: `location`, optional - where they all go) |
 | `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
-| `GET /api/export_inventory/<format>` | Download the inventory: `csv` (both games), `moxfield` (Magic) |
+| `GET /api/export_inventory/<format>` | Download the inventory: `moxfield` (Magic), `csv` (the app's own, every column) |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |
 | `GET /api/local_ai_models` | Models installed on the local AI server |

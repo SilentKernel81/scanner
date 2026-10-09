@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Card Scanner</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=38">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=39">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -302,9 +302,6 @@
                     </select>
                     <button class="btn btn-small btn-primary" onclick="addToCollection()" title="Move these cards to your collection">Add to collection</button>
                     <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
-                    <span id="export-buttons" class="export-buttons"></span>
-                    <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
-                    <input type="file" id="import-file-input" accept=".csv" style="display: none;" onchange="importInventory()">
                     <button class="btn btn-small btn-danger" onclick="clearInventory()">Clear all</button>
                 </div>
                 <div id="inventory-stats" class="inventory-stats"></div>
@@ -352,6 +349,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=15"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=48"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=49"></script>
 </body>
 </html>

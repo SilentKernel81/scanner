@@ -10,7 +10,7 @@ const totalQuantity = rows => rows.reduce((sum, row) => sum + row.quantity, 0);
 
 async function api(path, options = {}) {
     // JSON request; shows the server's error and returns null when it fails
-    if (options.body && typeof options.body !== 'string') {
+    if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
         options = {...options, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(options.body)};
     }
     try {
@@ -472,9 +472,35 @@ async function addSelectionToDeck() {
 
 // -- Export / import -----------------------------------------------------------
 
-function renderExportButtons() {
-    $('export-buttons').innerHTML = gameInfo.exports.map(([format, label]) =>
-        `<a class="btn btn-small" href="/api/export_inventory/${encodeURIComponent(format)}" download>Export ${escapeHtml(label)}</a>`).join('');
+function renderExportMenu() {
+    // The sites / apps the collection can be exported for (Game.export_formats), and read from
+    const select = $('export-select');
+    select.innerHTML = '<option value="">Export…</option>' + gameInfo.exports.map(([format, label]) =>
+        `<option value="${escapeHtml(format)}">${escapeHtml(label)}</option>`).join('');
+    select.hidden = !gameInfo.exports.length;
+    $('import-button').title = `Add the cards of a ${importFormats()} file to your collection`;
+}
+
+function importFormats() {
+    return [...gameInfo.imports, 'Card Scanner'].join(' or ');
+}
+
+function exportInventory() {
+    // The server sends the file as a download; the menu goes back to "Export…"
+    const select = $('export-select');
+    const format = select.value;
+    if (!format) return;
+    const label = select.selectedOptions[0].textContent;
+    select.value = '';
+    const link = document.createElement('a');
+    link.href = `/api/export_inventory/${encodeURIComponent(format)}`;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    notify(`${label} export started - check your downloads folder`
+        + (format === 'moxfield' ? '. Import it at moxfield.com/account/collection'
+            : format === 'csv' ? '. Every entry with its location and tags; Import reads it back' : ''), 'success');
 }
 
 async function importInventory() {
@@ -483,7 +509,7 @@ async function importInventory() {
     if (!file) return;
     const mode = await choiceDialog({
         title: `Import ${file.name}`,
-        message: 'Add the cards in this file to your inventory (quantities of matching cards are added up), or replace your whole inventory with this file?',
+        message: `Reads a ${importFormats()} file. Add its cards to your collection (quantities of matching cards are added up), or replace your whole collection with this file?`,
         choices: [
             {label: 'Cancel', value: null},
             {label: 'Replace inventory', value: 'replace', style: 'danger'},
@@ -496,7 +522,13 @@ async function importInventory() {
         form.append('replace_existing', mode === 'replace' ? 'true' : 'false');
         const data = await api('/api/import_inventory', {method: 'POST', body: form});
         if (data) {
-            notify(`Import complete: ${data.stats.added} added, ${data.stats.updated} updated, ${data.stats.skipped} skipped, ${data.stats.errors} errors`, 'success');
+            const stats = data.stats;
+            const missing = stats.not_found.length
+                ? ` Not found: ${stats.not_found.join(', ')}${stats.skipped > stats.not_found.length ? ', ...' : ''}.` : '';
+            notify(`${stats.format} import: ${stats.added} added, ${stats.updated} added to cards you had`
+                + (stats.by_name ? `, ${stats.by_name} matched by name only (check their printing)` : '')
+                + (stats.skipped ? `, ${stats.skipped} skipped.` : '.') + (stats.errors ? ` ${stats.errors} errors.` : '') + missing,
+                stats.skipped || stats.errors ? 'warning' : 'success');
             loadInventory();
         }
     }
@@ -1367,6 +1399,7 @@ function bindInventoryEvents() {
         renderInventory();
     });
     $('import-file-input').addEventListener('change', importInventory);
+    $('export-select').addEventListener('change', exportInventory);
     $('scanned-add').addEventListener('click', addScanned);
     $('batch-remove').addEventListener('click', removeBatch);
 
@@ -1618,7 +1651,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     gameInfo = data.games.find(game => game.id === data.active);
     $('game-label').textContent = data.games.length > 1 ? gameInfo.label : '';
     $('tab-button-decks').hidden = !gameInfo.deck_formats.length;
-    renderExportButtons();
+    renderExportMenu();
     bindEvents();
     await loadInventory();
     loadDecks();  // the location filter lists the decks' locations apart

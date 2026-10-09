@@ -63,8 +63,8 @@
                         <button data-view="list" class="is-active" title="List"><svg class="icon"><use href="#i-list"/></svg></button>
                         <button data-view="grid" title="Card images"><svg class="icon"><use href="#i-grid"/></svg></button>
                     </div>
-                    <span id="export-buttons" class="export-buttons"></span>
-                    <button class="btn btn-small" onclick="document.getElementById('import-file-input').click()">Import CSV</button>
+                    <select id="export-select" class="select" title="Download your collection as a file for another site or app"></select>
+                    <button class="btn btn-small" id="import-button" onclick="document.getElementById('import-file-input').click()">Import</button>
                     <input type="file" id="import-file-input" accept=".csv" style="display: none;">
                 </div>
             </div>
@@ -370,6 +370,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=15"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=24"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=26"></script>
 </body>
 </html>

@@ -3,6 +3,26 @@ What every card game provides to the scanner. The web app, AI worker and invento
 to the active game through this interface; each game module (games/mtg.py, ...) implements it
 on top of its own card data.
 """
+import csv
+
+# The app's own CSV: every column an inventory entry stores, so a file written here comes back
+# as it was (inventory.import_csv) - a copy of the collection that any spreadsheet reads.
+# Capture thumbnails and decks are not in it (the backups have those)
+COLLECTION_COLUMNS = ['Card Name', 'Set', 'Set Code', 'Card Number', 'Finish', 'Quantity', 'Condition',
+                      'Location', 'Tags', 'Price (USD)', 'Rarity', 'Type', 'Mana Cost', 'Colors',
+                      'Color Identity', 'Card ID', 'Timestamp']
+
+
+def write_collection_csv(rows, file):
+    writer = csv.writer(file)
+    writer.writerow(COLLECTION_COLUMNS)
+    for row in rows:
+        writer.writerow([
+            row['name'], row['set_name'], row['set_code'], row['number'], row['finish'], row['quantity'],
+            row['condition'], row.get('location', ''), ', '.join(row.get('tags') or []),
+            f"${row['price']:.2f}", row['rarity'], row['type_line'], row['mana_cost'], row['colors'],
+            row['color_identity'], row['card_id'] or '', row['timestamp'],
+        ])
 
 
 class Game:
@@ -155,4 +175,19 @@ class Game:
     # Export key -> (label, file name prefix, writer(rows, file)); rows come from
     # InventoryManager.get_all_cards
     def export_formats(self):
-        return {}
+        return {'csv': ('Card Scanner (everything)', f'{self.id}_collection', write_collection_csv)}
+
+    # Names of the other apps' collection files the game reads (the import dialog lists them)
+    import_formats = ()
+
+    def import_rows(self, columns, rows):
+        """
+        A collection file of another app -> inventory entries. columns: the file's column
+        names (lower case); rows: its rows as dicts with those names.
+
+        Returns None when the columns are not a format the game reads, else
+        {'format': name, 'entries': [{'fields' (inventory_fields), 'finish', 'condition',
+        'quantity', 'tags'}], 'by_name': entries matched by name only (another printing may
+        have been taken), 'not_found': [names]}
+        """
+        return None

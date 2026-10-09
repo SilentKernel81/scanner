@@ -3,6 +3,7 @@
 # Inventory management using SQLite database
 # ============================================================================
 import csv
+import re
 import logging
 import sqlite3
 import threading
@@ -85,6 +86,9 @@ ARRIVED_MOVES_TABLE = 'CREATE TABLE IF NOT EXISTS arrived_moves (move_id TEXT PR
 
 def now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+TIMESTAMP = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
 
 
 def clean_tags(tags):
@@ -780,9 +784,48 @@ class InventoryManager:
         self.log(f"Inventory exported to: {path}", level="success")
         return path
 
+    def import_entries(self, entries, game, replace_existing=False):
+        """
+        Add the cards of another app's collection file (entries from Game.import_rows: matched
+        to their printings) to one game's inventory, or replace it with them.
+
+        Returns:
+            dict: success, added (new entries), updated (copies added to an existing entry)
+        """
+        stats = {'success': True, 'added': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
+        timestamp = now()
+        with self._lock:
+            if replace_existing:
+                self.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
+                self._drop_orphan_captures()
+                self.last_added = None
+            for entry in entries:
+                fields = entry['fields']
+                values = {
+                    'game': game, 'card_id': fields.get('card_id'), 'card_name': fields['name'],
+                    'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
+                    'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
+                    'type_line': fields.get('type_line'), 'mana_cost': fields.get('mana_cost'),
+                    'colors': fields.get('colors'), 'color_identity': fields.get('color_identity'),
+                    'price_usd': float(fields.get('price') or 0), 'quantity': entry['quantity'],
+                    'condition': entry.get('condition') or 'Near Mint', 'finish': entry['finish'],
+                    'timestamp': timestamp, 'added_at': timestamp, 'location': '',
+                    'tags': ', '.join(clean_tags(entry.get('tags') or '')),
+                }
+                exists = self.conn.execute(
+                    f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+                    [values[c] for c in KEY_COLUMNS]).fetchone()
+                self.conn.execute(UPSERT, values)
+                stats['updated' if exists else 'added'] += 1
+            self.conn.commit()
+        self.log(f"Import complete: {stats['added']} added, {stats['updated']} updated", level="success")
+        return stats
+
     def import_csv(self, csv_file_path, game, finishes, replace_existing=False):
         """
-        Import a CSV written by the CSV export (Card Name, Set, Card Number, ..., Quantity,
+        Import a CSV in the app's own columns (games.base.write_collection_csv - with Card ID,
+        Set Code and Timestamp an entry comes back as it was - and the CSVs written before
+        that, which lack them: Card Name, Set, Card Number, ..., Quantity,
         Condition, Finish or the older Foil / Surge columns, and Location / Tags when present)
         into one game's inventory.
 
@@ -802,6 +845,7 @@ class InventoryManager:
                 self.conn.execute('DELETE FROM inventory WHERE game = ?', (game,))
                 self._drop_orphan_captures()
                 self.last_added = None
+            imported_at = now()
             with open(csv_file_path, newline='') as f:
                 for row_number, row in enumerate(csv.DictReader(f), start=2):
                     try:
@@ -827,18 +871,21 @@ class InventoryManager:
                             price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
                         except ValueError:
                             price = 0.0
+                        timestamp = (row.get('Timestamp') or '').strip()
                         values = {
-                            'game': game, 'card_id': None, 'card_name': name, 'set_name': set_name,
-                            'set_code': None, 'card_number': (row.get('Card Number') or '').strip(),
+                            'game': game, 'card_id': (row.get('Card ID') or '').strip() or None,
+                            'card_name': name, 'set_name': set_name,
+                            'set_code': (row.get('Set Code') or '').strip() or None, 'card_number': (row.get('Card Number') or '').strip(),
                             'rarity': (row.get('Rarity') or '').strip(), 'type_line': (row.get('Type') or '').strip(),
                             'mana_cost': (row.get('Mana Cost') or '').strip(), 'colors': (row.get('Colors') or '').strip(),
                             'color_identity': (row.get('Color Identity') or '').strip(), 'price_usd': price,
                             'quantity': quantity, 'condition': (row.get('Condition') or '').strip() or 'Near Mint',
-                            'finish': finish, 'timestamp': now(),
+                            'finish': finish,
+                            'timestamp': timestamp if TIMESTAMP.match(timestamp) else now(),
                             'location': (row.get('Location') or '').strip(),
                             'tags': ', '.join(clean_tags(row.get('Tags') or '')),
                         }
-                        values['added_at'] = values['timestamp']
+                        values['added_at'] = imported_at
                         exists = self.conn.execute(
                             f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                             [values[c] for c in KEY_COLUMNS]).fetchone()
