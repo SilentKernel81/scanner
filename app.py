@@ -561,6 +561,14 @@ def initialize_components():
     deck_store = DeckManager()
     recommend = Recommendations()
 
+    # The day's backup of the collection, scanned cards and decks (a restart finds it and makes none)
+    try:
+        made = backups.create_daily(inventory, scan_inventory, deck_store)
+        logger.info(f"Daily backup made: {made['cards']} cards, {made['scanned']} scanned, {made['decks']} decks"
+                    if made else "Daily backup: today's is there already (or there is nothing to back up)")
+    except Exception as e:
+        logger.error(f"The daily backup failed: {e}", exc_info=True)
+
     # Set up auto-capture callback
     def handle_auto_capture():
         """Handle auto-capture event - triggers card identification"""

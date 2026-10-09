@@ -290,7 +290,8 @@ you have scanned and to build decks. It works on a phone too.
   **Remove this batch** to take exactly those copies back out (copies you had before stay).
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
-- **Backups** - the gear button opens Settings: **Back up now** keeps your collection, the
+- **Backups** - one is made automatically the first time the app starts each day (the last
+  7 are kept). The gear button opens Settings: **Back up now** keeps your collection, the
   scanned cards and your decks as they are (with an optional note) - do it before a big load,
   like adding a pile of scanned cards or importing a file. **Restore** puts all three back as
   they were; what you had at that moment is backed up first, so a restore can be taken back.

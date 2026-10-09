@@ -1293,7 +1293,7 @@ function renderBackups(backups) {
     $('backup-list').innerHTML = backups.map(backup => `
         <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
             <div>
-                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic ? ' <span class="backup-auto">automatic</span>' : ''}</div>
+                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic || backup.daily ? ' <span class="backup-auto">automatic</span>' : ''}</div>
                 ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
                 <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
             </div>

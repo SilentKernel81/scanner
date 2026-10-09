@@ -16,6 +16,7 @@ from inventory import CAPTURES_DIR
 
 logger = logging.getLogger(__name__)
 
+# Made by the user (kept until deleted), when the app starts (create_daily) and before a restore.
 # One folder per backup, named by its time: backup.db (the tables below as plain copies, and
 # `info`) and captures/ - the capture thumbnails the entries point at, as hard links (no extra
 # space; they stay when the app deletes its own). Card data and settings are not part of it:
@@ -25,6 +26,7 @@ BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 INVENTORY_TABLES = ('inventory', 'inventory_captures')
 DECK_TABLES = ('decks', 'deck_cards')
 KEEP_AUTOMATIC = 5  # backups made before a restore; the ones the user makes are kept until deleted
+KEEP_DAILY = 7      # backups made when the app starts (one per day, see create_daily)
 
 
 class BackupError(Exception):
@@ -61,7 +63,7 @@ def _link(source, target):
         shutil.copyfile(source, target)
 
 
-def create(inventory, scan_inventory, deck_store, note='', automatic=False):
+def create(inventory, scan_inventory, deck_store, note='', automatic=False, daily=False):
     """Back up the collection, the scanned cards and the decks as they are now; returns its info"""
     created = datetime.now()
     backup_id = created.strftime('%Y-%m-%d_%H-%M-%S')
@@ -89,7 +91,7 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False):
         count = lambda sql: target.execute(sql).fetchone()[0]
         info = {
             'id': backup_id, 'created': created.strftime('%Y-%m-%d %H:%M:%S'), 'note': (note or '').strip()[:80],
-            'automatic': bool(automatic),
+            'automatic': bool(automatic), 'daily': bool(daily),
             'cards': count('SELECT COALESCE(SUM(quantity), 0) FROM collection_inventory'),
             'entries': count('SELECT COUNT(*) FROM collection_inventory'),
             'scanned': count('SELECT COALESCE(SUM(quantity), 0) FROM scanned_inventory'),
@@ -104,10 +106,27 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False):
         shutil.rmtree(work, ignore_errors=True)
         raise
     logger.info(f"Backup {backup_id}: {info['cards']} cards, {info['scanned']} scanned, {info['decks']} decks")
-    if automatic:
-        for old in [item for item in list_backups() if item['automatic']][KEEP_AUTOMATIC:]:
-            delete(old['id'])
+    # Only its own kind makes room: the daily ones don't push out the ones before a restore
+    for kind, keep in (('daily', KEEP_DAILY if daily else None), ('automatic', KEEP_AUTOMATIC if automatic else None)):
+        if keep:
+            for old in [item for item in list_backups() if item.get(kind)][keep:]:
+                delete(old['id'])
     return info
+
+
+def create_daily(inventory, scan_inventory, deck_store):
+    """
+    The backup made when the app starts: one per day - a later start the same day finds it and
+    makes none, as does a start with nothing to keep. Returns its info, or None.
+    """
+    today = datetime.now().strftime('%Y-%m-%d')
+    if any(item.get('daily') and item['created'].startswith(today) for item in list_backups()):
+        return None
+    made = create(inventory, scan_inventory, deck_store, note='Application start', daily=True)
+    if not (made['entries'] or made['scanned'] or made['decks']):
+        delete(made['id'])
+        return None
+    return made
 
 
 def list_backups():

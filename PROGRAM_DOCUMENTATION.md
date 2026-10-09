@@ -791,6 +791,11 @@ row (time, note, counts) - every game - and `captures/`, hard links to the thumb
 entries point at (no extra space; they survive the app deleting its own). It is written to a
 `.tmp` folder and moved into place, under the three managers' locks.
 
+**At startup** `backups.create_daily` (from `initialize_components`) makes the day's backup,
+marked `daily` (note "Application start"): a later start the same day finds it and makes
+none, an empty collection makes none, and the last `KEEP_DAILY` (7) are kept. A failure is
+logged and does not stop the app. Backups made by hand are never deleted automatically.
+
 **Restore** (`POST /api/backups/<id>/restore`, `backups.restore`) first makes an automatic
 backup of the current state ("Before restoring ...", the last 5 are kept), then replaces the
 rows of each table (the columns the backup has; row ids are kept) and links missing
