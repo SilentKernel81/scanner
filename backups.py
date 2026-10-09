@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sqlite3
+import tempfile
 import zipfile
 from datetime import datetime
 
@@ -196,14 +197,24 @@ def restore(backup_id, inventory, scan_inventory, deck_store):
 
 
 def archive(backup_id):
-    """A backup as one zip file; returns its path (the caller deletes it once sent)"""
+    """
+    A backup as one zip: returns (the open file, at its start; its size). The file has no
+    name - each download packs its own, and it is gone when closed, also when the download
+    is cut short.
+    """
     folder = _folder(backup_id)
-    path = BACKUPS_DIR / f'.{backup_id}.zip'
-    with zipfile.ZipFile(path, 'w') as target:
-        target.write(folder / 'backup.db', 'backup.db', compress_type=zipfile.ZIP_DEFLATED)
-        for capture in sorted((folder / 'captures').glob('*')):
-            target.write(capture, f'captures/{capture.name}')  # JPEGs: stored as they are
-    return path
+    packed = tempfile.TemporaryFile(dir=BACKUPS_DIR)
+    try:
+        with zipfile.ZipFile(packed, 'w') as target:
+            target.write(folder / 'backup.db', 'backup.db', compress_type=zipfile.ZIP_DEFLATED)
+            for capture in sorted((folder / 'captures').glob('*')):
+                target.write(capture, f'captures/{capture.name}')  # JPEGs: stored as they are
+        size = packed.tell()
+        packed.seek(0)
+    except Exception:
+        packed.close()
+        raise
+    return packed, size
 
 
 def add_archive(file):

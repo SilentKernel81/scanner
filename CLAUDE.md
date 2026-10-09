@@ -33,7 +33,8 @@ venv/bin/python cleanup.py --stats        # scanned images; --days N / --dry-run
 ```
 
 Dependencies: `requirements.txt` (~300 MB, Python 3.10+). The dev venv on this machine is
-Python 3.12.
+Python 3.12 - which accepts syntax 3.10/3.11 cannot parse: never nest an f-string (or any
+string) with the same quotes inside an f-string's `{}`, and no backslash there.
 
 There is no automated test suite. Verify changes by running the app (or a copy of it on another
 port with a copy of the database - never test adds against the real `data/cards_database.db`

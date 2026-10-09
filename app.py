@@ -245,23 +245,36 @@ app.config['SECRET_KEY'] = secret_key()
 # cards or restore a backup.
 # ----------------------------------------------------------------------------
 
+# Domains of a home or office network, which nobody can register on the internet: the
+# computer's name is trusted alone and under these, nothing else (scanner.attacker.example
+# is the attacker's name to hand out)
+LOCAL_DOMAINS = ('local', 'lan', 'home', 'home.arpa', 'internal', 'localdomain')
+
+
+def own_host_names():
+    """The exact names this computer is reached under, besides localhost and IP addresses"""
+    full = socket.gethostname().lower().rstrip('.')
+    short = full.split('.')[0]
+    names = {full, short} | {f'{short}.{domain}' for domain in LOCAL_DOMAINS}
+    names |= {str(allowed).lower().rstrip('.') for allowed in Config.ALLOWED_HOSTS}
+    return names - {''}
+
+
 def host_allowed(host):
     """
     Whether `host` (a Host header) is a name the pages are opened under: localhost, an IP
-    address, this computer's name (with any domain: scanner, scanner.local) or one of
-    flask.allowed_hosts. Another name that resolves here is a web page reaching in through
-    its own domain (DNS rebinding).
+    address, one of this computer's own names (own_host_names) or of flask.allowed_hosts.
+    Another name that resolves here is a web page reaching in through its own domain (DNS
+    rebinding).
     """
-    name = (urlsplit(f'//{host}').hostname or '').lower()
-    if name == 'localhost' or name in (allowed.lower() for allowed in Config.ALLOWED_HOSTS):
+    name = (urlsplit(f'//{host}').hostname or '').lower().rstrip('.')
+    if name == 'localhost' or name in own_host_names():
         return True
     try:
         ipaddress.ip_address(name)
         return True
     except ValueError:
-        pass
-    own = socket.gethostname().lower().split('.')[0]
-    return bool(own) and name.split('.')[0] == own
+        return False
 
 
 def same_origin(origin, host):
@@ -1098,14 +1111,9 @@ def restore_backup(backup_id):
 def download_backup(backup_id):
     """A backup as one file, to take the cards to another computer"""
     try:
-        path = backups.archive(backup_id)
+        packed, size = backups.archive(backup_id)
     except backups.BackupError as e:
         return jsonify({'success': False, 'error': str(e)}), 404
-    # Sent from the open file, which is gone from the folder already: nothing is left behind
-    # when the download is cut short
-    packed = open(path, 'rb')
-    size = path.stat().st_size
-    path.unlink()
     response = send_file(packed, mimetype='application/zip', as_attachment=True,
                          download_name=f'card-scanner-backup-{backup_id}.zip')
     response.content_length = size
@@ -3235,8 +3243,11 @@ def main():
     if debug_mode_running:
         enable_request_log()
     logger.info(f"Debug trace: {'on' if scanner.debug_trace_enabled else 'off'}, debug mode: {'on' if debug_mode_running else 'off'} (Settings)")
-    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {f"on - frames go to {Config.shown('debug_frames')}" if scanner.debug_trace_enabled else 'off'}")
-    print(f"{'✓' if debug_mode_running else '-'} Debug mode: {f"on - requests go to {Config.shown('logs', 'requests.log')}" if debug_mode_running else 'off'}")
+    # (the messages apart: Python 3.10 and 3.11 cannot nest f-strings with the same quotes)
+    trace_message = "on - frames go to " + Config.shown('debug_frames')
+    requests_message = "on - requests go to " + Config.shown('logs', 'requests.log')
+    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {trace_message if scanner.debug_trace_enabled else 'off'}")
+    print(f"{'✓' if debug_mode_running else '-'} Debug mode: {requests_message if debug_mode_running else 'off'}")
 
     print("\n" + "="*60)
     print("Web Interface Starting...")

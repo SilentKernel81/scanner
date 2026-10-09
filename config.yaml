@@ -64,7 +64,8 @@ flask:
   host: auto
   port: 5000
   # Names the pages may be opened under, besides localhost, IP addresses and this computer's
-  # own name (e.g. behind a reverse proxy): [cards.example.org]
+  # own name (alone or with .local, .lan, .home, .home.arpa, .internal, .localdomain) -
+  # e.g. behind a reverse proxy: [cards.example.org]
   allowed_hosts: []
   debug: false
   # secret_key: signs Flask's cookies; by default a random one is made in data/secret_key

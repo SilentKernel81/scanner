@@ -723,8 +723,8 @@ entries point at (no extra space; they survive the app deleting its own). It is 
 
 **Taking the cards to another computer** (or from a checkout to the AppImage's folder): the
 download button of a backup (`GET /api/backups/<id>/download`, `backups.archive`) sends it as
-one zip - `backup.db` and `captures/` - written beside the backups and unlinked before it is
-sent. **Upload a backup** (`POST /api/backups/upload`, `backups.add_archive`) accepts only
+one zip - `backup.db` and `captures/` - packed into a nameless temporary file of its own per
+download (gone when closed). **Upload a backup** (`POST /api/backups/upload`, `backups.add_archive`) accepts only
 those member names, checks that `backup.db` has the `info` row and the tables, and adds it to
 the list under its own time (numbered when taken), marked as made by the user so the automatic
 ones never push it out; restoring it is the usual second step.
@@ -940,8 +940,9 @@ address of one's own in `flask.host` is kept while access is on.
 requests to localhost, whatever the server listens on. `reject_other_sites` (`before_request`)
 answers 403 when a request that changes something names another `Origin` than the page it was
 sent to, when an `/api/` request says `Sec-Fetch-Site: cross-site`, and when the `Host` is not a
-name of this computer (`host_allowed`: localhost, an IP address, the computer's own name with
-any domain, `flask.allowed_hosts`) - the last one stops a page reaching in through its own
+name of this computer (`host_allowed`: localhost, an IP address, exactly the computer's own
+name - alone or under a domain nobody can register, `LOCAL_DOMAINS`: `.local`, `.lan`, ... -
+or `flask.allowed_hosts`; never by its first label, which `name.attacker.example` shares) - the last one stops a page reaching in through its own
 domain (DNS rebinding). Socket.IO connections get the same test (`socket_origin_allowed`, its
 `cors_allowed_origins`). Requests without an `Origin` (curl, `--quit`) are not from a browser
 and pass. Switching cameras drops a locked focus position (`_reopen_camera`): it was found for
