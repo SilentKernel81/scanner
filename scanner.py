@@ -17,6 +17,7 @@ import logging
 import re
 from datetime import datetime
 from config import Config
+from paths import tool
 from object_detector import ObjectDetector, warp_card
 from card_identifier import CardIdentifier
 from card_ocr import CardOcr
@@ -186,6 +187,7 @@ class CardScanner:
         # (the camera-to-card distance is fixed, and continuous autofocus can hunt and
         # settle on a blurry position when cards are dropped quickly)
         self.focus_range = None  # (min, max) of the camera's focus_absolute control
+        self._v4l2_missing_logged = False
         self.focus_locked_value = self.settings.get('focus_value')  # None = continuous autofocus
         self.focus_sweep_running = False
         self.last_focus_sweep = 0.0
@@ -1436,11 +1438,26 @@ class CardScanner:
         card_info = self.identify_card_from_image(card_image, foil_image)
         return image_path, card_info
 
+    def _v4l2_ctl(self):
+        """
+        Path of v4l2-ctl, or None: the camera then works with the settings it has - no focus
+        lock, sweeps or refocus (focus_range stays None). Said once, not per command.
+        """
+        program = tool('v4l2-ctl')
+        if not program and not self._v4l2_missing_logged:
+            self._v4l2_missing_logged = True
+            self.log("v4l2-ctl not found (package v4l-utils): the camera's focus and other "
+                     "controls cannot be set", level="warning")
+        return program
+
     def _run_v4l2_command(self, *args):
         """Run a v4l2-ctl command"""
+        program = self._v4l2_ctl()
+        if not program:
+            return False
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
-            cmd = ['v4l2-ctl', '-d', video_device] + list(args)
+            cmd = [program, '-d', video_device] + list(args)
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if result.returncode != 0:
                 self.log(f"v4l2-ctl error: {result.stderr}", level="warning")
@@ -1455,9 +1472,12 @@ class CardScanner:
 
     def _query_focus_range(self):
         """(min, max) of the camera's manual focus control, or None if it has none"""
+        program = self._v4l2_ctl()
+        if not program:
+            return None
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
-            output = subprocess.run(['v4l2-ctl', '-d', video_device, '--list-ctrls'],
+            output = subprocess.run([program, '-d', video_device, '--list-ctrls'],
                                     capture_output=True, text=True, timeout=2).stdout
         except Exception:
             return None

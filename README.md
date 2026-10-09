@@ -90,12 +90,22 @@ The script is safe to run again at any time - it only does what is missing, and 
 only to install missing system packages or the service. [INSTALL.md](INSTALL.md) has the
 details: Raspberry Pi setup, remote deployment over SSH, updating and uninstalling.
 
+### AppImage
+
+`./scripts/build-appimage.sh` (needs [uv](https://docs.astral.sh/uv/), curl and git) builds
+`dist/Card_Scanner-x86_64.AppImage`: one file with its own Python and Node.js, nothing to
+install where it runs. Start it and the page opens in your browser; the first start downloads
+the card database. Stop it with **Settings → Quit Card Scanner** (or `--quit`); `--no-browser`
+starts it without opening a page. Your cards and settings are kept in
+`~/.local/share/mtg-scanner` (API keys: Settings → Vision AI, or a `.env` there; a
+`config.yaml` there overrides settings). Install `v4l-utils` for focus lock and focus sweeps.
+
 ### Manual installation
 
 ```bash
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python setup_database.py     # download the card database (a few minutes)
+venv/bin/python setup_database.py     # download the card database (a few minutes; the app does it on its first start otherwise)
 cp .env.example .env                  # then add your API key(s)
 ```
 
@@ -304,7 +314,9 @@ Deck building needs card data downloaded with this version: the Decks tab offers
 
 ## Configuration
 
-Settings live in `config.yaml`. The most useful ones:
+Settings live in `config.yaml`. With `MTG_SCANNER_HOME=/some/folder` the app keeps `data/`,
+`scanned_cards/` and `.env` in that folder instead of beside the code, and a `config.yaml`
+there overrides the settings it lists. The most useful ones:
 
 | Setting | Default | Description |
 |---|---|---|
@@ -403,9 +415,11 @@ recommendations.py   Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield (ca
 cleanup.py           Scanned image cleanup (also a CLI)
 setup_database.py    Downloads and builds the card database
 config.yaml          Settings (loaded by config.py / config_loader.py)
+paths.py             Where the program's files and the user's data live
 settings.py          UI preferences saved in data/settings.json
 templates/, static/  Web interface
-scripts/             deploy.sh (install/update), mtg-scanner.service (template), start.sh, backup.sh
+scripts/             deploy.sh (install/update), mtg-scanner.service (template), start.sh, backup.sh, build-appimage.sh
+packaging/           AppImage entry point, desktop entry and icon
 requirements.txt     Python dependencies
 data/                Card database, settings, logs (created at runtime)
 scanned_cards/       Captured card images (created at runtime)

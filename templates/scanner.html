@@ -272,6 +272,7 @@
                     <a class="btn btn-block" href="{{ url_for('collection') }}#settings">Back up or restore your cards</a>
                     <div class="hint">The collection, the scanned cards and the decks - on the collection page</div>
                 </div>
+                {% include '_quit.html' %}
             </div>
         </aside>
     </div>
@@ -348,7 +349,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=15"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=49"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=16"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=50"></script>
 </body>
 </html>

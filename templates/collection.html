@@ -360,6 +360,7 @@
                     <a class="btn btn-block" href="{{ url_for('index') }}#settings">Camera, AI, sound and card database</a>
                     <div class="hint">These settings are on the scanner page</div>
                 </div>
+                {% include '_quit.html' %}
             </div>
         </aside>
     </div>
@@ -369,7 +370,7 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=15"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=16"></script>
     <script src="{{ url_for('static', filename='js/collection.js') }}?v=26"></script>
 </body>
 </html>

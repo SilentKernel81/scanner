@@ -4,8 +4,8 @@
 # All settings are loaded from config.yaml
 # ============================================================================
 import os
-from pathlib import Path
 from config_loader import get_config_loader
+from paths import BASE_DIR, USER_DIR
 
 # Load YAML configuration
 config = get_config_loader()
@@ -14,10 +14,11 @@ config = get_config_loader()
 class Config:
     """Application configuration - All values loaded from config.yaml"""
 
-    # Paths
-    BASE_DIR = Path(__file__).parent
-    DATA_DIR = BASE_DIR / 'data'
-    IMAGES_DIR = BASE_DIR / 'scanned_cards'
+    # Paths: BASE_DIR ships with the program (may be read-only), USER_DIR is the user's (paths.py)
+    BASE_DIR = BASE_DIR
+    USER_DIR = USER_DIR
+    DATA_DIR = USER_DIR / 'data'
+    IMAGES_DIR = USER_DIR / 'scanned_cards'
     TEMPLATES_DIR = BASE_DIR / 'templates'
     STATIC_DIR = BASE_DIR / 'static'
 
@@ -77,5 +78,5 @@ class Config:
     @staticmethod
     def create_directories():
         """Create required directories if they don't exist"""
-        Config.DATA_DIR.mkdir(exist_ok=True)
-        Config.IMAGES_DIR.mkdir(exist_ok=True)
+        Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        Config.IMAGES_DIR.mkdir(parents=True, exist_ok=True)

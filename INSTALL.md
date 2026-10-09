@@ -123,8 +123,7 @@ journalctl -u mtg-scanner -f            # live logs (the app also writes data/lo
 
 The service runs as your user with a read-only view of the system and your home folder, except
 `data/` and `scanned_cards/` in the project, and gets camera access through the `video` group.
-It restarts after a crash, but not after a normal exit (for example when the card database is
-missing - see the logs).
+It restarts after a crash, but not after a normal exit.
 
 ## Backups
 

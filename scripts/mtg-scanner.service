@@ -20,7 +20,7 @@ Environment=PATH=@DIR@/venv/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-@DIR@/.env
 ExecStart=@DIR@/venv/bin/python @DIR@/app.py
 
-# Restart after crashes, but not after a normal exit (e.g. card database missing)
+# Restart after crashes, but not after a normal exit
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30

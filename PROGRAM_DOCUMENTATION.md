@@ -60,8 +60,9 @@ Design choices:
 | `recommendations.py` | Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield, cached in `web_cache` |
 | `settings.py` | UI preferences persisted in `data/settings.json` |
 | `config.py`, `config_loader.py` | Settings from `config.yaml` (+ environment variables) |
+| `paths.py` | `BASE_DIR` (what ships with the program) and `USER_DIR` (the user's data, `.env`, own `config.yaml`) |
 | `cleanup.py` | Deletes old scanned images (on startup and as a CLI) |
-| `setup_database.py` | Downloads and builds the card database |
+| `setup_database.py` | Downloads and builds the card database from the command line (the app also does it by itself when it starts without one) |
 | `templates/scanner.html`, `static/` | The scanner page |
 | `templates/collection.html`, `static/js/collection.js`, `static/css/collection.css` | The collection page (`/collection`): inventory management, deck builder, statistics |
 | `static/js/common.js`, `templates/_icons.html`, `templates/_dialogs.html` | Shared by both pages: text helpers, in-page dialogs and notifications, the inventory edit dialog, the capture viewer, the icon sprite |
@@ -863,6 +864,42 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 `prices` (`[[finish label, USD]]`) and `thumb_uri` (printing picker).
 
 ## Configuration and files
+
+`paths.py` separates the program's own files (`BASE_DIR`: code, `templates/`, `static/`, `ocr/`,
+the default `config.yaml` - may be read-only) from the user's (`USER_DIR`: `data/`,
+`scanned_cards/`, `.env`, an optional `config.yaml`). Run from a checkout both are the
+checkout, so everything below sits beside the code. Packaged (the code inside `$APPDIR` of an
+AppImage, or a PyInstaller binary) `USER_DIR` is `$XDG_DATA_HOME/mtg-scanner`
+(`~/.local/share/mtg-scanner`); `MTG_SCANNER_HOME` sets it in either case. When the two differ,
+`USER_DIR/config.yaml` is laid over the program's `config.yaml` key by key (`ConfigLoader._merge`),
+so it only needs the settings that differ. All code reaches these folders through
+`Config.DATA_DIR` / `Config.IMAGES_DIR` (`app.py`, before `config` is imported: `paths.USER_DIR`).
+
+The app starts without card data: `main` then downloads the active game's in the background
+(`start_card_data_update`), and the scanner page says so (`showDataMissing`, from
+`/api/stats`: `total_cards` 0 and `updating`) - or, when the download failed, where to start it.
+
+### AppImage and running as a desktop program
+
+`scripts/build-appimage.sh` builds `dist/Card_Scanner-<arch>.AppImage` from portable parts: a
+python-build-standalone Python (through `uv`), the packages of `requirements.txt` installed into
+it, the app's files (what git knows, without docs and scripts) in `usr/app/`, Node.js from
+nodejs.org in `usr/app/bin/node` and `ocr/node_modules` from `npm ci`. `packaging/AppRun`
+starts `app.py --app` with that Python; it exports nothing but `APPDIR` (which makes
+`paths.py` use the user's folder), so the browser the app opens inherits a clean environment.
+`paths.tool(name)` finds the programs the app starts: `bin/<name>` beside the code first, then
+PATH. `v4l2-ctl` is not shipped (a copy from the build computer would not be portable): without
+it `CardScanner._v4l2_ctl` warns once, `focus_range` stays `None` and the camera runs with the
+settings it has - no focus lock, sweeps or refocus.
+
+`app.py` options: `--app` opens the page in the browser once the server answers
+(`open_browser_when_ready`; not with `--no-browser`) and shows **Settings → Quit Card Scanner**
+on both pages (`templates/_quit.html` → `POST /api/quit`, 403 without `--app`), since a program
+started by double click has no terminal for Ctrl+C. `--quit` asks the running program to stop.
+Quit and `SIGTERM` (`systemctl stop`) end the server like Ctrl+C (`stop_on_signal`), so the
+camera is released and the database closed. A start while the port already answers
+(`port_answers`) does not start a second copy - it could not open the camera - and with `--app`
+opens the page of the one that runs.
 
 | Where | What |
 |---|---|

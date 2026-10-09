@@ -14,7 +14,6 @@ import json
 import logging
 import queue
 import re
-import shutil
 import subprocess
 import threading
 import time
@@ -22,6 +21,7 @@ import time
 import cv2
 
 from config import Config
+from paths import tool
 
 # OCR is logged with the AI: both are "what was read from the card"
 logger = logging.getLogger('ai')
@@ -123,7 +123,7 @@ class CardOcr:
     @staticmethod
     def installed():
         """Whether Node.js and the light-ocr package (npm install in ocr/) are present"""
-        return bool(shutil.which('node')) and (OCR_DIR / 'node_modules' / '@arcships' / 'light-ocr').is_dir()
+        return bool(tool('node')) and (OCR_DIR / 'node_modules' / '@arcships' / 'light-ocr').is_dir()
 
     def supports(self, game_id):
         return game_id in PARSERS
@@ -151,7 +151,7 @@ class CardOcr:
         try:
             with open(log_dir / 'ocr.log', 'ab') as errors:
                 self.process = subprocess.Popen(
-                    ['node', 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR),
+                    [tool('node'), 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR),
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True)
         except OSError as e:
             return self._failed(f"light-ocr could not be started: {e}")

@@ -1,0 +1,8 @@
+{# Last section of each page's settings drawer when started as a desktop program (--app) #}
+{% if app_mode %}
+<div class="settings-section">
+    <h3>Program</h3>
+    <button class="btn btn-block" onclick="quitProgram()">Quit Card Scanner</button>
+    <div class="hint">Stops the program on the computer it runs on; your cards are saved</div>
+</div>
+{% endif %}

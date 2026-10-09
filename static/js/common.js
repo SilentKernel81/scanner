@@ -473,6 +473,24 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// Settings -> Quit (only there when the program was started as a desktop program)
+
+async function quitProgram() {
+    const ok = await confirmDialog({
+        title: 'Quit Card Scanner?',
+        message: 'The program stops and this page no longer works until it is started again.',
+        confirmText: 'Quit', danger: true
+    });
+    if (!ok) return;
+    try {
+        const response = await fetch('/api/quit', {method: 'POST'});
+        if (!response.ok) throw new Error((await response.json()).error);
+        notify('Card Scanner stopped - you can close this tab', 'success');
+    } catch (error) {
+        notify(`Could not quit: ${error.message}`, 'error');
+    }
+}
+
 // Scanned cards -> collection, from either page: asks for a location first
 
 let toCollectionResolve = null;

@@ -1,0 +1,7 @@
+#!/bin/sh
+# What the AppImage runs (built by scripts/build-appimage.sh): the bundled Python starts the
+# app as a desktop program. Options are passed on: --no-browser, --quit (see app.py --help).
+# Nothing is exported that the browser the app opens would inherit, apart from APPDIR.
+HERE="$(dirname "$(readlink -f "$0")")"
+export APPDIR="${APPDIR:-$HERE}"  # paths.py: the code is packaged, the user's files go to their own folder
+exec "$HERE/usr/python/bin/python3" -B "$HERE/usr/app/app.py" --app "$@"

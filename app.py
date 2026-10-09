@@ -6,9 +6,14 @@ Main Flask application with SocketIO - COMPLETE VERSION
 
 from flask import Flask, render_template, Response, jsonify, request, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
+import argparse
 import csv
 import cv2
 import io
+import os
+import signal
+import socket
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -23,8 +28,10 @@ from dotenv import load_dotenv
 # Add current directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from paths import USER_DIR  # noqa: E402
+
 # Load API keys etc. from .env before config is imported (config reads env vars)
-load_dotenv(Path(__file__).parent / '.env')
+load_dotenv(USER_DIR / '.env')
 
 # Keys entered in the web interface (data/api_keys.env) override .env
 from api_keys import load_saved_keys, credential_status, save_credential  # noqa: E402
@@ -38,7 +45,7 @@ load_saved_keys()
 def setup_logging():
     """Configure logging with separate log files for different components"""
     # Create logs directory
-    log_dir = Path(__file__).parent / 'data' / 'logs'
+    log_dir = USER_DIR / 'data' / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Create formatters
@@ -179,7 +186,7 @@ def enable_request_log():
     (setup_logging silences Werkzeug, and its console handler shows warnings only - the page
     asks for the detection status several times a second, too much for the console)
     """
-    handler = RotatingFileHandler(Path(__file__).parent / 'data' / 'logs' / 'requests.log',
+    handler = RotatingFileHandler(USER_DIR / 'data' / 'logs' / 'requests.log',
                                   maxBytes=10*1024*1024, backupCount=2)
     handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
     requests_logger = logging.getLogger('werkzeug')
@@ -736,6 +743,11 @@ def initialize_components():
 # ============================================================================
 # Flask Routes
 # ============================================================================
+
+@app.context_processor
+def template_globals():
+    return {'app_mode': app_mode}
+
 
 @app.route('/')
 def index():
@@ -2804,6 +2816,59 @@ def handle_rebuild_database():
 
 
 # ============================================================================
+# Running as a desktop program (--app: what the AppImage starts)
+# ============================================================================
+
+# Started by double click there is no terminal to press Ctrl+C in: the page opens in the
+# browser by itself and Settings offers Quit
+app_mode = False
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Card Scanner')
+    parser.add_argument('--app', action='store_true',
+                        help='run as a desktop program: open the page in the browser and offer Quit in Settings')
+    parser.add_argument('--no-browser', action='store_true', help="with --app: don't open the browser")
+    parser.add_argument('--quit', action='store_true', help='stop the program started with --app')
+    return parser.parse_args()
+
+
+def port_answers(port):
+    """Whether a program on this computer already listens on the port"""
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def open_browser_when_ready(url):
+    def wait():
+        for _ in range(120):
+            if port_answers(Config.PORT):
+                webbrowser.open(url)
+                return
+            time.sleep(0.5)
+    threading.Thread(target=wait, daemon=True, name='open-browser').start()
+
+
+def stop_on_signal(signum, frame):
+    # Ends socketio.run like Ctrl+C does, so main releases the camera and closes the database
+    raise KeyboardInterrupt
+
+
+@app.route('/api/quit', methods=['POST'])
+def quit_program():
+    """Stop the program (desktop program only: a service is stopped with systemctl)"""
+    if not app_mode:
+        return jsonify({'error': 'Only available when started as a desktop program (--app)'}), 403
+    logger.info("Quit requested from the web interface")
+    # After the answer is sent
+    threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGTERM)).start()
+    return jsonify({'success': True})
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -2847,18 +2912,34 @@ def run_cleanup_background():
 
 def main():
     """Start the web server"""
+    global app_mode
+    args = parse_arguments()
+    app_mode = args.app
+    url = f"http://localhost:{Config.PORT}"
+
+    if args.quit:
+        import requests
+        try:
+            stopped = requests.post(f"{url}/api/quit", timeout=5).ok
+        except requests.RequestException:
+            stopped = False
+        print("Card Scanner stopped" if stopped else f"No Card Scanner to stop at {url}")
+        return
+
+    # A second copy could not open the camera or the port: show the one that runs instead
+    if port_answers(Config.PORT):
+        print(f"Port {Config.PORT} is in use - Card Scanner is probably running already: {url}")
+        if app_mode and not args.no_browser:
+            webbrowser.open(url)
+        return
+
     # Use print for important startup messages that should always be visible
     print("="*60)
     print("Card Scanner Web Interface")
     print("="*60)
 
-    # Check if database exists
-    if not Config.DATABASE_FILE.exists() or Config.DATABASE_FILE.stat().st_size == 0:
-        print("\n⚠ WARNING: No card database found!")
-        print("Please run 'python3 setup_database.py' first")
-        print("to download the card database.")
-        logger.warning("Card database not found - cannot start application")
-        return
+    if Config.USER_DIR != Config.BASE_DIR:
+        print(f"✓ Your data: {Config.USER_DIR}")
 
     # Initialize components
     logger.info("Starting scanner initialization...")
@@ -2869,8 +2950,14 @@ def main():
     run_update_checks()
 
     game = games.active()
-    logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")
-    print(f"✓ {game.label}: {game.card_count():,} cards")
+    if game.card_count():
+        logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")
+        print(f"✓ {game.label}: {game.card_count():,} cards")
+    else:
+        # First start: the pages work meanwhile and show the progress
+        logger.info(f"No {game.label} card data yet - downloading it from {game.source}")
+        print(f"⚠ {game.label}: no card data yet - downloading it from {game.source} (a few minutes)")
+        start_card_data_update(game)
 
     # Check Vision AI status
     if scanner.card_identifier:
@@ -2903,8 +2990,8 @@ def main():
     print(f"\n✓ Access the scanner at:")
     print(f"  • Local:   http://localhost:{Config.PORT}")
     print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
-    print(f"\n✓ Logs are being written to: data/logs/app.log")
-    print("\nPress Ctrl+C to stop")
+    print(f"\n✓ Logs are being written to: {'data/logs/app.log' if Config.USER_DIR == Config.BASE_DIR else Config.DATA_DIR / 'logs' / 'app.log'}")
+    print("\nPress Ctrl+C to stop" + (" (or Settings -> Quit)" if app_mode else ""))
     print("="*60 + "\n")
 
     logger.info(f"Starting Flask server on {Config.HOST}:{Config.PORT}")
@@ -2914,6 +3001,10 @@ def main():
     import flask.cli
     flask.cli.show_server_banner = lambda *args, **kwargs: None
     sys.stdout.flush()  # those lines used to flush the banner when the output is not a terminal (the service's journal)
+
+    signal.signal(signal.SIGTERM, stop_on_signal)  # systemctl stop, Quit, the session ending
+    if app_mode and not args.no_browser:
+        open_browser_when_ready(url)
 
     try:
         # Start Flask app with SocketIO

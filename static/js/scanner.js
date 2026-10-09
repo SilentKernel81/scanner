@@ -865,6 +865,7 @@ function loadStats() {
             if (data.database) {
                 $('db-cards').textContent = data.database.total_cards.toLocaleString();
                 showDataUpdate(data.database.update);
+                showDataMissing(data.database);
             }
             setReviewCount(data.review || 0);
             if (data.inventory) {
@@ -888,6 +889,21 @@ function showDataUpdate(message) {
     if (message && !dataUpdateNotified) {
         dataUpdateNotified = true;
         notify(`Card data update available: ${message}`, 'info');
+    }
+}
+
+let dataMissingNotified = false;
+
+function showDataMissing(database) {
+    // First start: the card data downloads in the background (or failed to - no connection);
+    // one notification per page load
+    if (database.total_cards || dataMissingNotified) return;
+    dataMissingNotified = true;
+    if (database.updating) {
+        setButton('update-database-btn', 'Updating...', true);
+        notify(`Downloading the ${gameInfo ? gameInfo.label + ' ' : ''}card data - cards can be scanned when it finishes (a few minutes)`, 'info');
+    } else {
+        notify('No card data yet: download it with Settings → Update card database', 'error');
     }
 }
 

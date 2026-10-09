@@ -29,6 +29,7 @@ User docs: [README.md](README.md); deployment: [INSTALL.md](INSTALL.md).
 venv/bin/python app.py                    # run (http://localhost:5000)
 venv/bin/python setup_database.py         # (re)download the Scryfall card database
 venv/bin/python cleanup.py --stats        # scanned images; --days N / --dry-run / --all
+./scripts/build-appimage.sh               # dist/Card_Scanner-<arch>.AppImage (own Python, packages, Node.js)
 ```
 
 Dependencies: `requirements.txt` (~300 MB, Python 3.10+). The dev venv on this machine is
@@ -60,10 +61,18 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Decks (lists; ownership computed from the inventory), deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
+| AppImage, running as a desktop program | `scripts/build-appimage.sh`, `packaging/` (`AppRun`, desktop entry, icon); `paths.py`: `USER_DIR`, `tool`; `app.py`: `--app` / `--no-browser` / `--quit` (`parse_arguments`, `open_browser_when_ready`, `quit_program`); `templates/_quit.html`, `common.js`: `quitProgram` |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
 
+- **Paths**: `paths.py` splits `BASE_DIR` (shipped, maybe read-only: code, templates, static,
+  `ocr/`, default `config.yaml`) from `USER_DIR` (`data/`, `scanned_cards/`, `.env`, the user's
+  `config.yaml` overlay) - the same folder in a checkout, `~/.local/share/mtg-scanner` when
+  packaged, `MTG_SCANNER_HOME` to choose. Never write under `BASE_DIR` or build a data path
+  from `__file__`: use `Config.DATA_DIR` / `Config.IMAGES_DIR`. Programs the app starts
+  (`node`, `v4l2-ctl`) are found with `paths.tool()` (the AppImage's `bin/` first, then PATH);
+  `v4l2-ctl` may be missing - the camera then runs without focus control.
 - **Schema**: cards columns are defined once in `database.py:CARD_COLUMNS`; missing columns are
   added on startup (`initialize_database`). Rows are `sqlite3.Row` - access by column name.
   New search-relevant columns may need filling in the migration (see `name_search`).
