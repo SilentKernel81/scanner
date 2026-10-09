@@ -183,8 +183,47 @@ body {
 
 .stats {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 12px;
     flex-wrap: wrap;
+}
+
+/* The counters that are only read, framed together like the page links (.page-nav) */
+.stat-group {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+
+.stat-group .stat-box {
+    padding: 3px 12px;
+    border-radius: calc(var(--radius-sm) - 2px);
+}
+
+/* The counter that is a button (Scanned: opens the scanned cards) - a tab of the collection page */
+.stat-box.stat-button {
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    background: var(--accent-soft);
+    color: var(--accent);
+    transition: border-color 0.15s;
+}
+
+.stat-button .stat-label {
+    color: var(--accent);
+}
+
+.stat-box.stat-button:hover {
+    border-color: var(--accent);
+}
+
+.stat-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .stat-box {
@@ -192,8 +231,9 @@ body {
     flex-direction: column;
     padding: 6px 14px;
     border-radius: var(--radius-sm);
-    background: var(--surface);
-    border: 1px solid var(--border);
+    /* Flat like the tabs and buttons; a counter that needs attention gets its colour below */
+    background: transparent;
+    border: 1px solid transparent;
     min-width: 96px;
 }
 
@@ -216,8 +256,7 @@ body {
 }
 
 .stat-box.clickable:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    background: var(--surface-2);
 }
 
 /* Newer card data available: a small dot, the counter offers the update */
@@ -420,19 +459,28 @@ body {
     justify-content: center;
     gap: 8px;
     padding: 10px 16px;
-    border: 1px solid var(--border);
+    /* Flat, like the tabs of the collection page: filled only on hover or when active. The
+       border is there (invisible) so the coloured buttons beside it are the same size */
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--surface-2);
-    color: var(--text);
+    background: transparent;
+    color: var(--text-muted);
     font: inherit;
     font-weight: 550;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, transform 0.05s, opacity 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s, opacity 0.15s;
 }
 
-.btn:hover:not(:disabled) {
-    background: var(--surface-3);
+/* :where() keeps this as weak as .btn itself, so the coloured buttons below keep their colours */
+.btn:where(:hover:not(:disabled)) {
+    background: var(--surface-2);
+    color: var(--text);
+}
+
+.btn.is-active {
+    background: var(--accent-soft);
+    color: var(--accent);
 }
 
 .btn:active:not(:disabled) {
@@ -1937,6 +1985,11 @@ input[type="radio"] {
         flex: 1;
         min-width: 0;
         padding: 6px 8px;
+    }
+
+    .stat-group {
+        flex: 4;
+        min-width: 0;
     }
 
     .stat-label {

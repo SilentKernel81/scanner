@@ -17,13 +17,16 @@
     <!-- Shown only when more than one game is supported -->
     <select id="game-select" class="select game-select" title="Card game being scanned" hidden></select>
     <div class="stats topbar-page">
+        <!-- The one that opens something: a button, shaped like the collection page's tabs -->
+        <button type="button" class="stat-box stat-button" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
+            <span class="stat-label">Scanned</span>
+            <span class="stat-value" id="inv-cards">0</span>
+        </button>
+        <!-- Counters to read, framed together like the page links -->
+        <div class="stat-group">
         <div class="stat-box" id="db-stat" onclick="offerDataUpdate()">
             <span class="stat-label">Database</span>
             <span class="stat-value" id="db-cards">0</span>
-        </div>
-        <div class="stat-box clickable" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
-            <span class="stat-label">Scanned</span>
-            <span class="stat-value" id="inv-cards">0</span>
         </div>
         <div class="stat-box">
             <span class="stat-label">Value</span>
@@ -36,6 +39,7 @@
         <div class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
             <span class="stat-label">Review</span>
             <span class="stat-value" id="review-count">0</span>
+        </div>
         </div>
     </div>
     {% else %}
