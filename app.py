@@ -226,6 +226,7 @@ scanner = None
 debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
 database = None
 inventory = None           # the collection (table inventory in the card database file)
+daily_backup_status = ''    # the startup banner's line about the day's backup
 scan_inventory = None      # what the scanner page adds to, until it is moved to the collection
 current_card_info = None
 current_review_id = None  # review queue item open on the page
@@ -562,11 +563,15 @@ def initialize_components():
     recommend = Recommendations()
 
     # The day's backup of the collection, scanned cards and decks (a restart finds it and makes none)
+    global daily_backup_status
     try:
         made = backups.create_daily(inventory, scan_inventory, deck_store)
-        logger.info(f"Daily backup made: {made['cards']} cards, {made['scanned']} scanned, {made['decks']} decks"
-                    if made else "Daily backup: today's is there already (or there is nothing to back up)")
+        daily_backup_status = (
+            f"✓ Daily backup made: {made['cards']} cards, {made['scanned']} scanned, {made['decks']} decks" if made
+            else "- Daily backup: today's is there already (or there is nothing to back up)")
+        logger.info(daily_backup_status[2:])
     except Exception as e:
+        daily_backup_status = f"⚠ The daily backup failed: {e}"
         logger.error(f"The daily backup failed: {e}", exc_info=True)
 
     # Set up auto-capture callback
@@ -2882,6 +2887,7 @@ def main():
         print("  The collection works without it; the scanner page starts when the camera is connected")
     else:
         print(f"✓ Camera ready ({scanner.camera_type})")
+    print(daily_backup_status)
 
     global debug_mode_running
     debug_mode_running = saved_debug_mode()
