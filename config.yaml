@@ -64,7 +64,6 @@ flask:
 # API URLs
 api:
   scryfall_bulk: https://api.scryfall.com/bulk-data/default-cards
-  tcgdex: https://api.tcgdex.net/v2/en
 
 # Database
 database:

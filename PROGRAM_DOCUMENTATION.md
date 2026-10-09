@@ -52,7 +52,7 @@ Design choices:
 | `card_identifier.py` | Vision AI providers (`_ask`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `database.py` | Scryfall download and import, schema/migrations, searches, printing lookup, match confidence |
-| `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports), `pokemon.Pokemon` (TCGdex data, matching, prices, finishes, export); `games.active()` is the game being scanned |
+| `games/` | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports); `games.active()` is the game being scanned |
 | `card_search.py` | Magic search helpers combining name, number, set and treatment |
 | `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, bulk edits, locations and tags, delete, stats, CSV import/export |
 | `decks.py` | Decks (`decks`, `deck_cards`): lists of card names with a count and a board; never touches the inventory |
@@ -475,50 +475,6 @@ AI read the Dwarvish-rune Arcane Signet as "Nthryx-Cipher"); otherwise all print
 showcase, extended art, full art, retro frame, etched, surge foil) are listed newest first and
 shown as a picker when there's more than one.
 
-### Pokémon
-
-`games/pokemon.py` reads the same three values with its own prompt: the name with its suffix
-(ex, V, VMAX, GX...), the number as printed with the set total (`012/193`, `TG05/TG30`, promo
-codes like `SWSH095`), and the set abbreviation printed next to it on Scarlet & Violet era
-cards (`PAL`); older cards only have a set symbol (Unknown). `Pokemon.identify` tries:
-
-| Step | Match | Tag |
-|---|---|---|
-| 1 | Set abbreviation + number, if the name matches (same, one plus a suffix - "Charizard"/"Charizard ex", only real suffixes: ex, V, VMAX, GX...; "Energy" must not match "Energy Retrieval" -, ≥ 80% similar, or the card's name inside a sentence answer). A code no set has may be a misread one ("SYE" for SVE, "PREN" for PRE + EN): the codes one letter away count if exactly one has a card of that name and number | `set_number` |
-| 2 | Name + number, narrowed by the set total (`/193` = the set's official card count); the exact name wins over longer ones (Charizard before Charizard δ). One card left → confirmed; several → first one for review; a total no set has → review | `name_number` / `name_number_ambiguous` / `name_number_other_total` |
-| 3 | Name only (exact or fuzzy): the newest printing, for review | `name` / `fuzzy` |
-| 4 | Name not recognized: the printed set + number | `set_number_unverified` |
-
-Confirmed: `set_number`, `name_number`. Measured with qwen3.5:9b on official card images
-(160 cards from Base Set to Mega Evolution, 4 random samples): 39 of 40 confirmed correctly in
-each sample, ~0.94 s per card, **no confirmed wrong card**. The prompt is kept short and plain:
-an earlier, longer one (what not to read, format hints) got answers as Markdown sentences for
-14-23 of 40 cards, 35-38 confirmed, and 2-2.4 s per card on camera captures (now ~0.8-1.1 s).
-The rest went to review - mostly basic Energy cards
-(read as "ENERGY"), promos without a readable code, and cards the same name + number/total
-exist in twice (Dugtrio 19/102 is in Base Set and Triumphant). An early version confirmed an
-Eevee promo from its Pokédex number ("133/189") - no set has 189 cards, which is now a review.
-
-**Basic Energy cards** print "Basic ⟨symbol⟩ Energy"; the data names them "Water Energy". The
-model mostly copies "Basic Energy", and when asked for the type it can misname the symbol (Metal
-read as Fairy), and it once read 011 as 017. So a basic Energy is matched by set code + number
-only (`_identify_energy`; misread codes are tried one letter away, with and without a trailing
-EN): confirmed when the type read agrees with the card, otherwise `set_number_energy` - shown
-for review - so a misread number can't add another type. Without a set code + number that
-finds exactly one Energy (older Energies print none) only the name is used: the newest
-printing, for review. In the first real session all 4
-Energies went wrong (a fuzzy "Basic Fire Energy", or "Energy Retrieval" by the prefix rule);
-with this, 3 of the 4 captures give the right card (the 4th, number misread, goes to review).
-
-**Finishes** (`normal`, `holo`, `reverse`, `first_edition`): the card panel only offers the
-finishes the printing exists in (TCGdex `variants`). With one, it is certain; otherwise the
-suggestion is Normal (Holo when there is no normal print) - reverse holos are not recognized
-from the image and must be set by hand before adding.
-
-**Prices** are TCGplayer market prices (USD) per finish from the TCGdex card details, which the
-bulk data doesn't include: fetched when a card is matched or picked (~0.2 s) and cached in the
-table for a day.
-
 ## Foil and finish
 
 Modern cards print a star instead of a dot between set code and language on foil copies
@@ -595,8 +551,7 @@ Rows are addressed by `id` (edit, delete, undo). Also stores the printing id (`c
 code, rarity, type, mana cost, colors, color identity, price and timestamp. `finish` is one of
 the game's finish keys (Magic: `regular`, `foil`, `surge`). Editing the finish of part of a stack
 splits the row; an edit that makes a row identical to another merges them. A new finish takes
-the printing's price in that finish (`Game.get_card` + `inventory_fields`; Pokémon prices are
-refetched when older than a day); rows without a printing id (CSV imports) keep their price.
+the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows without a printing id (CSV imports) keep their price.
 
 **`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
@@ -634,46 +589,20 @@ The app's own columns (`Card Name`, `Set`) → `import_csv`; CSVs written before
 `Set Code` columns existed import without a link to their printing. Any other
 file, or one where no card is found, is refused before "replace" deletes anything.
 
-**`pokemon_cards`** / **`pokemon_sets`** (created by `games/pokemon.py`) - TCGdex data: one
-GraphQL request returns every card (~21k paper cards, a few MB); the printed set abbreviations
-come from the REST set details (8 requests in parallel). Pokémon TCG Pocket (digital) is left
-out. A download takes about 4 s; it happens automatically the first time Pokémon is selected.
-Columns: identity (`id` "sv02-001", `name`, `set_id`, `set_code` "PAL", `set_name`,
-`set_total`, `serie`, `released_at`, `number` as printed, `number_key` for comparing "012" /
-"12" / "TG05"), card data (`rarity`, `category`, `types`, `stage`, `hp`, `trainer_type`,
-`energy_type`), `finishes` (JSON), `image_url` (+ `/high.webp`, `/low.webp`), and the cached
-`prices` / `prices_updated`. `pokemon_sets` lists every set of the last download, for the update
-check. Prices are fetched per card when older than a day (5 s timeout) - never while matching
-(`identify`), so scanning doesn't wait for them: a card shown for Add / Skip gets them before it
-is shown, a review item when it is opened, and every add updates its entries' prices in the
-background afterwards (`update_added_prices`, `Game.fetches_prices` / `with_prices`; the page
-reloads the totals on `inventory_prices_updated`). After a failed
-connection no price is requested for 5 minutes (`PRICE_RETRY_OFFLINE`), so scanning offline
-doesn't wait 5 s per card - the cached prices, or none, are used.
-
-~21k cards is the whole paper catalogue on TCGdex (checked 2026-09-25: every set within a few
-cards of its total, newest set 9 days old). Pokémon prints far fewer cards than Magic (~112k
-Scryfall printings), and holo / reverse holo are finishes of one row, not separate cards. What
-TCGdex lacks: Jumbo cards (160), Radiant Collection as its own set (25), a few sample / promo
-cards.
-
-**Imports never leave a half-filled table.** Both games fill a staging table (`cards_import`,
-`pokemon_cards_import`), committing every 5,000 rows so the inventory can still write, and swap
+**Imports never leave a half-filled table.** The download fills a staging table (`cards_import`), committing every 5,000 rows so the inventory can still write, and swap
 it in at the end in one step (`CardDatabase.replace_table`, under the database lock, then the
 indexes are rebuilt) - scanning keeps using the old data while an update runs.
 
-**`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`; for Pokémon
-the newest set's release date), when it was downloaded, and the card count.
+**`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
 
 **Update check.** 10 s after startup and then once a day, `Game.check_for_update()` runs for
 each game with data. Magic: Scryfall's bulk data description (one small request) - since
 Scryfall republishes every day for prices, the data only counts as outdated once it is
 `database.update_after_days` (7) older than Scryfall's, or when its date is not recorded (data
-downloaded before this check existed). Pokémon: any TCGdex set not in `pokemon_sets`. A result
+downloaded before this check existed). A result
 is kept in `data_update_notices`, sent as `database_update_available`, and returned by
 `/api/stats`; the page puts a dot on the Database counter (click → confirm → update) and shows
-one notification per page load. Updates are never started without the user, except the first
-Pokémon download.
+one notification per page load. Updates are never started without the user.
 
 ## Focus
 
@@ -810,7 +739,7 @@ game's inventory over the REST endpoints; it listens to `inventory_updated`, `in
 and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.
 
 **Inventory tab.** `/api/inventory` adds to every row its `location`, `tags` and `details` from
-`Game.card_details` (Magic: image, mana value, color identity; Pokémon: image). Filters (text,
+`Game.card_details` (Magic: image, mana value, color identity). Filters (text,
 color identity, type, rarity, set, finish, location, tag, price), sorts, the list / image grid
 and the statistics are computed in the browser from that one response; rows render 200 at a
 time. Selected entries get the bulk bar (`POST /api/inventory/bulk`). Rows also carry `decks`:
@@ -946,7 +875,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Backups made on the collection page (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
 | `data/scan_inventory.db` | Cards scanned and not yet added to the collection |
-| `data/cards_database.db` | Card data (Magic `cards`, Pokémon `pokemon_cards` / `pokemon_sets`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
+| `data/cards_database.db` | Card data (`cards`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |
 
@@ -983,7 +912,5 @@ The 9B doesn't fit in a 6 GB GPU (it would be split with the CPU); the 4B is a u
 - **An identical copy landing within ~0.7 mm of the previous card** without the fall hiding the
   card for 6 frames isn't recognized as new - press Capture.
 - **Cards without the ★/• marker** (older printings) get their finish from printing data only.
-- **Pokémon reverse holos** are not recognized from the image: set the finish by hand. Pokémon
-  support was tested on official card images, not yet on camera captures.
 - **Undo** takes back only the most recent add; older adds are edited in the inventory.
 - **One camera, one instance**: the camera can only be opened by one process.

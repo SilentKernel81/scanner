@@ -4,9 +4,6 @@ A camera-based scanner for Magic: The Gathering cards. Put a card under the came
 scanner finds it in the video feed, identifies the exact printing with a vision AI, tells you
 whether it's foil, and adds it to a local collection you can export to Moxfield.
 
-It also scans **Pokémon** cards (one game at a time - pick it in the top bar); see
-[Pokémon](#pokémon) below.
-
 It runs as a small web app (Flask + Socket.IO) on a Raspberry Pi or any Linux machine with a
 USB webcam or Raspberry Pi camera, and is used from a browser on the same network.
 
@@ -216,21 +213,6 @@ and a **Treatment** (e.g. Borderless). If more than one printing matches, choose
 the thumbnail grid. After a capture, the fields are filled with what the AI read, so you can
 correct a misread and search again. Press Enter in any field to search.
 
-### Pokémon
-
-Choose **Pokémon** in the game selector in the top bar. The first time, its card data
-(~21,000 cards from [TCGdex](https://tcgdex.dev)) is downloaded automatically in a few seconds.
-Scanning works the same way: the AI reads the name, the number with the set total
-(`012/193`) and, on Scarlet & Violet era cards, the set abbreviation (`PAL`). A card is added
-automatically when set + number, or name + number + set total, identify exactly one printing;
-otherwise it waits for review. In manual search, type the number as printed (`012/193`); with
-the set total, or with the set code, the name can be left empty.
-
-The card panel only offers the finishes the printing exists in (normal, holo, reverse holo,
-1st edition). **Reverse holos are not recognized from the image** - the suggestion is the
-normal print, so change it before adding. Prices are TCGplayer market prices per finish.
-Pokémon support was tested on official card images; camera scans still need real-world tuning.
-
 ### Scanned cards
 
 What you scan is kept apart from your collection until you say so: the **Scanned** count in the
@@ -413,7 +395,7 @@ card_identifier.py   Vision AI providers, card identification, foil marker check
 prompts.py           AI prompts: built-in ones and those edited in Settings (data/prompts.json)
 database.py          Scryfall card database: download, schema, search, printings
 backups.py           Backups of the collection, scanned cards and decks (collection page)
-games/               Card games: base.py (interface), mtg.py (Magic), pokemon.py (Pokémon)
+games/               Card games: base.py (interface), mtg.py (Magic)
 card_search.py       Magic search helpers
 inventory.py         Inventory storage, locations and tags, stats, import/export
 decks.py             Decks (lists of cards; the inventory says what is owned)
@@ -484,7 +466,7 @@ copyright notice is kept.
 
 ## Acknowledgments
 
-- Card data, prices and images: [Scryfall](https://scryfall.com) (Magic), [TCGdex](https://tcgdex.dev) (Pokémon)
+- Card data, prices and images: [Scryfall](https://scryfall.com)
 - Computer vision: [OpenCV](https://opencv.org)
 - Web: [Flask](https://flask.palletsprojects.com) and
   [Flask-SocketIO](https://flask-socketio.readthedocs.io)
