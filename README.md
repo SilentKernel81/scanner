@@ -100,6 +100,9 @@ starts it without opening a page. Your cards and settings are kept in
 `~/.local/share/mtg-scanner` (API keys: Settings → Vision AI, or a `.env` there; a
 `config.yaml` there overrides settings). Install `v4l-utils` for focus lock and focus sweeps.
 
+Publishing a release on GitHub builds the AppImage and attaches it to the release
+(`.github/workflows/appimage.yml`).
+
 ### Manual installation
 
 ```bash

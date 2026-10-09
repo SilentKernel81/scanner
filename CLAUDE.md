@@ -61,7 +61,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | Decks (lists; ownership computed from the inventory), deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
 | UI logic (finish suggestion, printing picker, status) | `static/js/scanner.js`: `suggestedFinish`, `displayCard`, `displayPrintings`, `updateDetectionStatus` |
-| AppImage, running as a desktop program | `scripts/build-appimage.sh`, `packaging/` (`AppRun`, desktop entry, icon); `paths.py`: `USER_DIR`, `tool`; `app.py`: `--app` / `--no-browser` / `--quit` (`parse_arguments`, `open_browser_when_ready`, `quit_program`); `templates/_quit.html`, `common.js`: `quitProgram` |
+| AppImage, running as a desktop program | `scripts/build-appimage.sh` (run by `.github/workflows/appimage.yml` when a release is published), `packaging/` (`AppRun`, desktop entry, icon); `paths.py`: `USER_DIR`, `tool`; `app.py`: `--app` / `--no-browser` / `--quit` (`parse_arguments`, `open_browser_when_ready`, `quit_program`); `templates/_quit.html`, `common.js`: `quitProgram` |
 | Settings | `config.yaml` (+ `config.py`), `.env` (API keys), `data/api_keys.env` (keys entered in the UI, `api_keys.py`), `data/settings.json` (UI choices: AI provider/model, `auto_add`, `focus_value`), `data/prompts.json` (edited prompts) |
 
 ## Conventions and Pitfalls
