@@ -3,6 +3,8 @@
 From nothing to scanning cards: one **server** and one **camera station**, both as Docker
 containers. About 20 minutes, most of it waiting for downloads.
 
+There is a [75-second video](https://github.com/SilentKernel81/scanner-server/releases/tag/demo-video) of these steps.
+
 ```
    camera station                          server
  ┌───────────────────┐                ┌──────────────────────────┐
