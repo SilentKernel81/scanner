@@ -13,14 +13,45 @@ import threading
 from config import Config
 from database import search_key
 from inventory import now
+from storage import Transactional, upgrade
 
 BOARDS = ('commander', 'main', 'side')
 
 
-class DeckManager:
+def _add_rules(conn):
+    """
+    Version 1: the database itself refuses what only the code used to prevent - a card in a
+    deck that does not exist, a quantity that is not a positive whole number, an unknown board
+    - and a deleted deck takes its cards along. Triggers, not foreign keys and CHECKs: those
+    would need the tables rebuilt and a PRAGMA on every connection that ever writes here.
+    """
+    boards = ', '.join(f"'{board}'" for board in BOARDS)
+    for event in ('INSERT', 'UPDATE'):
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS deck_cards_valid_{event.lower()} BEFORE {event} ON deck_cards
+            BEGIN
+                SELECT RAISE(ABORT, 'deck_cards: no such deck')
+                    WHERE NOT EXISTS (SELECT 1 FROM decks WHERE id = NEW.deck_id);
+                SELECT RAISE(ABORT, 'deck_cards: the quantity must be a positive whole number')
+                    WHERE typeof(NEW.quantity) != 'integer' OR NEW.quantity <= 0;
+                SELECT RAISE(ABORT, 'deck_cards: unknown board')
+                    WHERE NEW.board NOT IN ({boards});
+            END''')
+    conn.execute('''
+        CREATE TRIGGER IF NOT EXISTS decks_take_cards AFTER DELETE ON decks
+        BEGIN
+            DELETE FROM deck_cards WHERE deck_id = OLD.id;
+        END''')
+
+
+SCHEMA_STEPS = [_add_rules]
+
+
+class DeckManager(Transactional):
     def __init__(self, db_file=None):
         self._lock = threading.RLock()
-        self.conn = sqlite3.connect(str(db_file or Config.DATABASE_FILE), check_same_thread=False, timeout=10.0)
+        self.db_file = db_file or Config.DATABASE_FILE
+        self.conn = sqlite3.connect(str(self.db_file), check_same_thread=False, timeout=10.0)
         self.conn.row_factory = sqlite3.Row
         with self._lock:
             self.conn.execute('''
@@ -46,6 +77,11 @@ class DeckManager:
                 )''')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_deck_cards_deck ON deck_cards(deck_id)')
             self.conn.commit()
+            upgrade(self.conn, 'decks', SCHEMA_STEPS)
+
+    def edit(self):
+        """`with decks.edit():` - several changes as one: all of them, or none when one fails"""
+        return self._transaction()
 
     # -- Decks ---------------------------------------------------------------
 
@@ -76,33 +112,30 @@ class DeckManager:
                                          'quantity': row['quantity'], 'board': row['board']} for row in cards]}
 
     def create(self, game, name, deck_format, notes=''):
-        with self._lock:
+        with self._transaction():
             deck_id = self.conn.execute(
                 'INSERT INTO decks (game, name, format, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
                 (game, name.strip() or 'New deck', deck_format, notes or '', now(), now())).lastrowid
-            self.conn.commit()
         return deck_id
 
     def update(self, deck_id, name=None, deck_format=None, notes=None):
-        with self._lock:
+        with self._transaction():
             deck = self.conn.execute('SELECT * FROM decks WHERE id = ?', (deck_id,)).fetchone()
             if not deck:
                 return False
             self.conn.execute('UPDATE decks SET name = ?, format = ?, notes = ?, updated_at = ? WHERE id = ?', (
                 (name.strip() if name is not None else '') or deck['name'], deck_format or deck['format'],
                 notes if notes is not None else deck['notes'], now(), deck_id))
-            self.conn.commit()
         return True
 
     def delete(self, deck_id):
-        with self._lock:
+        with self._transaction():
             self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ?', (deck_id,))
             deleted = self.conn.execute('DELETE FROM decks WHERE id = ?', (deck_id,)).rowcount
-            self.conn.commit()
         return bool(deleted)
 
     def duplicate(self, deck_id):
-        with self._lock:
+        with self._transaction():  # the copy and its cards, or neither
             deck = self.get(deck_id)
             if not deck:
                 return None
@@ -124,7 +157,8 @@ class DeckManager:
         """Set how many copies of a card a board has (0 removes it)"""
         if board not in BOARDS:
             raise ValueError(f"Unknown board: {board}")
-        with self._lock:
+        quantity = int(quantity)
+        with self._transaction():
             if quantity <= 0:
                 self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ? AND card_name = ? AND board = ?',
                                   (deck_id, name, board))
@@ -133,28 +167,27 @@ class DeckManager:
                     INSERT INTO deck_cards (deck_id, card_name, card_id, quantity, board) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(deck_id, card_name, board) DO UPDATE SET
                         quantity = excluded.quantity, card_id = COALESCE(excluded.card_id, card_id)''',
-                                  (deck_id, name, card_id, int(quantity), board))
+                                  (deck_id, name, card_id, quantity, board))
             self._touch(deck_id)
-            self.conn.commit()
 
     def set_printing(self, deck_id, name, board, card_id):
         """Choose the printing an entry is shown in"""
-        with self._lock:
+        with self._transaction():
             self.conn.execute('UPDATE deck_cards SET card_id = ? WHERE deck_id = ? AND card_name = ? AND board = ?',
                               (card_id, deck_id, name, board))
             self._touch(deck_id)
-            self.conn.commit()
 
     def add_card(self, deck_id, name, board, change=1, card_id=None):
         """Add (or, with a negative change, take out) copies; returns the new count"""
-        with self._lock:
+        with self._transaction():
             quantity = max(0, self._quantity(deck_id, name, board) + int(change))
             self.set_card(deck_id, name, board, quantity, card_id)
         return quantity
 
     def move_card(self, deck_id, name, from_board, to_board):
-        """Move every copy of a card to another board (added to the copies already there)"""
-        with self._lock:
+        """Move every copy of a card to another board (added to the copies already there) -
+        in one step: never on both boards, never on neither"""
+        with self._transaction():
             quantity = self._quantity(deck_id, name, from_board)
             if not quantity or from_board == to_board:
                 return
@@ -162,22 +195,30 @@ class DeckManager:
             self.set_card(deck_id, name, from_board, 0)
 
     def import_cards(self, deck_id, entries, replace=False):
-        """Add entries ([{'name', 'quantity', 'board', 'card_id'}]) to a deck; returns how many cards"""
-        added = 0
-        with self._lock:
+        """
+        Add entries ([{'name', 'quantity', 'board', 'card_id'}]) to a deck, or replace its cards
+        with them; returns how many cards. Every entry is checked before anything changes: a
+        list with a bad entry (ValueError) leaves the deck as it was.
+        """
+        rows = []
+        for entry in entries:
+            name = str(entry.get('name') or '').strip()
+            if not name:
+                raise ValueError("A card has no name")
+            try:
+                quantity = int(entry.get('quantity') or 1)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name}: the quantity is not a number")
+            board = entry.get('board') if entry.get('board') in BOARDS else 'main'
+            rows.append((deck_id, name, entry.get('card_id'), max(1, quantity), board))
+        with self._transaction():
             if replace:
                 self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ?', (deck_id,))
-            for entry in entries:
-                board = entry.get('board') if entry.get('board') in BOARDS else 'main'
-                quantity = max(1, int(entry.get('quantity') or 1))
-                self.conn.execute('''
-                    INSERT INTO deck_cards (deck_id, card_name, card_id, quantity, board) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(deck_id, card_name, board) DO UPDATE SET quantity = quantity + excluded.quantity''',
-                                  (deck_id, entry['name'], entry.get('card_id'), quantity, board))
-                added += quantity
+            self.conn.executemany('''
+                INSERT INTO deck_cards (deck_id, card_name, card_id, quantity, board) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(deck_id, card_name, board) DO UPDATE SET quantity = quantity + excluded.quantity''', rows)
             self._touch(deck_id)
-            self.conn.commit()
-        return added
+        return sum(row[3] for row in rows)
 
     def needed_by_name(self, game, commander_formats=()):
         """

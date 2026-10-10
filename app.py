@@ -1069,11 +1069,11 @@ def bulk_update_inventory():
 
 @app.route('/api/inventory/remove_batch', methods=['POST'])
 def remove_inventory_batch():
-    """Take back the cards that were added at one time (JSON: added_at, as in the entries)"""
-    added_at = str((request.get_json(silent=True) or {}).get('added_at') or '')
-    if not added_at:
-        return jsonify({'success': False, 'error': 'added_at is missing'}), 400
-    return jsonify({'success': True, **inventory_area().remove_batch(games.active().id, added_at)})
+    """Take back the cards that came in together (JSON: batch, as in the entries' 'batches')"""
+    batch = str((request.get_json(silent=True) or {}).get('batch') or '')
+    if not batch:
+        return jsonify({'success': False, 'error': 'batch is missing'}), 400
+    return jsonify({'success': True, **inventory_area().remove_batch(games.active().id, batch)})
 
 
 @app.route('/api/backups', methods=['GET', 'POST'])
@@ -1494,18 +1494,19 @@ def deck_cards(deck_id):
         return error
     data = request.get_json(silent=True) or {}
     try:
-        for item in data.get('cards') or []:
-            name, board = str(item['name']), item.get('board') or 'main'
-            if item.get('printing'):
-                if not games.get(deck['game']).card_details([item['printing']]):
-                    raise ValueError('Unknown printing')
-                deck_store.set_printing(deck_id, name, board, item['printing'])
-            elif item.get('move_to'):
-                deck_store.move_card(deck_id, name, board, item['move_to'])
-            elif 'quantity' in item:
-                deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
-            else:
-                deck_store.add_card(deck_id, name, board, int(item.get('change', 1)), item.get('card_id'))
+        with deck_store.edit():  # a request with a bad item changes nothing
+            for item in data.get('cards') or []:
+                name, board = str(item['name']), item.get('board') or 'main'
+                if item.get('printing'):
+                    if not games.get(deck['game']).card_details([item['printing']]):
+                        raise ValueError('Unknown printing')
+                    deck_store.set_printing(deck_id, name, board, item['printing'])
+                elif item.get('move_to'):
+                    deck_store.move_card(deck_id, name, board, item['move_to'])
+                elif 'quantity' in item:
+                    deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
+                else:
+                    deck_store.add_card(deck_id, name, board, int(item.get('change', 1)), item.get('card_id'))
     except (KeyError, ValueError, TypeError) as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_id))})
@@ -1528,7 +1529,12 @@ def deck_import(deck_id):
     if not entries:
         return jsonify({'success': False, 'error': 'No cards found'}), 400
     resolved, unknown = resolve_entries(game, entries, deck['format'])
-    added = deck_store.import_cards(deck_id, resolved, replace=bool(data.get('replace')))
+    if not resolved:  # replacing with them would only empty the deck
+        return jsonify({'success': False, 'error': 'None of these cards was found - the deck was not changed'}), 400
+    try:
+        added = deck_store.import_cards(deck_id, resolved, replace=bool(data.get('replace')))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'added': added, 'unknown': unknown,
                     'deck': deck_payload(deck_store.get(deck_id))})
 
@@ -1730,6 +1736,7 @@ def precon_own(file_name):
     by_id = database.cards_by_ids([entry['scryfall_id'] for entry in entries])
     by_name = game.cards_by_names([entry['name'] for entry in entries])
     deck_entries, unknown, added = [], [], 0
+    batch = inventory.new_batch()  # the deck's cards came in together
     for entry in entries:
         card = by_id.get(entry['scryfall_id']) \
             or (database.get_card_by_set_number(entry['set'], entry['number']) if entry['set'] and entry['number'] else None) \
@@ -1739,7 +1746,7 @@ def precon_own(file_name):
             continue
         finish = game.suggested_finish(card, 'foil' if entry['foil'] else 'non-foil')
         inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', entry['quantity'],
-                           location=location, quiet=True)
+                           location=location, quiet=True, batch=batch)
         added += entry['quantity']
         deck_entries.append({'name': card['name'], 'card_id': card['id'], 'quantity': entry['quantity'],
                              'board': entry['board']})

@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
+from contextlib import closing
 from urllib.parse import quote, urlparse
 
 import requests
@@ -31,6 +32,10 @@ TIMEOUT = 10         # seconds per request
 MIN_INTERVAL = 1.0   # seconds between two requests to the same site
 SITE_INTERVALS = {'mtgjson.com': 0.25}  # a file server meant for downloads
 DAY = 86400
+# The cache is a file of its own (data/web_cache.db): what it holds can be fetched again, so
+# it stays out of the collection's file, its write lock and its backups. Bounded by age - no
+# answer is used for longer than this - and by size, the oldest answers going first.
+CACHE_MAX_AGE = 90 * DAY
 
 EDHREC = 'https://json.edhrec.com/pages'
 MTGJSON = 'https://mtgjson.com/api/v5'
@@ -60,24 +65,72 @@ def edhrec_slug(name):
 
 
 class Recommendations:
-    def __init__(self, db_file=None):
-        self.db_file = str(db_file or Config.DATABASE_FILE)
+    def __init__(self, db_file=None, old_db_file=None, max_bytes=None):
+        """
+        db_file: the cache (default data/web_cache.db). old_db_file: the card database, which
+        held the cache in a web_cache table before - its answers are taken over once and the
+        table dropped there. max_bytes: what the cached answers may add up to.
+        """
+        self.db_file = str(db_file or Config.WEB_CACHE_FILE)
+        self.max_bytes = int(max_bytes if max_bytes is not None else Config.WEB_CACHE_MB * 1024 * 1024)
         self._lock = threading.RLock()
         self._site_locks = {}
         self._last_request = {}
-        with self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('''CREATE TABLE IF NOT EXISTS web_cache (
-                url TEXT PRIMARY KEY, fetched_at REAL NOT NULL, body TEXT NOT NULL)''')
+                url TEXT PRIMARY KEY, fetched_at REAL NOT NULL, size INTEGER NOT NULL, body TEXT NOT NULL)''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_web_cache_age ON web_cache(fetched_at)')
+            conn.commit()
+        if db_file is None or old_db_file:
+            self._take_over(str(old_db_file or Config.DATABASE_FILE))
+        self.prune()
 
     def _connect(self):
         return sqlite3.connect(self.db_file, timeout=10.0)
+
+    def _take_over(self, old_db_file):
+        """Once: the answers cached in the card database move here, and its table goes (the
+        pages it used are free for the collection; the file itself does not get smaller)"""
+        try:
+            with self._lock, closing(self._connect()) as conn:
+                conn.execute('ATTACH DATABASE ? AS old', (old_db_file,))
+                if not conn.execute("SELECT 1 FROM old.sqlite_master WHERE type = 'table' AND name = 'web_cache'").fetchone():
+                    return
+                moved = conn.execute('''INSERT OR IGNORE INTO main.web_cache (url, fetched_at, size, body)
+                                        SELECT url, fetched_at, LENGTH(CAST(body AS BLOB)), body FROM old.web_cache''').rowcount
+                conn.commit()  # safe here before it goes there
+                conn.execute('DROP TABLE old.web_cache')
+                conn.commit()
+                logger.info(f"Web cache moved to {self.db_file} ({moved} answers)")
+        except sqlite3.Error as e:
+            logger.warning(f"The web cache could not be moved out of the card database (tried again at the next start): {e}")
+
+    def prune(self):
+        """Drop the answers too old to be used, then the oldest ones until the rest fits max_bytes"""
+        try:
+            with self._lock, closing(self._connect()) as conn:
+                conn.execute('DELETE FROM web_cache WHERE fetched_at < ?', (time.time() - CACHE_MAX_AGE,))
+                total = conn.execute('SELECT COALESCE(SUM(size), 0) FROM web_cache').fetchone()[0]
+                for url, size in conn.execute('SELECT url, size FROM web_cache ORDER BY fetched_at').fetchall():
+                    if total <= self.max_bytes:
+                        break
+                    conn.execute('DELETE FROM web_cache WHERE url = ?', (url,))
+                    total -= size
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.warning(f"The web cache could not be pruned: {e}")
 
     # -- Fetching --------------------------------------------------------------
 
     def cached(self, url, max_age):
         """The cached answer for a URL when it is younger than max_age seconds, else None"""
-        with self._lock, self._connect() as conn:
-            row = conn.execute('SELECT fetched_at, body FROM web_cache WHERE url = ?', (url,)).fetchone()
+        try:
+            with self._lock, closing(self._connect()) as conn:
+                row = conn.execute('SELECT fetched_at, body FROM web_cache WHERE url = ?', (url,)).fetchone()
+        except sqlite3.Error as e:  # without its cache the answer is just fetched
+            logger.warning(f"The web cache could not be read: {e}")
+            return None
         if row and time.time() - row[0] < max_age:
             return json.loads(row[1])
         return None
@@ -109,9 +162,17 @@ class Recommendations:
                 self._last_request[site] = time.time()
                 logger.warning(f"{site} not available: {e}")
                 raise Unavailable(f"{site} is not available right now") from e
-        with self._lock, self._connect() as conn:
-            conn.execute('INSERT OR REPLACE INTO web_cache VALUES (?, ?, ?)',
-                         (url, time.time(), json.dumps(data, separators=(',', ':'))))
+        body = json.dumps(data, separators=(',', ':'))
+        size = len(body.encode('utf-8'))
+        if size <= self.max_bytes:  # (an answer larger than the whole cache is used, not kept)
+            try:
+                with self._lock, closing(self._connect()) as conn:
+                    conn.execute('INSERT OR REPLACE INTO web_cache (url, fetched_at, size, body) VALUES (?, ?, ?, ?)',
+                                 (url, time.time(), size, body))
+                    conn.commit()
+                self.prune()
+            except sqlite3.Error as e:  # the answer is good all the same
+                logger.warning(f"The answer of {site} could not be cached: {e}")
         return data
 
     # -- EDHREC ----------------------------------------------------------------

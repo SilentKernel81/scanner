@@ -74,6 +74,11 @@ flask:
 api:
   scryfall_bulk: https://api.scryfall.com/bulk-data/default-cards
 
+# Deck ideas from other sites (EDHREC, MTGJSON, ...): their answers are kept in
+# data/web_cache.db up to this size (MiB), the oldest going first
+deck_ideas:
+  cache_mb: 200
+
 # Database
 database:
   file: cards_database.db

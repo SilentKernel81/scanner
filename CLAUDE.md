@@ -52,7 +52,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
 | Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `app.py` (`save_prompt`, `test_prompt`) |
 | Card games (the active one drives search, finishes, exports / imports per site: `export_formats`, `import_rows`) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `MULTI_GAME_IMPLEMENTATION_PLAN.md` |
-| Card data updates (staged import, update check) | `database.py`: `replace_table`, `card_data_info`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
+| Card data updates (staged import on its own connection, checked before it is published, update check) | `database.py`: `populate_database`, `_fill_import_table`, `replace_table`, `card_data_info`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
 | Card search / printing match / confidence (Magic) | `database.py`: `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match` |
 | Capture orchestration, AI queue, auto-add gate, events | `app.py`: `handle_auto_capture` (in `initialize_components`), `ai_processing_worker`, `search_and_emit_card`, `set_auto_add`; automatic adds on the server (`add_automatically`, `Game.suggested_finish`) |
 | Review queue (unconfirmed cards while adding automatically) | `review.py` (`review_queue`, `data/review/`); `app.py`: `queue_for_review`, `review_open`/`review_skip`/`review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
@@ -114,6 +114,17 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **OCR parser**: keep `parse_magic` strict - a loose collector-number pattern once confirmed
   the wrong printing. Re-run a batch of `scanned_cards/` through `CardOcr.read_card` +
   `Game.confirmed_read` (on a copy of the database) and compare with the AI before loosening it.
+- **Edits are transactions**: a method of `InventoryManager` / `DeckManager` that changes
+  anything does it inside `with self._transaction():` (`storage.py`) and never calls
+  `conn.commit()` itself - an exception then rolls the whole edit back. Delete entries with
+  `_delete_entries` (captures and batches go along; files only after the commit). Triggers
+  refuse a quantity of 0: delete the row instead of counting it down to zero.
+- **Schema changes are numbered steps**: add a function to the manager's `SCHEMA_STEPS`
+  (`storage.upgrade`, one transaction per step, version in `schema_versions`); never edit a
+  step that has shipped. Test on a copy of a real database and compare totals.
+- **Batches**: every way copies come into an inventory writes `inventory_batches`
+  (`_note_batch`), and every way they leave or move keeps it in step (`_take_from_batches`,
+  `_trim_batches`) - an entry's batch rows never exceed its quantity.
 - **Thread safety**: frames/detection state under `scanner.frame_lock`; DB and inventory use
   their own `RLock`. Auto-capture callbacks and the AI worker run in their own threads.
 - **Prompts**: change the built-in text in `prompts.py:BUILT_IN` (instructions + fixed
@@ -142,7 +153,7 @@ with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 - **Inventory key**: `location` is part of `inventory.KEY_COLUMNS` (and the table's UNIQUE);
   anything that looks an entry up by its key must include it. Changing the key means rebuilding
   the table (`_migrate_add_location` is the pattern: backup, keep ids, check counts).
-- **Other sites** (`recommendations.py`): only MTGJSON is a published API. Go through `_get`
+- **Other sites** (`recommendations.py`, cache in `data/web_cache.db` - disposable, bounded): only MTGJSON is a published API. Go through `_get`
   (cache, 1 request/s per site), catch shape changes and raise `Unavailable`; never call these
   from scanning code paths.
 - **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line

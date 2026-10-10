@@ -24,6 +24,9 @@ class Config:
 
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')
+    # Answers of other sites (deck ideas): can be fetched again, so a file of its own
+    WEB_CACHE_FILE = DATA_DIR / 'web_cache.db'
+    WEB_CACHE_MB = config.get('deck_ideas', 'cache_mb', default=200)
     DATABASE_UPDATE_AFTER_DAYS = config.get('database', 'update_after_days', default=7)
 
     # API URLs

@@ -192,12 +192,16 @@ function fillFilterOptions() {
     fillLocationFilter();
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
     // The last times cards came into the collection (one per "Add to collection"), newest first
+    // (card.batches: every batch an entry has copies of, not only its latest)
     const batches = new Map();
-    // added_quantity 0: the entry's batch was removed, its copies were there before
-    inventory.filter(card => card.added_quantity).forEach(card => batches.set(card.added_at, (batches.get(card.added_at) || 0) + card.added_quantity));
-    const times = [...batches.keys()].sort().reverse().slice(0, 20);
-    fillSelect('filter-added', 'Added any time', times,
-               Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
+    inventory.forEach(card => card.batches.forEach(part => {
+        const batch = batches.get(part.batch) || {added_at: part.added_at, cards: 0};
+        batch.cards += part.quantity;
+        batches.set(part.batch, batch);
+    }));
+    const ids = [...batches.keys()].sort((a, b) => byText(batches.get(b).added_at, batches.get(a).added_at)).slice(0, 20);
+    fillSelect('filter-added', 'Added any time', ids,
+               Object.fromEntries(ids.map(id => [id, `Added ${batches.get(id).added_at.slice(0, 16)} (${plural(batches.get(id).cards, 'card')})`])));
     // Color chips only where the card data has color identities (Magic)
     $('filter-free-label').hidden = !gameInfo.deck_formats.length;
     $('filter-spare-label').hidden = !gameInfo.deck_formats.some(([, , commander]) => commander);
@@ -248,7 +252,7 @@ function applyFilters() {
         if (finish && card.finish !== finish) return false;
         if (location && card.location !== (location === '(none)' ? '' : location)) return false;
         if (tag && !card.tags.includes(tag)) return false;
-        if (added && (card.added_at !== added || !card.added_quantity)) return false;
+        if (added && !batchPart(card, added)) return false;
         if (free && card.decks.length) return false;
         if (spare && (card.decks.length || suggested[card.name])) return false;
         if (!isNaN(min) && card.price < min) return false;
@@ -438,18 +442,24 @@ async function bulkAction(action) {
     loadInventory();
 }
 
+function batchPart(card, batch) {
+    // The copies of an entry that came with a batch ({batch, added_at, quantity}), if any
+    return card.batches.find(part => part.batch === batch);
+}
+
 async function removeBatch() {
     // Undo an "Add to collection": only the copies that came with it go
     const added = $('filter-added').value;
-    const batch = inventory.filter(card => card.added_at === added && card.added_quantity);
-    const cards = batch.reduce((sum, card) => sum + card.added_quantity, 0);
-    const kept = batch.filter(card => card.added_quantity < card.quantity).length;
-    const ok = await confirmDialog({title: `Remove the ${plural(cards, 'card')} added ${added.slice(0, 16)}?`, confirmText: 'Remove', danger: true,
+    const parts = inventory.map(card => [card, batchPart(card, added)]).filter(([, part]) => part);
+    if (!parts.length) return;
+    const cards = parts.reduce((sum, [, part]) => sum + part.quantity, 0);
+    const kept = parts.filter(([card, part]) => part.quantity < card.quantity).length;
+    const ok = await confirmDialog({title: `Remove the ${plural(cards, 'card')} added ${parts[0][1].added_at.slice(0, 16)}?`, confirmText: 'Remove', danger: true,
         message: `They are deleted from the collection (not moved back to the scanner).`
             + (kept ? ` ${entriesText(kept)} had copies before and keep${kept === 1 ? 's' : ''} those.` : '')
             + " This can't be undone."});
     if (!ok) return;
-    const data = await api('/api/inventory/remove_batch', {method: 'POST', body: {added_at: added}});
+    const data = await api('/api/inventory/remove_batch', {method: 'POST', body: {batch: added}});
     if (!data) return;
     notify(`${plural(data.cards, 'card')} removed`, 'success');
     $('filter-added').value = '';

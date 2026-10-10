@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 # scripts/backup.sh archives everything.
 BACKUPS_DIR = Config.DATA_DIR / 'backups'
 BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
-INVENTORY_TABLES = ('inventory', 'inventory_captures')
+INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_batches')
+# Not in backups made before it existed: restoring one of those rebuilds it from its entries
+OPTIONAL_TABLES = ('inventory_batches',)
 DECK_TABLES = ('decks', 'deck_cards')
 KEEP_AUTOMATIC = 5  # backups made before a restore; the ones the user makes are kept until deleted
 KEEP_DAILY = 7      # backups made when the app starts (one per day, see create_daily)
@@ -153,47 +155,99 @@ def list_backups():
     return found
 
 
+def _has_table(conn, table):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone())
+
+
+def _check(source):
+    """A backup.db that can be restored in full: raises BackupError before anything is touched"""
+    try:
+        if source.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+            raise BackupError('This backup is damaged')
+        info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
+        for prefix, _manager, tables in _parts(None, None, None):
+            for table in tables:
+                if table in OPTIONAL_TABLES and not _has_table(source, prefix + table):
+                    continue
+                source.execute(f'SELECT * FROM {prefix}{table} LIMIT 1').fetchone()
+    except (sqlite3.Error, TypeError, ValueError) as e:
+        raise BackupError(f'This backup cannot be read ({e})')
+    return info
+
+
+def _restore_part(conn, source, prefix, tables):
+    """Replace `tables` through `conn` (inside its open transaction) with a backup's copies"""
+    for table in tables:
+        conn.execute(f'DELETE FROM {table}')
+    for table in tables:
+        if not _has_table(source, prefix + table):
+            continue  # an optional one: rebuilt by the caller
+        # Columns added since the backup keep their defaults
+        saved = _columns(source, prefix + table)
+        columns = [column for column in _columns(conn, table) if column in saved]
+        conn.executemany(
+            f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+            (tuple(row) for row in source.execute(f"SELECT {', '.join(columns)} FROM {prefix}{table}")))
+
+
 def restore(backup_id, inventory, scan_inventory, deck_store):
     """
     Put the collection, the scanned cards and the decks back as they were in a backup (what
     is there now is backed up first, so a restore can be taken back). Returns
     {'restored': the backup's info, 'previous': the backup made of the state replaced}.
+
+    The backup is checked in full before anything changes. The collection and the decks are
+    one file and come back in one transaction; the scanned cards, in their own file, are
+    written in a second one that is committed right after it - a failure before that point
+    rolls both back and nothing has changed.
     """
     folder = _folder(backup_id)
-    previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
-                      automatic=True)
     source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
-    parts = _parts(inventory, scan_inventory, deck_store)
     try:
+        info = _check(source)
+        previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
+                          automatic=True)
+        # The decks through the collection's connection when they share its file: one commit
+        together = str(deck_store.db_file) == str(inventory.db_file)
+        deck_conn = inventory.conn if together else deck_store.conn
         with inventory._lock, scan_inventory._lock, deck_store._lock:
-            # One part at a time: the collection and the decks are two connections to one
-            # file, which cannot both hold a write. If a part fails the ones before it are
-            # restored already - the backup just made has the state from before
-            for prefix, manager, tables in parts:
-                try:
-                    for table in tables:
-                        # Columns added since the backup keep their defaults
-                        saved = _columns(source, prefix + table)
-                        columns = [column for column in _columns(manager.conn, table) if column in saved]
-                        manager.conn.execute(f'DELETE FROM {table}')
-                        manager.conn.executemany(
-                            f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
-                            (tuple(row) for row in source.execute(f"SELECT {', '.join(columns)} FROM {prefix}{table}")))
-                    manager.conn.commit()
-                except Exception as e:
-                    manager.conn.rollback()
-                    raise BackupError(f"The restore stopped part way ({e}) - the state from before is in the "
-                                      f"backup \"{previous['note']}\"") from e
+            main, scan = inventory.conn, scan_inventory.conn
+            try:
+                for conn in {main, scan, deck_conn}:
+                    conn.commit()  # nothing of ours is pending; the restore starts clean
+                    conn.execute('BEGIN IMMEDIATE')
+                for manager, prefix in ((inventory, 'collection_'), (scan_inventory, 'scanned_')):
+                    _restore_part(manager.conn, source, prefix, INVENTORY_TABLES)
+                    if not _has_table(source, prefix + 'inventory_batches'):
+                        manager.rebuild_batches()
+                    # A move between the two that was under way describes other cards
+                    manager.forget_moves()
+                _restore_part(deck_conn, source, '', DECK_TABLES)
+            except Exception as e:
+                for conn in {main, scan, deck_conn}:
+                    conn.rollback()
+                raise BackupError(f"The restore failed ({e}) - nothing was changed") from e
+            try:
+                main.commit()
+                if deck_conn is not main:
+                    deck_conn.commit()
+                scan.commit()
+            except Exception as e:
+                for conn in {main, scan, deck_conn}:
+                    conn.rollback()
+                raise BackupError(f"The restore stopped part way ({e}) - the state from before is in the "
+                                  f"backup \"{previous['note']}\"") from e
             inventory.last_added = scan_inventory.last_added = None
             # Captures deleted since the backup come back with their entries
             CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
             for saved in (folder / 'captures').glob('*'):
                 _link(saved, CAPTURES_DIR / saved.name)
-        info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
     finally:
         source.close()
     logger.info(f"Restored backup {backup_id} (the state before it: backup {previous['id']})")
     return {'restored': {**info, 'id': backup_id}, 'previous': previous}
+
+
 
 
 def archive(backup_id):
@@ -245,7 +299,8 @@ def add_archive(file):
             info = json.loads(saved.execute('SELECT value FROM info').fetchone()[0])
             for prefix, _manager, tables in _parts(None, None, None):
                 for table in tables:
-                    saved.execute(f'SELECT 1 FROM {prefix}{table} LIMIT 1')
+                    if table not in OPTIONAL_TABLES or _has_table(saved, prefix + table):
+                        saved.execute(f'SELECT 1 FROM {prefix}{table} LIMIT 1')
             # Its own time when free here, so it sorts where it belongs
             base = info['id'][:19] if BACKUP_ID.match(str(info.get('id') or '')) else created
             backup_id, number = base, 1

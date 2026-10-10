@@ -57,6 +57,7 @@ fail() {
 mkdir -p "$STAGING/data"
 for db in data/*.db; do
     [ -f "$db" ] || continue
+    [ "$db" = "data/web_cache.db" ] && continue  # answers of other sites: fetched again when needed
     python3 - "$db" "$STAGING/$db" <<'PYTHON' || fail "could not snapshot $db"
 import sqlite3, sys
 source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=30)

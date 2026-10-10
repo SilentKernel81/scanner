@@ -471,7 +471,7 @@ endpoints work on the collection; add `?area=scan` for the cards scanned and not
 | `POST /api/import_inventory` | Import a collection CSV into the active game (multipart `file`, `replace_existing`): Moxfield (Magic), or the app's own columns |
 | `POST /api/clear_inventory` | Delete the active game's inventory entries |
 | `GET` / `POST /api/scan_inventory/to_collection` | Cards waiting and locations in use; move the scanned cards into the collection (JSON: `location`, optional - where they all go) |
-| `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
+| `POST /api/inventory/remove_batch` | Take back the cards that came in together (JSON: `batch`, an id from an entry's `batches`) |
 | `GET /api/export_inventory/<format>` | Download the inventory: `moxfield` (Magic), `csv` (the app's own, every column) |
 | `GET /api/ai_provider` | Current AI provider and model |
 | `GET /api/ai_models` | Built-in model lists for each provider |

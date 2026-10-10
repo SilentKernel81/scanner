@@ -57,7 +57,8 @@ Design choices:
 | `inventory.py` | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit/split, bulk edits, locations and tags, delete, stats, CSV import/export |
 | `decks.py` | Decks (`decks`, `deck_cards`): lists of card names with a count and a board; never touches the inventory |
 | `games/mtg_decks.py` | Magic deck formats, the deck checks (size, copies, color identity, legality) and text decklists |
-| `recommendations.py` | Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield, cached in `web_cache` |
+| `recommendations.py` | Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield, cached in `data/web_cache.db` |
+| `storage.py` | What the database managers share: one transaction per edit (`Transactional`), numbered schema upgrades (`upgrade`) |
 | `settings.py` | UI preferences persisted in `data/settings.json` |
 | `config.py`, `config_loader.py` | Settings from `config.yaml` (+ environment variables) |
 | `paths.py` | `BASE_DIR` (what ships with the program) and `USER_DIR` (the user's data, `.env`, own `config.yaml`) |
@@ -590,9 +591,17 @@ The app's own columns (`Card Name`, `Set`) → `import_csv`; CSVs written before
 `Set Code` columns existed import without a link to their printing. Any other
 file, or one where no card is found, is refused before "replace" deletes anything.
 
-**Imports never leave a half-filled table.** The download fills a staging table (`cards_import`), committing every 5,000 rows so the inventory can still write, and swap
-it in at the end in one step (`CardDatabase.replace_table`, under the database lock, then the
-indexes are rebuilt) - scanning keeps using the old data while an update runs.
+**Imports never leave a half-filled table.** The download fills a staging table (`cards_import`)
+through a connection of its own (`_fill_import_table` - the searches' connection would have its
+work committed with the import's batches), committing every 5,000 rows so the inventory can
+still write. A card the source got wrong is skipped and counted (`ROW_ERRORS`); a failing
+database stops the import. Nothing is published when the download is empty, when more than 1 %
+of it could not be read, or when it holds less than half of what is there now - the card data
+is then kept as it was. `CardDatabase.replace_table` swaps the table in, with its indexes and
+the `card_data_info` row, in one transaction it begins explicitly (Python's sqlite3 opens none
+for `DROP` / `ALTER`): other connections see the old table or the new one, never none, and a
+failure or a crash part way leaves the old one. One import runs at a time (`_import_lock`).
+Scanning keeps using the old data while an update runs.
 
 **`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
 
@@ -696,19 +705,42 @@ did not (the scanned cards are then still waiting). An error while copying rolls
 collection back. Decks, statistics and "owned" only look at
 the collection; the collection page shows a notice while scanned cards are waiting.
 
-Every entry records `added_at` - when it came into its inventory; one time for all entries of
-an "Add to collection" (`timestamp` stays the scan time) - and `added_quantity`, how many of
-its copies came with that (the rest were there before). The collection page sorts by it ("Last
-added to the collection", the default), filters by batch ("Added <time> (n cards)") and, with a
-batch chosen, offers **Remove this batch** (`POST /api/inventory/remove_batch`,
+Which copies came in together is kept in `inventory_batches`: one row per batch and entry
+(`batch` - an id unique for each "Add to collection", import or scanned card, so two in the same
+second are still two - `added_at`, `quantity`). An entry can hold copies of several batches;
+its rows never add up to more than its quantity, and copies no row accounts for were there
+before the oldest batch known. Entries are sent with `batches` (newest first); `added_at` /
+`added_quantity` are the newest one's. The collection page sorts by it ("Last added to the
+collection", the default), filters by batch ("Added <time> (n cards)") and, with a batch chosen,
+offers **Remove this batch** (`POST /api/inventory/remove_batch` with the `batch` id,
 `InventoryManager.remove_batch`): each entry loses only the copies that batch brought, with
-their newest captures; entries with no other copies are deleted. An entry that keeps copies
-gets `added_quantity = 0`: they belong to no batch any more (shown as "Added before <time>",
-left out of the batch filter), so removing a batch again never takes them. Adds to one entry
-at the same `added_at` (two in one second, a file with repeated rows) add up in
-`added_quantity`; Undo lowers it. The cards are deleted, not
-moved back to the scanner. Both columns are added on startup (`ALTER TABLE`; `added_at` starts
-as the scan time).
+their newest captures; entries with no other copies are deleted. The cards are deleted, not
+moved back to the scanner. Batches follow the copies: lowering a quantity or Undo takes from
+the newest batch first (`_take_from_batches`, as the newest captures go first), a split or a
+move to another location takes its copies' batches along, a merge adds them up, and deleting an
+entry removes its rows. The table was filled once from what each entry knew before - a single
+`added_at` / `added_quantity`, now batches named `old:<time>`; those columns are still written
+but no longer read.
+
+**Every edit is one transaction** (`storage.Transactional`: `with self._transaction():` in
+`InventoryManager` and `DeckManager`): all of it is committed, or - when anything raises - none
+of it, and nothing is left on the connection for a later commit to pick up. Edits made of
+others (a bulk change, a deck move, `deck_store.edit()` around the items of one request) commit
+once, at the end. Capture files are deleted only after the commit (`_committed`) - a rollback
+could not bring them back. Imports read and check the whole file before anything changes:
+`import_csv` matches column names whatever their case, skips unusable rows when adding, and
+refuses to replace the inventory unless every row can be used.
+
+**Rules in the database** (triggers, added by the numbered upgrades below): an inventory or
+deck quantity must be a positive whole number, a capture or batch row needs its entry and a deck
+card its deck, a board must be one of `BOARDS`; deleting an entry or a deck removes its rows.
+Triggers rather than foreign keys and CHECKs, which would need the tables rebuilt and a PRAGMA
+on every connection that writes.
+
+**Schema versions** (`storage.upgrade`, table `schema_versions`): each manager owns a component
+(`inventory`, `decks`) in the file it uses and runs its numbered steps (`SCHEMA_STEPS`) in
+order, each in one transaction together with its new version number. The older migrations that
+look at a table's columns run first and stay as they are; new schema changes go in as steps.
 
 ### Backups
 
@@ -734,14 +766,18 @@ marked `daily` (note "Application start"): a later start the same day finds it a
 none, an empty collection makes none, and the last `KEEP_DAILY` (7) are kept. A failure is
 logged and does not stop the app. Backups made by hand are never deleted automatically.
 
-**Restore** (`POST /api/backups/<id>/restore`, `backups.restore`) first makes an automatic
-backup of the current state ("Before restoring ...", the last 5 are kept), then replaces the
-rows of each table (the columns the backup has; row ids are kept) and links missing
-thumbnails back. Collection, scanned cards and decks are committed one after the other - the
-collection and the decks are two connections to one file - so a failure part way leaves the
-earlier parts restored; the automatic backup has the state from before. Every page reloads its
+**Restore** (`POST /api/backups/<id>/restore`, `backups.restore`) checks the whole backup first
+(`_check`: `quick_check`, the `info` row, every table readable) and makes an automatic backup
+of the current state ("Before restoring ...", the last 5 are kept), then replaces the rows of
+each table (the columns the backup has; row ids are kept) and links missing thumbnails back.
+The collection and the decks share a file and are written through one connection in one
+transaction; the scanned cards, in their own file, in a second one committed right after it -
+a failure before the commits rolls both back and nothing has changed (between the two commits
+the automatic backup has the state from before). Notes of a move between the two inventories
+are cleared with it (`forget_moves`). A backup made before `inventory_batches` restores too:
+the batches are rebuilt from its entries (`rebuild_batches`). Every page reloads its
 inventory (`inventory_updated`). Card data, the review queue and settings are not part of
-these backups: `scripts/backup.sh` archives all of `data/`.
+these backups: `scripts/backup.sh` archives all of `data/` except the web cache.
 
 `/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
 game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
@@ -804,8 +840,12 @@ decklists (`1 Sol Ring`, `4x Lightning Bolt (2X2) 117`, `Commander` / `Deck` / `
 sections, a blank line before the sideboard of a 60-card list) are read and written by
 `parse_decklist` / `format_decklist`.
 
-**Deck ideas from other sites** (`recommendations.py`). Every answer is cached in the
-`web_cache` table (EDHREC and the MTGJSON list 7 days, precon lists 90 days, deck searches and
+**Deck ideas from other sites** (`recommendations.py`). Every answer is cached in a file of its
+own, `data/web_cache.db` - it can be fetched again, so it stays out of the collection's file,
+its write lock and its backups (the table it had in the card database is moved over once and
+dropped there, `_take_over`). `prune` drops answers older than 90 days, then the oldest ones
+until the rest fits `deck_ideas.cache_mb` (200 MiB); a cache that cannot be read or written
+only means the answer is fetched. Lifetimes (EDHREC and the MTGJSON list 7 days, precon lists 90 days, deck searches and
 decks 1 day; a 403/404 is cached too), requests to one site are at least 1 s apart (MTGJSON
 0.25 s) with a 10 s timeout, and a site that fails or answers in another shape raises
 `Unavailable`: that panel says so and the rest works. Nothing here runs while scanning.
@@ -960,7 +1000,8 @@ the other lens.
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Backups made on the collection page (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
 | `data/scan_inventory.db` | Cards scanned and not yet added to the collection |
-| `data/cards_database.db` | Card data (`cards`, `card_data_info`), inventory, decks (`decks`, `deck_cards`) and answers cached from other sites (`web_cache`) |
+| `data/cards_database.db` | Card data (`cards`, `card_data_info`), inventory (`inventory`, `inventory_captures`, `inventory_batches`), decks (`decks`, `deck_cards`), `schema_versions` |
+| `data/web_cache.db` | Answers cached from other sites (deck ideas); can be deleted |
 | `data/logs/` | `app.log`, `ai.log`, `scanner.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process) |
 | `scanned_cards/` | Captured images (deleted after `cleanup.days`) |
 

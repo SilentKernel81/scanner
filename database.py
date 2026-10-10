@@ -187,6 +187,7 @@ class CardDatabase:
         self.db_file = db_file or Config.DATABASE_FILE
         self.conn = None
         self._lock = threading.RLock()  # Thread-safe database access
+        self._import_lock = threading.Lock()  # One card data import at a time
         self.initialize_database()
 
     def initialize_database(self):
@@ -262,25 +263,44 @@ class CardDatabase:
             row = self.conn.execute('SELECT * FROM card_data_info WHERE game = ?', (game,)).fetchone()
             return dict(row) if row else None
 
+    def _write_data_info(self, game, source_updated, card_count):
+        # No commit: part of the caller's transaction
+        self.conn.execute('INSERT OR REPLACE INTO card_data_info VALUES (?, ?, ?, ?)',
+                          (game, source_updated, datetime.now().isoformat(timespec='seconds'), card_count))
+
     def set_data_info(self, game, source_updated, card_count):
         with self._lock:
-            self.conn.execute('INSERT OR REPLACE INTO card_data_info VALUES (?, ?, ?, ?)',
-                              (game, source_updated, datetime.now().isoformat(timespec='seconds'), card_count))
+            self._write_data_info(game, source_updated, card_count)
             self.conn.commit()
 
-    def replace_table(self, staging, table, create_indexes=None):
+    def replace_table(self, staging, table, create_indexes=None, info=None):
         """
-        Put a freshly filled staging table in place of a card table in one step, so searches
-        never see a half-imported table (imports fill `staging`, committing as they go)
+        Put a freshly filled staging table in place of a card table (imports fill `staging`,
+        committing as they go) - in one transaction with its indexes and, with
+        info=(game, source_updated, card_count), the note of what the table now holds. Other
+        connections see the old table or the new one, never none; when anything fails, also a
+        crash, the old table is still there.
         """
         with self._lock:
             self.conn.commit()
-            cursor = self.conn.cursor()
-            cursor.execute(f'DROP TABLE IF EXISTS {table}')
-            cursor.execute(f'ALTER TABLE {staging} RENAME TO {table}')
-            if create_indexes:
-                create_indexes(cursor)
-            self.conn.commit()
+            # Explicit: Python's sqlite3 opens no transaction for DROP / ALTER by itself, each
+            # would be committed on its own
+            self.conn.execute('BEGIN IMMEDIATE')
+            try:
+                cursor = self.conn.cursor()
+                if not cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                                      (staging,)).fetchone():
+                    raise sqlite3.OperationalError(f"no such table: {staging}")
+                cursor.execute(f'DROP TABLE IF EXISTS {table}')
+                cursor.execute(f'ALTER TABLE {staging} RENAME TO {table}')
+                if create_indexes:
+                    create_indexes(cursor)
+                if info:
+                    self._write_data_info(*info)
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
 
     def fetch_scryfall_info(self):
         """Scryfall's bulk data description: download URL, size and updated_at"""
@@ -343,15 +363,54 @@ class CardDatabase:
         if progress_callback:
             progress_callback(f"Populating database with {len(cards_data)} cards...")
         
+        # One import at a time: they would fill the same cards_import table
+        if not self._import_lock.acquire(blocking=False):
+            raise Exception("A card data import is already running")
+        try:
+            return self._import_cards(cards_data, progress_callback)
+        finally:
+            self._import_lock.release()
+
+    # A card the source got wrong (skipped, counted) - not the database failing (the import stops)
+    ROW_ERRORS = (sqlite3.IntegrityError, sqlite3.ProgrammingError, sqlite3.InterfaceError, sqlite3.DataError)
+    # More skipped cards than this share of the file, or fewer cards than this share of what
+    # is there now: the download is broken, and the card data stays as it is
+    IMPORT_MAX_SKIPPED = 0.01
+    IMPORT_MIN_KEPT = 0.5
+
+    def _import_cards(self, cards_data, progress_callback):
         # Filled beside the current table and swapped in at the end (replace_table): scanning
-        # keeps working on the old data meanwhile
-        with self._lock:
-            cursor = self.conn.cursor()
-            cursor.execute('DROP TABLE IF EXISTS cards_import')
-            self._create_cards_table(cursor, table='cards_import')
-            self.conn.commit()
+        # keeps working on the old data meanwhile. On a connection of its own - the searches'
+        # connection would have its work committed along with the import's batches
+        conn = sqlite3.connect(str(self.db_file), timeout=30.0)
+        try:
+            inserted = self._fill_import_table(conn, cards_data, progress_callback)
+        finally:
+            conn.close()
+
+        current = self.get_database_stats()['total_cards']
+        if not inserted:
+            raise Exception("The download holds no cards - the card data was kept as it was")
+        if current and inserted < current * self.IMPORT_MIN_KEPT:
+            raise Exception(f"The download holds only {inserted} cards ({current} now) - "
+                            "the card data was kept as it was")
+        self.replace_table('cards_import', 'cards', self._create_card_indexes,
+                           info=('mtg', getattr(self, 'last_download_source', None), inserted))
+        if progress_callback:
+            progress_callback(f"Database populated with {inserted} cards!")
+
+        return inserted
+
+    def _fill_import_table(self, conn, cards_data, progress_callback):
+        """Write the cards to cards_import through `conn`; returns how many (raises when the
+        database fails or too many cards cannot be read)"""
+        cursor = conn.cursor()
+        cursor.execute('DROP TABLE IF EXISTS cards_import')
+        self._create_cards_table(cursor, table='cards_import')
+        conn.commit()
 
         inserted = 0
+        skipped = 0
         for card in cards_data:
             try:
                 if card.get('layout') in ['token', 'emblem', 'art_series']:
@@ -404,20 +463,24 @@ class CardDatabase:
                 inserted += 1
                 if inserted % 5000 == 0:
                     # Short transactions: the inventory (own connection) can still write
-                    self.conn.commit()
+                    conn.commit()
                     if progress_callback:
                         progress_callback(f"Inserted {inserted} cards...")
-            
+
             except Exception as e:
-                if progress_callback:
-                    progress_callback(f"Error inserting card {card.get('name')}: {e}")
+                if isinstance(e, sqlite3.Error) and not isinstance(e, self.ROW_ERRORS):
+                    raise  # disk full, file locked, ...: no point in going on
+                skipped += 1
+                if skipped <= 10:
+                    logger.warning(f"Card data: skipped {card.get('name') if isinstance(card, dict) else card!r}: {e}")
                 continue
-        
-        self.replace_table('cards_import', 'cards', self._create_card_indexes)
-        self.set_data_info('mtg', getattr(self, 'last_download_source', None), inserted)
-        if progress_callback:
-            progress_callback(f"Database populated with {inserted} cards!")
-        
+
+        conn.commit()
+        if skipped:
+            logger.warning(f"Card data: {skipped} of {inserted + skipped} cards could not be read")
+            if skipped > (inserted + skipped) * self.IMPORT_MAX_SKIPPED:
+                raise Exception(f"{skipped} of {inserted + skipped} cards in the download could not be read - "
+                                "the card data was kept as it was")
         return inserted
     
     def search_card_exact(self, card_name, collector_number=None, set_code=None):
@@ -914,6 +977,10 @@ class CardDatabase:
                 if progress_callback:
                     progress_callback("Copying card data into optimized table...")
 
+                # One transaction, begun explicitly (see replace_table): a failure or a crash
+                # part way leaves the cards table as it was
+                self.conn.commit()
+                cursor.execute('BEGIN IMMEDIATE')
                 cursor.execute("DROP TABLE IF EXISTS cards_rebuild")
                 self._create_cards_table(cursor, table='cards_rebuild')
                 cursor.execute(f"INSERT INTO cards_rebuild ({shared_columns}) SELECT {shared_columns} FROM cards")
