@@ -23,6 +23,34 @@ def _order_corners(pts):
     return np.array([pts[np.argmin(sums)], pts[np.argmin(diffs)], pts[np.argmax(sums)], pts[np.argmax(diffs)]])
 
 
+def _outline_bands(gray, corners, band):
+    """
+    The bands of pixels just outside and just inside an outline, as masks, with the part of
+    the image they lie in: (gray_part, outside, inside).
+
+    The masks are made by drawing the outline's polygon and growing / shrinking it by `band`.
+    Doing that on the whole image took 6 ms a call on a Raspberry Pi 4, and it is called
+    several times a frame; only the outline's surroundings matter, so only they are cut out
+    (the outline's bounding box plus the band and a pixel to spare). The result is the same
+    as on the whole image: nothing drawn here reaches the cut's edge, except where that edge
+    is the image's own.
+    """
+    points = corners.astype(np.int32)
+    margin = band + 2
+    x1, y1 = np.maximum(points.min(axis=0) - margin, 0)
+    x2 = min(int(points[:, 0].max()) + margin + 1, gray.shape[1])
+    y2 = min(int(points[:, 1].max()) + margin + 1, gray.shape[0])
+    if x2 <= x1 or y2 <= y1:
+        empty = np.zeros((0, 0), np.uint8)
+        return empty, empty, empty  # the outline lies outside the image
+    polygon = np.zeros((y2 - y1, x2 - x1), np.uint8)
+    cv2.fillPoly(polygon, [points - np.array([x1, y1], np.int32)], 255)
+    kernel = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
+    outside = cv2.dilate(polygon, kernel) & ~polygon
+    inside = polygon & ~cv2.erode(polygon, kernel)
+    return gray[y1:y2, x1:x2], outside, inside
+
+
 def _is_inner_frame(gray, corners, band=4):
     """
     True if the outline looks like the frame *inside* a card's dark border rather than
@@ -31,14 +59,10 @@ def _is_inner_frame(gray, corners, band=4):
     outer edge is cut off by the image border.) Assumes a background lighter than the
     card border, like a white scanning box.
     """
-    polygon = np.zeros(gray.shape, np.uint8)
-    cv2.fillPoly(polygon, [corners.astype(np.int32)], 255)
-    kernel = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
-    outside = cv2.dilate(polygon, kernel) & ~polygon
-    inside = polygon & ~cv2.erode(polygon, kernel)
+    part, outside, inside = _outline_bands(gray, corners, band)
     if not outside.any() or not inside.any():
         return False
-    return cv2.mean(gray, outside)[0] < cv2.mean(gray, inside)[0]
+    return cv2.mean(part, outside)[0] < cv2.mean(part, inside)[0]
 
 
 def side_area(corners):
@@ -73,14 +97,17 @@ def _is_rectangular(corners, side_tolerance=0.04, angle_tolerance=3):
 def _perimeter_coverage(edges, corners, samples=240, reach=3):
     """Fraction of points along a rectangle's sides that lie on (or within `reach` of) an edge"""
     near = cv2.dilate(edges, np.ones((2 * reach + 1, 2 * reach + 1), np.uint8))
-    hits = total = 0
-    for start, end in zip(corners, np.roll(corners, -1, axis=0)):
-        for t in np.linspace(0, 1, samples // 4, endpoint=False):
-            x, y = (start + (end - start) * t).astype(int)
-            if 0 <= y < near.shape[0] and 0 <= x < near.shape[1]:
-                total += 1
-                hits += near[y, x] > 0
-    return hits / max(total, 1)
+    # samples / 4 points along each of the four sides, all computed at once (one point at a
+    # time, in a Python loop, this took 10 ms a call on a Raspberry Pi 4):
+    #   point = start + (end - start) * t,   t = 0, 1/60, 2/60 ... (the end belongs to the next side)
+    starts = np.asarray(corners)
+    steps = np.linspace(0, 1, samples // 4, endpoint=False)
+    sides = (np.roll(starts, -1, axis=0) - starts).astype(np.float64)   # end - start, per side
+    points = starts.astype(np.float64)[:, None, :] + sides[:, None, :] * steps[None, :, None]
+    xs, ys = points.reshape(-1, 2).astype(int).T
+    inside = (ys >= 0) & (ys < near.shape[0]) & (xs >= 0) & (xs < near.shape[1])  # points outside the image don't count
+    hits = np.count_nonzero(near[ys[inside], xs[inside]])
+    return hits / max(int(np.count_nonzero(inside)), 1)
 
 
 def _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance):
@@ -120,14 +147,10 @@ def _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tole
 
 def _border_brightness(gray, corners, band=4):
     """Mean brightness of the bands just outside and just inside an outline: (outside, inside)"""
-    polygon = np.zeros(gray.shape, np.uint8)
-    cv2.fillPoly(polygon, [corners.astype(np.int32)], 255)
-    kernel = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
-    outside = cv2.dilate(polygon, kernel) & ~polygon
-    inside = polygon & ~cv2.erode(polygon, kernel)
+    part, outside, inside = _outline_bands(gray, corners, band)
     if not outside.any() or not inside.any():
         return None
-    return cv2.mean(gray, outside)[0], cv2.mean(gray, inside)[0]
+    return cv2.mean(part, outside)[0], cv2.mean(part, inside)[0]
 
 
 def _card_inside_box(contours, edges, gray, box, min_area, allow_landscape, ratio_tolerance):
@@ -149,7 +172,14 @@ def _card_inside_box(contours, edges, gray, box, min_area, allow_landscape, rati
     box_polygon = box[1].astype(np.float32)
     box_long_side = max(np.linalg.norm(box[1][1] - box[1][0]), np.linalg.norm(box[1][3] - box[1][0]))
     best = None
+    smallest = max(min_area, 0.5 * box[0])
     for contour in contours:
+        # Most contours are specks (letters, art): a contour's upright bounding box is never
+        # smaller than its tilted rectangle below, so one whose box is already too small is
+        # skipped here, without the slow steps (they took 47 ms a frame on a Raspberry Pi 4)
+        _, _, box_w, box_h = cv2.boundingRect(contour)
+        if box_w * box_h < smallest:
+            continue
         # An open outline encloses little area: judged by its rectangle instead
         corners = _order_corners(cv2.boxPoints(cv2.minAreaRect(contour)))
         side_w = np.linalg.norm(corners[1] - corners[0])
@@ -270,7 +300,9 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_s
     """
     height, width = frame.shape[:2]
     scale = work_size / max(height, width)
-    small = cv2.resize(frame, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
+    # A frame that already has the working size is used as it is (a Pi camera sends one)
+    small = frame if scale == 1 else cv2.resize(frame, (int(width * scale), int(height * scale)),
+                                                interpolation=cv2.INTER_AREA)
 
     gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), (5, 5), 0)
     median = np.median(gray)

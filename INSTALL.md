@@ -101,6 +101,28 @@ scanner lock the focus; others keep their own autofocus.
 
 ```bash
 git clone https://github.com/SilentKernel81/scanner-server.git && cd scanner-server
+docker compose -f docker-compose.client.yml up -d --build
+```
+
+Then open the station's **setup page**, `http://<the station's address>:8080`, and choose the
+server, the station's name and the camera:
+
+- **Server address** with a *Test connection* button (and the station token, if the server
+  has one). Until an address is saved the station only shows this page.
+- **Name** and **id** - the id is how the server knows the station; it defaults to the
+  machine's name.
+- **Camera**: the USB cameras and Raspberry Pi cameras found on the machine. *Show picture*
+  takes one picture from the chosen camera.
+- **Status**: connected or not, the camera and its pictures a second, the temperature.
+
+*Save and restart* writes the choices to the volume `station-data` (`data/station.json`) and
+restarts the station with them. The page has no login, like the server's pages: anyone on
+the network can open it.
+
+The settings can also be fixed in a `.env` file, as before the setup page existed - a value
+set there wins, and the page shows it as fixed:
+
+```bash
 ls /dev/v4l/by-id/                 # find your camera: ...-video-index0
 cp .env.station.example .env       # then edit it: the server's address, the camera, a name
 docker compose -f docker-compose.client.yml up -d --build
@@ -117,11 +139,13 @@ blocked by its firewall from inside a container.
 
 | Setting | |
 |---|---|
-| `SCANNER_SERVER` | The server's address (needed) |
+| `SCANNER_SERVER` | The server's address |
+| `SCANNER_CAMERA` | `auto` (default: a USB camera if there is one, else a Pi camera), `usb` or `picamera` |
 | `SCANNER_CAMERA_INDEX` | The camera: `N` of `/dev/videoN`, or its `/dev/v4l/by-id/...` path - that one stays the same camera when the numbers change. Default: `camera.usb_index` in `config.yaml` |
 | `SCANNER_STATION_ID` | 1-40 letters, digits, `-` or `_`. Default: the machine's name. It is how the server knows the station: keep it, or the station appears as a new one |
 | `SCANNER_STATION_NAME` | Shown on the server (it can be renamed there) |
 | `SCANNER_STATION_TOKEN` | The server's station token, when it has one |
+| `SCANNER_SETUP_PORT` | The setup page's port on the machine (default 8080) |
 
 - The container gets the host's `/dev` with access to video devices only, so the camera can
   be unplugged and plugged in again without restarting it. Unplugging while it runs has not
@@ -148,18 +172,33 @@ Raspberry Pi OS (64-bit) with Docker, and the steps above. Measured on a Pi 5 (8
 Anker PowerConf C200 on Wi-Fi: the image builds there in 37 s; about half a core idle and 70%
 while scanning, 75 °C without throttling; 1.6 s per card over a pile.
 
-A Raspberry Pi **camera module** is not supported in the container (its software comes from
-Raspberry Pi OS packages): the station runs from the Pi's own Python instead. Tried once, on a
-Pi 4 with a Camera Module 3 (Raspberry Pi OS, Debian 13) - one card captured and read; auto
-scanning over a pile has not been tested with it, and it keeps its own autofocus (no focus
-lock). A USB webcam is what is tested.
+A Raspberry Pi **camera module** needs a second compose file, which builds another image
+(Debian with Raspberry Pi's camera software, 1.3 GB) and gives the container the Pi's devices:
+
+```bash
+sudo apt install docker.io docker-cli docker-compose docker-buildx    # Raspberry Pi OS (Debian 13)
+docker compose -f docker-compose.client.yml -f docker-compose.client-pi.yml up -d --build
+```
+
+On the setup page choose the Raspberry Pi camera, press *Show picture* and drag a rectangle
+around the box: only that part of the sensor is then used, at its full resolution - with a
+wide lens the box is a small part of the picture. The camera keeps its own autofocus (no
+focus lock).
+
+Tried on a Pi 4 (4 GB) with a Camera Module 3 Wide, on a test server: four sessions of 15-17
+cards from the Pi's own Python, then the container set up through its page - connected, 14
+pictures a second, settings kept over a restart of the container. No session of cards has
+been run from the container yet, and the Pi ran at 77-79 °C with a heatsink, close to where it
+slows itself down (80 °C): it wants a fan. A USB webcam on a Pi 5 remains the tested setup.
+
+Without Docker the same station runs from the Pi's own Python:
 
 ```bash
 sudo apt install --no-install-recommends python3-picamera2 python3-opencv python3-socketio \
      python3-websocket python3-requests python3-yaml
-# in a folder with station_client.py, scanner.py, object_detector.py, settings.py, config.py,
-# config_loader.py and config.yaml (camera.type: picamera; camera.crop for a wide lens)
-python3 station_client.py --server http://<server>:5000
+# in a folder with station_client.py, station_setup.py, station_setup.html, scanner.py,
+# object_detector.py, settings.py, config.py, config_loader.py and config.yaml
+python3 station_client.py          # then the setup page, http://<the Pi>:8080
 ```
 
 ### When something is away

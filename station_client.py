@@ -8,9 +8,13 @@ collection. The server's scanner page shows this camera's live view and controls
     python station_client.py --server http://192.168.1.20:5000
     (or SCANNER_SERVER / SCANNER_STATION_ID / SCANNER_STATION_NAME / SCANNER_STATION_TOKEN)
 
-Nothing is kept here: camera settings (focus, rotation, fixed area) are saved on the server,
-and a captured image is deleted once the server has it. The camera itself is set in
-config.yaml (camera.usb_index, resolution). See remote_scanner.py for the messages.
+or without any of that: the station then serves its setup page (station_setup.py,
+http://<this machine>:8080), where the server, the station's name and the camera are chosen
+and saved in data/station.json.
+
+Little else is kept here: camera settings (focus, rotation, fixed area) are saved on the
+server, and a captured image is deleted once the server has it. Resolution and the capture
+thresholds are in config.yaml. See remote_scanner.py for the messages.
 """
 
 import argparse
@@ -19,6 +23,7 @@ import os
 import queue
 import re
 import socket
+import sys
 import threading
 import time
 import uuid
@@ -28,6 +33,7 @@ import cv2
 import requests
 import socketio
 
+import station_setup
 from config import Config
 
 NAMESPACE = '/station'
@@ -75,6 +81,7 @@ class Station:
         self.scanner = None
         self.capture_number = 0
         self.preview_wanted = False
+        self.stopping = False  # Set to leave run(): the setup page saved new settings (request_restart)
         self.uploads = queue.Queue()
         self.sio = socketio.Client(reconnection=True, reconnection_delay=1, reconnection_delay_max=5)
         self.sio.on('connect', self.on_connect, namespace=NAMESPACE)
@@ -88,7 +95,7 @@ class Station:
 
     def run(self):
         threading.Thread(target=self.upload_loop, daemon=True, name="Uploads").start()
-        while True:
+        while not self.stopping:
             try:
                 self.sio.connect(self.server, namespaces=[NAMESPACE], wait_timeout=10,
                                  auth={'id': self.id, 'name': self.name, 'token': self.token})
@@ -194,7 +201,7 @@ class Station:
         """Status several times a second; the preview while the scanner page is watched"""
         last_status = last_preview = 0.0
         last_frame = -1
-        while True:
+        while not self.stopping:
             time.sleep(0.02)  # the two intervals below are checked 50 times a second
             scanner = self.scanner
             if scanner is None or not self.connected():
@@ -330,20 +337,60 @@ def main():
     host_file = Path('/etc/host_hostname')
     host = host_file.read_text().strip() if host_file.is_file() else socket.gethostname()
     host = re.sub(r'[^A-Za-z0-9_-]', '-', host)[:40] or 'station'
+    # No defaults here: a value that is not given is looked for in the environment, then in
+    # what the setup page saved (station_setup.resolve) - and the page must know which of
+    # them were given here, to show those as fixed
     parser = argparse.ArgumentParser(description="Camera station for the card scanner server")
-    parser.add_argument('--server', default=os.getenv('SCANNER_SERVER'), help="e.g. http://192.168.1.20:5000")
-    parser.add_argument('--id', default=os.getenv('SCANNER_STATION_ID') or host,
-                        help="1-40 letters, digits, - or _ (default: this machine's name)")
-    parser.add_argument('--name', default=os.getenv('SCANNER_STATION_NAME'), help="shown on the server (default: the id)")
-    parser.add_argument('--token', default=os.getenv('SCANNER_STATION_TOKEN') or '',
-                        help="the server's station token, if it has one")
+    parser.add_argument('--server', help="e.g. http://192.168.1.20:5000 (or SCANNER_SERVER, or the setup page)")
+    parser.add_argument('--id', help="1-40 letters, digits, - or _ (default: this machine's name)")
+    parser.add_argument('--name', help="shown on the server (default: the id)")
+    parser.add_argument('--token', help="the server's station token, if it has one")
+    parser.add_argument('--setup-port', type=int, default=int(os.getenv('SCANNER_SETUP_PORT') or station_setup.DEFAULT_PORT),
+                        help=f"port of the setup page (default {station_setup.DEFAULT_PORT}; 0 = no setup page)")
     args = parser.parse_args()
-    if not args.server:
-        parser.error("--server (or SCANNER_SERVER) is needed, e.g. http://192.168.1.20:5000")
-    if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', args.id):
-        parser.error("--id must be 1-40 letters, digits, - or _")
-    Config.create_directories()
-    Station(args.server, args.id, args.name or args.id, args.token).run()
+
+    Config.create_directories()  # data/ must exist before the saved settings are read
+    values, fixed = station_setup.resolve({'server': args.server, 'id': args.id, 'name': args.name, 'token': args.token},
+                                          station_setup.load(), host)
+    if not re.fullmatch(station_setup.ID_PATTERN, values['id']):
+        parser.error("the station's id must be 1-40 letters, digits, - or _")
+    station_setup.apply_camera(values, fixed)  # before a CardScanner exists: it opens the camera
+
+    # Without a server address there is nothing to connect to yet: only the setup page runs
+    station = Station(values['server'], values['id'], values['name'], values['token']) if values['server'] else None
+
+    # A restart is asked for from the setup page's thread, but must happen in this main
+    # thread (it replaces the whole program): the page only raises a flag, and the loops
+    # below notice it
+    restart = threading.Event()
+
+    def request_restart():
+        restart.set()
+        if station:
+            station.stopping = True
+
+    if args.setup_port:
+        if station_setup.SetupPage(station, values, fixed, request_restart, args.setup_port).start():
+            logger.info(f"Setup page: http://<this machine's address>:{args.setup_port}")
+    if station is None:
+        if not args.setup_port:
+            parser.error("--server (or SCANNER_SERVER) is needed, e.g. http://192.168.1.20:5000")
+        logger.info("No server address yet - open the setup page to set this station up")
+        try:
+            restart.wait()  # until the page has saved settings
+        except KeyboardInterrupt:
+            return
+    else:
+        station.run()  # until Ctrl+C, or a restart is asked for
+
+    if restart.is_set():
+        # Start afresh with the saved settings. The camera is released by now (run() cleans
+        # up when it ends). os.execv replaces this program by a new copy of itself with the
+        # same command line - in a container that keeps the container running, where simply
+        # ending would rely on Docker to start it again.
+        time.sleep(0.5)  # let the page's "saved" answer go out first
+        logger.info("Restarting")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == "__main__":

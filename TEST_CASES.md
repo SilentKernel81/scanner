@@ -383,6 +383,21 @@ PROGRAM_DOCUMENTATION.md (Stations) and INSTALL.md; **(automated)** is in `tests
 | OCR-01 | P1 I | Server image with and without an NVIDIA GPU. | `ai.log` says `light-ocr ready (webgpu)` / `(cpu)`; the same reads either way. **done** |
 | LOAD-04 | P1 I | Four stations at a card every 0.5 s each; AI requests 1, 2, 3 and 6 at a time. | All cards settled; throughput as documented. **done** |
 
+### The station's setup page and the Raspberry Pi camera
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| SET-01 | P0 H/E | Start a station with no server set anywhere (no `.env`, no saved file). Open `http://<station>:8080`. | The page says the station is not set up; the camera is not opened; the log names the page. |
+| SET-02 | P0 H/E | Type the server's address without `http://`, press *Test connection*; then a wrong address; then an address of another web server. | "Scanner server found" with the address tidied; "No answer"; "answers, but not as a scanner server". |
+| SET-03 | P0 H/E | Fill in name and camera, *Save and restart*. | The page waits and reports the station running; the status shows connected and the camera working; the station appears on the server under that name. |
+| SET-04 | P1 H/E | Restart the container / the machine. | The station comes back with the saved settings, without the page being opened. |
+| SET-05 | P1 H/A | Set `SCANNER_SERVER` in `.env` and start. | The server field is shown as fixed and cannot be edited; saving other fields does not change the server. (`tests/test_station_setup.py` covers the order.) |
+| SET-06 | P1 H | Two USB cameras plugged in: choose each in turn, *Show picture*. Save one, swap the USB ports, restart. | Each picture is of the camera chosen; after the swap the same camera is used (saved by its by-id name). Not tried yet. |
+| SET-07 | P1 H | Raspberry Pi camera: *Show picture* while scanning, drag a rectangle around the box, save. | Scanning pauses a few seconds for the picture and goes on; after the restart the camera's page on the server shows only the dragged part. |
+| SET-08 | P1 H | Save a token on the page, reload the page, inspect what the browser received. | The token field is empty with "a token is saved"; `/api/state` holds no token. *Remove the saved token* removes it. |
+| SET-09 | P2 H | Type an id with a space; drag a tiny crop; save. | A sentence under the Save button says what is wrong; nothing is saved, the station is not restarted. |
+| SET-10 | P1 H | Pi camera in the container (`docker-compose.client-pi.yml`): a session of cards dropped onto a pile, with identical copies in a row and cards landing against the box walls. | Every card captured once, none waiting more than a few seconds; the Pi's temperature on the setup page stays under 80 °C. Not yet run from the container. |
+
 ## Suggested execution order and automation
 
 1. **Smoke:** BOOT-01, STN-01, CAM-01, SCAN-01, READ-12, SCAN-08, STN-02, REVIEW-03, TRANSFER-02, STN-12, INV-04, IO-01, DECK-01, BACKUP-03.
