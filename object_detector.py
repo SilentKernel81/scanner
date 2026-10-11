@@ -12,6 +12,9 @@ logger = logging.getLogger('scanner')
 CARD_ASPECT_RATIO = 88.0 / 63.0
 
 
+GAP_CLOSING = 21  # px at the detector's 640 px working size
+
+
 def _order_corners(pts):
     """Order 4 points as top-left, top-right, bottom-right, bottom-left"""
     pts = pts.reshape(4, 2).astype(np.float32)
@@ -293,35 +296,39 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_s
                 if _is_rectangular(previous):
                     return previous / scale, 1.0
 
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     min_area = 0.02 * small.shape[0] * small.shape[1]  # card must cover at least 2% of the frame
 
-    best = None
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < min_area:
-            continue
-        rect = cv2.minAreaRect(contour)
-        corners = _order_corners(cv2.boxPoints(rect))
-        side_w = np.linalg.norm(corners[1] - corners[0])
-        side_h = np.linalg.norm(corners[3] - corners[0])
-        if min(side_w, side_h) == 0:
-            continue
-        if side_w > side_h and not allow_landscape:
-            continue
-        ratio = max(side_w, side_h) / min(side_w, side_h)
-        fill = area / (side_w * side_h)  # 1.0 = perfectly rectangular
-        if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.85:
-            continue
-        if best is not None and area <= best[0]:
-            continue
-        if _is_inner_frame(gray, corners):
-            continue
-        best = (area, corners, fill)
+    def from_contours(edges):
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        best = None
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area:
+                continue
+            rect = cv2.minAreaRect(contour)
+            corners = _order_corners(cv2.boxPoints(rect))
+            side_w = np.linalg.norm(corners[1] - corners[0])
+            side_h = np.linalg.norm(corners[3] - corners[0])
+            if min(side_w, side_h) == 0:
+                continue
+            if side_w > side_h and not allow_landscape:
+                continue
+            ratio = max(side_w, side_h) / min(side_w, side_h)
+            fill = area / (side_w * side_h)  # 1.0 = perfectly rectangular
+            if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.85:
+                continue
+            if best is not None and area <= best[0]:
+                continue
+            if _is_inner_frame(gray, corners):
+                continue
+            best = (area, corners, fill)
 
-    if best is not None:
-        best = _card_inside_box(contours, edges, gray, (side_area(best[1]), best[1], best[2]), min_area,
-                                allow_landscape, ratio_tolerance) or best
+        if best is not None:
+            best = _card_inside_box(contours, edges, gray, (side_area(best[1]), best[1], best[2]), min_area,
+                                    allow_landscape, ratio_tolerance) or best
+        return best
+
+    best = from_contours(edges)
 
     # Outlines assembled from edge pieces or fitted lines can come out skewed (a holo streak
     # taken for the top edge); seen from above a card is a rectangle
@@ -329,6 +336,13 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_s
         best = _outline_from_edge_groups(edges, gray, min_area, allow_landscape, ratio_tolerance)
         if best is not None and not _is_rectangular(best[1]):
             best = None
+    # Still nothing: a side of the outline can have gaps where the card lies against something
+    # as dark as its border in the image (the shadowed wall of a box) - such a card was found
+    # in every other frame at best and waited up to 27 s for six still frames in a row. Close
+    # gaps of up to ~7% of a card's width and look again. Only here: closing the edges before
+    # the first look lost outlines that are found without it (10 of 271 frames of one session)
+    if best is None:
+        best = from_contours(cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((GAP_CLOSING, GAP_CLOSING), np.uint8)))
     if best is None and tracked is not None and _is_rectangular(tracked[1]):
         best = tracked
     if best is None:

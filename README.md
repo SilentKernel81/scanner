@@ -309,6 +309,7 @@ provider and model, OCR first, sound). `config.yaml` has the rest:
 | `camera.usb_index` | station | | `/dev/videoN` number of the USB camera (or `SCANNER_CAMERA_INDEX`: a number or a `/dev/v4l/by-id/...` path) |
 | `camera.resolution` / `fps` | station | `[2560, 1440]` / `20` | Capture resolution and frames processed per second |
 | `camera.rotate` | station | `0` | Default rotation (0/90/180/270) until it is set in Settings |
+| `camera.crop` | station | | Raspberry Pi camera module only: the part of the sensor's image to use (`[x1, y1, x2, y2]`, fractions) - e.g. the box under a wide lens |
 | `detection.allow_landscape` | station | `false` | Accept cards lying sideways (a card's art box can look like a sideways card) |
 | `auto_capture.delay` | station | `1.0` | Minimum seconds between automatic captures |
 | `auto_capture.stability_frames` | station | `5` | Still, in-focus frames before a capture that waits for Add / Skip |

@@ -252,4 +252,5 @@ container - or a second container with its own data folder and port.
 **Logs**: on the server `data/logs/app.log` (also every station's scanner lines), `ai.log`,
 `database.log`, `scanned_cards.log`, `ocr.log`; `scanner.log` only with a camera on the server
 itself; `requests.log` only with Debug mode on. A station logs to its console
-(`docker compose -f docker-compose.client.yml logs`).
+(`docker compose -f docker-compose.client.yml logs`) - only there: why a card waits ("Waiting
+N s: ..."), focus probes and saved debug frames.

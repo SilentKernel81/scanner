@@ -37,6 +37,7 @@ cv2.setNumThreads(2)
 # A camera that is not there (not plugged in, taken by another program, unplugged while
 # running) is said once and then looked for quietly - the rest of the app needs no camera
 CAMERA_RETRY_SECONDS = 3
+MEASURED_FPS = 20  # Frame rate of the USB cameras the frame-count thresholds were measured with
 CAMERA_LOST_AFTER = 20  # failed reads in a row (~2 s) before the camera counts as gone
 
 
@@ -98,6 +99,10 @@ class CardScanner:
         self.raw_mjpeg = False  # Camera delivers raw JPEG: decode at half size live, full size on capture
         self.half_size_decode = False
         self.next_retrieve = 0.0  # When the next raw frame is due for decoding (CAMERA_FPS pacing)
+        self.current_small = None  # The camera's own small copy of the frame (Pi camera), for detection
+        self.small_size = None  # Its size (width, height) as configured
+        self.frame_rate = float(MEASURED_FPS)  # Frames processed per second (smoothed)
+        self.last_frame_time = None
         self.frame_id = 0  # Increments with every processed frame (stream skips repeats)
         self._stream_cache = (-1, None)
         self.annotated_frame = None  # Frame with card detection overlay
@@ -177,6 +182,8 @@ class CardScanner:
         self.capture_pending = False  # Auto-capture triggered, image / focus probe not done yet
         # Image rotation (degrees clockwise), applied as each frame is decoded - live and full size
         self.rotation = int(self.settings.get('camera_rotation', Config.CAMERA_ROTATE) or 0)
+        self.camera_rotation = 0  # Degrees the camera turns the image itself (Pi camera: 180)
+        self.reopen_camera = False  # Asked by another thread; done by the capture thread
 
         # Fixed capture area (sleeved cards): stillness and new cards are judged by how the image
         # inside a drawn area changes, not by the card's outline (on a sleeved pile the outline
@@ -192,6 +199,49 @@ class CardScanner:
 
         self.initialize_camera()
     
+    def _frames(self, count, least=3):
+        """
+        A number of frames as the time it stood for when it was measured (20 frames a second):
+        6 frames are 0.3 s, at 12 frames a second that is 4. A camera that gives fewer frames
+        otherwise takes a card's fall (hidden 0.4 s) for a detector hiccup - a third copy of a
+        card was never captured that way at 7.7 a second. Used for "card gone" only: the still
+        frames before a capture stay as they are (shortened too, a replay of that camera's
+        frames captured a card twice - its autofocus is still settling after a drop).
+        Never fewer than `least`: the detector can miss a frame or two of a card lying still.
+        Only for the Pi camera, whose rate is what its sensor and the Pi manage: USB cameras
+        are paced to camera.fps, and their numbers were measured as they run.
+        """
+        if self.camera_type != 'picamera' or self.frame_rate >= 0.92 * MEASURED_FPS:
+            return count
+        return min(count, max(least, round(count * self.frame_rate / MEASURED_FPS)))
+
+    def _frame_processed(self):
+        """Keep the smoothed frame rate (pauses - no camera, a focus sweep - don't count)"""
+        now = time.time()
+        if self.last_frame_time is not None and 0 < now - self.last_frame_time < 0.5:
+            self.frame_rate += 0.1 * (1.0 / (now - self.last_frame_time) - self.frame_rate)
+        self.last_frame_time = now
+
+    def _detect_outline(self, frame, previous):
+        """
+        The outline detector's answer for this frame, in the frame's coordinates. A camera that
+        sends its own small copy of the frame (current_small) is searched there: the detector
+        works at 640 px anyway, and scaling a Pi camera's frame down took half its time.
+        """
+        small = self.current_small
+        if small is None:
+            return self.object_detector.detect(frame, previous=previous)
+        scale = np.array([frame.shape[1] / small.shape[1], frame.shape[0] / small.shape[0]], dtype=np.float32)
+        if previous is not None:
+            previous = np.asarray(previous, dtype=np.float32) / scale
+        bounding_box, name, score, corners = self.object_detector.detect(small, previous=previous)
+        if bounding_box is None:
+            return None, name, score, None
+        corners = corners * scale
+        x1, y1 = np.floor(corners.min(axis=0)).astype(int)
+        x2, y2 = np.ceil(corners.max(axis=0)).astype(int)
+        return (max(0, x1), max(0, y1), min(frame.shape[1], x2), min(frame.shape[0], y2)), name, score, corners
+
     def log(self, message, level="info"):
         """Send log message to both file logger and UI callback"""
         # Log to file
@@ -374,7 +424,9 @@ class CardScanner:
 
     def _record_debug_frame(self, frame):
         """Keep the frame (640 px wide, as the outline detector sees it); continue a dump"""
-        small = cv2.resize(frame, (640, int(640 * frame.shape[0] / frame.shape[1])), interpolation=cv2.INTER_AREA)
+        small = self.current_small
+        if small is None:
+            small = cv2.resize(frame, (640, int(640 * frame.shape[0] / frame.shape[1])), interpolation=cv2.INTER_AREA)
         self.debug_frames.append((time.time(), small, self.stable_frames))
         if self.debug_dump:
             folder, remaining = self.debug_dump
@@ -481,7 +533,7 @@ class CardScanner:
     ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
 
     def _rotate(self, image):
-        code = self.ROTATIONS.get(self.rotation)
+        code = self.ROTATIONS.get((self.rotation - self.camera_rotation) % 360)
         return image if code is None or image is None else cv2.rotate(image, code)
 
     def set_rotation(self, degrees):
@@ -494,6 +546,8 @@ class CardScanner:
             raise ValueError("Rotation must be 0, 90, 180 or 270")
         self.rotation = degrees
         self.settings.set('camera_rotation', degrees)
+        if self.camera_type == 'picamera':
+            self.reopen_camera = True  # it turns the image itself where it can
         with self.frame_lock:
             self.detected_card = None
             self.card_detected = False
@@ -598,7 +652,7 @@ class CardScanner:
                     self.log(f"New card detected (area change {change:.1f})")
 
         # Outline inside the area -> flat, tight crop for the photo
-        _, _, _, corners = self.object_detector.detect(
+        _, _, _, corners = self._detect_outline(
             frame, previous=self.tracked_outline if self.missing_frames <= 2 else None)
         if corners is not None:
             self.tracked_outline, self.missing_frames = corners, 0
@@ -828,25 +882,68 @@ class CardScanner:
         self.log(f"USB camera initialized (index: {Config.USB_CAMERA_INDEX})")
     
     def _initialize_picamera(self):
-        """Initialize Raspberry Pi Camera using Picamera2"""
+        """
+        Raspberry Pi camera module (Picamera2). The sensor runs at its full resolution and only
+        camera.crop of it is read out, pixel for pixel (a wide lens sees far more than the box):
+        the frames are then small enough for detection and are also what is captured. Without
+        a crop the whole image is scaled to camera.resolution. Focus stays the camera's own
+        continuous autofocus, measured inside the crop. The camera turns the image by 180°
+        itself and delivers it in RGB order: turning and reordering each frame here cost 24 ms
+        on a Pi 4, enough to miss every other frame.
+        """
         from picamera2 import Picamera2
-        
+        from libcamera import Transform
+
         self.camera = Picamera2()
-        
+        sensor_width, sensor_height = self.camera.sensor_resolution
+        if Config.CAMERA_CROP:
+            x1, y1, x2, y2 = Config.CAMERA_CROP
+            left, top = int(x1 * sensor_width) // 2 * 2, int(y1 * sensor_height) // 2 * 2
+            width = max(64, int((x2 - x1) * sensor_width) // 2 * 2)
+            height = max(64, int((y2 - y1) * sensor_height) // 2 * 2)
+            size = (width, height)
+        else:
+            left, top, width, height = 0, 0, sensor_width, sensor_height
+            size = Config.CAMERA_RESOLUTION
+        self.camera_rotation = 180 if self.rotation == 180 else 0
+        if self.camera_rotation:
+            # The sensor reads out turned, and the crop is counted in what it reads out
+            left, top = sensor_width - left - width, sensor_height - top - height
+        settings = {"FrameRate": Config.CAMERA_FPS, "ScalerCrop": (left, top, width, height)}
+        focus = "fixed focus"
+        if "AfMode" in self.camera.camera_controls:
+            from libcamera import controls
+            settings.update({"AfMode": controls.AfModeEnum.Continuous, "AfRange": controls.AfRangeEnum.Full,
+                             "AfSpeed": controls.AfSpeedEnum.Fast, "AfMetering": controls.AfMeteringEnum.Windows,
+                             "AfWindows": [(left, top, width, height)]})
+            focus = "continuous autofocus"
+
+        # A second, small stream for the outline detector: 480 px wide (rows of the camera's
+        # buffers are padded to 64 px), as high as the frame's shape asks
+        self.small_size = (480, int(round(480 * size[1] / size[0] / 2)) * 2)
         config = self.camera.create_video_configuration(
-            main={"size": Config.CAMERA_RESOLUTION},
-            lores={"size": Config.CAMERA_PREVIEW_RESOLUTION},
+            main={"size": size, "format": "BGR888"},  # libcamera's name for R, G, B in memory
+            lores={"size": self.small_size, "format": "YUV420"},
+            raw={"size": (sensor_width, sensor_height)},
+            transform=Transform(hflip=True, vflip=True) if self.camera_rotation else Transform(),
+            controls=settings, buffer_count=3,
         )
         self.camera.configure(config)
         self.camera.start()
-        
+
         time.sleep(2)
-        
+
+        self.log(f"Resolution: {size[0]}x{size[1]} of the sensor's {sensor_width}x{sensor_height}"
+                 + (f" (crop at {left},{top})" if Config.CAMERA_CROP else "") + f", {focus}")
         self.log("Picamera initialized")
-    
+
     def _capture_frames(self):
         """Continuously capture frames and perform object detection"""
         while self.running:
+            if self.reopen_camera:
+                self.reopen_camera = False
+                self._close_camera()
+                self._open_camera()
             if self.camera_error:
                 self._wait_for_camera()
                 continue
@@ -883,17 +980,24 @@ class CardScanner:
 
                 elif self.camera_type == 'picamera':
                     try:
-                        frame = self.camera.capture_array()
+                        request = self.camera.capture_request()
+                        try:
+                            frame, small = request.make_array('main'), request.make_array('lores')
+                        finally:
+                            request.release()
                     except Exception as e:
                         self._read_failed(f"The camera stopped sending images ({e})")
                         continue
                     self.failed_reads = 0
                     if len(frame.shape) == 3 and frame.shape[2] == 4:
                         frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-                    elif len(frame.shape) == 3 and frame.shape[2] == 3:
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # Planes of padded rows; OpenCV's "BGR" is R, G, B for this camera's order
+                    width, height = self.small_size
+                    small = cv2.cvtColor(small, cv2.COLOR_YUV420p2BGR)[:height, :width]
 
                 frame = self._rotate(frame)
+                self.current_small = self._rotate(small) if self.camera_type == 'picamera' else None
+                self._frame_processed()
                 annotated = frame.copy()
 
                 # Track which detection to display (current or cached)
@@ -917,7 +1021,7 @@ class CardScanner:
                     # Run detection on raw frame for better performance
                     # Follow the card of the previous frame (or of the last one, across a detector
                     # hiccup of up to 2 frames)
-                    bounding_box, card_name, confidence, corners = self.object_detector.detect(
+                    bounding_box, card_name, confidence, corners = self._detect_outline(
                         frame,
                         previous=self.tracked_outline if self.missing_frames <= 2 else None
                     )
@@ -1017,7 +1121,7 @@ class CardScanner:
                         # Card gone for more than a detector hiccup: treat as a change of card
                         # (not while the lens moves - the blur can hide the card)
                         self.missing_frames = 0 if self._focus_moving() else self.missing_frames + 1
-                        if self.awaiting_new_card and self.missing_frames >= self.missing_frames_for_new_card:
+                        if self.awaiting_new_card and self.missing_frames >= self._frames(self.missing_frames_for_new_card):
                             self.awaiting_new_card = False
                             if self.auto_capture_enabled:
                                 self.log("Card gone - ready for the next card")
@@ -1138,7 +1242,7 @@ class CardScanner:
                     self.annotated_frame = annotated
                     self.frame_id += 1
 
-                if raw is None:  # grab() already paces raw-JPEG cameras
+                if raw is None and self.camera_type != 'picamera':  # grab() / capture_array() already pace
                     time.sleep(1.0 / Config.CAMERA_FPS)
             except Exception as e:
                 self.log(f"Error capturing frame: {e}", level="error")
