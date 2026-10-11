@@ -332,7 +332,51 @@ settings are read from the saved values, so the page still shows them.
 - **The same id connecting again** replaces its earlier connection.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml`, or
   `SCANNER_CAMERA_INDEX` - a number, or a `/dev/v4l/by-id/...` path, which stays the same
-  camera when the numbers change (`config.usb_camera_index`).
+  camera when the numbers change (`config.usb_camera_index`) - or chosen on the station's
+  setup page.
+
+#### The station's setup page
+
+`station_setup.py` serves one page on the station itself (port 8080, `SCANNER_SETUP_PORT`,
+`--setup-port 0` for none), with Python's built-in web server - a station has no Flask. It
+holds only what a station must know *before* it can reach the server; everything about
+scanning stays on the camera's page on the server.
+
+| On the page | Saved as (`data/station.json`) |
+|---|---|
+| Server address (*Test connection* asks it for `/api/stations`), station token | `server`, `token` |
+| Name, id | `name`, `id` |
+| Camera: *automatic*, a USB camera (listed from `/sys/class/video4linux`, saved by its `/dev/v4l/by-id/` name where it has one) or a Raspberry Pi camera (listed by `picamera2`) | `camera`, `camera_index` |
+| A Pi camera's crop, dragged on a picture of the whole sensor | `crop` |
+| Status: connected, the camera and its pictures a second, captures waiting to be sent, temperature | - |
+
+- **Who wins** (`resolve`): the command line, then the environment (`SCANNER_SERVER`, ...),
+  then the saved file, then the default. A value from the first two is shown on the page as
+  fixed and is not saved - a station set up with `.env` behaves as before the page existed.
+- **Setup mode**: without a server address from any of them, `station_client.py` serves only
+  the page and waits; the camera is not opened.
+- **Saving** checks the form (`checked`), writes the file (to a temporary file, then renamed:
+  whole or not at all; mode 600, it can hold the token) and restarts the station: the page's
+  thread raises a flag, the main thread ends `Station.run()` - which releases the camera - and
+  replaces the program by a new copy of itself (`os.execv`), so a container keeps running.
+  Captures still waiting to be sent when that happens stay as files in `scanned_cards/` and
+  are not sent by the new run (as with any restart of a station).
+- **The camera in Config** (`apply_camera`): the saved camera and crop are put into `Config`
+  before the scanner is created, and only where the environment did not decide.
+- **Show picture** (`SetupPage.picture`): a free camera is opened for one picture and closed.
+  A USB camera the scanner is using: the scanner's current frame. A Pi camera the scanner is
+  using: the scanner shows only its crop, so it lets go of the camera for the moment
+  (`CardScanner.with_camera_released` - the capture thread closes it, the picture is taken,
+  it opens again; 4.5 s on a Pi 4, scanning pauses meanwhile).
+- **The token never reaches the page** (only whether one is saved), and the page has no
+  login: anyone on the network can open it and point the station elsewhere.
+
+Tried 2026-10-11 on the Pi 4 below, from its own Python and in the container: setup mode →
+*Test connection* → save → restarted, connected and scanning; a picture in setup mode (2 s)
+and while scanning; settings kept over a restart of the container; the page driven in a
+headless Chromium (picture shown, a crop dragged, no script errors). On a PC only setup mode
+and the page's routes were tried; choosing between two USB cameras has not been tried at all.
+`tests/test_station_setup.py` covers who wins, the form's checks and the file.
 
 Measured 2026-10-08 (laptop, Ryzen 5 7235HS, Anker PowerConf C200, Wi-Fi; server in Docker):
 manual capture to card on the page 2.7 s when the AI had to read it, auto-capture to added
@@ -1091,8 +1135,8 @@ A rotation of 180° is done by the camera (the crop is mirrored to stay on the s
 the frames arrive in RGB order; 90° / 270° are turned per frame as for other cameras. Changing
 the rotation reopens the camera (`reopen_camera`, done by the capture thread).
 
-The camera also delivers a small copy of each frame (480 px wide, `current_small`): the outline
-is searched there (`_detect_outline`, corners scaled back to the frame) and the debug trace
+The camera also delivers a small copy of each frame (640 px on its longer side, the
+detector's working size; `current_small`): the outline is searched there (`_detect_outline`, corners scaled back to the frame) and the debug trace
 saves it. Scaling the full frame down for the detector had taken half of its 33 ms.
 
 **Frame counts and frame rate.** "Card gone" - no outline for 6 frames - was measured at 20
@@ -1141,6 +1185,24 @@ Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 
   none waiting, all read by OCR; the count of each card and of its foils is that of the pile
   (2, 2, 2 with 1 foil, 3, 8 with 2 foil), so none twice and none lost. The Pi at 70 °C.
   One session: the repeat captures the replay warned of have not been seen, nor ruled out.
+- The detector with a card in view took 67 ms a frame on the Pi 4 (16 ms on the empty box),
+  so with cards the station fell back to 7.7 frames a second. Three of its helpers were made
+  cheaper without changing what they compute (`_card_inside_box` skips specks by their
+  bounding box, `_outline_bands` works on the outline's surroundings instead of the whole
+  image, `_perimeter_coverage` without a Python loop), and the camera's small frame is now
+  exactly the detector's working size (no rescaling): about 40 ms, and 13.9 frames a second
+  with a card in view. Checked on all 2,452 recorded frames (Pi and USB camera), alone and
+  following the previous outline: every outline and score identical to before.
+- **In Docker** (target `client-pi`, `docker-compose.client-pi.yml`): Debian 13 with Raspberry
+  Pi's package archive for `picamera2` / libcamera - its keyring package is fetched over HTTPS
+  from the archive's package list, because the key file offered for download is signed with
+  SHA-1, which Debian 13's apt refuses. The container runs privileged with `/run/udev`
+  mounted: a Pi camera is a chain of devices (sensor, image processor, picture memory) whose
+  numbers differ between models. The image is 1.33 GB and built in a few minutes on the Pi 4.
+  Tried: set up through its page, connected, 14 pictures a second, pictures taken from the
+  page. No session of cards has run from the container yet.
+- **Heat**: with a heatsink the Pi 4 ran at 77-79 °C while only watching the box, 1-3 °C under
+  the point where it slows itself down. It was never seen throttling, but it has no margin.
 - A card on the bottom of the box is 637x891 px, about 10 px per mm; a manual capture of it
   was confirmed by OCR (name, number, set, foil marker) in 0.5 s. One card, once.
 - The lens: sharpest for that card at lens position 0, the far end of its range, where things

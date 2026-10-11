@@ -100,12 +100,13 @@ container - or a second container with its own data folder and port.
 | Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js`; shared: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html` |
 | **Camera station** | |
 | Connection, status, preview, commands, uploads | `station_client.py`: `Station` (`hello`, `report_loop`, `on_command`, `on_set`, `auto_captured`, `manual_capture`, `upload_loop`), `ServerSettings` |
+| The station's own setup page (server, name, camera, a Pi camera's crop) | `station_setup.py`: `resolve` (command line > environment > `data/station.json` > default), `apply_camera`, `checked`, `list_cameras`, `take_picture`, `SetupPage`; `station_setup.html`; `station_client.py`: `main` (setup mode, `request_restart`); `scanner.py`: `with_camera_released` |
 | Capture loop, stillness, auto-capture, new-card detection, fixed area | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`, `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / drift tracking | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe`, `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` |
 | **Both** | |
 | Settings | `config.yaml` (+ `config.py`: also `SCANNER_CAMERA`, `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_TOKEN`), `.env`; on the server `data/settings.json` (everyone's choices), `data/stations.json` (each station's), `data/api_keys.env`, `data/prompts.json` |
-| Images | `Dockerfile` (targets `server`, `client`), `docker-compose.yml`, `docker-compose.gpu.yml`, `docker-compose.client.yml`, `scripts/docker-entrypoint.sh` |
+| Images | `Dockerfile` (targets `server`, `client`, `client-pi` for a Raspberry Pi camera), `docker-compose.yml`, `docker-compose.gpu.yml`, `docker-compose.client.yml`, `docker-compose.client-pi.yml`, `scripts/docker-entrypoint.sh` |
 
 ## Conventions and Pitfalls
 
@@ -113,8 +114,15 @@ container - or a second container with its own data folder and port.
 
 - **Two programs.** `scanner.py` / `object_detector.py` run in `station_client.py` (they still
   run inside `app.py` when `camera.type` is not `remote`). The client must not import server
-  modules (`database`, `inventory`, `identification`, Flask), and its image copies a fixed list
-  of files: a new module it imports must be added to the `COPY` line of the `client` target.
+  modules (`database`, `inventory`, `identification`, Flask), and its images copy a fixed list
+  of files: a new module it imports must be added to the `COPY` lines of the `client` and
+  `client-pi` targets.
+- **The station's setup page** (`station_setup.py`, port 8080) only holds what a station needs
+  before it can reach the server: the server's address, its id / name / token, the camera, a
+  Pi camera's crop. Everything about scanning stays on the server (`CAMERA_SETTINGS`). A value
+  from the command line or the environment wins over the saved file and is shown as fixed -
+  keep that order (`resolve`), or stations set up by `.env` change behaviour. The token is
+  never sent to the page. It uses Python's built-in web server: no Flask on a station.
 - **`RemoteScanner` mirrors `CardScanner`.** Anything `app.py` reads or calls on `scanner` must
   exist on both: a new attribute goes into the client's `state()` and one of `DECIDED` / `SENT`
   / `REPORTED`; a new method into `METHODS` on both sides.

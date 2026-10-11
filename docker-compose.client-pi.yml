@@ -1,0 +1,17 @@
+# Camera station with a Raspberry Pi camera module: used together with docker-compose.client.yml
+#   docker compose -f docker-compose.client.yml -f docker-compose.client-pi.yml up -d --build
+# Everything in that file stays as it is; this one only changes what a Pi camera needs.
+services:
+  station:
+    build:
+      target: client-pi  # Debian with Raspberry Pi's picamera2 / libcamera (see the Dockerfile)
+    image: mtg-scanner-station-pi
+    # A USB webcam is one video device. A Pi camera is a chain of them - the sensor, the Pi's
+    # image processor, the memory the pictures are passed in (/dev/media*, /dev/video*,
+    # /dev/dma_heap) - whose numbers differ between Pi models and system versions. Rather than
+    # list them, the container is given the host's devices. It is the camera station's own
+    # machine; nothing else runs in this container.
+    privileged: true
+    volumes:
+      # libcamera finds the camera through udev's records of the host's devices
+      - /run/udev:/run/udev:ro

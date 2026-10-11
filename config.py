@@ -13,22 +13,32 @@ from config_loader import get_config_loader
 config = get_config_loader()
 
 
-def usb_camera_index():
+def camera_index_from(value, source="SCANNER_CAMERA_INDEX"):
     """
-    The USB camera's /dev/videoN number: camera.usb_index in config.yaml, or SCANNER_CAMERA_INDEX -
-    a number, or a device path such as /dev/v4l/by-id/usb-...-video-index0 (the same camera
-    whatever number it got this time)
+    A camera chosen as text - a number ("2"), or a device path such as
+    /dev/v4l/by-id/usb-...-video-index0 (the same camera whatever number it got this time) -
+    as the N of /dev/videoN. `source` only names where the text came from, for the error.
     """
-    value = os.getenv('SCANNER_CAMERA_INDEX')
-    if not value:
-        return config.get('camera', 'usb_index', default=0)
+    value = str(value).strip()
     if value.isdigit():
         return int(value)
     device = os.path.realpath(value)
     digits = device.removeprefix('/dev/video')
     if not digits.isdigit():
-        raise ValueError(f"SCANNER_CAMERA_INDEX={value}: not a number or a /dev/videoN device ({device})")
+        raise ValueError(f"{source}={value}: not a number or a /dev/videoN device ({device})")
     return int(digits)
+
+
+def usb_camera_index():
+    """
+    The USB camera's /dev/videoN number: camera.usb_index in config.yaml, or SCANNER_CAMERA_INDEX
+    (see camera_index_from). A station's setup page can choose another one later
+    (station_setup.apply_camera).
+    """
+    value = os.getenv('SCANNER_CAMERA_INDEX')
+    if not value:
+        return config.get('camera', 'usb_index', default=0)
+    return camera_index_from(value)
 
 
 class Config:

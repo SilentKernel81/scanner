@@ -184,6 +184,7 @@ class CardScanner:
         self.rotation = int(self.settings.get('camera_rotation', Config.CAMERA_ROTATE) or 0)
         self.camera_rotation = 0  # Degrees the camera turns the image itself (Pi camera: 180)
         self.reopen_camera = False  # Asked by another thread; done by the capture thread
+        self.release_request = None  # with_camera_released(): something to do while the camera is closed
 
         # Fixed capture area (sleeved cards): stillness and new cards are judged by how the image
         # inside a drawn area changes, not by the card's outline (on a sleeved pile the outline
@@ -793,6 +794,37 @@ class CardScanner:
         except Exception as e:
             logger.debug(f"Closing the camera: {e}")
 
+    def with_camera_released(self, action, timeout=30):
+        """
+        Run action() while this scanner has let go of the camera, and return what it returns.
+        Only one program part can hold a camera at a time; the station's setup page uses this
+        to take a picture of the whole sensor (no crop) from a Pi camera that is scanning.
+
+        The camera belongs to the capture thread, so the work is handed to it: this method
+        leaves a request, the capture thread closes the camera, runs the action, opens the
+        camera again and signals that it is done. Whoever called waits for that signal.
+        """
+        request = {'action': action, 'done': threading.Event(), 'result': None, 'error': None}
+        self.release_request = request
+        if not request['done'].wait(timeout):
+            self.release_request = None  # never picked up: the capture thread is not running
+            raise TimeoutError("The camera was not released in time")
+        if request['error'] is not None:
+            raise request['error']
+        return request['result']
+
+    def _serve_release_request(self):
+        """The capture thread's half of with_camera_released()"""
+        request, self.release_request = self.release_request, None
+        self._close_camera()
+        try:
+            request['result'] = request['action']()
+        except Exception as e:  # handed back to the caller, which raises it there
+            request['error'] = e
+        finally:
+            self._open_camera()  # scanning goes on, whatever the action did
+            request['done'].set()
+
     def _read_failed(self, reason="The camera stopped sending images (unplugged?)"):
         """
         A frame could not be read. One can be a hiccup; CAMERA_LOST_AFTER in a row and the
@@ -918,9 +950,11 @@ class CardScanner:
                              "AfWindows": [(left, top, width, height)]})
             focus = "continuous autofocus"
 
-        # A second, small stream for the outline detector: 480 px wide (rows of the camera's
-        # buffers are padded to 64 px), as high as the frame's shape asks
-        self.small_size = (480, int(round(480 * size[1] / size[0] / 2)) * 2)
+        # A second, small stream for the outline detector, at the size the detector works at:
+        # 640 px on its longer side (object_detector: work_size), the other side as the
+        # frame's shape asks - an even number, as the camera wants
+        shrink = 640 / max(size)
+        self.small_size = (int(round(size[0] * shrink / 2)) * 2, int(round(size[1] * shrink / 2)) * 2)
         config = self.camera.create_video_configuration(
             main={"size": size, "format": "BGR888"},  # libcamera's name for R, G, B in memory
             lores={"size": self.small_size, "format": "YUV420"},
@@ -940,6 +974,8 @@ class CardScanner:
     def _capture_frames(self):
         """Continuously capture frames and perform object detection"""
         while self.running:
+            if self.release_request:
+                self._serve_release_request()
             if self.reopen_camera:
                 self.reopen_camera = False
                 self._close_camera()

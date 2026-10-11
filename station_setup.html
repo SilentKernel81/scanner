@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<!--
+  The camera station's setup page (served by station_setup.py at http://<station>:8080).
+  One file on purpose: the station serves nothing else, so the styles and the script are
+  inline and nothing is loaded from the internet - it works on a network without it.
+
+  How it works: the script asks /api/state for everything it shows, fills the form, and
+  sends the form to /api/save. The station then restarts and the page waits for it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera station setup</title>
+<style>
+  /* Colours in one place; the dark set is used when the device asks for dark pages */
+  :root { --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #667085; --line: #d7dbe3;
+          --accent: #2f6fed; --good: #18794e; --bad: #b42318; --warn: #b54708; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --card: #1d222b; --text: #e7eaf0; --muted: #98a2b3; --line: #343b48;
+            --accent: #6f9dff; --good: #4ade80; --bad: #f97066; --warn: #fdb022; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 4px 0 2px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  p.lead { margin: 0 0 16px; color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  .hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 9px 10px; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 7px; }
+  input:disabled, select:disabled { opacity: .6; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > input, .row > select { flex: 1 1 220px; }
+  button { padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; border-radius: 7px;
+           border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .message { margin: 8px 0 0; font-size: 14px; min-height: 1.2em; }
+  .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  /* The status list: a name on the left, its value on the right */
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  /* The picture, with a canvas of the same size on top of it for drawing the crop */
+  #pictureBox { position: relative; margin-top: 12px; display: none; line-height: 0; }
+  #picture { width: 100%; border-radius: 7px; }
+  #cropCanvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Camera station setup</h1>
+  <p class="lead">Where this station sends its cards, what it is called, and which camera it uses.
+    Focus, rotation and auto scanning are set on the camera's page on the server.</p>
+
+  <section>
+    <h2>Status</h2>
+    <dl id="status"><dt>Station</dt><dd>loading…</dd></dl>
+  </section>
+
+  <section>
+    <h2>Server</h2>
+    <label for="server">Server address</label>
+    <div class="row">
+      <input type="text" id="server" placeholder="http://192.168.1.20:5000" autocomplete="off" spellcheck="false">
+      <button type="button" id="testButton">Test connection</button>
+    </div>
+    <p class="hint" data-fixed-for="server"></p>
+    <p class="message" id="testMessage"></p>
+
+    <label for="token">Station token</label>
+    <input type="password" id="token" autocomplete="new-password" placeholder="only if the server asks for one">
+    <p class="hint" id="tokenHint"></p>
+    <label id="removeTokenRow" style="display:none; font-weight:400">
+      <input type="checkbox" id="removeToken"> Remove the saved token</label>
+    <p class="hint" data-fixed-for="token"></p>
+  </section>
+
+  <section>
+    <h2>This station</h2>
+    <label for="name">Name</label>
+    <input type="text" id="name" maxlength="60" autocomplete="off">
+    <p class="hint">Shown on the server, e.g. "Desk camera".</p>
+    <p class="hint" data-fixed-for="name"></p>
+
+    <label for="id">Id</label>
+    <input type="text" id="id" maxlength="40" autocomplete="off" spellcheck="false">
+    <p class="hint">How the server tells stations apart: letters, digits, - and _. Changing it makes
+      this a new station on the server, without the old one's settings and scanned cards.</p>
+    <p class="hint" data-fixed-for="id"></p>
+  </section>
+
+  <section>
+    <h2>Camera</h2>
+    <label for="camera">Camera to use</label>
+    <div class="row">
+      <select id="camera"></select>
+      <button type="button" id="pictureButton">Show picture</button>
+    </div>
+    <p class="hint" data-fixed-for="camera"></p>
+    <p class="message" id="pictureMessage"></p>
+    <div id="pictureBox">
+      <img id="picture" alt="The camera's picture">
+      <canvas id="cropCanvas"></canvas>
+    </div>
+    <div id="cropTools" style="display:none">
+      <p class="hint">Raspberry Pi camera: drag a rectangle around the box to use only that part of the
+        picture, at the sensor's full resolution. The picture is shown as the sensor sees it;
+        turning it is done on the server's page.</p>
+      <div class="actions" style="margin-top:8px">
+        <button type="button" id="cropClear">Use the whole picture</button>
+        <span class="hint" id="cropText"></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="actions">
+      <button type="button" class="primary" id="saveButton">Save and restart</button>
+      <button type="button" id="restartButton">Restart only</button>
+      <span class="message" id="saveMessage" style="margin:0"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+
+// Ask the station something and get its JSON answer. `body` given = a POST with that JSON.
+async function api(path, body) {
+  const options = body === undefined ? {} :
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  const response = await fetch(path, options);
+  return response.json();
+}
+
+// Put a sentence under a field, coloured by kind ('good', 'bad', 'warn' or nothing)
+function say(id, text, kind) {
+  const element = $(id);
+  element.textContent = text || '';
+  element.className = 'message' + (kind ? ' ' + kind : '');
+}
+
+// ---------------------------------------------------------------------------
+// State: what the station told us last, and what the form holds
+// ---------------------------------------------------------------------------
+let state = null;       // the last answer of /api/state
+let crop = null;        // [x1, y1, x2, y2] as fractions of the picture, or null = all of it
+let formFilled = false; // the form is filled once; after that only the status is refreshed
+
+// The camera list's values are "usb:<index>", "picamera" and "auto"
+function cameraChoice() {
+  const value = $('camera').value;
+  if (value.startsWith('usb:')) return { camera: 'usb', camera_index: value.slice(4) };
+  return { camera: value, camera_index: '' };
+}
+
+async function refresh() {
+  try {
+    state = await api('/api/state');
+  } catch (error) {
+    return;  // the station is restarting: keep what is shown, the next refresh will get it
+  }
+  showStatus();
+  if (!formFilled) { fillForm(); formFilled = true; }
+}
+
+function showStatus() {
+  const s = state.status, rows = [];
+  const row = (name, value, kind) => rows.push(`<dt>${name}</dt><dd class="${kind || ''}">${value}</dd>`);
+  if (!s.set_up) row('Station', 'Not set up yet - type the server address below and save', 'warn');
+  else if (s.connected) row('Server', 'Connected', 'good');
+  else row('Server', 'Not connected - trying again every few seconds', 'bad');
+  if (s.set_up) {
+    if (s.camera_error) row('Camera', 'No camera: ' + escapeHtml(s.camera_error), 'bad');
+    else if (s.scanning) row('Camera', `Working (${s.camera_type === 'picamera' ? 'Raspberry Pi camera' : 'USB camera'}, ` +
+                                       `${s.frames_per_second} pictures a second)`, 'good');
+    else row('Camera', 'Opens when the server has answered', '');
+    if (s.waiting_uploads) row('Waiting to be sent', s.waiting_uploads + ' captured cards', 'warn');
+  }
+  if (s.temperature !== null)
+    row('Temperature', s.temperature + ' °C', s.temperature >= 80 ? 'bad' : s.temperature >= 72 ? 'warn' : '');
+  $('status').innerHTML = rows.join('');
+}
+
+// Text from the station goes into HTML: make sure it stays text
+function escapeHtml(text) {
+  const element = document.createElement('span');
+  element.textContent = text;
+  return element.innerHTML;
+}
+
+function fillForm() {
+  const settings = state.settings;
+  $('server').value = settings.server || '';
+  $('name').value = settings.name || '';
+  $('id').value = settings.id || '';
+  $('tokenHint').textContent = state.has_token ? 'A token is saved. Leave this empty to keep it.' : '';
+  $('removeTokenRow').style.display = state.has_token && !state.fixed.token ? 'block' : 'none';
+  $('removeToken').checked = false;
+
+  // The camera list: "automatic", then every camera found. A saved camera that is not
+  // plugged in right now is listed too, so that saving does not silently change it.
+  const select = $('camera');
+  select.innerHTML = '';
+  const add = (value, label) => select.add(new Option(label, value));
+  add('auto', 'Automatic (a USB camera if there is one, else a Raspberry Pi camera)');
+  for (const camera of state.cameras)
+    add(camera.kind === 'usb' ? 'usb:' + camera.index : 'picamera', camera.label);
+  let current = settings.camera === 'usb' ? 'usb:' + settings.camera_index : settings.camera;
+  if (settings.camera === 'usb' && ![...select.options].some(o => o.value === current)) {
+    // The saved USB camera may be listed under its stable name instead of its number
+    const same = state.cameras.find(c => c.kind === 'usb' && c.label.endsWith(`(/dev/video${settings.camera_index})`));
+    if (same) current = 'usb:' + same.index;
+    else add(current, `Camera ${settings.camera_index} (not found right now)`);
+  }
+  if (settings.camera === 'picamera' && !state.cameras.some(c => c.kind === 'picamera'))
+    add('picamera', 'Raspberry Pi camera (not found right now)');
+  select.value = current;
+
+  crop = settings.crop || null;
+  showCropText();
+
+  // Fields decided by the environment or the command line: shown, but not editable
+  for (const hint of document.querySelectorAll('[data-fixed-for]')) {
+    const field = hint.dataset.fixedFor, source = state.fixed[field];
+    const fixed = source || (field === 'camera' && state.fixed.camera_index);
+    hint.textContent = fixed ? `Set by ${fixed} - change it there.` : '';
+    $(field).disabled = Boolean(fixed);
+  }
+  cameraChanged();
+}
+
+// ---------------------------------------------------------------------------
+// Server: test connection
+// ---------------------------------------------------------------------------
+$('testButton').onclick = async () => {
+  say('testMessage', 'Asking…');
+  const answer = await api('/api/test', { server: $('server').value, token: $('token').value });
+  if (answer.address) $('server').value = answer.address;  // tidied: http:// added, no slash at the end
+  say('testMessage', answer.message, answer.ok ? 'good' : 'bad');
+};
+
+// ---------------------------------------------------------------------------
+// Camera: picture and crop
+// ---------------------------------------------------------------------------
+function cameraChanged() {
+  // Another camera chosen: the old picture is not this camera's
+  $('pictureBox').style.display = 'none';
+  $('cropTools').style.display = 'none';
+  say('pictureMessage', '');
+}
+$('camera').onchange = cameraChanged;
+
+$('pictureButton').onclick = async () => {
+  let { camera, camera_index } = cameraChoice();
+  if (camera === 'auto') {  // show what "automatic" would pick: the first camera found
+    const first = state.cameras.find(c => c.kind === 'usb') || state.cameras[0];
+    if (!first) return say('pictureMessage', 'No camera found on this machine.', 'bad');
+    camera = first.kind; camera_index = first.index;
+  }
+  say('pictureMessage', camera === 'picamera' ? 'Taking a picture - scanning pauses for a few seconds…' : 'Taking a picture…');
+  $('pictureButton').disabled = true;
+  try {
+    const response = await fetch(`/api/picture?kind=${camera}&index=${encodeURIComponent(camera_index)}&t=${Date.now()}`);
+    if (!response.ok) throw new Error((await response.json()).error);
+    $('picture').src = URL.createObjectURL(await response.blob());
+    await $('picture').decode();  // wait until the browser has it, so its size is known
+    $('pictureBox').style.display = 'block';
+    $('cropTools').style.display = camera === 'picamera' ? 'block' : 'none';
+    say('pictureMessage', '');
+    drawCrop();
+  } catch (error) {
+    say('pictureMessage', 'No picture: ' + error.message, 'bad');
+  }
+  $('pictureButton').disabled = false;
+};
+
+function showCropText() {
+  $('cropText').textContent = crop
+    ? `Using ${Math.round((crop[2] - crop[0]) * 100)}% of the width and ${Math.round((crop[3] - crop[1]) * 100)}% of the height`
+    : 'Using the whole picture';
+}
+
+// The crop is drawn on a canvas lying over the picture: everything outside it is dimmed.
+// `draft` is the rectangle being dragged right now, if any.
+function drawCrop(draft) {
+  const canvas = $('cropCanvas'), picture = $('picture');
+  if ($('cropTools').style.display === 'none') {  // not a Pi camera: nothing to draw
+    canvas.width = canvas.height = 0;
+    return;
+  }
+  canvas.width = picture.clientWidth; canvas.height = picture.clientHeight;
+  const context = canvas.getContext('2d'), area = draft || crop;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  if (!area) return;
+  const x = area[0] * canvas.width, y = area[1] * canvas.height;
+  const width = (area[2] - area[0]) * canvas.width, height = (area[3] - area[1]) * canvas.height;
+  context.fillStyle = 'rgba(0, 0, 0, .55)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.clearRect(x, y, width, height);          // the part that is used stays clear
+  context.strokeStyle = '#4ade80'; context.lineWidth = 2;
+  context.strokeRect(x, y, width, height);
+}
+
+// Dragging: pointer events cover mouse, pen and finger alike
+let dragStart = null;
+const position = event => {
+  const box = $('cropCanvas').getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
+          Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))];
+};
+const rectangle = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+$('cropCanvas').onpointerdown = event => {
+  dragStart = position(event);
+  $('cropCanvas').setPointerCapture(event.pointerId);  // keep getting moves outside the canvas
+};
+$('cropCanvas').onpointermove = event => { if (dragStart) drawCrop(rectangle(dragStart, position(event))); };
+$('cropCanvas').onpointerup = event => {
+  if (!dragStart) return;
+  const area = rectangle(dragStart, position(event));
+  dragStart = null;
+  // A click without dragging is not a crop
+  if (area[2] - area[0] >= 0.05 && area[3] - area[1] >= 0.05) crop = area.map(v => Math.round(v * 10000) / 10000);
+  showCropText(); drawCrop();
+};
+$('cropClear').onclick = () => { crop = null; showCropText(); drawCrop(); };
+window.addEventListener('resize', () => drawCrop());
+
+// ---------------------------------------------------------------------------
+// Save and restart
+// ---------------------------------------------------------------------------
+$('saveButton').onclick = async () => {
+  const form = { server: $('server').value, name: $('name').value, id: $('id').value,
+                 token: $('token').value, remove_token: $('removeToken').checked,
+                 crop: crop, ...cameraChoice() };
+  say('saveMessage', 'Saving…');
+  const answer = await api('/api/save', form);
+  if (answer.error) return say('saveMessage', answer.error, 'bad');
+  waitForRestart('Saved.');
+};
+
+$('restartButton').onclick = async () => {
+  await api('/api/restart', {});
+  waitForRestart('');
+};
+
+// The station stops and starts again, which takes a few seconds: keep asking until it answers,
+// then fill the form afresh with what it now runs with.
+async function waitForRestart(prefix) {
+  say('saveMessage', (prefix + ' Restarting…').trim());
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      state = await api('/api/state');
+      formFilled = false;
+      $('token').value = '';
+      await refresh();
+      return say('saveMessage', (prefix + ' The station is running again.').trim(), 'good');
+    } catch (error) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  say('saveMessage', 'The station did not come back - look at its log.', 'bad');
+}
+
+// ---------------------------------------------------------------------------
+refresh();
+setInterval(refresh, 2000);  // the status keeps itself up to date
+</script>
+</body>
+</html>
