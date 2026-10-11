@@ -149,8 +149,18 @@ Anker PowerConf C200 on Wi-Fi: the image builds there in 37 s; about half a core
 while scanning, 75 °C without throttling; 1.6 s per card over a pile.
 
 A Raspberry Pi **camera module** is not supported in the container (its software comes from
-Raspberry Pi OS packages) and has no focus control here; that path has not been run. Use a USB
-webcam.
+Raspberry Pi OS packages): the station runs from the Pi's own Python instead. Tried once, on a
+Pi 4 with a Camera Module 3 (Raspberry Pi OS, Debian 13) - one card captured and read; auto
+scanning over a pile has not been tested with it, and it keeps its own autofocus (no focus
+lock). A USB webcam is what is tested.
+
+```bash
+sudo apt install --no-install-recommends python3-picamera2 python3-opencv python3-socketio \
+     python3-websocket python3-requests python3-yaml
+# in a folder with station_client.py, scanner.py, object_detector.py, settings.py, config.py,
+# config_loader.py and config.yaml (camera.type: picamera; camera.crop for a wide lens)
+python3 station_client.py --server http://<server>:5000
+```
 
 ### When something is away
 
@@ -222,7 +232,7 @@ camera, like the Docker image.
 | `--service` / `--remove-service` | Install and start / stop and remove the systemd service `mtg-scanner` (your data is kept) |
 | `--update` | Pull the latest code first, then update packages and restart the service |
 | `--camera N` | Use USB camera `/dev/videoN` (sets `camera.usb_index` in `config.yaml`) |
-| `--picamera` | Raspberry Pi camera module (untested here) |
+| `--picamera` | Raspberry Pi camera module (this option of the script is untested; the camera module itself was tried as a station, see below) |
 | `--skip-database` / `--refresh-cards` | Don't download the card data / download the latest |
 
 The script is safe to run again: each step is skipped when it is already done. It installs

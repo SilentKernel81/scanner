@@ -56,6 +56,8 @@ class Config:
     CAMERA_PREVIEW_RESOLUTION = tuple(config.get('camera', 'preview_resolution', default=[640, 480]))
     CAMERA_FPS = config.get('camera', 'fps', default=20)
     CAMERA_ROTATE = int(config.get('camera', 'rotate', default=0))
+    # Pi camera: the part of the sensor's image to read out (fractions x1, y1, x2, y2), or None
+    CAMERA_CROP = config.get('camera', 'crop', default=None)
 
     # Object detection settings
     DETECTION_ALLOW_LANDSCAPE = config.get('detection', 'allow_landscape', default=False)

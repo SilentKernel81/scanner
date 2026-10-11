@@ -508,6 +508,17 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    A skewed followed outline is not dropped but replaced by the previous outline: dropping it
    left the photo to the other steps, which on a borderless The Shire took the frame inside
    the card - the outline went back and forth and the same card was captured 9 times (2026-10-06).
+7. **Gap closing** (only when steps 3 and 5 find nothing; `GAP_CLOSING`): a card lying against
+   the wall of a small box has a side where its black border meets the wall's shadow, and that
+   side of the outline comes out in pieces. The edge image is closed with a 21 px square (gaps
+   up to ~7% of a card's width) and step 3 runs again. Closing *before* step 3 was tried and
+   dropped: it lost outlines that are found without it (10 of 271 frames of one session).
+   Measured on recorded frames, old detector → new, with the outline followed as the scanner
+   does: three Pi camera sessions 274 → 423 of 471, 256 → 365 of 513 and 389 → 585 of 764
+   frames with an outline; 704 frames of the USB camera 593 → 606 (the 13 gained are cards in
+   motion). No frame lost its outline. On stretches where a still card had waited, found in
+   0-48% of the frames before and 82-100% after (one card, the worst, still only ~55%).
+   Live: one session of 17 cards on the Pi camera (below); not run live on a USB camera.
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
@@ -1067,6 +1078,77 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
 
 Cameras without a `focus_absolute` control (and the Pi camera module) keep their own autofocus.
 
+### Pi camera module
+
+`camera.type: picamera` (`_initialize_picamera`). The sensor runs at its full resolution and
+only `camera.crop` of it (fractions x1, y1, x2, y2 of the whole image, in the station's
+`config.yaml`) is read out, pixel for pixel: a wide lens sees far more than the box, and the
+cropped frames are small enough to be used as they are for detection, the live view and the
+capture (no half-size decoding). Without a crop the whole image is scaled to
+`camera.resolution`. Autofocus is continuous, over the whole lens range, measured inside the
+crop. The frame rate is what the sensor's full-resolution mode gives, not `camera.fps`.
+A rotation of 180° is done by the camera (the crop is mirrored to stay on the same spot) and
+the frames arrive in RGB order; 90° / 270° are turned per frame as for other cameras. Changing
+the rotation reopens the camera (`reopen_camera`, done by the capture thread).
+
+The camera also delivers a small copy of each frame (480 px wide, `current_small`): the outline
+is searched there (`_detect_outline`, corners scaled back to the frame) and the debug trace
+saves it. Scaling the full frame down for the detector had taken half of its 33 ms.
+
+**Frame counts and frame rate.** "Card gone" - no outline for 6 frames - was measured at 20
+frames a second, where it is 0.3 s. For the Pi camera it is counted as that time at the rate
+the station really runs at (`_frames`: 4 frames at 14 a second, never fewer than 3). The still
+frames before a capture are *not* shortened: this camera's autofocus is still settling after
+a drop, and a replay with fewer still frames captured one card twice. USB cameras are paced
+to `camera.fps` and keep their numbers.
+
+Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 4608x2592,
+102° wide) about 19 cm above the bottom of the box, crop `[0.33, 0.08, 0.67, 0.75]` =
+1566x1736 px:
+
+- Frame rate: the camera gives 14-15 a second in this mode. Turning the image by 180° and
+  reordering its colours per frame took 24 ms of a 70 ms frame on the Pi 4, and with outline
+  detection (40 ms) the loop missed every other frame: 7 a second in the first session of 15
+  drops, 1-3 s from drop to capture. With both done by the camera: 14.2 a second (12.2 with
+  the debug trace on, 10 with a 90° rotation) - measured on the empty box, not yet over a
+  session of drops.
+- That session (15 cards, ~140 lux, 60 ms exposure): every card captured once and confirmed by
+  OCR, the ★/• markers right on the six looked at by eye. Three cards waited 9-18 s: for two
+  no outline was found (the card's lower edge in the shadow of the box wall) until the
+  autofocus rescanned by itself; the third is unexplained.
+- Second session (17 cards, camera lowered and turned, ~1,700 lux, 7.7 frames a second with a
+  card in view, the trace on and the live view watched; the Pi at 75 °C): 15 captured and
+  read by OCR; one lay 17 s without an outline - its left edge against the shadowed wall of
+  the box - and was captured by hand (read by the AI from the whole frame); and one, the
+  third copy of a card, was **never captured**: it landed 0.4% from the copy before it, the
+  fall hid the card for 3 frames (0.4 s), and "card gone" asked for 6. This led to the two
+  changes above. Replaying the session's trace frames through `CardScanner` (a fake Pi camera
+  at the recorded pace) reproduces the loss with the old count and captures the card with the
+  new one, with the same captures otherwise; the first session's frames replay the same with
+  both. The replay is on 640 px trace frames, not the camera's own.
+- With the small frame from the camera: 14.4 frames a second on the empty box, also with the
+  trace on and the live view watched (61 °C).
+- Third session (17 cards, the changes above in place; 10.9 frames a second with cards, the
+  Pi at 77 °C): all 17 captured once, the first 13 about 2.3 s apart. Three of the last four
+  waited 11-27 s until the box was shaken: the card lay against a wall, its outline was found
+  in about every other frame, and six still frames in a row never came. That led to the
+  detector's gap closing (step 7 of [the outline detector](#card-detection)).
+  Replaying the session with it captures those cards 1-2 s after they land, with no capture
+  added. Replays of the first session (camera further away, frames smaller than the detector
+  saw them live) show two repeat captures with it, where the outline of a still card dropped
+  out for a moment and where the autofocus rescanned by itself - both can happen live.
+- Fourth session (the same 17 cards, gap closing in place): 17 captures in 38 s, 2.4 s a card,
+  none waiting, all read by OCR; the count of each card and of its foils is that of the pile
+  (2, 2, 2 with 1 foil, 3, 8 with 2 foil), so none twice and none lost. The Pi at 70 °C.
+  One session: the repeat captures the replay warned of have not been seen, nor ruled out.
+- A card on the bottom of the box is 637x891 px, about 10 px per mm; a manual capture of it
+  was confirmed by OCR (name, number, set, foil marker) in 0.5 s. One card, once.
+- The lens: sharpest for that card at lens position 0, the far end of its range, where things
+  a metre away stay blurred - on this module the range lies closer than its scale says. The
+  bottom of the box is at its edge; a pile brings the cards into it. Not looked into further.
+- Sharpness (Laplacian, the card's area) was about 200-250 there, around the
+  `min_sharpness` of 250 that auto scanning asks for - a number measured with the USB webcam.
+
 ## Collection page and decks
 
 **Scanned cards and the collection are two inventories.** Scanning - every station - adds to
@@ -1522,6 +1604,8 @@ container with its own data folder and port.
   in its `scanned_cards/`, sent only by that run; phone: kept across restarts of the app).
 - **One camera per station**, opened by one process.
 - **Raspberry Pi camera modules** go through `picamera2`, which is not in the client's Docker
-  image and has no focus control here; that path has not been run. USB webcams are what is
-  tested.
+  image: the station runs from the Pi's own Python there (see [Pi camera module](#pi-camera-module)).
+  Focus is the camera's own continuous autofocus - no sweep, lock or drift check. Tried once
+  (2026-10-11) with one card; auto scanning, a growing pile and the capture thresholds, all
+  measured with a USB webcam, have not been tested with it.
 - **Entries shared between cameras** can't be edited from a list filtered to one camera.

@@ -41,9 +41,14 @@ SETTABLE = ('fast_scan_mode', 'required_stable_frames', 'auto_capture_delay', 'd
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('station')
-# CardScanner's lines are logged here (send_log), not a second time by its own logger
+# CardScanner's lines for the page are logged here (send_log), not a second time by its own
+# logger; what it writes to the log only (why a card waits, focus probes, saved debug frames)
+# has no other way to this console
 logging.getLogger('scanner').propagate = False
-logging.getLogger('scanner').addHandler(logging.NullHandler())
+scanner_console = logging.StreamHandler()
+scanner_console.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S'))
+scanner_console.addFilter(lambda record: record.funcName != 'log')
+logging.getLogger('scanner').addHandler(scanner_console)
 
 
 class ServerSettings:
