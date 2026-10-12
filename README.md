@@ -382,7 +382,9 @@ after a capture); correct them there and search again, or pick the printing from
 ## Project structure
 
 ```
-app.py               Server: web pages, routes, events, one desk per camera, station captures
+app.py               Starts the server (python app.py)
+server/              The server: web pages, routes, events, one desk per camera, station captures -
+                     one module per area (server/__init__.py lists them)
 identification.py    Reading a card: OCR queue, AI queue, shared by every camera
 card_ocr.py, ocr/    light-ocr reader (Node.js) and the parser for what it reads
 card_identifier.py   Vision AI providers, card identification, foil marker check

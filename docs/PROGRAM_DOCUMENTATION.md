@@ -66,20 +66,20 @@ Design choices:
 
 | Program | Runs on | What it does |
 |---|---|---|
-| `app.py` - the server | One machine; a Docker image (`deploy/Dockerfile` target `server`) | Web pages, reading (OCR + AI), matching, card data, scanned cards, collection, decks, backups; holds every station's settings |
+| `app.py` - the server (the package `server/`) | One machine; a Docker image (`deploy/Dockerfile` target `server`) | Web pages, reading (OCR + AI), matching, card data, scanned cards, collection, decks, backups; holds every station's settings |
 | `station_client.py` - a camera station | The machine a USB webcam is plugged into; a Docker image (target `client`, x86-64 and ARM64) | Camera, outline detection, stillness, new-card rules, focus; uploads each capture; shows nothing itself |
 | The Android app ([mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android)) in client mode | A phone over the box | The same job with the phone's camera (a Kotlin port of the detection); uploads each capture. It can also work on its own, without a server |
 
-`app.py` can still open a camera itself (`camera.type` other than `remote`): the server then
+The server can still open a camera itself (`camera.type` other than `remote`): the server then
 has one local camera, as the single-machine scanner this grew from. Everything below about
 detection, auto-capture and focus is the same code in both cases - `CardScanner` either runs
-inside `app.py` or inside `station_client.py`.
+inside the server or inside `station_client.py`.
 
 ### Modules
 
 | Module | Runs in | Responsibility |
 |---|---|---|
-| `app.py` | server | Flask + Socket.IO: pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
+| `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
@@ -194,7 +194,7 @@ location, capture count, last seen, whether it has a camera the server can show,
 
 ### Sending a capture
 
-`POST /api/stations/<id>/captures` (multipart; `app.py: station_capture`):
+`POST /api/stations/<id>/captures` (multipart; `server/stations_api.py: station_capture`):
 
 | Field | |
 |---|---|
@@ -291,7 +291,7 @@ recorded captures): one station at a card every 2.5 s - 30 of 30 added, 29 by OC
 
 `station_client.py` runs the real `CardScanner` next to the camera - capture thread, outline
 detection, stillness, new-card rules, focus sweeps and probes, all at camera speed. On the
-server `app.py` holds a `RemoteScanner` (`remote_scanner.py`) in its place, one per station
+server holds a `RemoteScanner` (`remote_scanner.py`) in its place, one per station
 (`CameraHub.scanner(id)`): the same attributes and methods, so the page's handlers are the same
 whether the camera is local or at a station.
 
@@ -311,7 +311,7 @@ keeps it; nothing has to be configured on the server to add a camera.
 | `command` | A `CardScanner` method (`METHODS`: rotation, fixed area, focus, detection, and `capture` for the page's Capture button), waited for (6 s); the answer carries the result or the error text (raised as `ValueError` on the server) and the state after it |
 | `set` | Attributes: `card_under_review`, `auto_capture_enabled`, and the decided ones when they change |
 
-What `app.py` reads on its scanner comes from three places (`remote_scanner.py`): `DECIDED`
+What the server reads on its scanner comes from three places (`remote_scanner.py`): `DECIDED`
 attributes are the server's and are sent to the client; `SENT` ones are set by the server now
 and then but otherwise the client's own (`auto_capture_enabled`, `card_under_review`);
 `REPORTED` ones only come from the client's status. With no client connected the camera
@@ -461,7 +461,7 @@ server has a camera of its own, is that camera's scanner page. A station's count
 `scanned`, its copies in the scanned cards now (what its page lists); `captures` in
 `data/stations.json` counts every picture it ever sent and only numbers the captures.
 
-On the server each station has a **desk** (`app.py: Desk`, `desk_for`): its scanner, the card
+On the server each station has a **desk** (`server/desks.py: Desk`, `desk_for`): its scanner, the card
 on its page (`current_card_info`), its open review, the capture being reviewed, its captures
 being read. The handlers were written for one camera and still read that way: `desk()` gives
 the current desk and `scanner` is a proxy for `desk().scanner`. Which desk is current:
@@ -780,7 +780,7 @@ meanwhile is captured right after.
 ### The two queues
 
 Reading a card is shared by every camera (`identification.py`, one `Identification` in
-`app.py`) and has two stages, each behind its own queue:
+the server) and has two stages, each behind its own queue:
 
 1. **OCR** - one worker, because the reader takes one request at a time (0.10 s per card on a
    GPU). A confirmed read with its foil marker is done here.
@@ -1292,7 +1292,7 @@ Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 
 `scan_inventory` - a second `InventoryManager` on its own file, `data/scan_inventory.db`, with
 the same tables - and its top bar counter, inventory window, edit / delete, Undo, export, import
 and "Clear all" work on that one only (`?area=scan` on the `/api/inventory*` endpoints,
-`inventory_area()` in `app.py`; `/api/stats` reports it as `inventory` and the collection as
+`inventory_area()` in `server/inventory_api.py`; `/api/stats` reports it as `inventory` and the collection as
 `collection`). So a scanning session can be checked, corrected or thrown away without touching
 the collection. **Add to collection** (`POST /api/scan_inventory/to_collection`,
 `InventoryManager.take_from`) moves every scanned entry of the active game - or, with a camera
@@ -1359,7 +1359,7 @@ entry, lowering its quantity below what is held, moving a whole stack of several
 another location or merging the entry into another one by an edit (both delete the entry; a
 single card is changed where it is and stays in its trade), "Remove this batch", clearing
 the inventory, an import that replaces it. The page shows "These copies are set aside for a
-trade: take them out of the trade first" (`TRADE_HELD`; `app.py`: `write_refused`). Copies the
+trade: take them out of the trade first" (`TRADE_HELD`; `server/trades_api.py`: `write_refused`). Copies the
 trade does not hold can be changed as always, and so can condition, tags and price. Bulk
 delete and bulk move, which commit entry by entry, are refused before anything changes when
 one of the entries is held. Trades are in every backup (`backups.INVENTORY_TABLES`): a restore
@@ -1436,7 +1436,7 @@ does that for an installation without Docker).
 `/collection` (`templates/collection.html`, `static/js/collection.js`) works on the active
 game's inventory over the REST endpoints; it listens to `inventory_updated`, `inventory_undone`
 and `inventory_prices_updated` to follow what is scanned meanwhile, and reloads on `game_changed`.
-A change to a trade is announced as `collection_updated` (`app.py`: `collection_changed`, no
+A change to a trade is announced as `collection_updated` (`server/trades_api.py`: `collection_changed`, no
 payload), which only this page listens to: a scanner page takes `inventory_updated` for a card
 that was just added and would drop the card it is showing.
 
@@ -1496,7 +1496,7 @@ Selected entries get the bulk bar (`POST /api/inventory/bulk`). Rows also carry 
 the names of the decks that use the card (by name, `DeckManager.needed_by_name`; a Commander
 deck's considered cards don't count) - shown as a badge, and hidden by the **Not in a deck**
 tick. A deck lists names, not copies, so the location decides which copies are its own
-(`decks_using` in `app.py`): when the location named after the deck holds as many copies as the
+(`decks_using` in `server/decks_api.py`): when the location named after the deck holds as many copies as the
 deck plays, only the entries there count for it and the same card elsewhere is free (the basic
 lands in a box, next to the ones in ten precons); with fewer copies there - or no such
 location - every entry of the card counts. The deck builder has the same idea as **Not in other decks** on the card search
@@ -1511,7 +1511,7 @@ cache). Decks EDHREC has no answer for come back in `unknown` and are named in a
 **Decks** (Magic; a game without `Game.deck_formats` has no Decks tab). A deck (`decks.py`) is a
 name, a format and `deck_cards` rows: card name, count, board (`commander`, `main`, `side`) and
 a printing id for the image. The card is identified by its name, so any printing owned counts.
-Nothing a deck does changes the inventory. `deck_payload` in `app.py` puts together what the
+Nothing a deck does changes the inventory. `deck_payload` in `server/decks_api.py` puts together what the
 page shows:
 
 - card data: one printing per name (`CardDatabase.cards_by_names` - the newest one that has an
@@ -1599,7 +1599,7 @@ to find them again - filter by that location to move or delete them. Undo does n
 
 ## Web interface
 
-Three pages, all served by `app.py`, with one header (`templates/_topbar.html`):
+Three pages, all served by the server (`server/pages.py`), with one header (`templates/_topbar.html`):
 
 | Page | Template, script | What it is |
 |---|---|---|

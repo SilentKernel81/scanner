@@ -295,7 +295,7 @@ class Station:
     # small note on disk beside its picture, and a new start reads the notes back.
     #
     # The note holds the capture's capture_id. That id is what makes sending a capture
-    # twice harmless: the server counts an id once (app.py: seen_captures, settled_captures).
+    # twice harmless: the server counts an id once (server/state.py: seen_captures; pending.py: settled_captures).
     # A capture that was being sent when the program ended may or may not have arrived - it
     # is sent again with the same id, and is one card either way.
     #

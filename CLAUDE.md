@@ -14,7 +14,7 @@ collection.
 
 | Program | Where it runs | Entry point |
 |---|---|---|
-| Server (Flask + Socket.IO web app; collection, decks, OCR, AI) | One machine, normally the Docker image (target `server`) | `app.py` |
+| Server (Flask + Socket.IO web app; collection, decks, OCR, AI) | One machine, normally the Docker image (target `server`) | `app.py` (a launcher; the server is the package `server/`) |
 | Camera station (camera, detection, auto-capture, focus) | Each machine with a USB webcam - PC, laptop, Raspberry Pi; Docker image (target `client`) or a venv | `station_client.py` |
 | Android app, in client mode a station too | A phone | its own repository, [SilentKernel81/mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android) (checked out beside this one, `../mtg-scanner-android`) |
 
@@ -65,7 +65,8 @@ this machine is Python 3.12 and has both.
 **Testing.** `tests/test_ownership.py` covers which station scanned what (splits, merges,
 moves, clears) and backups; `tests/test_database.py` the cases of docs/plans/DATABASE_REVIEW.md (failed
 writes rolled back, reads that do not write, captures that count once, the card data swap, the
-web cache) - all on temporary databases; `tests/test_station_setup.py` a station's setup
+web cache) - all on temporary databases; `tests/test_app_surface.py` the server's routes and
+events against the recorded list (`tests/app_surface.json`); `tests/test_station_setup.py` a station's setup
 page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts. Nothing else is
 automated: verify changes
@@ -80,26 +81,26 @@ container - or a second container with its own data folder and port.
 | Area | Code |
 |---|---|
 | **Server** | |
-| One desk per camera: whose card, review and events this is | `app.py`: `Desk`, `desk`, `desk_for`, `in_desk`, `at_station`, `emit_desk`, the `scanner` proxy, `make_remote_scanner`, `handle_connect` (`page_stations`) |
-| A station's capture arriving; kept until settled | `app.py`: `station_capture`, `submit_capture`, `resume_pending`, `capture_outcome_response`, `seen_captures`; `pending.py`: `PendingCaptures` (`settle`, `fail`, `settled`), `APPLIED_CAPTURES_TABLE` (`data/pending_captures.db`) |
+| One desk per camera: whose card, review and events this is | `server/desks.py`: `Desk`, `desk`, `desk_for`, `in_desk`, `at_station`, `emit_desk`, the `scanner` proxy, `make_remote_scanner`; `server/scan_events.py`: `handle_connect` (`page_stations`) |
+| A station's capture arriving; kept until settled | `server/stations_api.py`: `station_capture`; `server/captures.py`: `submit_capture`, `resume_pending`; `server/stations_api.py`: `capture_outcome_response`; `server/state.py`: `seen_captures`; `pending.py`: `PendingCaptures` (`settle`, `fail`, `settled`), `APPLIED_CAPTURES_TABLE` (`data/pending_captures.db`) |
 | Reading a card: OCR stage, AI stage, their queues and workers, AI provider / OCR switch | `identification.py`: `Identification` (`submit` → `_ocr_worker` → `_ai_worker` → `_done_worker`; `identify` in the caller's thread; `set_ai_provider`, `set_ocr_enabled`, `last_capture`) |
 | OCR reader process and parsers | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `Game.confirmed_read` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
-| Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `app.py` (`save_prompt`, `test_prompt`) |
-| What becomes of a read card: lookup, automatic add, review, events | `app.py`: `announce_and_route`, `route_identified` (returns the outcome), `search_and_emit_card`, `add_automatically`, `queue_for_review`, `queue_changed`, `set_auto_add`; `Game.suggested_finish` |
-| Stations: registry, per-station settings, list / rename / forget | `stations.py`: `Stations`, `StationSettings` (`data/stations.json`); `app.py`: `station_list`, `station_item`, `station_undo`, `clear_camera`; `scanner.js`: `loadStations`, `renderStations` |
+| Prompts (built-in + edited per model) | `prompts.py`: `BUILT_IN`, `prompt`, `save`, `reset`; editor events in `server/ai_events.py` (`save_prompt`, `test_prompt`) |
+| What becomes of a read card: lookup, automatic add, review, events | `server/captures.py`: `announce_and_route`, `route_identified` (returns the outcome), `search_and_emit_card`, `add_automatically`, `queue_for_review`; `server/desks.py`: `queue_changed`; `server/settings_events.py`: `set_auto_add`; `Game.suggested_finish` |
+| Stations: registry, per-station settings, list / rename / forget | `stations.py`: `Stations`, `StationSettings` (`data/stations.json`); `server/stations_api.py`: `station_list`, `station_item`, `station_undo`; `server/inventory_api.py`: `clear_camera`; `scanner.js`: `loadStations`, `renderStations` |
 | The server's stand-in for a station's camera; the stations' connection | `remote_scanner.py`: `RemoteScanner` (`METHODS`, `DECIDED`, `SENT`, `REPORTED`, `CAMERA_SETTINGS`), `CameraHub` (namespace `/station`) |
-| Review queue (per station and game) | `review.py` (`review_queue`, `data/review/`, `ANY`, `clear`); `app.py`: `review_open` / `review_skip` / `review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
+| Review queue (per station and game) | `review.py` (`review_queue`, `data/review/`, `ANY`, `clear`); `server/scan_events.py`: `review_open` / `review_skip` / `review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Card games (the active one drives search, finishes, exports / imports) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `docs/plans/MULTI_GAME_IMPLEMENTATION_PLAN.md` |
-| Card data: schema, updates, search, printing match, confidence | `database.py`: `CARD_COLUMNS`, `replace_table`, `card_data_info`, `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
+| Card data: schema, updates, search, printing match, confidence | `database.py`: `CARD_COLUMNS`, `replace_table`, `card_data_info`, `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match`; `Game.check_for_update`; `server/card_data.py`: `start_card_data_update`, `check_card_data_updates` |
 | Inventory: add / merge / undo / split / export, locations, tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `desk().pending_capture`, `card['capture']`; `scan_location` |
-| Scanned cards by camera (filter, per-camera move, clear) | `inventory.py`: `inventory_sources`, `_station_rows`, `_move_sources`, `stations_by_entry`, `get_all_cards(station)`, `get_stats(station)`, `take_from(station)`, `clear_inventory(station)`; `app.py`: `scan_camera`, `scan_stats`; `scanner.js`: `scannedCamera`, `loadInventoryCameras`; `common.js`: `addScannedToCollection(camera)` |
-| Trades: cards set aside until a trade is confirmed | `trades.py`: `Trades` (`add`, `set_quantity`, `confirm`, `cancel`, `by_entry`); `inventory.py`: `TRADES_TABLE`, `TRADE_CARDS_TABLE`, `TRADE_TRIGGERS`, `TRADE_HELD`; `app.py`: `trade_list`, `trade_item`, `trade_confirm`, `trade_export`, `write_refused`; `collection.js`: `loadTrades`, `renderTrades`, `setAsideForTrade` |
-| Backups of the collection, scanned cards and decks | `backups.py`: `create` (`keep`), `create_scheduled`, `restore` (`RESTORABLE`), `archive` / `add_archive`, `list_backups`, `INVENTORY_TABLES` (`data/backups/<date_time>/`); `app.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups` |
-| Everything at one moment (all database files + pictures) | `backups.py`: `create_full`; `app.py`: `full_backup`, `maintenance_barrier`; `scripts/backup.sh` |
+| Scanned cards by camera (filter, per-camera move, clear) | `inventory.py`: `inventory_sources`, `_station_rows`, `_move_sources`, `stations_by_entry`, `get_all_cards(station)`, `get_stats(station)`, `take_from(station)`, `clear_inventory(station)`; `server/captures.py`: `scan_camera`, `scan_stats`; `scanner.js`: `scannedCamera`, `loadInventoryCameras`; `common.js`: `addScannedToCollection(camera)` |
+| Trades: cards set aside until a trade is confirmed | `trades.py`: `Trades` (`add`, `set_quantity`, `confirm`, `cancel`, `by_entry`); `inventory.py`: `TRADES_TABLE`, `TRADE_CARDS_TABLE`, `TRADE_TRIGGERS`, `TRADE_HELD`; `server/trades_api.py`: `trade_list`, `trade_item`, `trade_confirm`, `trade_export`, `write_refused`; `collection.js`: `loadTrades`, `renderTrades`, `setAsideForTrade` |
+| Backups of the collection, scanned cards and decks | `backups.py`: `create` (`keep`), `create_scheduled`, `restore` (`RESTORABLE`), `archive` / `add_archive`, `list_backups`, `INVENTORY_TABLES` (`data/backups/<date_time>/`); `server/backups_api.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups` |
+| Everything at one moment (all database files + pictures) | `backups.py`: `create_full`; `server/backups_api.py`: `full_backup`; `server/state.py`: `maintenance_barrier`; `scripts/backup.sh` |
 | Database connections, migrations, measurements | `storage.py`: `connect`, `rebuild`, `schema_migrations`; `scripts/benchmark_db.py` (on copies only) |
-| Decks, deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `app.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
-| Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `app.py`: `deck_suggestions`, `popular_decks`, `run_deck_ideas` |
+| Decks, deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `server/decks_api.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
+| Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `server/decks_api.py`: `deck_suggestions`; `server/deck_ideas_api.py`: `popular_decks`, `run_deck_ideas` |
 | Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js`; shared: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html` |
 | **Camera station** | |
 | Connection, status, preview, commands, uploads | `station_client.py`: `Station` (`hello`, `report_loop`, `on_command`, `on_set`, `auto_captured`, `manual_capture`, `upload_loop`), `ServerSettings` |
@@ -117,8 +118,29 @@ container - or a second container with its own data folder and port.
 
 **Server and stations**
 
+- **The server is the package `server/`**, not one file: `server/__init__.py` lists its
+  modules in the order they build on each other, and **a module imports only from those
+  before it** (state, logs, desks, captures, card_data, pages, decks_api, deck_ideas_api,
+  inventory_api, trades_api, backups_api, stations_api, scan_events, settings_events,
+  ai_events, startup) - an import the other way is a cycle and fails at start. What two
+  modules both need lives in the earlier one. Routes are plain `@app.route` on the one app
+  from `server/state.py` (no Blueprints: templates use the endpoint names). A route or event
+  exists once its module is imported: **a new module must be added to the list in
+  `server/startup.py`**, and `tests/app_surface.json` recorded again - the surface test
+  fails otherwise, on purpose.
+- **Shared objects are proxies.** `database`, `inventory`, `scan_inventory`, `review`,
+  `stations`, `pending`, `identification`, `deck_store`, `trade_store`, `recommend`,
+  `camera_hub`, `app_settings` are imported from `server.state` and used as plain names; the
+  real objects are attributes of `services`, set by `initialize_components`. `if inventory:`
+  works, `inventory is None` never does; assign only through `services.x = ...`; values
+  that change (`auto_capture_counter`, `debug_mode_running`, `default_desk`) are always
+  written and read as `services.x`. Paths are built from `server.ROOT` (the top folder),
+  never from `__file__` - that is `server/` now.
+- **Changing the server without changing what it does** (moving code, renaming inside):
+  `scripts/walk_server.py` records what a server answers - run it before and after on fresh
+  copies of the data (never real data) and `--compare`.
 - **Two programs.** `scanner.py` / `object_detector.py` run in `station_client.py` (they still
-  run inside `app.py` when `camera.type` is not `remote`). The client must not import server
+  run inside the server when `camera.type` is not `remote`). The client must not import server
   modules (`database`, `inventory`, `identification`, Flask), and its images copy a fixed list
   of files: a new module it imports must be added to the `COPY` lines of the `client` and
   `client-pi` targets.
@@ -132,7 +154,7 @@ container - or a second container with its own data folder and port.
   goes below that check. The password is only ever stored as its scrypt hash
   (`station_login.py`) - never write it, or the station token, to a log. The cookie key is
   random and the station's own: never derive it from the password.
-- **`RemoteScanner` mirrors `CardScanner`.** Anything `app.py` reads or calls on `scanner` must
+- **`RemoteScanner` mirrors `CardScanner`.** Anything the server reads or calls on `scanner` must
   exist on both: a new attribute goes into the client's `state()` and one of `DECIDED` / `SENT`
   / `REPORTED`; a new method into `METHODS` on both sides.
 - **Camera settings live on the server.** The client's `CardScanner` gets a `ServerSettings`
@@ -189,7 +211,9 @@ container - or a second container with its own data folder and port.
   between entries must call `_move_sources` (before the quantity and captures change); a new
   table beside the entries belongs in `backups.INVENTORY_TABLES`. A filtered list's `quantity`
   is the camera's copies, not the entry's (`entry_quantity`).
-- **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
+- **New Socket.IO events** need a handler in `server/` (`scan_events.py`, `settings_events.py`
+  or `ai_events.py`) and in `static/js/scanner.js`, the new list recorded
+  (`venv/bin/python tests/test_app_surface.py --record`), and a line
   in docs/PROGRAM_DOCUMENTATION.md. Messages between server and station are in `remote_scanner.py`
   and `station_client.py` - change both.
 - **Stations are open without a token** (`stations.token`), like the web UI, which has no login.

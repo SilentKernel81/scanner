@@ -2,7 +2,7 @@
 """
 Captures waiting to be read (in the OCR / AI queues of identification.py), kept on disk so a
 restart doesn't lose them: each is recorded when it is queued and removed when it is settled
-(added or in the review queue). What is still here at startup is queued again (app.py:
+(added or in the review queue). What is still here at startup is queued again (server/captures.py:
 resume_pending). The images themselves are the files in scanned_cards/.
 
 A capture must count once, also across a crash or a restart:
@@ -82,7 +82,7 @@ class PendingCaptures:
                 )''')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_settled_sender ON settled_captures(sender, number)')
             # One record per capture a sender names: the database refuses a second one, whatever
-            # the code that asks first (app.py: capture_accept_lock) does
+            # the code that asks first (server/state.py: capture_accept_lock) does
             try:
                 self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_capture_id '
                                   'ON pending_captures(COALESCE(sender, station, \'\'), capture_id) WHERE capture_id IS NOT NULL')

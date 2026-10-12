@@ -2,6 +2,9 @@
 
 Date: 2026-10-11
 
+**Done on 2026-10-12** - see *How it went* at the end. What follows is the plan as it was
+written the day before.
+
 A plan for breaking `app.py` into modules by area. Nothing here is implemented. The numbers
 below were counted in `app.py` as of commit 5390d76; the design choices are argued from the
 code as it is, and none of them has been tried.
@@ -244,3 +247,41 @@ Backup, then the server (it is the only machine this touches - stations do not r
 About 3,600 lines moved in about 15 commits, plus two new test tools. With `app.py` frozen
 and the checks in place, one long working session; without the checks it would be faster and
 not something to deploy to the server that holds the collection.
+
+## How it went (2026-10-12)
+
+Done as planned in its design, differently in its steps.
+
+- **One generated move, not fifteen commits.** The plan's phases would have meant
+  intermediate states where `app.py` and the new modules import each other. Instead a
+  generator read `app.py` and sent every top-level statement to its module, writing each
+  module's imports from the names it uses; it was run, checked and committed as one step.
+  The per-function check below is what the phase-by-phase commits were meant to give.
+- **The module order instead of "siblings do not import each other".** Letting the
+  `*_api` / `*_events` modules import from those before them in one fixed order left a
+  single function to relocate (`start_price_update`, with `update_added_prices`, to
+  `captures.py`); the stricter rule would have needed a grab-bag module for five more.
+- **Two things the plan had not seen**: `Flask(__name__)` and `Path(__file__).parent` both
+  meant "the project's top folder" and would have meant `server/` after the move - the app
+  is created as `Flask('app', root_path=ROOT)` and paths are built from `server.ROOT`.
+  `default_desk` is reassigned at start-up, so it became `services.default_desk` everywhere
+  rather than a proxy (a proxy returned by `desk()` would have been compared and stored as
+  if it were the desk).
+
+Checked:
+
+| | |
+|---|---|
+| Functions and classes of the old `app.py` | 162: 151 identical in text, 11 changed - only by the rewrites above (`services.x`, `ROOT`, `global` lines removed), each read |
+| Undefined names (pyflakes) | none |
+| Routes and events (`tests/test_app_surface.py`) | 61 and 30, as recorded before |
+| The recorded walk (`scripts/walk_server.py`) | 73 steps, twice before and twice after on fresh copies of the laptop's test data: no step different |
+| Pages in a headless browser | no script errors |
+| A station's connection (`hello` on `/station`) | answered with the camera's settings |
+| All tests | pass |
+
+Not checked: a real camera station scanning against the split server, and the server with a
+camera of its own (`camera.type` other than `remote`) - that branch of
+`initialize_components` was moved like the rest but not run.
+
+`app.py` is 13 lines; the largest module is `decks_api.py` (about 400 lines).
