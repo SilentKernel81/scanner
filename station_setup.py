@@ -39,7 +39,7 @@ import cv2
 import requests
 
 import station_login
-from config import Config, camera_index_from
+from config import Config, camera_index_from, camera_index_or_none
 
 logger = logging.getLogger('station')
 
@@ -142,12 +142,13 @@ def apply_camera(values, fixed):
     if 'camera' not in fixed and values.get('camera') in CAMERA_KINDS:
         Config.CAMERA_TYPE = values['camera']
     if 'camera_index' not in fixed and values.get('camera_index') not in (None, ''):
-        try:
-            Config.USB_CAMERA_INDEX = camera_index_from(values['camera_index'], source="the saved camera")
-        except ValueError as e:
-            # The saved camera is gone (a by-id path of a webcam that is unplugged): keep
-            # config.yaml's number. The scanner then says "no camera" and keeps looking.
-            logger.warning(f"{e} - using camera {Config.USB_CAMERA_INDEX} instead")
+        # The camera as it was chosen (a number, or its by-id path), and its number right now.
+        # A saved camera that is unplugged has none: the scanner then says "no camera" and
+        # looks for that same camera again every few seconds (scanner._open_camera) - it does
+        # not quietly use another one.
+        chosen = str(values['camera_index'])
+        Config.USB_CAMERA_SOURCE = int(chosen) if chosen.isdigit() else chosen
+        Config.USB_CAMERA_INDEX = camera_index_or_none(Config.USB_CAMERA_SOURCE)
     if values.get('crop'):
         Config.CAMERA_CROP = values['crop']
 
@@ -300,7 +301,7 @@ def take_picture(kind, index=None):
     if kind == 'picamera':
         frame = pi_camera_picture()
     else:
-        frame = usb_camera_picture(camera_index_from(index if index not in (None, '') else Config.USB_CAMERA_INDEX,
+        frame = usb_camera_picture(camera_index_from(index if index not in (None, '') else Config.USB_CAMERA_SOURCE,
                                                      source="The camera"))
     ok, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     if not ok:
@@ -512,7 +513,7 @@ class SetupPage:
         settings = {key: self.values.get(key) for key in DEFAULTS if key != 'token'}
         settings['camera'] = settings['camera'] or Config.CAMERA_TYPE
         if settings['camera_index'] in (None, ''):
-            settings['camera_index'] = str(Config.USB_CAMERA_INDEX)
+            settings['camera_index'] = str(Config.USB_CAMERA_SOURCE)
         settings['crop'] = settings['crop'] or Config.CAMERA_CROP
         return {
             'settings': settings,
@@ -553,7 +554,7 @@ class SetupPage:
             if scanner is not None and scanner.camera is not None and scanner.camera_type == kind:
                 if kind == 'picamera':
                     return scanner.with_camera_released(lambda: take_picture('picamera'))
-                if camera_index_from(index or Config.USB_CAMERA_INDEX, source="The camera") == Config.USB_CAMERA_INDEX:
+                if camera_index_or_none(index or Config.USB_CAMERA_SOURCE) == Config.USB_CAMERA_INDEX:
                     frame = scanner.get_full_frame()
                     if frame is None:
                         raise RuntimeError("The camera has no picture yet")

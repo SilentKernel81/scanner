@@ -251,7 +251,10 @@ container - or a second container with its own data folder and port.
 - **The camera may be missing**: a station must start and connect without it.
   `scanner.camera_error` says why (also in its status and `/api/detection_status`);
   `scanner.camera` is `None` then and the capture thread retries (`_open_camera`). Don't log
-  per failed frame or retry.
+  per failed frame or retry. Nothing about the camera may fail when `config.py` is imported:
+  a camera named by its `/dev/v4l/by-id/...` path has no number while unplugged
+  (`Config.USB_CAMERA_INDEX` is `None`, `USB_CAMERA_SOURCE` keeps the name) and is looked up
+  again at every attempt to open it.
 - **Frame sizes**: with a raw-JPEG camera ≥ 1920 px wide, `current_frame`, detections, corners
   and the preview are **half size**; only captures decode full size (`get_detected_card`,
   `get_full_frame`). Don't crop captures from `current_frame` directly.

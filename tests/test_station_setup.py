@@ -129,7 +129,7 @@ class TheCameraInConfig(CleanEnvironment):
     def setUp(self):
         super().setUp()
         # apply_camera changes Config: put it back for the other tests
-        for name in ('CAMERA_TYPE', 'USB_CAMERA_INDEX', 'CAMERA_CROP'):
+        for name in ('CAMERA_TYPE', 'USB_CAMERA_SOURCE', 'USB_CAMERA_INDEX', 'CAMERA_CROP'):
             patcher = mock.patch.object(Config, name, getattr(Config, name))
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -145,10 +145,23 @@ class TheCameraInConfig(CleanEnvironment):
                                    {'camera': 'SCANNER_CAMERA in the environment', 'camera_index': 'SCANNER_CAMERA_INDEX in the environment'})
         self.assertEqual((Config.CAMERA_TYPE, Config.USB_CAMERA_INDEX), before)
 
-    def test_a_saved_camera_that_is_gone_keeps_the_configured_one(self):
-        before = Config.USB_CAMERA_INDEX
-        station_setup.apply_camera({'camera': 'usb', 'camera_index': '/dev/v4l/by-id/usb-unplugged-video-index0'}, {})
-        self.assertEqual(Config.USB_CAMERA_INDEX, before)
+    def test_a_saved_camera_that_is_unplugged_is_waited_for(self):
+        # It is not replaced by another camera: it has no number now, and the scanner keeps
+        # looking for that same one
+        gone = '/dev/v4l/by-id/usb-unplugged-video-index0'
+        station_setup.apply_camera({'camera': 'usb', 'camera_index': gone}, {})
+        self.assertEqual((Config.USB_CAMERA_SOURCE, Config.USB_CAMERA_INDEX), (gone, None))
+
+    def test_a_camera_named_by_its_path_is_found_when_it_is_there(self):
+        with tempfile.TemporaryDirectory() as folder:
+            link = Path(folder) / 'usb-Some_Camera-video-index0'
+            link.symlink_to('/dev/video7')  # what /dev/v4l/by-id holds: links to /dev/videoN
+            from config import camera_index_or_none
+            self.assertEqual(camera_index_or_none(str(link)), 7)
+            link.unlink()
+            self.assertIsNone(camera_index_or_none(str(link)))  # unplugged: no error
+        self.assertEqual(camera_index_or_none(3), 3)
+        self.assertEqual(camera_index_or_none('3'), 3)
 
 
 class Answer:
