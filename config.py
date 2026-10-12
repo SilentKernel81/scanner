@@ -76,7 +76,8 @@ class Config:
     SCRYFALL_BULK_URL = config.get('api', 'scryfall_bulk', default="https://api.scryfall.com/bulk-data/default-cards")
 
     # Camera settings
-    # 'remote': the camera is at a station (station_client.py) - also from the environment
+    # A camera station's camera: auto / usb / picamera - also from the environment. The server
+    # opens no camera and does not read this
     CAMERA_TYPE = os.getenv('SCANNER_CAMERA') or config.get('camera', 'type', default='auto')
     USB_CAMERA_SOURCE = configured_camera()  # as configured: a number, or a device path
     USB_CAMERA_INDEX = camera_index_or_none(USB_CAMERA_SOURCE)  # its /dev/videoN now; None = not plugged in

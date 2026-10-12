@@ -75,23 +75,6 @@ def setup_logging():
     ai_logger.addHandler(console_handler)
 
     # ========================================================================
-    # SCANNER LOGGER - Camera/scanner operations, detection events
-    # ========================================================================
-    scanner_logger = logging.getLogger('scanner')
-    scanner_logger.setLevel(logging.INFO)
-    scanner_logger.propagate = False
-
-    scanner_file_handler = RotatingFileHandler(
-        log_dir / 'scanner.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    scanner_file_handler.setLevel(logging.INFO)
-    scanner_file_handler.setFormatter(detailed_formatter)
-    scanner_logger.addHandler(scanner_file_handler)
-    scanner_logger.addHandler(console_handler)
-
-    # ========================================================================
     # DATABASE LOGGER - Database queries, inventory operations
     # ========================================================================
     db_logger = logging.getLogger('database')
@@ -137,7 +120,7 @@ def setup_logging():
     app_logger.info("="*80)
     app_logger.info("Logging initialized - Multi-file configuration")
     app_logger.info(f"Log directory: {log_dir}")
-    app_logger.info("Log files: app.log, ai.log, scanner.log, database.log, scanned_cards.log")
+    app_logger.info("Log files: app.log, ai.log, database.log, scanned_cards.log")
     app_logger.info("="*80)
 
     return app_logger

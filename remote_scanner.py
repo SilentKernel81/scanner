@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A camera at a station (camera.type: remote): station_client.py runs the real CardScanner -
+A camera at a station: station_client.py runs the real CardScanner -
 camera, outline detection, auto-capture, focus - next to the camera and connects here
 (Socket.IO namespace /station). RemoteScanner is what the server holds in its place, one per
 station: the same attributes and methods, answered from the state the client reports several

@@ -2,7 +2,7 @@
 The scanner server: the web pages, what happens to every captured card, the collection and decks.
 
 Cameras are elsewhere (stations: station_client.py, the Android app) and send one picture per
-card - or, with camera.type other than 'remote', one camera is opened here (CardScanner).
+card. The server opens none itself.
 
 `python app.py` starts it (app.py only calls server.startup.main). The modules, in the order
 they build on each other - a module imports only from those above it:

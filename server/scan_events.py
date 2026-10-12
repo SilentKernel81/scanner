@@ -7,18 +7,12 @@ from flask import request, send_from_directory
 from flask_socketio import emit, join_room
 
 import games
-from remote_scanner import RemoteScanner
 from review import REVIEW_DIR
 
-from server.state import (
-    app, database, identification, inventory, review, scan_inventory, socketio, stations,
-)
+from server.state import app, database, inventory, review, scan_inventory, socketio, stations
 from server.logs import logger
 from server.desks import desk, desk_for, emit_desk, log_to_client, page_stations, scanner
-from server.captures import (
-    added_payload, announce_and_route, scan_location, scan_stats, set_pending_capture,
-    start_price_update,
-)
+from server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
 from server.stations_api import undo_station_add
 
 
@@ -50,24 +44,10 @@ def handle_capture(data):
         emit('error', {'message': f'No camera: {scanner.camera_error}'})
         return
 
-    card_number = data.get('card_number', 1)
-
     try:
-        # Manual capture works regardless of detection state
-        # If no card detected, captures full frame
-        if isinstance(scanner, RemoteScanner):
-            scanner.request_capture()  # the station takes the picture and sends it (station_capture)
-            return
-
-        game_id = games.active_id()
-        image_path, card_image_rgb, foil_image = scanner.capture_card_image_only(card_number)
-
-        if not image_path:
-            emit('error', {'message': 'Failed to capture image'})
-            return
-
-        card_info = identification.identify(card_image_rgb, foil_image)
-        announce_and_route(image_path, card_info, card_number, game_id, to=request.sid)
+        # The station takes the picture - whatever is in view, also without a detected card -
+        # and sends it; it arrives like every capture (stations_api.station_capture)
+        scanner.request_capture()
 
     except Exception as e:
         logger.exception(f"Exception in handle_capture: {e}")

@@ -24,14 +24,14 @@ from server.logs import logger
 class Desk:
     """
     One camera's side of the app: its scanner, the card on its page, its open review, its
-    captures being read. Every station has one (desk_for); default_desk is the camera plugged
-    into this machine - or, with camera.type remote, what a request that names no station gets.
+    captures being read. Every station has one (desk_for); default_desk is what a request that
+    names no station gets - a desk whose camera never connects.
     The code below reaches the current one through desk() and the `scanner` proxy.
     """
 
     def __init__(self, station_id=None, scanner=None, review_filter=ANY):
         self.id = station_id                # stations.py id; None: default_desk
-        self.scanner = scanner              # CardScanner / RemoteScanner
+        self.scanner = scanner              # remote_scanner.RemoteScanner: the station's camera, as seen from here
         self.review_filter = review_filter  # whose review items its page shows (review.py)
         self.current_card_info = None       # the card on its page, waiting for Add / Skip
         self.current_review_id = None       # review queue item open on its page

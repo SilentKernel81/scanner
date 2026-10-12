@@ -2,9 +2,11 @@
 # ============================================================================
 # MTG Card Scanner - deployment script
 #
-# Run it on the machine that runs the scanner (Raspberry Pi or any Linux PC):
+# Run it on the machine that runs the scanner (Raspberry Pi or any Linux PC). It sets up the
+# two programs a single machine needs: the server (app.py) and, for the camera plugged into
+# this machine, a camera station (station_client.py) that sends its cards to that server.
 #   ./scripts/deploy.sh                  # install / repair
-#   ./scripts/deploy.sh --service        # ... and run it as a systemd service
+#   ./scripts/deploy.sh --service        # ... and run both as systemd services
 #   ./scripts/deploy.sh --update         # pull the latest code, update, restart
 # Remotely:  ssh pi@scanner.local 'cd scanner && ./scripts/deploy.sh --update'
 #
@@ -15,6 +17,9 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="mtg-scanner"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+# The camera on this machine: a station of its own, connecting to the server above
+STATION_SERVICE_NAME="mtg-scanner-station"
+STATION_SERVICE_FILE="/etc/systemd/system/${STATION_SERVICE_NAME}.service"
 MIN_PYTHON="3.10"
 
 INSTALL_SERVICE=0
@@ -42,9 +47,10 @@ Usage: $0 [options]
 Installs or updates the MTG Card Scanner in ${DIR}.
 
 Options:
-  --service           Install and start a systemd service (starts on boot)
-  --remove-service    Stop and remove the systemd service
-  --update            Pull the latest code (git) before installing; restarts the service
+  --service           Install and start the systemd services - the server and this machine's
+                      camera station (both start on boot)
+  --remove-service    Stop and remove the systemd services
+  --update            Pull the latest code (git) before installing; restarts the services
   --camera N          Use USB camera /dev/videoN (sets camera.usb_index in config.yaml)
   --picamera          Raspberry Pi camera module (installs python3-picamera2)
   --skip-database     Don't download the card database
@@ -88,10 +94,11 @@ service_installed() { [ -f "$SERVICE_FILE" ]; }
 if [ "$REMOVE_SERVICE" -eq 1 ]; then
     step "Removing the ${SERVICE_NAME} service"
     if service_installed; then
+        sudo_cmd systemctl disable --now "$STATION_SERVICE_NAME" 2>/dev/null || true
         sudo_cmd systemctl disable --now "$SERVICE_NAME" || true
-        sudo_cmd rm -f "$SERVICE_FILE"
+        sudo_cmd rm -f "$SERVICE_FILE" "$STATION_SERVICE_FILE"
         sudo_cmd systemctl daemon-reload
-        ok "Service removed (your data in ${DIR}/data is untouched)"
+        ok "Services removed (your data in ${DIR}/data is untouched)"
     else
         ok "No service installed"
     fi
@@ -192,6 +199,7 @@ pip_install() {
 
 echo "  Installing Python packages (first run takes a few minutes)..."
 pip_install -r requirements.txt
+pip_install -r requirements-client.txt   # the camera station's (station_client.py)
 venv/bin/python -c "import flask, flask_socketio, cv2, numpy, PIL, yaml, dotenv, requests" \
     || die "Python packages are not importable - see the errors above"
 ok "Python packages installed"
@@ -274,7 +282,7 @@ else
 fi
 if [ -e "/dev/video${usb_index}" ] && [ ! -r "/dev/video${usb_index}" ]; then
     # Desktop sessions get camera access automatically; over SSH you need the video group
-    warn "No permission to read /dev/video${usb_index} - the service gets access anyway; for manual runs: sudo usermod -aG video $(id -un) (then log in again)"
+    warn "No permission to read /dev/video${usb_index} - the station's service gets access anyway; for manual runs: sudo usermod -aG video $(id -un) (then log in again)"
 fi
 
 # ----------------------------------------------------------------------------
@@ -295,14 +303,19 @@ fi
 
 # ----------------------------------------------------------------------------
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
-    step "System service"
+    step "System services"
     command -v systemctl >/dev/null || die "systemd is needed for --service"
-    tmp=$(mktemp)
-    sed -e "s|@USER@|$(id -un)|g" -e "s|@GROUP@|$(id -gn)|g" -e "s|@DIR@|${DIR}|g" scripts/mtg-scanner.service > "$tmp"
-    sudo_cmd install -m 644 "$tmp" "$SERVICE_FILE"
-    rm -f "$tmp"
+    # Two units from their templates: the server, and the station for this machine's camera
+    # (it is told the server's port; everything else it reads from config.yaml and .env)
+    for unit in "$SERVICE_NAME" "$STATION_SERVICE_NAME"; do
+        tmp=$(mktemp)
+        sed -e "s|@USER@|$(id -un)|g" -e "s|@GROUP@|$(id -gn)|g" -e "s|@DIR@|${DIR}|g" \
+            -e "s|@PORT@|$(config_get flask.port 5000)|g" "scripts/${unit}.service" > "$tmp"
+        sudo_cmd install -m 644 "$tmp" "/etc/systemd/system/${unit}.service"
+        rm -f "$tmp"
+    done
     sudo_cmd systemctl daemon-reload
-    sudo_cmd systemctl enable -q "$SERVICE_NAME"
+    sudo_cmd systemctl enable -q "$SERVICE_NAME" "$STATION_SERVICE_NAME"
     sudo_cmd systemctl restart "$SERVICE_NAME"
     sleep 3
     if systemctl is-active -q "$SERVICE_NAME"; then
@@ -310,8 +323,15 @@ if [ "$INSTALL_SERVICE" -eq 1 ]; then
     else
         die "Service failed to start - see: journalctl -u ${SERVICE_NAME} -n 50"
     fi
+    sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
+    sleep 3
+    if systemctl is-active -q "$STATION_SERVICE_NAME"; then
+        ok "Service ${STATION_SERVICE_NAME} is running: this machine's camera (starts on boot)"
+    else
+        warn "The camera station did not start - see: journalctl -u ${STATION_SERVICE_NAME} -n 50 (the server runs without it)"
+    fi
 elif service_installed; then
-    step "System service"
+    step "System services"
     if [ "$REFRESH_CARDS" -eq 1 ] && [ "$UPDATE" -eq 0 ]; then
         # New card data is read straight from the database file - no restart (and no sudo,
         # so this also works from cron)
@@ -319,6 +339,14 @@ elif service_installed; then
     else
         sudo_cmd systemctl restart "$SERVICE_NAME"
         ok "Restarted ${SERVICE_NAME}"
+        if [ -f "$STATION_SERVICE_FILE" ]; then
+            sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
+            ok "Restarted ${STATION_SERVICE_NAME}"
+        else
+            # Installed before the camera moved out of the server (2026-10-12): the server
+            # alone no longer reads a camera
+            warn "This machine's camera needs its own service now: run $0 --service once"
+        fi
     fi
 fi
 
@@ -333,10 +361,14 @@ for ip in $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut
 done
 echo
 if service_installed; then
-    echo "  Service:  sudo systemctl {status|restart|stop} ${SERVICE_NAME}"
-    echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
+    echo "  Services: sudo systemctl {status|restart|stop} ${SERVICE_NAME} ${STATION_SERVICE_NAME}"
+    echo "  Logs:     journalctl -u ${SERVICE_NAME} -f      (the camera: -u ${STATION_SERVICE_NAME})"
 else
-    echo "  Start it: cd ${DIR} && venv/bin/python app.py"
-    echo "  Or run it as a service (starts on boot): $0 --service"
+    echo "  Start it: cd ${DIR} && ./scripts/start.sh     (the server and this machine's camera)"
+    echo "  or the two by hand, each in its own terminal:"
+    echo "            venv/bin/python app.py"
+    echo "            venv/bin/python station_client.py --server http://localhost:${port}"
+    echo "  Or run both as services (start on boot): $0 --service"
 fi
+echo "  Camera:   which one, and its name: http://localhost:8080 (the station's setup page)"
 echo "  Update:   $0 --update"

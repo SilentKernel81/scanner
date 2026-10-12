@@ -26,7 +26,8 @@ It is made of two kinds of programs on your network:
 The server needs no camera, and a station keeps nothing: it can be unplugged, replaced or
 reinstalled without losing a card. This repository grew out of the single-machine
 [scanner](https://github.com/SilentKernel81/scanner), which is a separate project; a single
-machine with its own camera still works here too (see [docs/INSTALL.md](docs/INSTALL.md)).
+machine can still be both here, running the server and a camera station side by side (see
+[docs/INSTALL.md](docs/INSTALL.md)).
 
 ## How it works
 
@@ -307,7 +308,7 @@ provider and model, OCR first, sound). `config.yaml` has the rest:
 
 | Setting | Where | Default | Description |
 |---|---|---|---|
-| `camera.type` | server | `auto` | `remote`: no camera on the server (the Docker image sets it); `auto` / `usb` / `picamera`: the server opens a camera itself |
+| `camera.type` | station | `auto` | `auto` (a USB camera if there is one, else a Raspberry Pi camera), `usb` or `picamera`. Also `SCANNER_CAMERA` and the station's setup page. The server opens no camera |
 | `camera.usb_index` | station | | `/dev/videoN` number of the USB camera (or `SCANNER_CAMERA_INDEX`: a number or a `/dev/v4l/by-id/...` path) |
 | `camera.resolution` / `fps` | station | `[2560, 1440]` / `20` | Capture resolution and frames processed per second |
 | `camera.rotate` | station | `0` | Default rotation (0/90/180/270) until it is set in Settings |

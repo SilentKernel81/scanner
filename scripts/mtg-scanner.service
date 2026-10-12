@@ -1,5 +1,6 @@
-# MTG Card Scanner - systemd service template
+# MTG Card Scanner - the server (systemd service template)
 # Installed by scripts/deploy.sh --service, which fills in @USER@, @GROUP@ and @DIR@.
+# The camera is a second service, mtg-scanner-station.service: the server has none itself.
 # Logs: journalctl -u mtg-scanner -f   (the app also writes data/logs/)
 
 [Unit]
@@ -11,8 +12,6 @@ Wants=network-online.target
 Type=simple
 User=@USER@
 Group=@GROUP@
-# Camera access (/dev/video*)
-SupplementaryGroups=video
 WorkingDirectory=@DIR@
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=@DIR@/venv/bin:/usr/local/bin:/usr/bin:/bin
