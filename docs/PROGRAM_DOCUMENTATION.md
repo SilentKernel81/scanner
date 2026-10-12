@@ -263,6 +263,15 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
   and removes that photo, one copy, and the station's claim on it - of three identical cards
   scanned in a row, the one named. A review item carries the same uid (`review_queue.capture_key`),
   and the card added from it takes it along (`handle_add_inventory`).
+- **The page's Add and a station's removal take turns** (`maintenance_barrier`, held by
+  `handle_add_inventory` and by the route). Without it an Add could read which review item is
+  open, the station's `DELETE` then remove that item and answer `removed`, and the Add still
+  put the card into the scanned cards. Everything the Add reads about the page is read under
+  the barrier: after a removal there is no card on the page to add, and an item that left the
+  queue some other way is refused ("no longer in the review queue") instead of added again.
+- **A reviewed capture stays its station's card**, whichever page works through the review:
+  the page without a station lists every station's items, and a card added there is counted
+  as the capture's station's (`source`), not as nobody's - or its phone could never follow it.
 - **The collection is out of reach.** `take_from` copies the photos without the key and deletes
   the rows in the scanned cards: afterwards there is no row to find, in either file. A `DELETE`
   then answers `resolved` and changes nothing.
@@ -289,8 +298,10 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
   copies of the real databases (5,407 cards in 2,151 entries, 4,107 photos, 15 decks, 147
   settled outcomes): every row of every table was the same before and after. What was scanned
   before has no `sync_key` and stays as it is: the phone is answered `409` for it.
-- Tested (`tests/test_capture_sync.py`, 34 cases on temporary databases, the routes through
-  Flask's test client): duplicates, repeated removal, two stations, pending and failed
+- Tested (`tests/test_capture_sync.py`, 39 cases on temporary databases, the routes through
+  Flask's test client and the page's Add through Socket.IO's): a removal arriving in the
+  middle of an Add (it waits, then removes the card), a review worked through on the page of
+  every station, duplicates, repeated removal, two stations, pending and failed
   captures, restarts, review removal and hand-off, splits, merges, printing changes, the move
   into the collection with a location (collection rows compared before and after a `DELETE`),
   forgotten outcomes, a number used again. Also run once on a local server with test data
