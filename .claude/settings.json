@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(hyprctl clients *)",
+      "Bash(hyprctl monitors *)",
+      "Bash(hyprctl devices *)",
+      "Bash(journalctl -k *)",
+      "Bash(journalctl --user *)",
+      "Bash(journalctl -u *)",
+      "Bash(journalctl -t *)",
+      "Bash(waydroid status)",
+      "Bash(lsusb *)",
+      "Bash(ping -c1 *)",
+      "Bash(ping -c2 *)",
+      "Bash(tar -tzf *)",
+      "Bash(pacman -Q *)",
+      "Bash(pacman -Ql *)",
+      "Bash(v4l2-ctl --list-devices)",
+      "Bash(ip neigh)",
+      "Bash(ip link)",
+      "Bash(systemctl is-active *)",
+      "Bash(systemctl status *)",
+      "Bash(omarchy plugin list)",
+      "Bash(omarchy version)"
+    ]
+  }
+}
