@@ -1,4 +1,4 @@
-# Card scanner images (see INSTALL.md)
+# Card scanner images (see docs/INSTALL.md)
 #   server - web app, card data, OCR reader and AI requests (docker-compose.yml)
 #   client - a camera station: station_client.py next to the camera (docker-compose.client.yml)
 

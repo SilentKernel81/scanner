@@ -16,7 +16,7 @@ Today a station decides from the camera alone that a new card has landed
 second signal that does not depend on what the card looks like: each card is a step of about
 1.8 g in the pile's weight.
 
-What the weight step would settle, all of them open points in PROGRAM_DOCUMENTATION.md today:
+What the weight step would settle, all of them open points in ../PROGRAM_DOCUMENTATION.md today:
 
 | Case | Camera today | With the scale |
 |---|---|---|
@@ -154,8 +154,8 @@ soon as phase 1 has its numbers.
 ### 5. Measure and document
 
 A drop test like the camera's (every card captured exactly once, identical copies, doubles
-reported), then PROGRAM_DOCUMENTATION.md (the station, the thresholds and how they were
-measured, what was never tested), README.md, INSTALL.md (wiring, flashing), TEST_CASES.md.
+reported), then ../PROGRAM_DOCUMENTATION.md (the station, the thresholds and how they were
+measured, what was never tested), README.md, ../INSTALL.md (wiring, flashing), ../TEST_CASES.md.
 
 ## Order of work
 

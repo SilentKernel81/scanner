@@ -109,9 +109,9 @@ measurements say otherwise; any that differ become per-platform values, not new 
 
 ### 6. Documentation
 
-INSTALL.md (a Windows station section), README.md (the stations table), DOCKER_GUIDE.md (a line
-saying Docker is not the way on Windows), PROGRAM_DOCUMENTATION.md (the controls split, what
-was measured), TEST_CASES.md (Windows cases, marked tested / not tested), CLAUDE.md (the new
+../INSTALL.md (a Windows station section), README.md (the stations table), ../DOCKER_GUIDE.md (a line
+saying Docker is not the way on Windows), ../PROGRAM_DOCUMENTATION.md (the controls split, what
+was measured), ../TEST_CASES.md (Windows cases, marked tested / not tested), CLAUDE.md (the new
 pitfalls). The documentation must say plainly which parts were run on Windows and by whom.
 
 ## Where each part is done
@@ -127,7 +127,7 @@ passed through to it (the user's intention, 2026-10-09), working on a clone of t
 
 What the Windows session needs to know, because nothing but the repository travels with it:
 
-- Read `CLAUDE.md` and the *Camera and detection* part of PROGRAM_DOCUMENTATION.md first.
+- Read `CLAUDE.md` and the *Camera and detection* part of ../PROGRAM_DOCUMENTATION.md first.
 - The server is the one in use, with the real collection. A station under test must not feed it:
   either run a second server with its own data folder and port (CLAUDE.md, *Testing*), or
   connect to the real one with a station id of its own and auto-add off, and clear that

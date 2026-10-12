@@ -1345,7 +1345,7 @@ def full_backups():
     """
     The full backups (GET), or make one (POST): every database file and the pictures their rows
     point at, taken at one moment, in data/backups/full/<date_time>/ - what scripts/backup.sh
-    archives while the server runs. Not restored from the web interface (INSTALL.md).
+    archives while the server runs. Not restored from the web interface (docs/INSTALL.md).
     """
     if request.method == 'POST':
         try:

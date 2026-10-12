@@ -1,6 +1,6 @@
 # Card Scanner - Technical Documentation
 
-How the scanner works inside. For what it is and how to use it see [README.md](README.md); for
+How the scanner works inside. For what it is and how to use it see [README.md](../README.md); for
 installing the server, the camera stations and the phone app see [INSTALL.md](INSTALL.md).
 
 The program and this document were written by an AI coding assistant (Claude, through Claude
@@ -253,7 +253,7 @@ captures on record; after the restart all were added, 120 cards for 119 accepted
 extra card was one added just before the kill and not yet taken off the record (then added
 again), which is what the next paragraph is about.
 
-**A capture counts once** (since 2026-10-09, after DATABASE_REVIEW.md):
+**A capture counts once** (since 2026-10-09, after plans/DATABASE_REVIEW.md):
 - Each capture on record has a `uid`. The add (`InventoryManager.add_card(capture_key=)`) or
   the review item (`ReviewQueue.add(capture_key=)`) notes it in its own commit, in a table
   `applied_captures` of the database it writes to; a capture read again after a crash between

@@ -121,7 +121,7 @@ Socket events: `save_prompt`, `reset_prompt`, `test_prompt` (+ `GET /api/prompts
 ## Phases
 
 Each phase ends working, tested (DB copy, scratch settings, never the real inventory) and
-documented (PROGRAM_DOCUMENTATION.md, README.md, CLAUDE.md), and is committed separately.
+documented (../PROGRAM_DOCUMENTATION.md, README.md, CLAUDE.md), and is committed separately.
 
 1. **Editable prompts** (useful now for Magic): split prompt, `data/prompts.json`, Settings UI,
    "Test on last capture". **Done** - `prompts.py` already keys prompts by game (`mtg`).
