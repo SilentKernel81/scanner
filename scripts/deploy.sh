@@ -305,6 +305,7 @@ fi
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
     step "System services"
     command -v systemctl >/dev/null || die "systemd is needed for --service"
+    mkdir -p data scanned_cards station_captures   # the units name them as writable: they must exist
     # Two units from their templates: the server, and the station for this machine's camera
     # (it is told the server's port; everything else it reads from config.yaml and .env)
     for unit in "$SERVICE_NAME" "$STATION_SERVICE_NAME"; do

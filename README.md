@@ -417,7 +417,8 @@ docs/                How it works, installation, the Docker guide, the manual te
 scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker;
                      benchmark_db.py, benchmark_station.py
 data/                Card data, collection, settings, backups, logs (created at runtime)
-scanned_cards/       Capture images (created at runtime)
+scanned_cards/       Capture images the server received (created at runtime)
+station_captures/    A camera station's captures that are not on the server yet (created at runtime)
 ```
 
 [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md) explains how everything works inside

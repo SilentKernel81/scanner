@@ -372,7 +372,7 @@ scanning stays on the camera's page on the server.
   server yet* below. One that is on its way gets up to 10 s to arrive first.
 - **Captures that are not on the server yet** (`station_client.py`: `write_note`,
   `load_pending`, `send_until_settled`): the upload queue is in memory, so every queued
-  capture also has a note beside its picture, `scanned_cards/<image>.upload.json` - its
+  capture also has a note beside its picture, `station_captures/<image>.upload.json` - its
   `capture_id`, mode, foil picture, and where it was going (server address, station id).
   A new start queues the notes it finds, oldest first, under the same `capture_id`: a
   capture that may or may not have arrived before the program ended is sent again and is
@@ -390,6 +390,27 @@ scanning stays on the camera's page on the server.
   - Until this was added (2026-10-11, found by a Codex review of the setup page), a
     station's unsent captures were only sent by the run that took them, and the setup
     page's restart made that a common case.
+  - *A folder of its own.* The waiting captures are in `station_captures/`
+    (`Config.STATION_CAPTURES_DIR`), not in `scanned_cards/`, where the server keeps the
+    pictures it received and deletes those older than `cleanup.days`. On a machine that
+    runs both programs from one checkout the two folders were the same until 2026-10-12, and
+    a capture that waited longer than the server keeps pictures would have been deleted
+    before it was ever sent - the station then found no picture and dropped its note. What
+    an earlier version left in `scanned_cards/` is moved over at the next start
+    (`adopt_old_folder`: every note with its pictures; the server writes no notes, so
+    nothing of its own is touched). In Docker the volume `station-captures` is mounted at
+    the new folder and carries over what was waiting. Found by a Codex review of the
+    one-machine setup; `tests/test_station_uploads.py` runs the server's clean-up over a
+    waiting capture a year old.
+  - *Stopping.* The station ends in an orderly way (the camera released) on SIGINT and
+    SIGTERM, and takes both back explicitly at its start: a shell that starts a program in
+    the background makes it ignore SIGINT, and Python then never raises `KeyboardInterrupt`.
+    With a server address the Socket.IO library happened to re-arm the signal; in setup mode
+    nothing did, and the station could only be killed (reproduced on the version before:
+    still running 10 s after `kill -INT`). `scripts/start.sh` also gives the station 10 s
+    and then kills it, so the script itself cannot hang. Tried: started in the background,
+    both modes, both signals - stopped each time; the start script with Ctrl+C in a
+    terminal, and with the server killed - the station followed within a second.
 - **The camera in Config** (`apply_camera`): the saved camera and crop are put into `Config`
   before the scanner is created, and only where the environment did not decide.
 - **Show picture** (`SetupPage.picture`): a free camera is opened for one picture and closed.
@@ -1676,7 +1697,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 |---|---|
 | `config.yaml` | The camera (`camera.usb_index`, `resolution`, `fps`), detection and auto-capture thresholds |
 | Environment, or `.env` beside `deploy/docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
-| `scanned_cards/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
+| `station_captures/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
 
 ## Performance
 
@@ -1749,7 +1770,7 @@ container with its own data folder and port.
   For a home or shop network, not the internet.
 - **A station without a connection** shows no live view and no result until it is back; the
   captures wait, and are kept across restarts of the station and of the app (a computer
-  station: pictures with a note each in its `scanned_cards/`; see the station's setup page).
+  station: pictures with a note each in its `station_captures/`; see the station's setup page).
 - **One camera per station**, opened by one process.
 - **Raspberry Pi camera modules** go through `picamera2`, which is not in the client's Docker
   image: the station runs from the Pi's own Python there (see [Pi camera module](#pi-camera-module)).

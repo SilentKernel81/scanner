@@ -34,12 +34,15 @@ RestartSec=10
 TimeoutStopSec=30
 
 # Hardening: read-only system and home, except what the station writes - its settings and
-# debug frames (data/) and captured cards that are not on the server yet (scanned_cards/)
+# debug frames (data/) and captured cards that are not on the server yet (station_captures/,
+# a folder of its own: the server cleans old pictures out of scanned_cards/). scanned_cards/
+# is writable only so that captures an earlier version left waiting there can be moved over.
+# deploy.sh creates the folders: a path named here must exist when the service starts.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@DIR@/data @DIR@/scanned_cards
+ReadWritePaths=@DIR@/data @DIR@/station_captures @DIR@/scanned_cards
 
 [Install]
 WantedBy=multi-user.target

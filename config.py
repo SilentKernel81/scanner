@@ -64,7 +64,11 @@ class Config:
     # Paths
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / 'data'
-    IMAGES_DIR = BASE_DIR / 'scanned_cards'
+    IMAGES_DIR = BASE_DIR / 'scanned_cards'  # the server's: every capture it received
+    # A camera station's own: captures it has taken that are not on the server yet. Not the
+    # folder above, also when both programs run from one checkout: the server deletes old
+    # pictures from scanned_cards/ (cleanup.days), and must never reach these
+    STATION_CAPTURES_DIR = BASE_DIR / 'station_captures'
     TEMPLATES_DIR = BASE_DIR / 'templates'
     STATIC_DIR = BASE_DIR / 'static'
 
