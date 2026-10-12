@@ -282,6 +282,9 @@ Checked:
 
 Not checked: a real camera station scanning against the split server, and the server with a
 camera of its own (`camera.type` other than `remote`) - that branch of
-`initialize_components` was moved like the rest but not run.
+`initialize_components` was moved like the rest but not run. Decided the same day: the
+server no longer has a camera of its own, cameras are only at stations - so that branch is
+not a gap to close but code to remove, in a change of its own (it reaches into start-up,
+the capture event, the logs, `scripts/deploy.sh` and the install guide).
 
 `app.py` is 13 lines; the largest module is `decks_api.py` (about 400 lines).
