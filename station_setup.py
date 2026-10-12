@@ -165,7 +165,13 @@ def checked(data, current):
         server = str(data['server'] or '').strip().rstrip('/')
         if server and not re.match(r'https?://', server):
             server = 'http://' + server  # "192.168.1.20:5000" is what people type
-        if server and not urlparse(server).hostname:
+        try:
+            # .port is read to check it: "http://server:bad" has a host name, but urlparse
+            # raises ValueError for its port only when the port is asked for
+            usable = bool(urlparse(server).hostname) and (urlparse(server).port or True)
+        except ValueError:
+            usable = False
+        if server and not usable:
             raise ValueError("The server address is not an address, e.g. http://192.168.1.20:5000")
         values['server'] = server
 
@@ -558,9 +564,17 @@ class SetupPage:
 
     def test(self, data):
         """
-        "Test connection": ask the address for its list of stations - something only a scanner
-        server answers - and say in a sentence what came back. With a token typed in, or one
-        saved, also whether the server accepts it.
+        "Test connection", in two steps, and a sentence for the page about what came back:
+
+        1. Is a scanner server at the address? It is asked for its list of stations -
+           something only a scanner server answers. That answer also says whether the server
+           wants a station token.
+        2. If it wants one: does it accept the token typed in (or the saved one)? The list
+           of stations is given to anyone, with or without a token, so it proves nothing
+           about the token. The server is therefore asked something it only answers to a
+           station with the right token - what became of this station's capture number 0.
+           No such capture exists, and nothing is changed by asking: the right token gets
+           "no such capture" (404), a wrong one "wrong or missing station token" (401).
         """
         try:
             server = checked({'server': data.get('server')}, {})['server']
@@ -569,23 +583,37 @@ class SetupPage:
         if not server:
             return {'ok': False, 'message': "Type the server's address first"}
         token = str(data.get('token') or '') or self.values.get('token') or ''
+        headers = {'X-Station-Token': token} if token else {}
+
+        # Step 1. The request and the reading of its answer are kept apart on purpose: an
+        # address that cannot be requested at all raises an error that is both a "request
+        # failed" and a ValueError, and treating it as "answered, but not with JSON" went on
+        # to use an answer that was never received.
         try:
-            answer = requests.get(f"{server}/api/stations", timeout=5,
-                                  headers={'X-Station-Token': token} if token else {})
-            stations = answer.json().get('stations')
-        except (ValueError, AttributeError):
-            # Something answered, but not with JSON: a router's page, another web server.
-            # (This clause comes first: requests' "not JSON" error is also a RequestException)
-            stations = None
-        except requests.RequestException as e:
+            answer = requests.get(f"{server}/api/stations", timeout=5, headers=headers)
+        except (requests.RequestException, ValueError) as e:
             return {'ok': False, 'message': f"No answer from {server} ({type(e).__name__})"}
+        try:
+            body = answer.json()
+        except ValueError:
+            body = None  # something answered, but not with JSON: a router's page, another web server
+        stations = body.get('stations') if isinstance(body, dict) else None
         if answer.status_code != 200 or not isinstance(stations, list):
             return {'ok': False, 'message': f"{server} answers, but not as a scanner server"}
-        needs_token = bool(answer.json().get('token_required'))
         message = f"Scanner server found ({len(stations)} station{'s' if len(stations) != 1 else ''} known)"
-        if needs_token and not token:
+        if not body.get('token_required'):
+            return {'ok': True, 'address': server, 'message': message}
+        if not token:
             return {'ok': False, 'address': server, 'message': message + " - it asks for a station token"}
-        return {'ok': True, 'address': server, 'message': message}
+
+        # Step 2
+        try:
+            check = requests.get(f"{server}/api/stations/{self.values['id']}/captures/0", timeout=5, headers=headers)
+        except requests.RequestException as e:
+            return {'ok': False, 'address': server, 'message': message + f" - but the token could not be checked ({type(e).__name__})"}
+        if check.status_code == 401:
+            return {'ok': False, 'address': server, 'message': message + " - but it does not accept this station token"}
+        return {'ok': True, 'address': server, 'message': message + " - the station token is accepted"}
 
     def held(self, action):
         """

@@ -344,7 +344,7 @@ scanning stays on the camera's page on the server.
 
 | On the page | Saved as (`data/station.json`) |
 |---|---|
-| Server address (*Test connection* asks it for `/api/stations`), station token | `server`, `token` |
+| Server address, station token. *Test connection* asks the address for `/api/stations` (only a scanner server answers that) and, if the server wants a token, for this station's capture 0 - a request that needs the token and changes nothing: 401 means the token is wrong | `server`, `token` |
 | Name, id | `name`, `id` |
 | Camera: *automatic*, a USB camera (listed from `/sys/class/video4linux`, saved by its `/dev/v4l/by-id/` name where it has one) or a Raspberry Pi camera (listed by `picamera2`) | `camera`, `camera_index` |
 | A Pi camera's crop, dragged on a picture of the whole sensor | `crop` |
@@ -419,7 +419,8 @@ Tried 2026-10-11 on the Pi 4 below, from its own Python and in the container: se
 and while scanning; settings kept over a restart of the container; the page driven in a
 headless Chromium (picture shown, a crop dragged, no script errors). On a PC only setup mode
 and the page's routes were tried; choosing between two USB cameras has not been tried at all.
-`tests/test_station_setup.py` covers who wins, the form's checks, the file, and the password
+`tests/test_station_setup.py` covers who wins, the form's checks, the connection test (wrong
+and right tokens, addresses that cannot be requested), the file, and the password
 (hashing, the lock after wrong attempts, session cookies, that a cookie cannot be made from
 the environment's password); `tests/test_station_uploads.py` the notes (a restart with
 captures waiting, a capture sent twice under one id, held captures sent or deleted) against
