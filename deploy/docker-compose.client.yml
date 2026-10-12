@@ -53,8 +53,10 @@ services:
       # What the setup page saved (station.json), and the debug trace's frames
       - station-data:/app/data
       # Captured cards that are not on the server yet (pictures and their notes): kept when
-      # the container is replaced by a new image, and sent by the new one
-      - station-captures:/app/scanned_cards
+      # the container is replaced by a new image, and sent by the new one. (Until 2026-10-12
+      # the station kept them in /app/scanned_cards; the same volume, mounted where it looks
+      # now, carries over whatever was waiting.)
+      - station-captures:/app/station_captures
     device_cgroup_rules:
       - "c 81:* rmw"
 

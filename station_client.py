@@ -14,7 +14,7 @@ and saved in data/station.json.
 
 Little else is kept here: camera settings (focus, rotation, fixed area) are saved on the
 server, and a captured image is deleted once the server has it. Until then it lies in
-scanned_cards/ with a note beside it (<image>.upload.json) saying what it is and where it
+station_captures/ with a note beside it (<image>.upload.json) saying what it is and where it
 goes, so that a capture taken while the server was away is still sent after this program -
 or the whole machine - has been restarted. Resolution and the capture thresholds are in
 config.yaml. See remote_scanner.py for the messages.
@@ -35,6 +35,7 @@ from pathlib import Path
 
 import cv2
 import requests
+import signal
 import socketio
 
 import station_setup
@@ -335,7 +336,8 @@ class Station:
         At the start: queue the captures an earlier run left behind, oldest first. Those
         taken for another server or under another station id are held instead (see above).
         """
-        notes = sorted(Config.IMAGES_DIR.glob('*' + NOTE_SUFFIX), key=lambda path: path.stat().st_mtime)
+        self.adopt_old_folder()
+        notes = sorted(Config.STATION_CAPTURES_DIR.glob('*' + NOTE_SUFFIX), key=lambda path: path.stat().st_mtime)
         queued = 0
         for path in notes:
             try:
@@ -362,6 +364,34 @@ class Station:
         if self.held:
             logger.warning(f"{len(self.held)} captured cards were taken for {self.held[0]['server']} "
                            f"(station {self.held[0]['station']}) and are kept, not sent - the setup page asks what to do with them")
+
+    @staticmethod
+    def adopt_old_folder():
+        """
+        Until 2026-10-12 a station kept its waiting captures in scanned_cards/ - the folder
+        the server keeps the captures it received in, and cleans old pictures out of. On a
+        machine that runs both programs from one checkout, a capture that waited longer than
+        the server keeps pictures (cleanup.days) would have been deleted before it was ever
+        sent. Waiting captures now have a folder of their own, station_captures/.
+
+        This moves over what an earlier version left in the old folder: every note, with its
+        picture and foil picture. Notes mark what is the station's - the server never writes
+        them - so nothing of the server's is touched. It runs at every start and finds
+        nothing after the first.
+        """
+        Config.STATION_CAPTURES_DIR.mkdir(exist_ok=True)
+        for note_path in sorted(Config.IMAGES_DIR.glob('*' + NOTE_SUFFIX)):
+            try:
+                note = json.loads(note_path.read_text())
+                names = [note['image']] + ([note['foil']] if note.get('foil') else [])
+                for name in names:
+                    picture = note_path.with_name(name)
+                    if picture.is_file():
+                        os.replace(picture, Config.STATION_CAPTURES_DIR / name)
+                os.replace(note_path, Config.STATION_CAPTURES_DIR / note_path.name)  # the note last: until then it is found here again
+                logger.info(f"Moved a waiting capture to {Config.STATION_CAPTURES_DIR.name}/: {note['image']}")
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logger.warning(f"{note_path.name} could not be moved to {Config.STATION_CAPTURES_DIR.name}/ ({e}) - left where it is")
 
     def pending_count(self):
         """Captures taken but not on the server yet (queued or being sent), for the setup page"""
@@ -504,6 +534,16 @@ def main():
                         help=f"port of the setup page (default {station_setup.DEFAULT_PORT}; 0 = no setup page)")
     args = parser.parse_args()
 
+    # Stopping. The station ends on Ctrl+C: Python turns that signal (SIGINT) into a
+    # KeyboardInterrupt, which the loops below catch to let go of the camera first. But
+    # Python only does so if nobody told the process to ignore the signal - and a shell that
+    # starts a program in the background (`station_client.py &` in scripts/start.sh) does
+    # exactly that, after which `kill -INT` did nothing and the station could not be stopped
+    # short of killing it. So the signal is taken back here, explicitly. SIGTERM - what
+    # systemd and `docker stop` send by default - ends the station the same orderly way.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGTERM, lambda number, frame: signal.default_int_handler(signal.SIGINT, frame))
+
     Config.create_directories()  # data/ must exist before the saved settings are read
     values, fixed = station_setup.resolve({'server': args.server, 'id': args.id, 'name': args.name, 'token': args.token},
                                           station_setup.load(), host)
@@ -536,7 +576,10 @@ def main():
         except KeyboardInterrupt:
             return
     else:
-        station.run()  # until Ctrl+C, or a restart is asked for
+        try:
+            station.run()  # until Ctrl+C, or a restart is asked for
+        except KeyboardInterrupt:
+            pass  # stopped while still looking for the server: nothing was opened yet
 
     if restart.is_set():
         # Start afresh with the saved settings. The camera is released by now (run() cleans

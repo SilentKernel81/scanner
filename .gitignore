@@ -97,6 +97,8 @@ scanned_cards/*.jpg
 scanned_cards/*.png
 scanned_cards/*.jpeg
 scanned_cards/*.upload.json
+# A camera station's captures that are not on the server yet
+station_captures/
 !scanned_cards/.gitkeep
 
 # Models

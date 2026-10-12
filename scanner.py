@@ -1410,7 +1410,8 @@ class CardScanner:
 
         # Save image
         timestamp = int(time.time())
-        image_path = Config.IMAGES_DIR / f"card_{card_number}_{timestamp}.jpg"
+        Config.STATION_CAPTURES_DIR.mkdir(exist_ok=True)
+        image_path = Config.STATION_CAPTURES_DIR / f"card_{card_number}_{timestamp}.jpg"
 
         card_bgr = cv2.cvtColor(card_image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(image_path), card_bgr)

@@ -185,10 +185,14 @@ container - or a second container with its own data folder and port.
   same commit. A new place a capture's result is written to must take `capture_key()` too. Keep
   both when touching `station_capture`, `submit_capture` or the clients' retry loops.
   On a computer station a queued capture is on disk before it is in the queue
-  (`write_note`: `scanned_cards/<image>.upload.json` with its `capture_id` and destination)
+  (`write_note`: `station_captures/<image>.upload.json` with its `capture_id` and destination)
   and is queued again by the next start (`load_pending`); one taken for another server or
   station id is held for the setup page to decide, never sent on its own. Anything new that a
-  capture needs to be sent must go into the note.
+  capture needs to be sent must go into the note. A station's waiting captures live in
+  `Config.STATION_CAPTURES_DIR` (`station_captures/`), never in the server's `scanned_cards/`:
+  the server's clean-up deletes old pictures there, and server and station can share one
+  checkout. A station must end on SIGINT and SIGTERM however it was started (`main` takes
+  both signals back: a program a shell starts in the background ignores SIGINT).
 - **A change is whole or not at all.** Inventory methods that write are `@_writes` (rolled back
   when they fail) and commit through `_commit()` (thumbnails of deleted captures go only then);
   deck changes are inside `with self._writing()`. **Reads never write**: no DELETE / UPDATE in a

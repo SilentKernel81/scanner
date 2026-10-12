@@ -204,9 +204,21 @@ PORT=$(python3 -c "from config import Config; print(Config.PORT)" 2>/dev/null ||
 if [ "$NO_STATION" != 1 ]; then
     python3 station_client.py --server "http://localhost:${PORT}" &
     STATION_PID=$!
-    # When this script ends - Ctrl+C or the server stopping - the station gets Ctrl+C too
-    # (it then lets go of the camera) and is waited for
-    trap 'kill -INT "$STATION_PID" 2>/dev/null; wait "$STATION_PID" 2>/dev/null' EXIT
+    # When this script ends - Ctrl+C or the server stopping - the station is asked to stop
+    # too (it then lets go of the camera), and given 10 seconds to do so. A station that has
+    # not ended by then is killed: this script must never hang, and nothing is lost by it -
+    # captures that are not on the server yet are on disk and sent at the next start.
+    stop_station() {
+        kill -INT "$STATION_PID" 2>/dev/null || return 0
+        for _ in $(seq 1 50); do
+            kill -0 "$STATION_PID" 2>/dev/null || { wait "$STATION_PID" 2>/dev/null; return 0; }
+            sleep 0.2
+        done
+        echo "The camera station did not stop by itself - ending it"
+        kill -KILL "$STATION_PID" 2>/dev/null
+        wait "$STATION_PID" 2>/dev/null
+    }
+    trap stop_station EXIT
 fi
 
 python3 app.py

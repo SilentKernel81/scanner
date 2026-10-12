@@ -58,10 +58,16 @@ class Uploads(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        patcher = mock.patch.object(Config, 'IMAGES_DIR', Path(self.folder.name))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.pictures = Path(self.folder.name)
+        # Two folders, as on a machine that runs the server and a station from one checkout:
+        # the station's waiting captures, and the server's received ones (scanned_cards/)
+        self.pictures = Path(self.folder.name) / 'station_captures'
+        self.server_pictures = Path(self.folder.name) / 'scanned_cards'
+        self.pictures.mkdir()
+        self.server_pictures.mkdir()
+        for name, folder in (('STATION_CAPTURES_DIR', self.pictures), ('IMAGES_DIR', self.server_pictures)):
+            patcher = mock.patch.object(Config, name, folder)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def station(self, server=SERVER, station_id='desk', token=''):
         return station_client.Station(server, station_id, 'Desk camera', token)
@@ -209,6 +215,46 @@ class Uploads(unittest.TestCase):
         after.load_pending()
         self.assertTrue(after.uploads.empty())
         self.assertEqual(self.notes(), ['junk' + station_client.NOTE_SUFFIX])  # the orphan is gone, the broken one left alone
+
+    def test_the_server_s_cleanup_does_not_reach_waiting_captures(self):
+        # The server deletes pictures older than cleanup.days from scanned_cards/. A capture
+        # that has waited longer than that (the server away, a wrong token) must survive it.
+        import os
+        import time
+        import cleanup
+        station = self.station()
+        waiting = self.capture(station, 1, with_foil=True)
+        received = self.server_pictures / 'desk_7_1791000000.jpg'
+        received.write_bytes(b'a picture the server has')
+        long_ago = time.time() - 400 * 24 * 3600
+        for path in list(self.pictures.iterdir()) + [received]:
+            os.utime(path, (long_ago, long_ago))
+        cleanup.cleanup_old_images(days_to_keep=30)
+        self.assertFalse(received.exists())          # the server's old picture went, as it should
+        self.assertTrue(waiting.exists())            # the station's did not
+        self.assertEqual(len(self.notes()), 1)
+        after = self.station()
+        after.load_pending()
+        self.assertEqual(after.uploads.qsize(), 1)   # and it is still sent
+
+    def test_captures_an_earlier_version_left_in_scanned_cards_are_moved_over(self):
+        # Until 2026-10-12 waiting captures lay in scanned_cards/, among the server's pictures
+        old_picture = self.server_pictures / 'card_3_1791754770.jpg'
+        old_foil = self.server_pictures / 'card_3_1791754770_foil.jpg'
+        old_picture.write_bytes(b'waiting'); old_foil.write_bytes(b'its foil picture')
+        (self.server_pictures / ('card_3_1791754770' + station_client.NOTE_SUFFIX)).write_text(json.dumps({
+            'capture_id': 'from-the-old-folder', 'mode': 'auto', 'foil_is_image': False, 'image': old_picture.name,
+            'foil': old_foil.name, 'server': SERVER, 'station': 'desk', 'taken': '2026-10-11 20:00:00'}))
+        servers_own = self.server_pictures / 'desk_7_1791000000.jpg'
+        servers_own.write_bytes(b'a picture the server has')
+
+        station = self.station()
+        station.load_pending()
+        item = station.uploads.get()
+        self.assertEqual(item['capture_id'], 'from-the-old-folder')
+        self.assertEqual((item['image'].parent, item['foil'].parent), (self.pictures, self.pictures))
+        self.assertTrue(item['image'].exists() and item['foil'].exists())
+        self.assertEqual(sorted(p.name for p in self.server_pictures.iterdir()), [servers_own.name])  # only the server's is left there
 
     def test_pending_count(self):
         station = self.station()
