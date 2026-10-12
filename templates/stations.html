@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
     <title>Cameras - Card Scanner</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=44">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=45">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -16,11 +16,19 @@
     {% include '_topbar.html' %}
 
     <main class="container">
-        <section class="panel">
-            <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> Cameras</h2>
-            <div class="station-cards" id="station-cards"></div>
-            <div class="hint" id="stations-hint"></div>
-        </section>
+        <h1 class="page-title">Cameras</h1>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Camera</th>
+                    <th>Status</th>
+                    <th class="col-wide">Scanned cards</th>
+                    <th><span hidden>Actions</span></th>
+                </tr>
+            </thead>
+            <tbody id="station-rows"></tbody>
+        </table>
+        <div class="hint" id="stations-hint"></div>
     </main>
 
     {% include '_dialogs.html' %}
@@ -31,19 +39,24 @@
         function inventoryChanged() {}
 
         function renderStations(stations, tokenRequired) {
-            document.getElementById('station-cards').innerHTML = stations.map(station => {
+            document.getElementById('station-rows').innerHTML = stations.map(station => {
                 const state = !station.connected ? (station.camera ? 'Camera not connected' : 'Sends captured cards')
                     : station.camera_error ? 'No camera: ' + station.camera_error
                     : station.scanning ? 'Scanning' : station.detected ? 'Card in view' : 'Connected';
+                const page = '/scan/' + encodeURIComponent(station.id);
+                // The line under the name says the count too: the count's own column goes on a narrow screen
                 return `
-                <a class="panel station-card" href="/scan/${encodeURIComponent(station.id)}">
-                    <strong>${escapeHtml(station.name)}</strong>
-                    <span class="station-state ${station.connected && !station.camera_error ? 'is-on' : ''}">${escapeHtml(state)}</span>
-                    <span class="hint">${station.scanned} scanned card${station.scanned === 1 ? '' : 's'}${station.review ? ' · ' + station.review + ' to review' : ''}${station.location ? ' · into ' + escapeHtml(station.location) : ''}</span>
-                </a>`;
-            }).join('');
-            document.getElementById('stations-hint').textContent = (stations.length ? '' : 'No camera yet. ')
-                + `A camera connects with: station_client.py --server ${window.location.origin}`
+                <tr>
+                    <td>
+                        <a class="row-title" href="${page}">${escapeHtml(station.name)}</a>
+                        <div class="hint">${station.scanned} scanned card${station.scanned === 1 ? '' : 's'}${station.review ? ' · ' + station.review + ' to review' : ''}${station.location ? ' · into ' + escapeHtml(station.location) : ''}</div>
+                    </td>
+                    <td><span class="status ${station.connected && !station.camera_error ? 'is-on' : ''}">${escapeHtml(state)}</span></td>
+                    <td class="col-wide">${station.scanned}</td>
+                    <td class="row-actions"><a class="btn btn-small" href="${page}">Open</a></td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="4"><div class="empty-state">No camera yet.</div></td></tr>';
+            document.getElementById('stations-hint').textContent = `A camera connects with: station_client.py --server ${window.location.origin}`
                 + (tokenRequired ? ' (and the station token)' : '');
         }
 

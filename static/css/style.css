@@ -1,59 +1,117 @@
 /* ============================================================================
    Card Scanner - UI styles
-   Dark theme by default, light theme follows the OS preference.
+   Light theme by default, dark theme follows the OS preference.
    ============================================================================ */
 
-:root {
-    --bg: #0e1015;
-    --surface: #161920;
-    --surface-2: #1d212a;
-    --surface-3: #252a35;
-    --border: #2a303c;
-    --text: #e7e9ee;
-    --text-muted: #8b93a6;
-    --text-subtle: #626a7d;
-
-    --accent: #7c6cff;
-    --accent-hover: #6b5af0;
-    --accent-soft: rgba(124, 108, 255, 0.14);
-    --success: #22c55e;
-    --success-soft: rgba(34, 197, 94, 0.14);
-    --warning: #f59e0b;
-    --warning-soft: rgba(245, 158, 11, 0.14);
-    --danger: #ef4444;
-    --danger-soft: rgba(239, 68, 68, 0.14);
-    --info: #38bdf8;
-    --info-soft: rgba(56, 189, 248, 0.14);
-    --foil: #f5b942;
-    --surge: #c084fc;
-
-    --radius-sm: 8px;
-    --radius: 12px;
-    --radius-lg: 16px;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
-    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+/* Roboto, served from here: the pages work on a network without the internet */
+@font-face {
+    font-family: "Roboto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("../fonts/roboto-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+        U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-@media (prefers-color-scheme: light) {
+@font-face {
+    font-family: "Roboto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("../fonts/roboto-latin.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+        U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+    --bg: #f5f6f9;
+    --header-bg: #fafafa;
+    --surface: #ffffff;
+    --surface-2: #f5f5f5;
+    --surface-3: #e5e5e5;
+    --field: #ffffff;
+    --border: #e5e5e5;
+    --border-strong: #d4d4d4;
+    --text: #171717;
+    --text-muted: #525252;
+    --text-subtle: #737373;
+
+    /* One blue does the work: --accent as ink (links, outlines), --accent-solid as a fill under white text */
+    --accent: #1955ae;
+    --accent-hover: #134287;
+    --accent-solid: #1955ae;
+    --accent-solid-hover: #134287;
+    --accent-soft: #e4edfb;
+    --ring: #79a7ec;
+    --brand: #cd2355;
+
+    --success: #15803d;
+    --success-solid: #15803d;
+    --success-soft: rgba(22, 163, 74, 0.12);
+    --online: #22c55e;
+    --warning: #b45309;
+    --warning-soft: rgba(245, 158, 11, 0.16);
+    --danger: #dc2626;
+    --danger-solid: #dc2626;
+    --danger-soft: rgba(220, 38, 38, 0.1);
+    --info: #0369a1;
+    --info-soft: rgba(2, 132, 199, 0.1);
+    --foil: #a16207;
+    --surge: #9333ea;
+    --uncommon: #475569;
+    --rare: #a16207;
+    --mythic: #c2410c;
+
+    --radius-sm: 6px;
+    --radius: 8px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+    --backdrop: rgba(23, 23, 23, 0.35);
+    --font: Roboto, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+
+    /* The header's two rows: the upper one scrolls away, the lower one stays (.topbar) */
+    --topbar-top: 52px;
+    --topbar-nav: 48px;
+    --page-width: 1440px;
+}
+
+@media (prefers-color-scheme: dark) {
     :root {
-        --bg: #f4f5f8;
-        --surface: #ffffff;
-        --surface-2: #f6f7fa;
-        --surface-3: #eceef3;
-        --border: #e2e5ec;
-        --text: #171a21;
-        --text-muted: #5f6678;
-        --text-subtle: #8b93a6;
-        --accent: #6152f5;
-        --accent-hover: #5042e0;
-        --accent-soft: rgba(97, 82, 245, 0.1);
-        --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 8px 24px rgba(16, 24, 40, 0.06);
-        --foil: #c98a0c;
-        --surge: #9333ea;
-        --success: #16a34a;
-        --warning: #d97706;
-        --danger: #dc2626;
+        --bg: #141414;
+        --header-bg: #1a1a1a;
+        --surface: #1f1f1f;
+        --surface-2: #282828;
+        --surface-3: #363636;
+        --field: #171717;
+        --border: #303030;
+        --border-strong: #454545;
+        --text: #f5f5f5;
+        --text-muted: #a3a3a3;
+        --text-subtle: #8a8a8a;
+        --accent: #79a7ec;
+        --accent-hover: #a8c5f3;
+        --accent-solid: #2563c9;
+        --accent-solid-hover: #1955ae;
+        --accent-soft: rgba(121, 167, 236, 0.16);
+        --success: #4ade80;
+        --success-soft: rgba(34, 197, 94, 0.14);
+        --warning: #fbbf24;
+        --warning-soft: rgba(245, 158, 11, 0.14);
+        --danger: #f87171;
+        --danger-soft: rgba(239, 68, 68, 0.14);
+        --info: #38bdf8;
+        --info-soft: rgba(56, 189, 248, 0.14);
+        --foil: #f5b942;
+        --surge: #c084fc;
+        --uncommon: #a8b8cc;
+        --rare: #eab308;
+        --mythic: #f97316;
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+        --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+        --backdrop: rgba(0, 0, 0, 0.6);
     }
 }
 
@@ -70,12 +128,16 @@ html {
 
 body {
     font-family: var(--font);
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.5;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: var(--accent);
 }
 
 .icon {
@@ -90,66 +152,98 @@ body {
 }
 
 /* ============================================================================
-   Top bar
+   Top bar: two rows. The upper one (brand, game, settings) scrolls away with the page;
+   the lower one (page links, the page's own counters or tabs) stays at the top.
    ============================================================================ */
 
 .topbar {
     position: sticky;
-    top: 0;
+    top: calc(-1px - var(--topbar-top));
     z-index: 50;
+    box-shadow: var(--shadow-sm);
+}
+
+.topbar-top {
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.topbar-nav {
+    background: var(--surface);
+}
+
+.topbar-inner {
     display: flex;
     align-items: center;
-    gap: 16px;
-    min-height: 80px;  /* the same on every page (the scanner's counters are the tallest part) */
-    padding: 12px 24px;
-    background: color-mix(in srgb, var(--bg) 85%, transparent);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    max-width: var(--page-width);
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+.topbar-top .topbar-inner {
+    height: var(--topbar-top);
+}
+
+.topbar-nav .topbar-inner {
+    min-height: var(--topbar-nav);
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
 
 .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-weight: 650;
-    font-size: 16px;
-    letter-spacing: -0.01em;
+    margin-right: auto;
+    font-weight: 700;
+    font-size: 18px;
     white-space: nowrap;
+}
+
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    background: var(--brand);
+    color: white;
 }
 
 /* Links between the pages: the same place on every page */
 .page-nav {
     display: flex;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
+    gap: 8px;
 }
 
 .page-link {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    border-radius: calc(var(--radius-sm) - 2px);
-    color: var(--text-muted);
-    font-weight: 550;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-weight: 500;
     font-size: 14px;
     text-decoration: none;
 }
 
+.page-link .icon {
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+}
+
 .page-link:hover {
-    color: var(--text);
     background: var(--surface-2);
 }
 
 .page-link.is-active {
-    color: var(--accent);
-    background: var(--accent-soft);
+    background: var(--surface-3);
 }
 
-/* The page's own part of the header (counters, tabs), between the links and the settings button */
+/* The page's own part of the header (counters, tabs), right of the links */
 .topbar-page {
     margin-left: auto;
 }
@@ -163,91 +257,73 @@ body {
     color: var(--text-muted);
 }
 
-/* The game: a choice on the scanner page, its name elsewhere - the same room for both, so
-   what follows wraps at the same width */
-.topbar .game-select,
-.topbar .game-label {
-    width: 176px;
-    flex-shrink: 0;
-}
-
-.brand-mark {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
-    background: linear-gradient(135deg, var(--accent), #b06cff);
-    color: white;
-}
-
 .stats {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 6px;
     flex-wrap: wrap;
 }
 
-/* The counters that are only read, framed together like the page links (.page-nav) */
+/* The counters that are only read */
 .stat-group {
     display: flex;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* A counter: a small tag, its name then its number */
+.stat-box {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--surface-2);
+    white-space: nowrap;
 }
 
-.stat-group .stat-box {
-    padding: 3px 12px;
-    border-radius: calc(var(--radius-sm) - 2px);
+.stat-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
 }
 
-/* The counter that is a button (Scanned: opens the scanned cards) - a tab of the collection page */
+.stat-value {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The counter that is a button (Scanned: opens the scanned cards): an outline button */
 .stat-box.stat-button {
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    background: var(--accent-soft);
+    padding: 3px 12px;
+    border: 2px solid var(--accent);
+    border-radius: 999px;
+    background: var(--surface);
     color: var(--accent);
-    transition: border-color 0.15s;
+    font: inherit;
+    cursor: pointer;
 }
 
 .stat-button .stat-label {
+    font-weight: 700;
     color: var(--accent);
 }
 
 .stat-box.stat-button:hover {
-    border-color: var(--accent);
+    border-color: var(--accent-hover);
+    color: var(--accent-hover);
+}
+
+.stat-button:hover .stat-label {
+    color: var(--accent-hover);
+    text-decoration: underline;
 }
 
 .stat-button:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
-}
-
-.stat-box {
-    display: flex;
-    flex-direction: column;
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
-    /* Flat like the tabs and buttons; a counter that needs attention gets its colour below */
-    background: transparent;
-    border: 1px solid transparent;
-    min-width: 96px;
-}
-
-.stat-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.stat-value {
-    font-size: 16px;
-    font-weight: 650;
-    font-variant-numeric: tabular-nums;
 }
 
 .stat-box.clickable {
@@ -256,7 +332,7 @@ body {
 }
 
 .stat-box.clickable:hover {
-    background: var(--surface-2);
+    background: var(--surface-3);
 }
 
 /* Newer card data available: a small dot, the counter offers the update */
@@ -267,19 +343,15 @@ body {
 .stat-box.has-update::after {
     content: '';
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 7px;
-    height: 7px;
+    top: -3px;
+    right: -3px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--brand);
 }
 
-.stat-box.has-items {
-    border-color: var(--warning);
-    background: var(--warning-soft);
-}
-
+.stat-box.has-items,
 .stat-box.is-busy {
     border-color: var(--warning);
     background: var(--warning-soft);
@@ -290,9 +362,9 @@ body {
    ============================================================================ */
 
 .container {
-    max-width: 1440px;
+    max-width: var(--page-width);
     margin: 0 auto;
-    padding: 24px;
+    padding: 24px 24px 48px;
 }
 
 .main-content {
@@ -311,10 +383,14 @@ body {
 
 .panel {
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     padding: 20px;
     box-shadow: var(--shadow);
+}
+
+.panel .panel {
+    box-shadow: none;
 }
 
 .panel-header {
@@ -329,9 +405,8 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 16px;
+    font-weight: 700;
 }
 
 .section-title .icon {
@@ -340,7 +415,7 @@ body {
 
 .card-info {
     position: sticky;
-    top: 84px;
+    top: calc(var(--topbar-nav) + 16px);
 }
 
 /* ============================================================================
@@ -450,7 +525,8 @@ body {
 }
 
 /* ============================================================================
-   Buttons
+   Buttons: pills. Outlined by default, filled for the one that matters, plain text for the
+   ones that matter least (.btn-ghost).
    ============================================================================ */
 
 .btn {
@@ -458,38 +534,33 @@ body {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px 16px;
-    /* Flat, like the tabs of the collection page: filled only on hover or when active. The
-       border is there (invisible) so the coloured buttons beside it are the same size */
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
+    padding: 5px 16px;
+    border: 2px solid var(--accent);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--accent);
     font: inherit;
-    font-weight: 550;
+    font-weight: 700;
+    text-decoration: none;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s, opacity 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
 }
 
 /* :where() keeps this as weak as .btn itself, so the coloured buttons below keep their colours */
 .btn:where(:hover:not(:disabled)) {
-    background: var(--surface-2);
-    color: var(--text);
+    border-color: var(--accent-hover);
+    color: var(--accent-hover);
+    text-decoration: underline;
 }
 
 .btn.is-active {
     background: var(--accent-soft);
-    color: var(--accent);
-}
-
-.btn:active:not(:disabled) {
-    transform: translateY(1px);
 }
 
 .btn:focus-visible,
 .icon-btn:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
 }
 
@@ -499,38 +570,47 @@ body {
 }
 
 .btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--accent-solid);
+    border-color: var(--accent-solid);
     color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-    background: var(--accent-hover);
+    background: var(--accent-solid-hover);
+    border-color: var(--accent-solid-hover);
+    color: white;
 }
 
 .btn-success {
-    background: var(--success);
-    border-color: var(--success);
+    background: var(--success-solid);
+    border-color: var(--success-solid);
     color: white;
 }
 
 .btn-success:hover:not(:disabled) {
-    filter: brightness(0.92);
+    border-color: var(--success-solid);
+    color: white;
+    filter: brightness(0.9);
 }
 
 .btn-danger {
-    background: var(--danger-soft);
-    border-color: transparent;
+    border-color: var(--danger);
     color: var(--danger);
 }
 
 .btn-danger:hover:not(:disabled) {
-    background: var(--danger);
+    background: var(--danger-solid);
+    border-color: var(--danger-solid);
     color: white;
 }
 
 .btn-ghost {
+    border-color: transparent;
     background: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+    border-color: transparent;
 }
 
 .btn-autoscan.is-active {
@@ -540,8 +620,13 @@ body {
 }
 
 .btn-small {
-    padding: 7px 12px;
+    padding: 2px 12px;
     font-size: 13px;
+}
+
+.btn-small .icon {
+    width: 15px;
+    height: 15px;
 }
 
 .btn-block {
@@ -551,11 +636,11 @@ body {
 .icon-btn {
     display: inline-grid;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: var(--surface);
+    background: transparent;
     color: var(--text-muted);
     cursor: pointer;
     transition: color 0.15s, background 0.15s, border-color 0.15s;
@@ -608,28 +693,85 @@ body {
     color: var(--success, #16a34a);
 }
 
-/* The cameras' overview page (templates/stations.html) */
-.station-cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
+/* The cameras' overview page (templates/stations.html): one white table, a camera a row */
+.page-title {
+    margin-bottom: 16px;
+    font-size: 24px;
+    font-weight: 700;
 }
 
-.station-card {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    text-decoration: none;
-    color: inherit;
+.data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow);
 }
 
-.station-card .station-state {
-    font-size: 13px;
-    color: var(--text-muted);
+.data-table th {
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
 }
 
-.station-card .station-state.is-on {
-    color: var(--success, #16a34a);
+.data-table th:first-child { border-top-left-radius: var(--radius-lg); }
+.data-table th:last-child { border-top-right-radius: var(--radius-lg); }
+
+.data-table td {
+    padding: 12px;
+    vertical-align: middle;
+}
+
+.data-table tbody tr + tr td {
+    border-top: 1px solid var(--border);
+}
+
+.data-table .row-title {
+    font-size: 18px;
+    line-height: 1.25;
+}
+
+.data-table .hint {
+    margin-top: 2px;
+}
+
+.data-table .row-actions {
+    text-align: right;
+}
+
+.data-table .empty-state {
+    padding: 32px 16px;
+}
+
+/* A state in words, with a dot for what the eye looks for first: is it on */
+.status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--text-subtle);
+}
+
+.status.is-on::before {
+    background: var(--online);
+}
+
+.data-table + .hint {
+    margin-top: 16px;
+    overflow-wrap: anywhere;
 }
 
 #stations-list + .hint {
@@ -661,10 +803,10 @@ body {
 .select,
 .text-input {
     width: 100%;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--surface-2);
+    background: var(--field);
     color: var(--text);
     font: inherit;
     transition: border-color 0.15s, box-shadow 0.15s;
@@ -715,7 +857,7 @@ body {
 .search-row input,
 .search-row select,
 .search-row .btn {
-    height: 42px;
+    height: 40px;
 }
 
 /* Toggle switch rows */
@@ -843,7 +985,7 @@ input[type="radio"] {
     max-width: 200px;
     align-self: flex-start;
     border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow);
 }
 
 .card-facts {
@@ -1140,7 +1282,7 @@ input[type="radio"] {
 
 .treatment-tag {
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     background: var(--accent-soft);
     color: var(--accent);
     font-size: 11px;
@@ -1190,8 +1332,7 @@ input[type="radio"] {
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(5, 7, 10, 0.6);
-    backdrop-filter: blur(4px);
+    background: var(--backdrop);
 }
 
 .modal.show {
@@ -1229,7 +1370,7 @@ input[type="radio"] {
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     animation: popIn 0.15s ease-out;
@@ -1262,8 +1403,8 @@ input[type="radio"] {
 }
 
 .modal-header h2 {
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
 }
 
 /* Edit card: previous / next through the list */
@@ -1332,11 +1473,8 @@ input[type="radio"] {
 }
 
 .settings-section h3 {
-    font-size: 11px;
-    font-weight: 650;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
+    font-size: 16px;
+    font-weight: 700;
     margin-bottom: 4px;
 }
 
@@ -1383,10 +1521,10 @@ input[type="radio"] {
 
 .inventory-controls input[type="text"] {
     flex: 1 1 220px;
-    padding: 7px 12px;
-    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--surface-2);
+    background: var(--field);
     color: var(--text);
     font: inherit;
 }
@@ -1394,7 +1532,7 @@ input[type="radio"] {
 .inventory-controls .select {
     width: auto;
     flex: 0 1 220px;
-    padding: 7px 12px;
+    padding: 6px 12px;
 }
 
 .inventory-controls input[type="text"]:focus {
@@ -1428,10 +1566,14 @@ input[type="radio"] {
     color: var(--text-muted);
 }
 
+/* The cards, a row each, in one framed list with a line between them */
 .inventory-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    overflow: hidden;
 }
 
 .inventory-card {
@@ -1440,13 +1582,20 @@ input[type="radio"] {
     gap: 14px;
     align-items: center;
     padding: 10px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    transition: border-color 0.15s, background 0.15s;
+    transition: background 0.15s;
+}
+
+/* A line of text in place of the rows (loading, asking another site) */
+.inventory-list > .hint {
+    margin: 0;
+    padding: 14px;
+}
+
+.inventory-card + .inventory-card {
+    border-top: 1px solid var(--border);
 }
 
 .inventory-card:hover {
-    border-color: var(--surface-3);
     background: var(--surface-2);
 }
 
@@ -1595,7 +1744,7 @@ input[type="radio"] {
 
 .inventory-badge {
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text-muted);
     font-size: 11px;
@@ -1603,9 +1752,9 @@ input[type="radio"] {
 }
 
 .inventory-badge.common { color: var(--text-muted); }
-.inventory-badge.uncommon { background: rgba(148, 163, 184, 0.18); color: #a8b8cc; }
-.inventory-badge.rare { background: rgba(234, 179, 8, 0.16); color: #eab308; }
-.inventory-badge.mythic { background: rgba(249, 115, 22, 0.16); color: #f97316; }
+.inventory-badge.uncommon { background: rgba(148, 163, 184, 0.18); color: var(--uncommon); }
+.inventory-badge.rare { background: rgba(234, 179, 8, 0.16); color: var(--rare); }
+.inventory-badge.mythic { background: rgba(249, 115, 22, 0.16); color: var(--mythic); }
 .inventory-badge.foil { background: rgba(245, 185, 66, 0.16); color: var(--foil); }
 .inventory-badge.surge { background: rgba(192, 132, 252, 0.16); color: var(--surge); }
 
@@ -1729,7 +1878,7 @@ input[type="radio"] {
 /* Game selector (top bar) and generated export buttons */
 .game-select {
     width: auto;
-    padding: 6px 10px;
+    padding: 5px 10px;
     font-size: 13px;
 }
 
@@ -1792,8 +1941,8 @@ input[type="radio"] {
 
 .area-rect {
     position: absolute;
-    border: 2px dashed var(--accent);
-    background: rgba(124, 108, 255, 0.15);
+    border: 2px dashed var(--ring);
+    background: rgba(121, 167, 236, 0.2);
 }
 
 .area-rect[hidden],
@@ -1839,7 +1988,7 @@ input[type="radio"] {
     display: inline-block;
     margin-right: 6px;
     padding: 2px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text);
     font-weight: 600;
@@ -2023,52 +2172,31 @@ input[type="radio"] {
     }
 }
 
-/* No room for everything in one row: the page's own part goes below, on every page alike */
-@media (max-width: 1280px) {
-    .topbar {
+/* No room for everything in one row: the page's own part goes below the links, on every page alike */
+@media (max-width: 900px) {
+    .topbar-nav .topbar-inner {
         flex-wrap: wrap;
     }
 
     .topbar-page {
-        order: 3;
         width: 100%;
         margin: 0;
-        min-height: 56px;  /* the counters' height, for the tabs too */
-        align-items: center;
-    }
-
-    .topbar-settings {
-        margin-left: auto;
     }
 }
 
 @media (max-width: 720px) {
     .container {
-        padding: 16px;
+        padding: 16px 16px 32px;
     }
 
-    .topbar {
-        padding: 10px 16px;
+    .topbar-inner {
+        padding-left: 16px;
+        padding-right: 16px;
     }
 
-    .page-link {
-        padding: 6px 9px;
-    }
-
-    .stat-box {
-        flex: 1;
-        min-width: 0;
-        padding: 6px 8px;
-    }
-
-    .stat-group {
-        flex: 4;
-        min-width: 0;
-    }
-
-    .stat-label {
-        font-size: 9px;
-        letter-spacing: 0;
+    /* The cameras' table: the count is in the line under the name too */
+    .data-table .col-wide {
+        display: none;
     }
 
     .form-row {
@@ -2171,9 +2299,9 @@ input[type="radio"] {
 .review-search input {
     min-width: 0;
     padding: 6px 8px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--field);
     color: var(--text);
     font: inherit;
 }
