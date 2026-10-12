@@ -166,11 +166,12 @@
                     <div class="panel idea-panel">
                         <div class="panel-header">
                             <h3 class="section-title">Preconstructed decks</h3>
-                            <button class="btn btn-small" data-ideas="precons" title="Reads every list the first time (about a minute)">Rank by what I own</button>
+                            <button class="btn btn-small" data-ideas="precons" title="Reads every list of the kind chosen below the first time: about a minute for the Commander decks, several for all kinds">Rank by what I own</button>
                         </div>
-                        <div class="hint">Commander and Challenger decks (MTGJSON). <strong>View cards</strong> shows the list - nothing is saved until you choose <strong>Create deck</strong> there; <strong>I own it</strong> also adds its cards to your inventory.</div>
+                        <div class="hint">Printed decks (MTGJSON): Commander, Challenger, theme and intro decks, starter kits, duel decks, and Jumpstart packs - 20 cards each, as in the Beginner Box. <strong>View cards</strong> shows the list - nothing is saved until you choose <strong>Create deck</strong> there; <strong>I own it</strong> also adds its cards to your inventory.</div>
                         <div class="filter-row">
                             <input type="search" id="precon-search" class="text-input filter-text" placeholder="Deck name, set code or year">
+                            <select id="precon-type" class="select" title="Kind of deck"></select>
                         </div>
                         <div id="precon-progress"></div>
                         <div id="ideas-precons" class="idea-list"></div>
@@ -439,6 +440,6 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=39"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=40"></script>
 </body>
 </html>

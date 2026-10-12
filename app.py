@@ -2134,7 +2134,10 @@ def run_deck_ideas(kind, game, state):
                     })
                 state['done'] += 1
         elif kind == 'precons':
-            precons = recommend.precon_list()
+            # Every list is a request the first time: with a kind chosen on the page, only
+            # the decks of that kind are read
+            precons = [precon for precon in recommend.precon_list()
+                       if not state.get('type') or precon['type'] == state['type']]
             state['total'] = len(precons)
             for precon in precons:
                 if state['stop']:
@@ -2180,7 +2183,7 @@ def deck_ideas_state(kind):
     """
     "What can I build?" searches, each a background run the page polls:
       commanders  owned legendary creatures, by the share of their EDHREC cards that is owned
-      precons     preconstructed decks, by the share owned
+      precons     preconstructed decks (JSON: type - only that kind; none: all), by the share owned
       card        public decks that play a card (JSON: card, format), by the share owned
     POST starts a run - replacing one that is running (answers are cached, so a second run is
     quick); POST with {"stop": true} ends it, keeping what was found; GET returns its state.
@@ -2200,7 +2203,8 @@ def deck_ideas_state(kind):
             if state:
                 state['stop'] = True  # the run it replaces ends at its next step
             state = deck_ideas[kind] = {'running': True, 'stop': False, 'done': 0, 'total': 0, 'items': [],
-                                        'error': None, 'card': data.get('card'), 'format': data.get('format')}
+                                        'error': None, 'card': data.get('card'), 'format': data.get('format'),
+                                        'type': str(data.get('type') or '')}
             threading.Thread(target=run_deck_ideas, args=(kind, game, state), daemon=True).start()
     if not state:
         return jsonify({'success': True, 'started': False, 'running': False, 'items': []})
