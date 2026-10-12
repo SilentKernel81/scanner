@@ -509,6 +509,105 @@ class SyncRoute(TemporaryData):
         self.assertEqual([(card['quantity'], card['location']) for card in self.collection.get_all_cards(GAME)],
                          [(2, 'Binder')])
 
+    # ---- the page's own Add (server/scan_events.py: handle_add_inventory), through Socket.IO
+
+    PAGE_CARD = {'id': None, 'name': 'Test Card', 'set': 'Test Set', 'set_code': 'tst', 'number': '1', 'price': 1.0}
+
+    def page(self, station=None):
+        """A scanner page connected to the server: a station's, or the one that shows every station's review"""
+        import app as launcher
+        import games
+        patcher = mock.patch('server.scan_events.start_price_update')   # no price look-up in the background
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # The game being scanned, as at start-up - with no card database behind it (the card
+        # on the page is put there by the test) - and put back as it was afterwards
+        registered = dict(games._games)
+        games.init(mock.Mock(), None)
+        self.addCleanup(lambda: (games._games.clear(), games._games.update(registered)))
+        page = launcher.socketio.test_client(launcher.app, query_string=f'station={station}' if station else '')
+        self.addCleanup(page.disconnect)
+        return page
+
+    def open_review(self, page, desk):
+        """The page opens the oldest review item and a card is picked for it (as a manual search does)"""
+        page.emit('review_open')
+        desk.current_card_info = dict(self.PAGE_CARD)
+        return desk.current_review_id
+
+    def errors(self, page):
+        return [event['args'][0]['message'] for event in page.get_received() if event['name'] == 'error']
+
+    def test_the_pages_add_hands_the_capture_on(self):
+        number, uid, item = self.queued()
+        page, desk = self.page('phone-a'), self.desks.desk_for('phone-a')
+        self.assertEqual(self.open_review(page, desk), item)
+        page.emit('add_to_inventory', {'items': [{'finish': None, 'quantity': 1}]})
+        self.assertEqual((self.total('phone-a'), self.review.count(GAME)), (1, 0))
+        self.assertEqual(self.state_of(number), 'scanned')
+        self.assertEqual(self.delete(number).json['state'], 'removed')
+        self.assertEqual(self.total(), 0)
+
+    def test_reviewed_on_the_page_of_every_station_it_stays_the_stations_card(self):
+        """The page without a station lists every station's review items: a card added there is
+        still the capture's station's - counted as its, and within its phone's reach"""
+        number, uid, item = self.queued()
+        page, desk = self.page(), self.state.services.default_desk
+        self.assertEqual(self.open_review(page, desk), item)
+        page.emit('add_to_inventory', {'items': [{'finish': None, 'quantity': 1}]})
+        self.assertEqual((self.total('phone-a'), self.total()), (1, 1))
+        self.assertEqual(self.state_of(number), 'scanned')
+        self.assertEqual(self.delete(number).json, {'success': True, 'state': 'removed'})
+        self.assertEqual(self.total(), 0)
+
+    def test_removed_at_the_station_first_the_pages_add_adds_nothing(self):
+        number, uid, item = self.queued()
+        page, desk = self.page('phone-a'), self.desks.desk_for('phone-a')
+        self.open_review(page, desk)
+        self.assertEqual(self.delete(number).json['state'], 'removed')
+        page.get_received()
+        page.emit('add_to_inventory', {'items': [{'finish': None, 'quantity': 1}]})   # the page had not caught up
+        self.assertEqual(self.errors(page), ['No card selected'])
+        self.assertEqual((self.total(), self.review.count(GAME)), (0, 0))
+
+    def test_an_item_resolved_elsewhere_is_not_added_from_a_page_that_still_shows_it(self):
+        number, uid, item = self.queued()
+        page, desk = self.page('phone-a'), self.desks.desk_for('phone-a')
+        self.open_review(page, desk)
+        self.review.remove(item)                        # gone, and this page's desk was not told
+        page.get_received()
+        page.emit('add_to_inventory', {'items': [{'finish': None, 'quantity': 1}]})
+        self.assertEqual(self.errors(page), ['This card is no longer in the review queue'])
+        self.assertEqual(self.total(), 0)
+        self.assertIsNone(desk.current_review_id)
+
+    def test_a_removal_waits_for_an_add_that_is_under_way(self):
+        """The Add has read which item is open and is writing the card: a DELETE arriving now
+        must not find the queue item, remove it and say 'removed' while the card goes in. It
+        waits for the add, then finds the card in the scanned cards and removes that."""
+        import threading
+        number, uid, item = self.queued()
+        page, desk = self.page('phone-a'), self.desks.desk_for('phone-a')
+        self.open_review(page, desk)
+        answer, waited = {}, {}
+        add_card = self.scan.add_card
+
+        def add_while_a_delete_arrives(*args, **kwargs):
+            # In the middle of the page's Add: the station's DELETE comes in on another thread
+            removal = threading.Thread(target=lambda: answer.update(self.delete(number).json))
+            removal.start()
+            removal.join(0.4)
+            waited['blocked'] = removal.is_alive()       # still waiting for the add to finish
+            waited['thread'] = removal
+            return add_card(*args, **kwargs)
+
+        with mock.patch.object(self.scan, 'add_card', add_while_a_delete_arrives):
+            page.emit('add_to_inventory', {'items': [{'finish': None, 'quantity': 1}]})
+        waited['thread'].join(5)
+        self.assertTrue(waited['blocked'])
+        self.assertEqual(answer, {'success': True, 'state': 'removed'})
+        self.assertEqual((self.total(), self.review.count(GAME)), (0, 0))   # in neither place: really removed
+
     def test_a_number_used_again_is_not_mistaken_for_the_old_capture(self):
         """A station forgotten on the server counts from 1 again: with the key it was given, a
         phone's old row cannot reach the new capture of the same number"""

@@ -9,7 +9,7 @@ from flask_socketio import emit, join_room
 import games
 from review import REVIEW_DIR
 
-from server.state import app, database, inventory, review, scan_inventory, socketio, stations
+from server.state import app, database, inventory, maintenance_barrier, review, scan_inventory, socketio, stations
 from server.logs import logger
 from server.desks import desk, desk_for, emit_desk, log_to_client, page_stations, scanner
 from server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
@@ -128,7 +128,18 @@ def handle_select_printing(data):
 @socketio.on('add_to_inventory')
 def handle_add_inventory(data):
     """Handle add to inventory request"""
+    # One at a time with a station removing a capture (stations_api.py: station_capture_sync,
+    # which holds the same barrier): the card on the page may be a review item, and between
+    # "which item is open" and "its card is in the scanned cards" the station must not be able
+    # to remove that item and be told it is gone - the card would then be added after all.
+    # Everything the add reads about the page (the card, the open item) is read in here: a
+    # removal that came first has cleared it, and there is then no card to add.
+    with maintenance_barrier:
+        add_selected_card(data)
 
+
+def add_selected_card(data):
+    """The card on the page goes into the scanned cards (handle_add_inventory, under its barrier)"""
     card = desk().current_card_info
     if not scan_inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
@@ -156,7 +167,20 @@ def handle_add_inventory(data):
         # then finds it in the scanned cards, and can still remove exactly this copy. It goes
         # with the first finish added, like the photo.
         reviewed = review.get(desk().current_review_id) if desk().current_review_id is not None else None
+        if desk().current_review_id is not None and reviewed is None:
+            # The item open here is not in the queue any more (resolved somewhere else): its
+            # card is not added a second time, or after its station took it back
+            desk().current_review_id = desk().review_sid = desk().current_card_info = None
+            emit('error', {'message': 'This card is no longer in the review queue'})
+            emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter)})
+            handle_review_open()
+            return
         sync_key = reviewed.get('capture_key') if reviewed else None
+        # Whose card it is: the station whose capture was reviewed, also when the review is
+        # worked through on a page that shows every station's items (the page without a
+        # station) - its camera scanned it, it counts as that camera's, and the phone that sent
+        # it can still ask about it and remove it. A card added by hand is the page's own.
+        source = reviewed['station'] if reviewed and reviewed.get('station') else desk().id
 
         for item in items:
             finish = item.get('finish') or game.default_finish
@@ -167,7 +191,7 @@ def handle_add_inventory(data):
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
             added_rows.append(scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish,
                                                       condition, quantity, capture=capture,
-                                                      location=scan_location(), source=desk().id,
+                                                      location=scan_location(), source=source,
                                                       capture_key=sync_key))
             capture = None
             sync_key = None

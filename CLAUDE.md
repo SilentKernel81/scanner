@@ -186,7 +186,9 @@ container - or a second container with its own data folder and port.
   for the Android app's list). Its identity is the capture's uid (the `sync_key` in settled
   outcomes), carried by the copy's photo row (`inventory_captures.capture_key`) or its review
   item (`review_queue.capture_key`): anything new that moves copies must keep moving the photo
-  rows with them, and a new way from review to the scanned cards must hand the key on. Never
+  rows with them, and a new way from review to the scanned cards must hand the key on, keep
+  the capture's station as the card's `source`, and hold `maintenance_barrier` from reading
+  the item to writing the card (as `handle_add_inventory` does - the route holds it too). Never
   answer `resolved` for a capture that is unknown or cannot be followed (404 / 409), and never
   give the collection's photo rows a key - that is what keeps a phone out of the collection.
 - **Uploads are "at least once", a capture counts once.** `capture_id` makes a repeat the same
