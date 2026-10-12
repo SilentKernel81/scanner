@@ -293,8 +293,14 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
   Flask's test client): duplicates, repeated removal, two stations, pending and failed
   captures, restarts, review removal and hand-off, splits, merges, printing changes, the move
   into the collection with a location (collection rows compared before and after a `DELETE`),
-  forgotten outcomes, a number used again. **Not tried**: against the Android app, or on a
-  running server.
+  forgotten outcomes, a number used again. Also run once on a local server with test data
+  (2026-10-12), with real uploads: two pictures of the same card and one nothing can be read
+  from; the answers carried `capture` and `sync_key` (also for the capture sent again, before
+  and after a restart); one of the two identical cards removed, a second `DELETE` `resolved`;
+  the review item added through the page's events (`review_open`, `search_card`,
+  `select_printing`, `add_to_inventory`) read `scanned` and was removed; the last card moved
+  into the collection with a location read `resolved`, and a `DELETE` left the collection's
+  count unchanged. **Not tried**: against the Android app, or on the real server.
 
 - **Token**: with `stations.token` in `config.yaml` (or `SCANNER_STATION_TOKEN`) set, uploads,
   the outcome, the capture synchronization, undo and the `/station` connection need it (header `X-Station-Token`, or `token`
