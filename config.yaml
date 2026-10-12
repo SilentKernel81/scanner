@@ -4,8 +4,9 @@
 
 # Camera Settings
 camera:
-  # Options: 'auto', 'picamera', 'usb' - or 'remote': no camera on this machine, the scanner
-  # page shows the camera of a station running station_client.py (also SCANNER_CAMERA=remote)
+  # A camera station's camera (station_client.py; the server has none): 'auto' - a USB camera
+  # if there is one, else a Raspberry Pi camera - or 'usb' / 'picamera'. Also SCANNER_CAMERA,
+  # and the station's setup page
   type: auto
   usb_index: 2  # /dev/videoN - check with: v4l2-ctl --list-devices
   resolution: [2560, 1440]

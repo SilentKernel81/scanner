@@ -1,0 +1,45 @@
+# MTG Card Scanner - the camera station on the same machine as the server (systemd template)
+# Installed by scripts/deploy.sh --service together with mtg-scanner.service, which fills in
+# @USER@, @GROUP@, @DIR@ and @PORT@.
+#
+# The server (app.py) has no camera of its own: the camera is always read by a station
+# (station_client.py), also when both are on one machine. This unit is that station. It
+# connects to the server on this machine and tries again every few seconds while the server
+# is not up yet, so the order the two start in does not matter.
+# Logs: journalctl -u mtg-scanner-station -f
+# Its setup page (which camera, the server's address): http://<this machine>:8080
+
+[Unit]
+Description=MTG Card Scanner - camera station
+After=network-online.target mtg-scanner.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+# Camera access (/dev/video*)
+SupplementaryGroups=video
+WorkingDirectory=@DIR@
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=@DIR@/venv/bin:/usr/local/bin:/usr/bin:/bin
+# SCANNER_CAMERA_INDEX, SCANNER_STATION_NAME ... if you set them (see .env.station.example)
+EnvironmentFile=-@DIR@/.env
+ExecStart=@DIR@/venv/bin/python @DIR@/station_client.py --server http://localhost:@PORT@
+# Ctrl+C for the station: it lets go of the camera
+KillSignal=SIGINT
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Hardening: read-only system and home, except what the station writes - its settings and
+# debug frames (data/) and captured cards that are not on the server yet (scanned_cards/)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DIR@/data @DIR@/scanned_cards
+
+[Install]
+WantedBy=multi-user.target

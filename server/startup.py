@@ -2,7 +2,6 @@
 # FILE: server/startup.py
 # Start-up: every shared object is created here (initialize_components), then the web server runs.
 # ============================================================================
-import cv2
 import sys
 import threading
 import time
@@ -18,7 +17,6 @@ from pending import PendingCaptures
 from recommendations import Recommendations
 from remote_scanner import CameraHub, RemoteScanner
 from review import ReviewQueue
-from scanner import CardScanner
 from settings import Settings
 from stations import Stations
 from trades import Trades
@@ -27,11 +25,11 @@ from server.state import (
     SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, services, socketio,
 )
 from server.logs import enable_request_log, logger
-from server.desks import Desk, emit_desk, log_to_client, make_remote_scanner, queue_changed, scanner
-from server.captures import announce_and_route, foil_file, resume_pending, submit_capture
+from server.desks import Desk, log_to_client, make_remote_scanner, scanner
+from server.captures import resume_pending
 from server.card_data import run_update_checks
 from server.backups_api import run_backup_schedule, scheduled_backup
-from server.settings_events import saved_debug_mode, set_auto_add
+from server.settings_events import saved_debug_mode
 
 # Routes and Socket.IO events exist once their module has been imported. Every module that
 # defines some is named here - also those this file uses nothing else of. A module missing
@@ -55,19 +53,15 @@ def initialize_components():
     logger.info("Initializing database...")
     services.database = CardDatabase()
 
-    # Cameras: each station's is reached through the hub; with camera.type other than 'remote'
-    # there is also the one plugged into this machine (the default desk)
+    # Cameras are at the stations, each reached through the hub. The server has none of its own
+    # (it could open one itself until 2026-10-12; a machine that is server and camera in one
+    # now runs station_client.py beside this program)
     logger.info("Initializing scanner...")
     services.app_settings = Settings()
     services.stations = Stations()
     services.camera_hub = CameraHub(socketio, services.stations, make_remote_scanner)
-    if Config.CAMERA_TYPE.lower() == 'remote':
-        # A request that names no station has no camera: this one never connects
-        services.default_desk = Desk(scanner=RemoteScanner(socketio, services.app_settings))
-    else:
-        services.default_desk = Desk(scanner=CardScanner(log_callback=log_to_client, settings=services.app_settings),
-                            review_filter=None)
-        set_auto_add(services.app_settings.get('auto_add', True))  # remembered in data/settings.json
+    # A request that names no station has no camera: this one never connects
+    services.default_desk = Desk(scanner=RemoteScanner(socketio, services.app_settings))
     log_to_client("Scanner initialized", level="info")
 
     # Card games (Magic, ...) - each wraps its card data; the saved one is scanned
@@ -103,87 +97,6 @@ def initialize_components():
     except Exception as e:
         services.daily_backup_status = f"⚠ The automatic backup failed: {e}"
         logger.error(f"The automatic backup failed: {e}", exc_info=True)
-
-    # Set up auto-capture callback
-    def handle_auto_capture():
-        """Handle auto-capture event - triggers card identification"""
-        logger.info(f"Auto-capture triggered #{services.auto_capture_counter}")
-
-        def announce_capture(taken=True):
-            """
-            The capture beep - the signal to drop the next card: sent once the image is taken
-            and a focus probe started by this capture (~1 s, every refocus_every cards) is done
-            """
-            if scanner.capture_pending and not taken:
-                scanner.capture_pending = False
-            elif scanner.capture_pending:
-                deadline = time.time() + 2.5
-                while scanner.focus_probe_running and time.time() < deadline:
-                    time.sleep(0.05)
-                scanner.capture_pending = False
-                emit_desk('auto_capture_triggered', {
-                    'counter': current_capture_number,
-                    'message': f'Auto-capture #{current_capture_number}'
-                })
-
-        current_capture_number = services.auto_capture_counter
-        services.auto_capture_counter += 1
-
-        queue_changed(+1)
-        queued = False  # handed on to submit_capture, which keeps its own count
-        try:
-            # Capture fast scan mode state at time of capture (not current state)
-            was_fast_scan_mode = scanner.fast_scan_mode if scanner and hasattr(scanner, 'fast_scan_mode') else False
-
-            if not scanner.is_card_detected():
-                logger.warning("Auto-capture triggered but no card detected")
-                scanner.capture_pending = False
-                return
-
-            game_id = games.active_id()  # a switch before the card is read: see route_identified
-            image_path, card_image_rgb, foil_image = scanner.capture_card_image_only(current_capture_number, settle=0)
-            announce_capture(taken=bool(image_path))
-            if not image_path:
-                logger.error("Auto-capture: failed to capture image")
-                return
-
-            if was_fast_scan_mode:
-                # Adding automatically: the card is read in the background (OCR, then the AI
-                # for what OCR can't settle) and the scanner is ready for the next drop
-                foil_path = None
-                if foil_image is not None and foil_image is not card_image_rgb:
-                    # Fixed area: the capture is the area, the foil check uses the outlined card
-                    foil_path = foil_file(image_path)
-                    cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
-                submit_capture(image_path, card_image_rgb, foil_image, current_capture_number, game_id,
-                               foil_path=foil_path)
-                # submit_capture counts the capture as "being read" from here on (and counts it
-                # off when it is settled): take back this function's own count
-                queued = True
-                queue_changed(-1)
-                scanner.card_under_review = False
-                logger.info(f"Fast Scan Mode: Card #{current_capture_number} captured and queued "
-                            f"(waiting for OCR / AI: {services.identification.waiting()}) - ready for next capture in {Config.AUTO_CAPTURE_DELAY}s")
-            else:
-                # Each card waits for Add / Skip: read here, the next capture is held back
-                # (card_under_review stays True)
-                card_info = services.identification.identify(card_image_rgb, foil_image)
-                announce_and_route(image_path, card_info, current_capture_number, game_id)
-                logger.info(f"Normal Auto-Scan: Card #{current_capture_number} awaiting review - next capture blocked until user adds/dismisses")
-
-        except Exception as e:
-            logger.exception(f"Error in auto-capture: {e}")
-            log_to_client(f"Auto-capture error: {e}", level="error")
-            # Clear flags on error to prevent getting stuck (in both modes)
-            if scanner:
-                scanner.card_under_review = False
-                scanner.capture_pending = False
-        finally:
-            if not queued:
-                queue_changed(-1)
-
-    scanner.auto_capture_callback = handle_auto_capture
-    logger.info("Auto-capture callback registered")
 
     resume_pending()
 
@@ -268,11 +181,7 @@ def main():
         print(f"⚠ Vision AI disabled")
         print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
 
-    if scanner.camera_error:
-        print(f"⚠ No camera: {scanner.camera_error}")
-        print("  The collection works without it; the scanner page starts when the camera is connected")
-    else:
-        print(f"✓ Camera ready ({scanner.camera_type})")
+    print("✓ Cameras: at the stations - each connects by itself (station_client.py, the Android app)")
     print(services.daily_backup_status)
 
     services.debug_mode_running = saved_debug_mode()

@@ -70,10 +70,13 @@ Design choices:
 | `station_client.py` - a camera station | The machine a USB webcam is plugged into; a Docker image (target `client`, x86-64 and ARM64) | Camera, outline detection, stillness, new-card rules, focus; uploads each capture; shows nothing itself |
 | The Android app ([mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android)) in client mode | A phone over the box | The same job with the phone's camera (a Kotlin port of the detection); uploads each capture. It can also work on its own, without a server |
 
-The server can still open a camera itself (`camera.type` other than `remote`): the server then
-has one local camera, as the single-machine scanner this grew from. Everything below about
-detection, auto-capture and focus is the same code in both cases - `CardScanner` either runs
-inside the server or inside `station_client.py`.
+The server opens no camera itself. Until 2026-10-12 it could (`camera.type` other than
+`remote`, as the single-machine scanner this grew from): that path was removed - every
+machine in use already had its camera at a station, and it was the one part of start-up that
+the tests of the server never ran. A machine that is server and camera in one runs both
+programs (`scripts/start.sh`, or the two services of `scripts/deploy.sh --service`).
+Everything below about detection, auto-capture and focus is `CardScanner`, which runs inside
+`station_client.py`.
 
 ### Modules
 
@@ -100,7 +103,7 @@ inside the server or inside `station_client.py`.
 | `settings.py` | server | Choices made in the web interface, in `data/settings.json` |
 | `cleanup.py`, `setup_database.py` | server | Old capture images (on startup and as a CLI); downloading the card database |
 | `station_client.py` | station | `Station`: connects to the server, runs a `CardScanner`, reports status and preview, executes the server's commands, uploads captures |
-| `scanner.py` | station (or server, with a local camera) | `CardScanner`: camera (USB via OpenCV / V4L2, or Pi camera), capture thread, detection state, stillness, auto-capture, fixed area, focus |
+| `scanner.py` | station | `CardScanner`: camera (USB via OpenCV / V4L2, or Pi camera), capture thread, detection state, stillness, auto-capture, fixed area, focus |
 | `object_detector.py` | station (or server) | Outline detection (`find_card_outline`), perspective warp (`warp_card`) |
 | `config.py`, `config_loader.py` | both | Settings from `config.yaml` and the environment |
 | `templates/`, `static/` | server | The pages: `stations.html` (the cameras), `scanner.html` (one camera's page), `collection.html`; shared `_topbar.html`, `_dialogs.html`, `_icons.html`, `common.js` |
@@ -456,8 +459,7 @@ OCR.
 
 Every station has its own scanner page, `/scan/<id>`: its live view and controls, the card it
 is showing, its review queue, its Undo, its activity log and its scanned-cards count. `/` lists
-the stations (`templates/stations.html`, refreshed from `GET /api/stations`) - or, when the
-server has a camera of its own, is that camera's scanner page. A station's count there is
+the stations (`templates/stations.html`, refreshed from `GET /api/stations`). A station's count there is
 `scanned`, its copies in the scanned cards now (what its page lists); `captures` in
 `data/stations.json` counts every picture it ever sent and only numbers the captures.
 
@@ -471,7 +473,7 @@ the current desk and `scanner` is a proxy for `desk().scanner`. Which desk is cu
 | A scanner page's Socket.IO event | The station the page named when it connected (`io({query: {station}})`, `page_stations`); the page's socket is in the room `station:<id>` |
 | An HTTP request | `?station=<id>` (the scanner page adds it to every `/api/` request - a wrapper around `fetch` at the top of `scanner.js`), or the id in `/api/stations/<id>/...` |
 | A worker thread | The one set with `in_desk(...)`: `submit_capture` remembers its desk for the result, the OCR / AI workers run each job in its desk (`Job.scope`), a `RemoteScanner`'s callbacks in its station's (`at_station`) |
-| Anything else | `default_desk`: the server's own camera - or, without one, a desk with no camera |
+| Anything else | `default_desk`: a desk with no camera (a request that names no station) |
 
 Events about a card go to the desk's room only (`emit_desk`: captured, found, added, queued
 for review, log lines, the capture beep, camera settings); events about shared things stay
@@ -519,8 +521,8 @@ lines; review queues, focus-check interval and location were each station's own.
 
 ## Card detection
 
-This chapter, [Auto-capture](#auto-capture) and [Focus](#focus) describe `CardScanner` (`scanner.py`, `object_detector.py`): it runs where the camera is - inside `station_client.py`
-on a camera station, or inside the server when that has a camera of its own. The Android app
+This chapter, [Auto-capture](#auto-capture) and [Focus](#focus) describe `CardScanner` (`scanner.py`, `object_detector.py`): it runs where the camera is, inside `station_client.py`
+on a camera station. The Android app
 has the same rules ported to Kotlin (its README maps the files).
 
 **Frames.** USB cameras deliver MJPEG; the scanner asks OpenCV for the raw JPEG
@@ -1603,7 +1605,7 @@ Three pages, all served by the server (`server/pages.py`), with one header (`tem
 
 | Page | Template, script | What it is |
 |---|---|---|
-| `/` | `stations.html` (inline script) | The cameras: each station with its state and a link to its page. With a camera on the server itself, `/` is that camera's scanner page instead |
+| `/` | `stations.html` (inline script) | The cameras: each station with its state and a link to its page |
 | `/scan/<id>` | `scanner.html`, `static/js/scanner.js` | One station's scanner page. `window.STATION` tells the script which; a station without a camera gets the page without the camera panel |
 | `/collection` | `collection.html`, `static/js/collection.js` | Inventory, decks, trades, statistics, backups |
 
@@ -1652,7 +1654,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 
 | Where | What |
 |---|---|
-| `config.yaml` | Vision AI defaults, web server, station token, cleanup, card data update interval; `camera.type: remote` (or `SCANNER_CAMERA=remote`, the Docker image's default) for a server without a camera |
+| `config.yaml` | Vision AI defaults, web server, station token, cleanup, card data update interval. `camera.*` is read by a station, not by the server |
 | `.env` (beside `deploy/docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The page only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
@@ -1665,7 +1667,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Backups (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
-| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `scanner.log` (a camera on the server itself), `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `requests.log` (debug mode) |
+| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `requests.log` (debug mode) |
 | `scanned_cards/` | Captured images as uploaded (deleted after `cleanup.days`) |
 
 **Camera station** - nothing it must keep:

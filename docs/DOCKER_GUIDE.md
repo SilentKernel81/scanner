@@ -15,7 +15,7 @@ There is a [75-second video](https://github.com/SilentKernel81/scanner-server/re
 ```
 
 The two can be the same machine. [INSTALL.md](INSTALL.md) is the reference for everything
-else (running without Docker, a phone as a station, a single machine with its own camera).
+else (running without Docker, a phone as a station, server and camera on a single machine).
 
 This project, including this guide, was written by an AI coding assistant (Claude) directed by
 its author - see the [README](../README.md#how-this-project-was-built). The last section says how

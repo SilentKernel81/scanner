@@ -26,6 +26,7 @@ echo ""
 PROVIDER=""
 MODEL=""
 SHOW_HELP=false
+NO_STATION=0   # --no-station: don't start this machine's camera station beside the server
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
         -m|--model)
             MODEL="$2"
             shift 2
+            ;;
+        --no-station)
+            NO_STATION=1
+            shift
             ;;
         -h|--help)
             SHOW_HELP=true
@@ -56,6 +61,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Options:"
     echo "  -p, --provider PROVIDER   Set AI provider (gemini, openai, anthropic, local)"
     echo "  -m, --model MODEL         Set specific model to use"
+    echo "  --no-station              Only the server: no camera on this machine"
     echo "  -h, --help                Show this help message"
     echo ""
     echo "Examples:"
@@ -183,8 +189,24 @@ echo -e "${GREEN}Starting Card Scanner...${NC}"
 echo -e "${BLUE}================================${NC}"
 echo ""
 echo -e "Web interface: ${GREEN}http://0.0.0.0:5000${NC}"
+echo -e "Camera setup:  ${GREEN}http://0.0.0.0:8080${NC}"
 echo -e "Press Ctrl+C to stop"
 echo ""
 
 cd "$PROJECT_DIR"
+
+# The server has no camera of its own: this machine's camera is read by a camera station,
+# a second program that sends its cards to the server. It is started here in the background
+# and stopped again when the server ends. It keeps trying until the server answers, so it
+# does not matter that it is started first.
+# --no-station: only the server (the cameras are on other machines)
+PORT=$(python3 -c "from config import Config; print(Config.PORT)" 2>/dev/null || echo 5000)
+if [ "$NO_STATION" != 1 ]; then
+    python3 station_client.py --server "http://localhost:${PORT}" &
+    STATION_PID=$!
+    # When this script ends - Ctrl+C or the server stopping - the station gets Ctrl+C too
+    # (it then lets go of the camera) and is waited for
+    trap 'kill -INT "$STATION_PID" 2>/dev/null; wait "$STATION_PID" 2>/dev/null' EXIT
+fi
+
 python3 app.py

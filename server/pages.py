@@ -5,7 +5,6 @@
 from flask import Response, abort, jsonify, render_template, send_from_directory
 import time
 
-from config import Config
 import games
 
 from server.state import app, database, inventory, review, stations
@@ -16,10 +15,8 @@ from server.card_data import data_update_notices, data_updates_running
 
 @app.route('/')
 def index():
-    """The cameras (stations), each with a link to its page - or, with a camera on this machine, its scanner page"""
-    if Config.CAMERA_TYPE.lower() == 'remote':
-        return render_template('stations.html')
-    return render_template('scanner.html', station=None)
+    """The cameras (stations), each with a link to its page"""
+    return render_template('stations.html')
 
 
 @app.route('/scan/<station_id>')
@@ -33,7 +30,7 @@ def scan_page(station_id):
 @app.context_processor
 def page_links():
     """settings_url: where the camera / AI settings are - a scanner page (the first station's when there are several)"""
-    if Config.CAMERA_TYPE.lower() != 'remote' or not stations or not stations.all():
+    if not stations or not stations.all():
         return {'settings_url': '/#settings'}
     return {'settings_url': f"/scan/{stations.all()[0]['id']}#settings"}
 

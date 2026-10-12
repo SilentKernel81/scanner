@@ -22,8 +22,8 @@
 #   - `a is b` compares the proxies, which is fine between two of these names
 #     (`inventory_area() is scan_inventory`), but a proxy is never `is` the
 #     real object taken from `services`.
-# Plain values that change (a counter, a flag) have no proxy: they are read and
-# written as `services.auto_capture_counter`, always.
+# Plain values that change (a flag, a line of text) have no proxy: they are read
+# and written as `services.debug_mode_running`, always.
 # ============================================================================
 import collections
 import threading
@@ -73,7 +73,6 @@ class Services:
     default_desk = None       # desks.Desk of the camera on this machine (set in server/desks.py)
     debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
     daily_backup_status = ''    # the startup banner's line about the day's backup
-    auto_capture_counter = 1
 
 
 services = Services()

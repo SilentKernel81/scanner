@@ -43,7 +43,7 @@ User docs: [README.md](README.md); installation: [docs/INSTALL.md](docs/INSTALL.
 # server
 docker compose up -d --build                                                   # data/ and scanned_cards/ are volumes
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build   # ... with OCR on an NVIDIA GPU
-venv/bin/python app.py                    # without Docker (camera.type decides: remote, or a local camera)
+venv/bin/python app.py                    # without Docker (the server never opens a camera)
 venv/bin/python setup_database.py         # (re)download the Scryfall card database
 venv/bin/python cleanup.py --stats        # capture images; --days N / --dry-run / --all
 
@@ -54,8 +54,9 @@ venv/bin/python station_client.py --server http://<server>:5000   # without Dock
 # tests
 venv/bin/python -m unittest discover tests
 
-# single machine without Docker
-./scripts/deploy.sh [--service | --update | --camera N]
+# single machine without Docker: the server and a station for its camera, side by side
+./scripts/deploy.sh [--service | --update | --camera N]      # --service installs both units
+./scripts/start.sh [--no-station]                            # both programs; Ctrl+C stops both
 ```
 
 Dependencies: `requirements.txt` (server, ~300 MB, Python 3.10+; the OCR reader also needs
@@ -133,14 +134,17 @@ container - or a second container with its own data folder and port.
   `camera_hub`, `app_settings` are imported from `server.state` and used as plain names; the
   real objects are attributes of `services`, set by `initialize_components`. `if inventory:`
   works, `inventory is None` never does; assign only through `services.x = ...`; values
-  that change (`auto_capture_counter`, `debug_mode_running`, `default_desk`) are always
+  that change (`debug_mode_running`, `daily_backup_status`, `default_desk`) are always
   written and read as `services.x`. Paths are built from `server.ROOT` (the top folder),
   never from `__file__` - that is `server/` now.
 - **Changing the server without changing what it does** (moving code, renaming inside):
   `scripts/walk_server.py` records what a server answers - run it before and after on fresh
   copies of the data (never real data) and `--compare`.
-- **Two programs.** `scanner.py` / `object_detector.py` run in `station_client.py` (they still
-  run inside the server when `camera.type` is not `remote`). The client must not import server
+- **Two programs, and the camera is always the station's.** `scanner.py` /
+  `object_detector.py` run in `station_client.py` only: the server opens no camera (removed
+  2026-10-12), imports neither module, and its `scanner` is always a `RemoteScanner`. One
+  machine as server and camera runs both programs (`scripts/start.sh`; two systemd units).
+  Don't add a "local camera" branch back to the server. The client must not import server
   modules (`database`, `inventory`, `identification`, Flask), and its images copy a fixed list
   of files: a new module it imports must be added to the `COPY` lines of the `client` and
   `client-pi` targets.
@@ -313,7 +317,6 @@ container - or a second container with its own data folder and port.
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.
 
 **Logs**: on the server `data/logs/app.log` (also every station's scanner lines), `ai.log`,
-`database.log`, `scanned_cards.log`, `ocr.log`; `scanner.log` only with a camera on the server
-itself; `requests.log` only with Debug mode on. A station logs to its console
+`database.log`, `scanned_cards.log`, `ocr.log`; `requests.log` only with Debug mode on. A station logs to its console
 (`docker compose -f deploy/docker-compose.client.yml logs`) - only there: why a card waits ("Waiting
 N s: ..."), focus probes and saved debug frames.
