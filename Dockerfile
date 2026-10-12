@@ -54,7 +54,7 @@ COPY requirements-client.txt .
 RUN pip install --no-cache-dir -r requirements-client.txt
 
 # Only what the station runs (station_client.py must not import the server's modules)
-COPY station_client.py station_setup.py station_setup.html scanner.py object_detector.py settings.py \
+COPY station_client.py station_setup.py station_login.py station_setup.html scanner.py object_detector.py settings.py \
      config.py config_loader.py config.yaml ./
 
 # The station's setup page (station_setup.py)
@@ -107,7 +107,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
-COPY station_client.py station_setup.py station_setup.html scanner.py object_detector.py settings.py \
+COPY station_client.py station_setup.py station_login.py station_setup.html scanner.py object_detector.py settings.py \
      config.py config_loader.py config.yaml ./
 
 EXPOSE 8080

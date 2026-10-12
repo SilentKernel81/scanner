@@ -116,8 +116,14 @@ server, the station's name and the camera:
 - **Status**: connected or not, the camera and its pictures a second, the temperature.
 
 *Save and restart* writes the choices to the volume `station-data` (`data/station.json`) and
-restarts the station with them. The page has no login, like the server's pages: anyone on
-the network can open it.
+restarts the station with them.
+
+The page is behind a **password**. The first time it is opened it asks you to choose one (at
+least 8 characters) - until then, whoever opens it first chooses it, so do that right after
+starting the station, or set `SCANNER_SETUP_PASSWORD` in `.env`. Only a hash of the password
+is kept (`data/station_login.json`). Forgotten: delete that file in the volume and restart
+the station. The page is plain HTTP, so this keeps out the curious on your network, not
+someone who can listen on it.
 
 The settings can also be fixed in a `.env` file, as before the setup page existed - a value
 set there wins, and the page shows it as fixed:
@@ -146,6 +152,7 @@ blocked by its firewall from inside a container.
 | `SCANNER_STATION_NAME` | Shown on the server (it can be renamed there) |
 | `SCANNER_STATION_TOKEN` | The server's station token, when it has one |
 | `SCANNER_SETUP_PORT` | The setup page's port on the machine (default 8080) |
+| `SCANNER_SETUP_PASSWORD` | The setup page's password (default: chosen on the page at its first visit) |
 
 - The container gets the host's `/dev` with access to video devices only, so the camera can
   be unplugged and plugged in again without restarting it. Unplugging while it runs has not
@@ -196,8 +203,8 @@ Without Docker the same station runs from the Pi's own Python:
 ```bash
 sudo apt install --no-install-recommends python3-picamera2 python3-opencv python3-socketio \
      python3-websocket python3-requests python3-yaml
-# in a folder with station_client.py, station_setup.py, station_setup.html, scanner.py,
-# object_detector.py, settings.py, config.py, config_loader.py and config.yaml
+# in a folder with station_client.py, station_setup.py, station_login.py, station_setup.html,
+# scanner.py, object_detector.py, settings.py, config.py, config_loader.py and config.yaml
 python3 station_client.py          # then the setup page, http://<the Pi>:8080
 ```
 

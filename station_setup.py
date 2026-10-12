@@ -14,6 +14,7 @@
 #   2. Finding the cameras plugged into this machine (list_cameras) and taking
 #      one picture from any of them (take_picture).
 #   3. The little web server and its routes (SetupPage).
+# The page is behind a password: station_login.py has how it is kept and checked.
 # The page itself - HTML, CSS and JavaScript in one file - is station_setup.html.
 #
 # What is NOT here: everything about scanning. Focus, rotation, fixed area and
@@ -37,6 +38,7 @@ from urllib.parse import parse_qs, urlparse
 import cv2
 import requests
 
+import station_login
 from config import Config, camera_index_from
 
 logger = logging.getLogger('station')
@@ -357,12 +359,16 @@ class SetupPage:
     the running Station, or None while the station has no server address yet ("setup mode").
 
     Routes (all answer JSON except the page and the picture):
-        GET  /              the page
+        GET  /              the page (its HTML holds no settings, so it needs no login)
+        POST /api/login     {password} - or {new_password} while no password has been chosen yet
+        POST /api/logout
+      and, only for a browser that is logged in (anything else is answered 401):
         GET  /api/state     settings, what is fixed, the cameras found, how the station is doing
         GET  /api/picture   ?kind=usb|picamera&index=...  one JPEG from that camera
         POST /api/test      {server, token}  can that server be reached, and does it take the token?
         POST /api/save      the settings; the station then restarts with them
         POST /api/restart   restart without changing anything
+        POST /api/password  {password, new_password}  change the page's password
     """
 
     def __init__(self, station, values, fixed, restart, port=DEFAULT_PORT):
@@ -372,6 +378,7 @@ class SetupPage:
         self.restart = restart    # call it to restart the station (station_client.request_restart)
         self.port = port
         self.picture_lock = threading.Lock()  # one picture at a time: a camera opens only once
+        self.login = station_login.Login()    # the page's password and who is logged in
 
     def start(self):
         """Start serving in a background thread. False when the port cannot be used."""
@@ -383,10 +390,21 @@ class SetupPage:
             def log_message(self, *_args):
                 pass  # no line per request in the station's log
 
+            def logged_in(self):
+                """True if this request carries a valid session cookie; else it is answered 401"""
+                if page.login.valid_session(station_login.session_from(self.headers.get('Cookie'))):
+                    return True
+                # The page shows its login form on this answer - "create" while no password
+                # exists yet, so that it asks to choose one instead
+                self.send_json({'error': 'Log in first', 'login': 'needed' if page.login.has_password() else 'create'}, 401)
+                return False
+
             def do_GET(self):
                 url = urlparse(self.path)
                 if url.path == '/':
                     self.send(200, PAGE_FILE.read_bytes(), 'text/html; charset=utf-8')
+                elif not self.logged_in():
+                    pass  # answered by logged_in()
                 elif url.path == '/api/state':
                     self.send_json(page.state())
                 elif url.path == '/api/picture':
@@ -409,6 +427,21 @@ class SetupPage:
                         raise ValueError("Not a settings form")
                 except ValueError:
                     return self.send_json({'error': 'Not understood'}, 400)
+                if self.path == '/api/login':
+                    return self.log_in(data)
+                if self.path == '/api/logout':
+                    return self.send_json({'ok': True}, headers=[('Set-Cookie', page.login.cookie_header(''))])
+                if not self.logged_in():
+                    return
+                if self.path == '/api/password':
+                    try:
+                        if not page.login.check(data.get('password')):
+                            raise ValueError("The current password is wrong")
+                        page.login.set_password(data.get('new_password'))
+                    except ValueError as e:
+                        return self.send_json({'error': str(e)}, 400)
+                    # The old cookie was signed with the old key: hand out one for the new
+                    return self.send_json({'ok': True}, headers=[('Set-Cookie', page.login.cookie_header(page.login.new_session()))])
                 if self.path == '/api/test':
                     self.send_json(page.test(data))
                 elif self.path == '/api/save':
@@ -422,11 +455,29 @@ class SetupPage:
                 else:
                     self.send_json({'error': 'Not found'}, 404)
 
-            def send_json(self, data, status=200):
-                self.send(status, json.dumps(data).encode(), 'application/json')
+            def log_in(self, data):
+                """
+                POST /api/login. While no password exists the first visitor chooses one
+                ({new_password}); after that only the right password logs in. Either way the
+                answer carries the session cookie.
+                """
+                try:
+                    if not page.login.has_password():
+                        page.login.set_password(data.get('new_password'))
+                        logger.info("Setup page: a password was chosen")
+                    elif not page.login.check(data.get('password')):
+                        raise ValueError("Wrong password")
+                except ValueError as e:
+                    return self.send_json({'error': str(e)}, 403)
+                self.send_json({'ok': True}, headers=[('Set-Cookie', page.login.cookie_header(page.login.new_session()))])
 
-            def send(self, status, body, content_type):
+            def send_json(self, data, status=200, headers=()):
+                self.send(status, json.dumps(data).encode(), 'application/json', headers)
+
+            def send(self, status, body, content_type, headers=()):
                 self.send_response(status)
+                for name, value in headers:
+                    self.send_header(name, value)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(body)))
                 self.send_header('Cache-Control', 'no-store')  # always the current state and picture
@@ -457,6 +508,7 @@ class SetupPage:
             'settings': settings,
             'has_token': bool(self.values.get('token')),
             'fixed': self.fixed,
+            'password_fixed': self.login.fixed,  # set from the environment: not changeable here
             'cameras': list_cameras(),
             'status': {
                 'set_up': station is not None,

@@ -15,6 +15,7 @@
 #   SCANNER_STATION_ID     default: this machine's name;  SCANNER_STATION_NAME: shown on the server
 #   SCANNER_STATION_TOKEN  when the server has a station token
 #   SCANNER_SETUP_PORT     the setup page's port on this machine (default 8080)
+#   SCANNER_SETUP_PASSWORD the setup page's password (default: chosen on the page at its first visit)
 services:
   station:
     build:
@@ -32,6 +33,7 @@ services:
       SCANNER_STATION_ID: ${SCANNER_STATION_ID:-}
       SCANNER_STATION_NAME: ${SCANNER_STATION_NAME:-}
       SCANNER_STATION_TOKEN: ${SCANNER_STATION_TOKEN:-}
+      SCANNER_SETUP_PASSWORD: ${SCANNER_SETUP_PASSWORD:-}
     ports:
       - "${SCANNER_SETUP_PORT:-8080}:8080"  # the setup page
     volumes:
