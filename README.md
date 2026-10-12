@@ -404,7 +404,8 @@ station_login.py     ... and that page's password
 scanner.py           Camera capture thread, detection, stability, auto-capture, focus
 object_detector.py   Card outline detection + perspective correction
 config.yaml          Settings (loaded by config.py / config_loader.py)
-templates/, static/  Web interface: the cameras, a camera's page, the collection
+templates/, static/  Web interface: the cameras, a camera's page, the collection. The font and
+                     Socket.IO's client are in static/ too: the pages load nothing from the internet
 tests/               Automated tests (camera ownership, backups, database, a station's setup page and uploads)
 compose.yaml         `docker compose up` in this folder starts the server (it points into deploy/)
 deploy/              Everything about Docker: the Dockerfile (images server, client, client-pi) and
