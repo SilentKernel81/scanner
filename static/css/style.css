@@ -464,6 +464,9 @@ a {
 }
 
 .camera-missing[hidden] { display: none; }
+/* While the note is shown, the status pill would only repeat it ("No camera") - and on a
+   phone, where the picture area is low, it lay on top of the note's heading */
+.camera-missing:not([hidden]) ~ .detection-status { display: none; }
 .camera-missing strong { font-size: 18px; }
 .camera-missing-hint { color: #9aa3b2; font-size: 13px; max-width: 420px; }
 .camera-missing a { color: #7dd3fc; }

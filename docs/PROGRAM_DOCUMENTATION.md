@@ -736,6 +736,18 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    motion). No frame lost its outline. On stretches where a still card had waited, found in
    0-48% of the frames before and 82-100% after (one card, the worst, still only ~55%).
    Live: one session of 17 cards on the Pi camera (below); not run live on a USB camera.
+8. **The picture's own border is not a card** (`_is_whole_picture`; in step 3 and on the final
+   result): an outline whose corners all lie within 3 px of the picture's corners is dropped.
+   A dark picture with a card's proportions - a Pi camera's crop around the box, the lamp off -
+   gave exactly that: the edge thresholds follow the picture's median brightness, near zero
+   the sensor's noise becomes one sheet of edges, and the sheet's outline is the picture.
+   Seen once on a station in the dark (2026-10-12; never captured, the picture was too
+   blurry). With synthetic dark frames (brightness 2-8 of 255, with noise): 474x640 and
+   1382x1866 pictures gave the whole picture as a card in 96 of 120 frames before, 0 of 120
+   after; a 16:9 picture gave none either way. The 3,200 recorded frames on the development
+   machine (USB camera) give the same result before and after, and a drawn card 12 px from
+   every border is still found. Not run on the Pi camera's recorded frames or live. Not in
+   the Android app's port of the detector yet.
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
@@ -1251,6 +1263,10 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   (lens + camera buffer), so each position waits 0.45 s; if re-measuring the chosen position
   doesn't confirm it, the sweep repeats with 0.8 s. About 10 s in total. The position is saved
   (`focus_value`, per station - on the server) and restored when the station starts.
+  A station without a position of its own is given the one in the server's shared settings;
+  a camera whose lens cannot be set from the station (a Pi camera, a webcam without the focus
+  control) ignores it and reports continuous autofocus (`_open_camera`) - until 2026-10-12 it
+  took the number over and its page showed autofocus as off. Checked with fake cameras only.
 - **The lens has play**: the same `focus_absolute` reached from above measured up to 5× blurrier
   than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
   or restored position is approached from 30 below (`_move_focus`).
