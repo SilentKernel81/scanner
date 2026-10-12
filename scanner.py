@@ -496,6 +496,13 @@ class CardScanner:
         """
         if self.focus_locked_value is None or self.focus_sweep_running or self.focus_probe_running:
             return
+        if self.camera_type != 'usb' or not self.focus_range:
+            # A camera whose lens cannot be set here (a Pi camera, a webcam without the focus
+            # control) can still have a locked position - inherited from the server's settings
+            # of another camera. refocus() then refuses with a warning and notes no sweep, so
+            # this ran again at once: one warning per frame, sent to the server too, for as long
+            # as the card stayed blurry (53,730 lines in the server's log in one dark night)
+            return
         movement, _ = getattr(self, 'last_frame_change', (1.0, 0.0))
         if self.card_in_focus or movement >= 0.01:
             self.out_of_focus_since = None
