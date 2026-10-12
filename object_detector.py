@@ -94,6 +94,22 @@ def _is_rectangular(corners, side_tolerance=0.04, angle_tolerance=3):
     return True
 
 
+def _is_whole_picture(corners, shape, margin=3):
+    """
+    Is this outline the picture's own border (every corner within `margin` px of a corner of
+    the picture)? That is never a card: one that large would be cut off on all four sides.
+    It is what a dark picture gives when the picture itself has a card's proportions (a Pi
+    camera's crop is drawn around the box, upright): with almost no light the edge thresholds
+    are near zero, the sensor's noise becomes one sheet of edges, and that sheet's outline is
+    the picture - 4 sides, the right proportions, perfectly filled. Seen on a station whose
+    box lamp was off (2026-10-12), and with synthetic dark frames: 474x640 at a brightness of
+    2-8 of 255 gave the whole picture in 57 of 60 frames; a 16:9 picture gave none.
+    """
+    height, width = shape[:2]
+    return bool(corners[:, 0].min() <= margin and corners[:, 1].min() <= margin
+                and corners[:, 0].max() >= width - 1 - margin and corners[:, 1].max() >= height - 1 - margin)
+
+
 def _perimeter_coverage(edges, corners, samples=240, reach=3):
     """Fraction of points along a rectangle's sides that lie on (or within `reach` of) an edge"""
     near = cv2.dilate(edges, np.ones((2 * reach + 1, 2 * reach + 1), np.uint8))
@@ -345,6 +361,8 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_s
                 continue
             if side_w > side_h and not allow_landscape:
                 continue
+            if _is_whole_picture(corners, small.shape):
+                continue  # the picture's border, not a card - a smaller outline may still be one
             ratio = max(side_w, side_h) / min(side_w, side_h)
             fill = area / (side_w * side_h)  # 1.0 = perfectly rectangular
             if abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO > ratio_tolerance or fill < 0.85:
@@ -377,7 +395,8 @@ def find_card_outline(frame, allow_landscape=False, ratio_tolerance=0.08, work_s
         best = from_contours(cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((GAP_CLOSING, GAP_CLOSING), np.uint8)))
     if best is None and tracked is not None and _is_rectangular(tracked[1]):
         best = tracked
-    if best is None:
+    # The other ways to an outline (edge pieces, the followed card) are held to the same rule
+    if best is None or _is_whole_picture(best[1], small.shape):
         return None, 0
     return best[1] / scale, float(best[2])
 

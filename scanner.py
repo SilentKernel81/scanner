@@ -776,11 +776,22 @@ class CardScanner:
             # under another number
             Config.USB_CAMERA_INDEX = camera_index_or_none(Config.USB_CAMERA_SOURCE)
             self.camera_type = self.detect_camera_type()
+            # The saved lens position, asked again for the camera that is being opened now
+            # (the one before it may have had no use for it - see below)
+            self.focus_locked_value = self.settings.get('focus_value')
 
             if self.camera_type == 'usb':
                 self._initialize_usb_camera()
             elif self.camera_type == 'picamera':
                 self._initialize_picamera()
+
+            if self.camera_type != 'usb' or not self.focus_range:
+                # A camera whose lens cannot be set from here (a Pi camera, a webcam without
+                # the focus control) focuses by itself whatever was saved. A station that has
+                # no focus position of its own is given the one in the server's shared
+                # settings - some other camera's: taken over here, it made the page show
+                # this camera as locked at a position it was never moved to.
+                self.focus_locked_value = None
 
             self.failed_reads = 0
             self.camera_error = None
