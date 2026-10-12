@@ -287,4 +287,26 @@ server no longer has a camera of its own, cameras are only at stations - so that
 not a gap to close but code to remove, in a change of its own (it reaches into start-up,
 the capture event, the logs, `scripts/deploy.sh` and the install guide).
 
+**With a real station, the same night.** The Pi 4's station (Camera Module 3) was pointed at
+a local server on copies of the test data, first with the code from before the split, then
+with the split, and a scanner page's side was played against both: the station list, the
+detection status, the live view (38 frames in 4 s), detection, debug trace, rotation 180 and
+back (the camera reopens), a refused rotation, the focus check interval, refocus and
+autofocus on a camera that has neither, the fixed area, add automatically, auto scanning on
+and off, a manual capture, dismiss - 26 steps. What each command answered was the same on
+both; when the server was swapped for the split one, the station reconnected by itself.
+The box was dark (the lamp was off), so no card could be *read* through the camera that
+night: the manual capture travelled the whole way but ended as an unreadable picture, on
+both.
+
+A capture waiting at a restart, against a real server, for the first time: a recorded
+picture of a card was left in the station's `scanned_cards/` with its note, the station
+restarted; the split server received it, read it by OCR and added it (17 → 18 scanned
+cards), the station's folder was empty afterwards, and the same `capture_id` sent once
+more left it at 18.
+
+Found on the way, in both versions and not the split's doing: with a card out of focus,
+this station logged "This camera has no manual focus control" at every frame (fixed
+separately, in `scanner.py`).
+
 `app.py` is 13 lines; the largest module is `decks_api.py` (about 400 lines).
