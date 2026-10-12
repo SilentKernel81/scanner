@@ -18,7 +18,7 @@ The two can be the same machine. [INSTALL.md](INSTALL.md) is the reference for e
 else (running without Docker, a phone as a station, a single machine with its own camera).
 
 This project, including this guide, was written by an AI coding assistant (Claude) directed by
-its author - see the [README](README.md#how-this-project-was-built). The last section says how
+its author - see the [README](../README.md#how-this-project-was-built). The last section says how
 the steps below were checked.
 
 ## What you need

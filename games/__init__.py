@@ -1,6 +1,6 @@
 """
 Card games the scanner supports, and which one is being scanned (one game at a time; saved as
-`game` in data/settings.json). See MULTI_GAME_IMPLEMENTATION_PLAN.md.
+`game` in data/settings.json). See docs/plans/MULTI_GAME_IMPLEMENTATION_PLAN.md.
 
     games.init(database, settings, log_callback)   # once, at startup
     games.active()                                 # the Game being scanned

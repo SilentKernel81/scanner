@@ -11,7 +11,7 @@ measure at sizes the tables do not have yet, and indexes are created and dropped
 
 It prints, for each request: the query plan of its SQL and the median time of repeated runs
 (the first, cold run apart). Nothing here changes the app: an index is added to the code only
-when these numbers say so (PROGRAM_DOCUMENTATION.md, Card database, has the last measurement).
+when these numbers say so (docs/PROGRAM_DOCUMENTATION.md, Card database, has the last measurement).
 """
 import sqlite3
 import statistics

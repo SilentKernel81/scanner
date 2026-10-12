@@ -31,11 +31,11 @@ The project is developed entirely with AI (this assistant, directed by the user)
 documentation says so (README.md, *How this project was built*): keep that statement true and
 in place, and keep marking in the docs what was measured and what was never tested.
 
-**How everything works is documented in [PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md)**
+**How everything works is documented in [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md)**
 (stations, detection, auto-capture rules, matching, foil logic, schema, events, measured
 thresholds) - read the relevant section before changing behavior, and keep it up to date.
-User docs: [README.md](README.md); installation: [INSTALL.md](INSTALL.md); manual test list:
-[TEST_CASES.md](TEST_CASES.md).
+User docs: [README.md](README.md); installation: [docs/INSTALL.md](docs/INSTALL.md); manual test list:
+[docs/TEST_CASES.md](docs/TEST_CASES.md).
 
 ## Common Commands
 
@@ -63,7 +63,7 @@ Node.js 22+ and `npm install` in `ocr/`), `requirements-client.txt` (station). T
 this machine is Python 3.12 and has both.
 
 **Testing.** `tests/test_ownership.py` covers which station scanned what (splits, merges,
-moves, clears) and backups; `tests/test_database.py` the cases of DATABASE_REVIEW.md (failed
+moves, clears) and backups; `tests/test_database.py` the cases of docs/plans/DATABASE_REVIEW.md (failed
 writes rolled back, reads that do not write, captures that count once, the card data swap, the
 web cache) - all on temporary databases; `tests/test_station_setup.py` a station's setup
 page (which setting wins, the form's checks, the password and its sessions);
@@ -90,7 +90,7 @@ container - or a second container with its own data folder and port.
 | Stations: registry, per-station settings, list / rename / forget | `stations.py`: `Stations`, `StationSettings` (`data/stations.json`); `app.py`: `station_list`, `station_item`, `station_undo`, `clear_camera`; `scanner.js`: `loadStations`, `renderStations` |
 | The server's stand-in for a station's camera; the stations' connection | `remote_scanner.py`: `RemoteScanner` (`METHODS`, `DECIDED`, `SENT`, `REPORTED`, `CAMERA_SETTINGS`), `CameraHub` (namespace `/station`) |
 | Review queue (per station and game) | `review.py` (`review_queue`, `data/review/`, `ANY`, `clear`); `app.py`: `review_open` / `review_skip` / `review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
-| Card games (the active one drives search, finishes, exports / imports) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `MULTI_GAME_IMPLEMENTATION_PLAN.md` |
+| Card games (the active one drives search, finishes, exports / imports) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `docs/plans/MULTI_GAME_IMPLEMENTATION_PLAN.md` |
 | Card data: schema, updates, search, printing match, confidence | `database.py`: `CARD_COLUMNS`, `replace_table`, `card_data_info`, `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match`; `Game.check_for_update`; `app.py`: `start_card_data_update`, `check_card_data_updates` |
 | Inventory: add / merge / undo / split / export, locations, tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `desk().pending_capture`, `card['capture']`; `scan_location` |
 | Scanned cards by camera (filter, per-camera move, clear) | `inventory.py`: `inventory_sources`, `_station_rows`, `_move_sources`, `stations_by_entry`, `get_all_cards(station)`, `get_stats(station)`, `take_from(station)`, `clear_inventory(station)`; `app.py`: `scan_camera`, `scan_stats`; `scanner.js`: `scannedCamera`, `loadInventoryCameras`; `common.js`: `addScannedToCollection(camera)` |
@@ -190,7 +190,7 @@ container - or a second container with its own data folder and port.
   table beside the entries belongs in `backups.INVENTORY_TABLES`. A filtered list's `quantity`
   is the camera's copies, not the entry's (`entry_quantity`).
 - **New Socket.IO events** need a handler in `app.py` and in `static/js/scanner.js`, and a line
-  in PROGRAM_DOCUMENTATION.md. Messages between server and station are in `remote_scanner.py`
+  in docs/PROGRAM_DOCUMENTATION.md. Messages between server and station are in `remote_scanner.py`
   and `station_client.py` - change both.
 - **Stations are open without a token** (`stations.token`), like the web UI, which has no login.
   **Never send full API keys to the browser**: `api_keys.credential_status()` masks them; the UI
@@ -236,7 +236,7 @@ container - or a second container with its own data folder and port.
 **Camera and detection** (the station)
 
 - **Auto-capture thresholds** in `scanner.py` come from measured camera noise and a live drop
-  test (documented in PROGRAM_DOCUMENTATION.md). Re-measure before changing them.
+  test (documented in docs/PROGRAM_DOCUMENTATION.md). Re-measure before changing them.
 - **The camera is exclusive**: only one process can open it; stop the station before testing
   with the real camera. Camera *controls* (`v4l2-ctl -c ...`) can be changed while another
   process streams.

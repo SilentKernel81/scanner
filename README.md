@@ -26,7 +26,7 @@ It is made of two kinds of programs on your network:
 The server needs no camera, and a station keeps nothing: it can be unplugged, replaced or
 reinstalled without losing a card. This repository grew out of the single-machine
 [scanner](https://github.com/SilentKernel81/scanner), which is a separate project; a single
-machine with its own camera still works here too (see [INSTALL.md](INSTALL.md)).
+machine with its own camera still works here too (see [docs/INSTALL.md](docs/INSTALL.md)).
 
 ## How it works
 
@@ -87,8 +87,8 @@ machine with its own camera still works here too (see [INSTALL.md](INSTALL.md)).
 
 ## Installation
 
-[DOCKER_GUIDE.md](DOCKER_GUIDE.md) walks through a server and a camera station step by step, with
-what each command should print (and a [75-second video](https://github.com/SilentKernel81/scanner-server/releases/tag/demo-video) shows it); [INSTALL.md](INSTALL.md) is the reference for every part. In short:
+[docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) walks through a server and a camera station step by step, with
+what each command should print (and a [75-second video](https://github.com/SilentKernel81/scanner-server/releases/tag/demo-video) shows it); [docs/INSTALL.md](docs/INSTALL.md) is the reference for every part. In short:
 
 ```bash
 # the server
@@ -128,7 +128,7 @@ you start auto scanning and kept loaded for 30 minutes.
 
 `qwen3.5:9b` is the recommended model (about 1 s per card on a desktop GPU). It needs more
 than 6 GB of GPU memory; on smaller GPUs `qwen3.5:4b` works, but it is slower on weak GPUs and
-more often mistakes regular cards for foil - see PROGRAM_DOCUMENTATION.md for the comparison.
+more often mistakes regular cards for foil - see docs/PROGRAM_DOCUMENTATION.md for the comparison.
 
 **Prompts**: **Settings → Vision AI → Edit prompts** shows what the AI is asked (card
 identification and the foil marker check) and lets you change it - for all models or just the
@@ -413,11 +413,11 @@ data/                Card data, collection, settings, backups, logs (created at 
 scanned_cards/       Capture images (created at runtime)
 ```
 
-[PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md) explains how everything works inside
+[docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md) explains how everything works inside
 (stations, detection, auto-capture, identification, matching, database);
-[INSTALL.md](INSTALL.md) covers installation and [DOCKER_GUIDE.md](DOCKER_GUIDE.md) is the
-step-by-step version ([VIDEO_SCRIPT.md](VIDEO_SCRIPT.md): a script for filming it);
-[TEST_CASES.md](TEST_CASES.md) lists what to check by hand.
+[docs/INSTALL.md](docs/INSTALL.md) covers installation and [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) is the
+step-by-step version ([docs/VIDEO_SCRIPT.md](docs/VIDEO_SCRIPT.md): a script for filming it);
+[docs/TEST_CASES.md](docs/TEST_CASES.md) lists what to check by hand.
 
 ## HTTP API
 
@@ -434,7 +434,7 @@ those to one camera.
 | `GET /api/stats` | Card data, scanned cards, collection and review counts |
 | `GET /api/stations` | The stations and their state |
 | `PUT` / `DELETE /api/stations/<id>` | Rename a station or set its location; forget it (with its scanned cards and review items) |
-| `POST /api/stations/<id>/captures` | A card captured by a station (multipart `image`; optional `foil_image`, `foil_is_image`, `name`, `wait`, `capture_id`): read, then added or queued for review - see PROGRAM_DOCUMENTATION.md, Stations |
+| `POST /api/stations/<id>/captures` | A card captured by a station (multipart `image`; optional `foil_image`, `foil_is_image`, `name`, `wait`, `capture_id`): read, then added or queued for review - see docs/PROGRAM_DOCUMENTATION.md, Stations |
 | `GET /api/stations/<id>/captures/<n>`, `POST /api/stations/<id>/undo` | The outcome of a capture that was still pending; take back the station's last card |
 | `GET /api/scan_settings`, `POST /api/scan_location`, `POST /api/sound` | A camera's scanning settings; its location for scanned cards; the sound switches (all, capture beep, card added) and volume |
 | `GET /api/games` | Supported card games (finishes, export formats) and the active one |
@@ -467,7 +467,7 @@ those to one camera.
 Scanning, searching and settings on a camera's page go through Socket.IO events
 (`capture_card`, `search_card`, `add_to_inventory`, `toggle_auto_capture`, ...), and a camera
 station holds a Socket.IO connection of its own (`/station`); both are listed in
-PROGRAM_DOCUMENTATION.md.
+docs/PROGRAM_DOCUMENTATION.md.
 
 The web interface has no login: run it on a network you trust.
 

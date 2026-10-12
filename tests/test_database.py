@@ -1,5 +1,5 @@
 """
-The cases of DATABASE_REVIEW.md (2026-10-09): transactions that are whole or not at all, reads
+The cases of docs/plans/DATABASE_REVIEW.md (2026-10-09): transactions that are whole or not at all, reads
 that do not write, station ownership that follows the quantity, captures that count once, and
 the web cache's own bounded file. Everything runs on temporary databases and folders; no
 application data is touched.
