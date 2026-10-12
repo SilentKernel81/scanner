@@ -287,7 +287,8 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
   forgotten on the server (`DELETE /api/stations/<id>`) counts from 1 again: a row the phone
   kept from before then names a new capture. `?sync_key=<key>` on either request makes it
   exact - a number that belongs to another capture now is refused (`409`). The Android app
-  does not send it yet (2026-10-12).
+  sends it. A row whose capture is answered `404` / `409` can never be kept in step: the app
+  then offers to take it off the phone only, on a second Remove.
 - **Pages**: a removal from the scanned cards sends `inventory_updated` (`cleared: true`) to every
   page, which count and list again; one from the review queue sends `review_queue_update` to the
   station's page, and closes the item there if it was the one open (`review_item` with
@@ -746,8 +747,9 @@ Changing the rotation turns the fixed area off (it was drawn for the other orien
    1382x1866 pictures gave the whole picture as a card in 96 of 120 frames before, 0 of 120
    after; a 16:9 picture gave none either way. The 3,200 recorded frames on the development
    machine (USB camera) give the same result before and after, and a drawn card 12 px from
-   every border is still found. Not run on the Pi camera's recorded frames or live. Not in
-   the Android app's port of the detector yet.
+   every border is still found. The 1,600 recorded frames of the Pi camera (three sessions)
+   give the same result before and after as well. Not run live with the lamp off. The
+   Android app's port has the rule too (`CardOutline.kt`: `isWholePicture`).
 
 `warp_card(frame, corners)` maps the corners to an upright rectangle with the card's aspect
 ratio - the image sent to the AI is flat and tightly cropped, and the collector line is always in
