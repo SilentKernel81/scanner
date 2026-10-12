@@ -353,6 +353,30 @@ class CapturesCountOnce(TemporaryData):
         self.assertEqual(self.review.count(GAME), 1)
         self.assertEqual(len(list(review_store.REVIEW_DIR.glob('*.jpg'))), 1)
 
+    def test_items_without_a_station_show_on_every_cameras_page(self):
+        """
+        What the server's own camera queued before 2026-10-12 (station NULL) has no page of
+        its own any more: each camera's page lists it beside its own items, so it can still
+        be resolved, and resolving it once takes it off all of them.
+        """
+        nobodys = self.review.add(GAME, self.photo, 'From the old camera')            # station NULL
+        own = self.review.add(GAME, self.photo, 'Unknown', station='desk-a')
+        self.review.add(GAME, self.photo, 'Unknown', station='desk-b')
+        self.assertEqual(self.review.count(GAME, 'desk-a'), 2)      # its own and nobody's, not desk-b's
+        self.assertEqual(self.review.count(GAME, 'desk-b'), 2)
+        self.assertEqual(self.review.count(GAME, None), 1)
+        self.assertEqual(self.review.count(GAME), 3)                # each item once
+        item, total = self.review.first(GAME, 'desk-a')
+        self.assertEqual((item['id'], total), (nobodys, 2))         # oldest first
+        # Clearing one camera drops only what that camera queued
+        self.assertEqual(self.review.clear(GAME, 'desk-a'), 1)
+        self.assertIsNone(self.review.get(own))
+        self.assertEqual(self.review.count(GAME, 'desk-a'), 1)
+        # Resolved on one page: gone from the other too
+        self.review.remove(nobodys)
+        self.assertEqual(self.review.count(GAME, 'desk-a'), 0)
+        self.assertEqual(self.review.count(GAME, 'desk-b'), 1)
+
     def test_the_outcome_survives_a_restart(self):
         pending_id, _ = self.queue()
         self.assertTrue(self.pending.has('desk-a', 7))

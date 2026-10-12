@@ -21,7 +21,8 @@ from pending import APPLIED_CAPTURES_TABLE, prune_applied
 logger = logging.getLogger('database')
 
 REVIEW_DIR = Config.DATA_DIR / 'review'
-# count / first: every station's items (a station id or None - the scanner's own camera - narrows it)
+# count / first: every station's items. A station id narrows it to that station's and those
+# that are nobody's (see _of); None to only those that are nobody's
 ANY = object()
 
 
@@ -42,7 +43,7 @@ class ReviewQueue:
                     card_id TEXT,           -- best match, if any
                     match TEXT,             -- how it was matched (Game.confirmed_matches)
                     created_at TEXT NOT NULL,
-                    station TEXT            -- stations.py id the capture came from (NULL: the scanner page's camera)
+                    station TEXT            -- stations.py id the capture came from (NULL: nobody's - see _of)
                 )''')
             if 'station' not in {row['name'] for row in self.conn.execute('PRAGMA table_info(review_queue)')}:
                 self.conn.execute('ALTER TABLE review_queue ADD COLUMN station TEXT')
@@ -84,9 +85,19 @@ class ReviewQueue:
 
     @staticmethod
     def _of(game, station):
+        """
+        The WHERE clause for what a page lists. A station's page shows that station's items
+        and those without a station: until 2026-10-12 the server could have a camera of its
+        own, and what that camera queued has station NULL - as has a capture of it that was
+        still waiting to be read at the update. That camera's page is gone with it; without
+        this, those items would be on no page and could never be resolved. They show on every
+        camera's page instead, and are gone from all of them once one resolves them.
+        """
         if station is ANY:
             return 'game = ?', (game,)
-        return 'game = ? AND station IS ?', (game, station)
+        if station is None:
+            return 'game = ? AND station IS NULL', (game,)
+        return 'game = ? AND (station = ? OR station IS NULL)', (game, station)
 
     def count(self, game, station=ANY):
         where, values = self._of(game, station)
@@ -110,7 +121,11 @@ class ReviewQueue:
         return REVIEW_DIR / item['file'] if item and item.get('file') else None
 
     def clear(self, game, station):
-        """Drop every item of one station (clearing that camera's scanned cards); returns how many"""
+        """
+        Drop every item of one station (clearing that camera's scanned cards); returns how many.
+        Exactly that station's: the items that are nobody's (see _of) show on its page too, but
+        clearing one camera does not throw them away - station None drops those.
+        """
         with self._lock:
             rows = self.conn.execute('SELECT file FROM review_queue WHERE game = ? AND station IS ?',
                                      (game, station)).fetchall()

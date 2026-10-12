@@ -484,6 +484,14 @@ the stations (`templates/stations.html`, refreshed from `GET /api/stations`). A 
 `scanned`, its copies in the scanned cards now (what its page lists); `captures` in
 `data/stations.json` counts every picture it ever sent and only numbers the captures.
 
+Review items without a station (`review_queue.station` NULL) are listed on **every** camera's
+page beside its own (`ReviewQueue._of`), and counted for each station in the list. They come
+from the camera the server itself could have until 2026-10-12 - what it had queued, and its
+captures that were still waiting to be read at the update - whose page went with it; shown
+nowhere, they could never have been resolved. Resolving one on any page removes it from all;
+clearing a camera's scanned cards leaves them. (Tested on a temporary database; no real
+installation with such items was updated.)
+
 On the server each station has a **desk** (`server/desks.py: Desk`, `desk_for`): its scanner, the card
 on its page (`current_card_info`), its open review, the capture being reviewed, its captures
 being read. The handlers were written for one camera and still read that way: `desk()` gives

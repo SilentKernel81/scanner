@@ -331,7 +331,9 @@ def clear_camera(game, camera):
             desk().current_review_id = desk().review_sid = desk().current_card_info = None
             set_pending_capture(None)
             emit_desk('review_item', {'id': None, 'total': 0})
-        emit_desk('review_queue_update', {'count': 0})
+        # What is left on its page: nothing of its own, but the items that are nobody's stay
+        # (review.py: _of)
+        emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter)})
         if reviews:
             log_to_client(f"Scanned cards cleared: {reviews} card(s) removed from the review queue too", level="warning")
     return result, reviews

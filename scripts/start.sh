@@ -201,6 +201,12 @@ cd "$PROJECT_DIR"
 # does not matter that it is started first.
 # --no-station: only the server (the cameras are on other machines)
 PORT=$(python3 -c "from config import Config; print(Config.PORT)" 2>/dev/null || echo 5000)
+# camera.type: remote in config.yaml used to tell the server "no camera on this machine":
+# it still means that here - only the server is started
+if [ "$(python3 -c "from config import Config; print(str(Config.CAMERA_TYPE).lower())" 2>/dev/null)" = "remote" ]; then
+    NO_STATION=1
+    echo "No camera on this machine (camera.type: remote): starting the server only"
+fi
 if [ "$NO_STATION" != 1 ]; then
     python3 station_client.py --server "http://localhost:${PORT}" &
     STATION_PID=$!
