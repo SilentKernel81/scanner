@@ -116,6 +116,8 @@ models/*.onnx
 
 # Environment variables (contains API keys!)
 .env
+# ... but not this link to it: Docker Compose looks for .env beside the compose files
+!deploy/.env
 .env.local
 .env.*.local
 

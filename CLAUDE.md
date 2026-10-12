@@ -42,13 +42,13 @@ User docs: [README.md](README.md); installation: [docs/INSTALL.md](docs/INSTALL.
 ```bash
 # server
 docker compose up -d --build                                                   # data/ and scanned_cards/ are volumes
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build   # ... with OCR on an NVIDIA GPU
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build   # ... with OCR on an NVIDIA GPU
 venv/bin/python app.py                    # without Docker (camera.type decides: remote, or a local camera)
 venv/bin/python setup_database.py         # (re)download the Scryfall card database
 venv/bin/python cleanup.py --stats        # capture images; --days N / --dry-run / --all
 
 # camera station, on the machine the webcam is plugged into
-docker compose -f docker-compose.client.yml up -d --build         # SCANNER_SERVER in .env
+docker compose -f deploy/docker-compose.client.yml up -d --build         # SCANNER_SERVER in .env
 venv/bin/python station_client.py --server http://<server>:5000   # without Docker (requirements-client.txt)
 
 # tests
@@ -111,7 +111,7 @@ container - or a second container with its own data folder and port.
 | Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` |
 | **Both** | |
 | Settings | `config.yaml` (+ `config.py`: also `SCANNER_CAMERA`, `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_TOKEN`), `.env`; on the server `data/settings.json` (everyone's choices), `data/stations.json` (each station's), `data/api_keys.env`, `data/prompts.json` |
-| Images | `Dockerfile` (targets `server`, `client`, `client-pi` for a Raspberry Pi camera), `docker-compose.yml`, `docker-compose.gpu.yml`, `docker-compose.client.yml`, `docker-compose.client-pi.yml`, `scripts/docker-entrypoint.sh` |
+| Images | `deploy/`: `Dockerfile` (targets `server`, `client`, `client-pi` for a Raspberry Pi camera), `docker-compose.yml`, `docker-compose.gpu.yml`, `docker-compose.client.yml`, `docker-compose.client-pi.yml`, `.env` (a link to the top folder's); `compose.yaml` in the top folder (includes the server's file); `scripts/docker-entrypoint.sh` |
 
 ## Conventions and Pitfalls
 
@@ -195,6 +195,14 @@ container - or a second container with its own data folder and port.
 - **Stations are open without a token** (`stations.token`), like the web UI, which has no login.
   **Never send full API keys to the browser**: `api_keys.credential_status()` masks them; the UI
   can only replace or remove a key.
+- **Where the compose files are.** In `deploy/`, with paths written from there (`../data`), the
+  build context `..` and the project name pinned (`name: scanner-server`): the folders, volumes
+  and network Docker resolves are the same as when the files lay in the top folder - check
+  with `docker compose ... config` before and after touching them (a wrong path there would
+  start the server on an empty `deploy/data`). Compose reads `.env` for `${...}` from beside
+  the compose file, hence the link `deploy/.env` → `../.env`; deploying with rsync must copy
+  links as links (`-l`). The image's build context is still the top folder, so `COPY` paths
+  in the Dockerfile and `.dockerignore` are unchanged.
 - **Docker images.** light-ocr's native library needs glibc 2.38+ (Debian 13 base images - on
   Debian 12 OCR silently fails to start), and NVIDIA's Vulkan driver needs the X11 / GLVND
   libraries plus `NVIDIA_DRIVER_CAPABILITIES=all`, or OCR falls back to the CPU. After changing
@@ -274,5 +282,5 @@ container - or a second container with its own data folder and port.
 **Logs**: on the server `data/logs/app.log` (also every station's scanner lines), `ai.log`,
 `database.log`, `scanned_cards.log`, `ocr.log`; `scanner.log` only with a camera on the server
 itself; `requests.log` only with Debug mode on. A station logs to its console
-(`docker compose -f docker-compose.client.yml logs`) - only there: why a card waits ("Waiting
+(`docker compose -f deploy/docker-compose.client.yml logs`) - only there: why a card waits ("Waiting
 N s: ..."), focus probes and saved debug frames.

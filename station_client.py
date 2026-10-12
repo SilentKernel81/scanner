@@ -488,7 +488,7 @@ def upload_verdict(response):
 
 
 def main():
-    # In a container the machine's name is the one mounted from the host (docker-compose.client.yml)
+    # In a container the machine's name is the one mounted from the host (deploy/docker-compose.client.yml)
     host_file = Path('/etc/host_hostname')
     host = host_file.read_text().strip() if host_file.is_file() else socket.gethostname()
     host = re.sub(r'[^A-Za-z0-9_-]', '-', host)[:40] or 'station'

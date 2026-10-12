@@ -152,8 +152,8 @@ In nano, save with Ctrl+O, Enter, and leave with Ctrl+X.
 **4. Start it.**
 
 ```bash
-docker compose -f docker-compose.client.yml up -d --build
-docker compose -f docker-compose.client.yml logs -f
+docker compose -f deploy/docker-compose.client.yml up -d --build
+docker compose -f deploy/docker-compose.client.yml logs -f
 ```
 
 You should see (Ctrl+C to leave):
@@ -221,7 +221,7 @@ export to Moxfield.
 on the server, then start the server with both files - now and every time:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build
 grep "light-ocr ready" data/logs/ai.log | tail -1      # ... light-ocr ready (webgpu)
 ```
 
@@ -239,21 +239,21 @@ goes through it step by step: downloading the app, mounting the phone, and the f
 
 **Lock out other devices.** Anyone on your network can open the pages. To at least require a
 password from cameras, put `SCANNER_STATION_TOKEN=<something long>` in a `.env` file beside the
-server's `docker-compose.yml`, run `docker compose up -d` again, and add the same line to
+server's `deploy/docker-compose.yml`, run `docker compose up -d` again, and add the same line to
 every station's `.env`.
 
 ## Day to day
 
 | | On the server | On a camera station |
 |---|---|---|
-| Stop | `docker compose stop` | `docker compose -f docker-compose.client.yml stop` |
-| Start | `docker compose up -d` | `docker compose -f docker-compose.client.yml up -d` |
-| See what it is doing | `docker compose logs -f` | `docker compose -f docker-compose.client.yml logs -f` |
-| Update to a new version | `git pull && docker compose up -d --build` | `git pull && docker compose -f docker-compose.client.yml up -d --build` |
+| Stop | `docker compose stop` | `docker compose -f deploy/docker-compose.client.yml stop` |
+| Start | `docker compose up -d` | `docker compose -f deploy/docker-compose.client.yml up -d` |
+| See what it is doing | `docker compose logs -f` | `docker compose -f deploy/docker-compose.client.yml logs -f` |
+| Update to a new version | `git pull && docker compose up -d --build` | `git pull && docker compose -f deploy/docker-compose.client.yml up -d --build` |
 
 - Both start again by themselves after a reboot.
 - Update the server first; the stations reconnect on their own.
-- With the GPU file, add `-f docker-compose.yml -f docker-compose.gpu.yml` to every server
+- With the GPU file, add `-f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml` to every server
   command.
 - **Backup**: the collection page's Settings has *Back up now* (and makes one every day). For
   everything, stop the server and copy its `data/` folder.
@@ -262,8 +262,8 @@ every station's `.env`.
 
 | What you see | What to do |
 |---|---|
-| The camera's page says **No camera station connected** | The station isn't running or can't reach the server. On the station: `docker compose -f docker-compose.client.yml logs`. "not reachable - trying again" means the address in `.env` is wrong or the server is down; it connects by itself once it can |
-| The station's log says **No camera found** | The name in `SCANNER_CAMERA_INDEX` is wrong, or another program has the camera open (a video call, another scanner). Check `ls /dev/v4l/by-id/`, fix `.env`, then `docker compose -f docker-compose.client.yml up -d` |
+| The camera's page says **No camera station connected** | The station isn't running or can't reach the server. On the station: `docker compose -f deploy/docker-compose.client.yml logs`. "not reachable - trying again" means the address in `.env` is wrong or the server is down; it connects by itself once it can |
+| The station's log says **No camera found** | The name in `SCANNER_CAMERA_INDEX` is wrong, or another program has the camera open (a video call, another scanner). Check `ls /dev/v4l/by-id/`, fix `.env`, then `docker compose -f deploy/docker-compose.client.yml up -d` |
 | The card is not outlined | The whole card must be in view, on a background that contrasts with its border. For sleeved or borderless cards use **Fixed area** on the camera's page |
 | Status stays on **Focusing** | Click **Refocus** with a card in the box |
 | Many cards go to **Review** | Usually focus: the small print is too soft to read. **Refocus**. Full-art and borderless cards need a vision AI |
