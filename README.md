@@ -99,7 +99,7 @@ docker compose up -d --build              # the first start downloads the card d
 
 # a camera station, on the machine with the webcam (same repository)
 cp .env.station.example .env              # edit it: the server's address, the camera, a name
-docker compose -f docker-compose.client.yml up -d --build
+docker compose -f deploy/docker-compose.client.yml up -d --build
 # it appears on the server's page by itself
 ```
 
@@ -339,7 +339,7 @@ image).
 | Update the programs | `git pull`, then `docker compose up -d --build` again - on the server and on each station |
 | Back up your cards | Collection page → Settings → **Back up now**; automatic backups are set there too (every hour to every week, or off; default every day, the last 7 kept), and each backup can be downloaded as a zip file and uploaded again |
 | Back up everything | Copy the server's `data/` folder while the container is stopped |
-| See what a station is doing | Its page's Activity log; `docker compose -f docker-compose.client.yml logs -f` on the station |
+| See what a station is doing | Its page's Activity log; `docker compose -f deploy/docker-compose.client.yml logs -f` on the station |
 | Server logs | `data/logs/`: `app.log` (web app, every station's scanner lines), `ai.log` (OCR and AI reads), `database.log`, `scanned_cards.log` (one CSV line per identified card), `ocr.log` |
 
 Your collection lives in the same SQLite file as the card data (`data/cards_database.db`,
@@ -348,7 +348,7 @@ table `inventory`); updating the card data does not touch it.
 ## Troubleshooting
 
 **A camera's page says "No camera station connected"** - the station's program isn't running
-or can't reach the server. On the station: `docker compose -f docker-compose.client.yml logs`;
+or can't reach the server. On the station: `docker compose -f deploy/docker-compose.client.yml logs`;
 it retries by itself once the server is reachable.
 
 **"No camera found" on a connected station** - the station doesn't see its webcam. Check
@@ -405,10 +405,13 @@ scanner.py           Camera capture thread, detection, stability, auto-capture, 
 object_detector.py   Card outline detection + perspective correction
 config.yaml          Settings (loaded by config.py / config_loader.py)
 templates/, static/  Web interface: the cameras, a camera's page, the collection
-tests/               Automated tests (camera ownership, backups)
-Dockerfile           Images: server, client
-docker-compose*.yml  Server, server with GPU, camera station
-scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker
+tests/               Automated tests (camera ownership, backups, database, a station's setup page and uploads)
+compose.yaml         `docker compose up` in this folder starts the server (it points into deploy/)
+deploy/              Everything about Docker: the Dockerfile (images server, client, client-pi) and
+                     the compose files - server, server with GPU, camera station, station with a Pi camera
+docs/                How it works, installation, the Docker guide, the manual test list; docs/plans/
+scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker;
+                     benchmark_db.py, benchmark_station.py
 data/                Card data, collection, settings, backups, logs (created at runtime)
 scanned_cards/       Capture images (created at runtime)
 ```

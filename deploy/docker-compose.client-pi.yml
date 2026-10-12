@@ -1,5 +1,5 @@
 # Camera station with a Raspberry Pi camera module: used together with docker-compose.client.yml
-#   docker compose -f docker-compose.client.yml -f docker-compose.client-pi.yml up -d --build
+#   docker compose -f deploy/docker-compose.client.yml -f deploy/docker-compose.client-pi.yml up -d --build
 # Everything in that file stays as it is; this one only changes what a Pi camera needs.
 services:
   station:

@@ -66,7 +66,7 @@ Design choices:
 
 | Program | Runs on | What it does |
 |---|---|---|
-| `app.py` - the server | One machine; a Docker image (`Dockerfile` target `server`) | Web pages, reading (OCR + AI), matching, card data, scanned cards, collection, decks, backups; holds every station's settings |
+| `app.py` - the server | One machine; a Docker image (`deploy/Dockerfile` target `server`) | Web pages, reading (OCR + AI), matching, card data, scanned cards, collection, decks, backups; holds every station's settings |
 | `station_client.py` - a camera station | The machine a USB webcam is plugged into; a Docker image (target `client`, x86-64 and ARM64) | Camera, outline detection, stillness, new-card rules, focus; uploads each capture; shows nothing itself |
 | The Android app ([mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android)) in client mode | A phone over the box | The same job with the phone's camera (a Kotlin port of the detection); uploads each capture. It can also work on its own, without a server |
 
@@ -1247,7 +1247,7 @@ Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 
   exactly the detector's working size (no rescaling): about 40 ms, and 13.9 frames a second
   with a card in view. Checked on all 2,452 recorded frames (Pi and USB camera), alone and
   following the previous outline: every outline and score identical to before.
-- **In Docker** (target `client-pi`, `docker-compose.client-pi.yml`): Debian 13 with Raspberry
+- **In Docker** (target `client-pi`, `deploy/docker-compose.client-pi.yml`): Debian 13 with Raspberry
   Pi's package archive for `picamera2` / libcamera - its keyring package is fetched over HTTPS
   from the archive's package list, because the key file offered for download is signed with
   SHA-1, which Debian 13's apt refuses. The container runs privileged with `/run/udev`
@@ -1646,7 +1646,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | Where | What |
 |---|---|
 | `config.yaml` | Vision AI defaults, web server, station token, cleanup, card data update interval; `camera.type: remote` (or `SCANNER_CAMERA=remote`, the Docker image's default) for a server without a camera |
-| `.env` (beside `docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
+| `.env` (beside `deploy/docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The page only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
 | `data/stations.json` | The stations: name, location, capture count, last seen, `camera` (it connects as a camera station), and `settings` - each station's `focus_value`, `camera_rotation`, `refocus_every`, `fixed_area`, `fixed_area_enabled`, `debug_trace`, `auto_add` |
@@ -1666,7 +1666,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | Where | What |
 |---|---|
 | `config.yaml` | The camera (`camera.usb_index`, `resolution`, `fps`), detection and auto-capture thresholds |
-| Environment, or `.env` beside `docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
+| Environment, or `.env` beside `deploy/docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
 | `scanned_cards/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
 
 ## Performance

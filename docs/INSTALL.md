@@ -30,7 +30,7 @@ docker compose logs -f             # the first start downloads the card data (ab
 Then open `http://<server>:5000`: an empty list of cameras, and **Collection**. Stop with
 `docker compose stop` (the app closes its databases, like Ctrl+C).
 
-Files: `Dockerfile` (target `server`), `docker-compose.yml`, `docker-compose.gpu.yml`,
+Files: `deploy/Dockerfile` (target `server`), `deploy/docker-compose.yml`, `deploy/docker-compose.gpu.yml`,
 `scripts/docker-entrypoint.sh`.
 
 - **Your data** is in `data/` (card data, collection, scanned cards, decks, settings, the
@@ -70,7 +70,7 @@ Ti SUPER against 4 cores of a Ryzen 7 7800X3D). It needs the
 on the host.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build
 ```
 
 `data/logs/ai.log` then says `light-ocr ready (webgpu)` instead of `(cpu)`. Use the same two
@@ -101,7 +101,7 @@ scanner lock the focus; others keep their own autofocus.
 
 ```bash
 git clone https://github.com/SilentKernel81/scanner-server.git && cd scanner-server
-docker compose -f docker-compose.client.yml up -d --build
+docker compose -f deploy/docker-compose.client.yml up -d --build
 ```
 
 Then open the station's **setup page**, `http://<the station's address>:8080`, and choose the
@@ -134,8 +134,8 @@ set there wins, and the page shows it as fixed:
 ```bash
 ls /dev/v4l/by-id/                 # find your camera: ...-video-index0
 cp .env.station.example .env       # then edit it: the server's address, the camera, a name
-docker compose -f docker-compose.client.yml up -d --build
-docker compose -f docker-compose.client.yml logs -f
+docker compose -f deploy/docker-compose.client.yml up -d --build
+docker compose -f deploy/docker-compose.client.yml logs -f
 ```
 
 The station appears on the server's start page; its page is `http://<server>:5000/scan/<id>`.
@@ -161,7 +161,7 @@ blocked by its firewall from inside a container.
   be unplugged and plugged in again without restarting it. Unplugging while it runs has not
   been tested; restart the container if the camera does not come back.
 - Nothing is kept in the container: it can be removed and rebuilt at any time.
-- Files: `Dockerfile` (target `client`), `docker-compose.client.yml`,
+- Files: `deploy/Dockerfile` (target `client`), `deploy/docker-compose.client.yml`,
   `requirements-client.txt`. The image is about 510 MB.
 
 ### Without Docker
@@ -187,7 +187,7 @@ A Raspberry Pi **camera module** needs a second compose file, which builds anoth
 
 ```bash
 sudo apt install docker.io docker-cli docker-compose docker-buildx    # Raspberry Pi OS (Debian 13)
-docker compose -f docker-compose.client.yml -f docker-compose.client-pi.yml up -d --build
+docker compose -f deploy/docker-compose.client.yml -f deploy/docker-compose.client-pi.yml up -d --build
 ```
 
 On the setup page choose the Raspberry Pi camera, press *Show picture* and drag a rectangle
@@ -245,11 +245,22 @@ On the server, then on each camera station:
 ```bash
 git pull
 docker compose up -d --build                                # server (add the GPU file if you use it)
-docker compose -f docker-compose.client.yml up -d --build   # camera station
+docker compose -f deploy/docker-compose.client.yml up -d --build   # camera station
 ```
 
 Update the server first: a station reconnects by itself a few seconds after the server is
-back, and scanning continues. Card data is updated from the web interface (**Settings → Update
+back, and scanning continues.
+
+**Coming from a version with the Docker files in the top folder** (before 2026-10-12): they
+are in `deploy/` now, and the documents in `docs/`. `git pull` moves them; your `data/`,
+`scanned_cards/` and `.env` stay where they are and are used as before. What changes is the
+command for a station and for the GPU file - `-f deploy/docker-compose....yml` as above;
+the server's plain `docker compose up -d --build` is the same. The compose files now name
+their project `scanner-server`: if your folder has another name, run `docker compose down`
+with the *old* files before pulling (containers of the old name would be in the way), and a
+station set up on its setup page has its settings in a volume of the old name
+(`<folder>_station-data`) - copy it to `scanner-server_station-data`, or set the station up
+again on its page. Card data is updated from the web interface (**Settings → Update
 card database**, or the Database counter when it shows a dot).
 
 ## Backups
@@ -307,7 +318,7 @@ journalctl -u mtg-scanner -f            # live logs (the app also writes data/lo
 
 **The station's page says "No camera station connected"** - the station isn't running, or
 can't reach the server: check `SCANNER_SERVER` and the log on the station
-(`docker compose -f docker-compose.client.yml logs`). It keeps trying.
+(`docker compose -f deploy/docker-compose.client.yml logs`). It keeps trying.
 
 **The station is refused** - "wrong or missing station token" in the server's log: give the
 station the server's token.

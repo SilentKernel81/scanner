@@ -28,7 +28,7 @@ controlled, and how the station is packaged:
 | `config.py: usb_camera_index` | A number, or a `/dev/v4l/by-id/...` path that stays the same camera | Only a number, and DirectShow's numbering can change when devices are plugged in. A camera chosen by name would be the stable equivalent |
 | Raw JPEG frames | With `CAP_PROP_CONVERT_RGB = 0` V4L2 hands over the camera's JPEG; live frames are decoded at half size, captures at full size (`raw_mjpeg`, `half_size_decode`) | Unknown whether a Windows backend hands over raw JPEG. The code already falls back to frames decoded by OpenCV - correct, but more CPU at 2560x1440 |
 | `station_client.py: main` | Default station id from `/etc/host_hostname` (mounted in Docker), else the machine's name | Falls back to the machine's name already |
-| Packaging | Docker image (target `client`), `docker-compose.client.yml` with `/dev` mounted | Docker Desktop cannot hand a USB webcam to a Linux container in any simple way, so the station runs natively: Python, or one `.exe` |
+| Packaging | Docker image (target `client`), `deploy/docker-compose.client.yml` with `/dev` mounted | Docker Desktop cannot hand a USB webcam to a Linux container in any simple way, so the station runs natively: Python, or one `.exe` |
 
 ## Approach
 

@@ -1,0 +1,9 @@
+# The scanner server, started from this folder as it always was:
+#   mkdir -p data scanned_cards      # before the first start, so they belong to you, not root
+#   docker compose up -d --build
+# This file only points at the real one: everything about Docker is in deploy/ - the image
+# (Dockerfile), the server (docker-compose.yml, and docker-compose.gpu.yml for an NVIDIA GPU)
+# and the camera stations (docker-compose.client.yml, docker-compose.client-pi.yml).
+name: scanner-server
+include:
+  - deploy/docker-compose.yml
