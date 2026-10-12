@@ -82,6 +82,11 @@ data/moxfield_export_*.csv
 data/settings.json
 data/prompts.json
 data/debug_frames/
+# A camera station's own settings (can hold the server's token) and its setup page's password hash
+data/station.json
+data/station_login.json
+# Answers of other sites, cached: disposable, rebuilt as needed
+data/web_cache.db*
 
 # Logs
 data/logs/
@@ -91,6 +96,7 @@ data/logs/
 scanned_cards/*.jpg
 scanned_cards/*.png
 scanned_cards/*.jpeg
+scanned_cards/*.upload.json
 !scanned_cards/.gitkeep
 
 # Models
