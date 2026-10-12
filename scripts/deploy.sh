@@ -302,21 +302,44 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+# Does this machine have a camera of its own? Yes, unless the camera type is 'remote'
+# (camera.type in config.yaml, or SCANNER_CAMERA in .env) - which until 2026-10-12 told the
+# server "no camera here" and still means exactly that to this script and to start.sh: only
+# the server is installed and started. Asked of config.py, so both scripts and the programs
+# read the same value.
+wants_station() {
+    [ "$(venv/bin/python -c 'from config import Config; print(str(Config.CAMERA_TYPE).lower())' 2>/dev/null)" != "remote" ]
+}
+
+install_unit() {  # install_unit <name>: /etc/systemd/system/<name>.service from scripts/<name>.service
+    local tmp; tmp=$(mktemp)
+    sed -e "s|@USER@|$(id -un)|g" -e "s|@GROUP@|$(id -gn)|g" -e "s|@DIR@|${DIR}|g" \
+        -e "s|@PORT@|$(config_get flask.port 5000)|g" "scripts/$1.service" > "$tmp"
+    sudo_cmd install -m 644 "$tmp" "/etc/systemd/system/$1.service"
+    rm -f "$tmp"
+}
+
+start_station_service() {  # install (or refresh), enable and start the camera's service, and say how it went
+    mkdir -p data scanned_cards station_captures   # the unit names them as writable: they must exist
+    install_unit "$STATION_SERVICE_NAME"
+    sudo_cmd systemctl daemon-reload
+    sudo_cmd systemctl enable -q "$STATION_SERVICE_NAME"
+    sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
+    sleep 3
+    if systemctl is-active -q "$STATION_SERVICE_NAME"; then
+        ok "Service ${STATION_SERVICE_NAME} is running: this machine's camera (starts on boot)"
+    else
+        warn "The camera station did not start - see: journalctl -u ${STATION_SERVICE_NAME} -n 50 (the server runs without it)"
+    fi
+}
+
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
     step "System services"
     command -v systemctl >/dev/null || die "systemd is needed for --service"
-    mkdir -p data scanned_cards station_captures   # the units name them as writable: they must exist
-    # Two units from their templates: the server, and the station for this machine's camera
-    # (it is told the server's port; everything else it reads from config.yaml and .env)
-    for unit in "$SERVICE_NAME" "$STATION_SERVICE_NAME"; do
-        tmp=$(mktemp)
-        sed -e "s|@USER@|$(id -un)|g" -e "s|@GROUP@|$(id -gn)|g" -e "s|@DIR@|${DIR}|g" \
-            -e "s|@PORT@|$(config_get flask.port 5000)|g" "scripts/${unit}.service" > "$tmp"
-        sudo_cmd install -m 644 "$tmp" "/etc/systemd/system/${unit}.service"
-        rm -f "$tmp"
-    done
+    mkdir -p data scanned_cards
+    install_unit "$SERVICE_NAME"
     sudo_cmd systemctl daemon-reload
-    sudo_cmd systemctl enable -q "$SERVICE_NAME" "$STATION_SERVICE_NAME"
+    sudo_cmd systemctl enable -q "$SERVICE_NAME"
     sudo_cmd systemctl restart "$SERVICE_NAME"
     sleep 3
     if systemctl is-active -q "$SERVICE_NAME"; then
@@ -324,12 +347,13 @@ if [ "$INSTALL_SERVICE" -eq 1 ]; then
     else
         die "Service failed to start - see: journalctl -u ${SERVICE_NAME} -n 50"
     fi
-    sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
-    sleep 3
-    if systemctl is-active -q "$STATION_SERVICE_NAME"; then
-        ok "Service ${STATION_SERVICE_NAME} is running: this machine's camera (starts on boot)"
+    # The camera on this machine is read by a second service, a station that sends its cards
+    # to the server above (it is told the server's port; the rest it reads from config.yaml
+    # and .env)
+    if wants_station; then
+        start_station_service
     else
-        warn "The camera station did not start - see: journalctl -u ${STATION_SERVICE_NAME} -n 50 (the server runs without it)"
+        ok "No camera on this machine (camera.type: remote in config.yaml): the server only"
     fi
 elif service_installed; then
     step "System services"
@@ -343,10 +367,13 @@ elif service_installed; then
         if [ -f "$STATION_SERVICE_FILE" ]; then
             sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
             ok "Restarted ${STATION_SERVICE_NAME}"
-        else
-            # Installed before the camera moved out of the server (2026-10-12): the server
-            # alone no longer reads a camera
-            warn "This machine's camera needs its own service now: run $0 --service once"
+        elif wants_station; then
+            # A machine installed before 2026-10-12: its one service, the server, read the
+            # camera itself. The server no longer does, so an update that only restarted it
+            # would leave a scanner that worked an hour ago unable to scan, also after the
+            # next reboot. The camera's service is added here, as part of the update.
+            warn "This machine's camera was read by the server, which no longer opens one: adding its own service"
+            start_station_service
         fi
     fi
 fi
@@ -362,8 +389,13 @@ for ip in $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut
 done
 echo
 if service_installed; then
-    echo "  Services: sudo systemctl {status|restart|stop} ${SERVICE_NAME} ${STATION_SERVICE_NAME}"
-    echo "  Logs:     journalctl -u ${SERVICE_NAME} -f      (the camera: -u ${STATION_SERVICE_NAME})"
+    if [ -f "$STATION_SERVICE_FILE" ]; then
+        echo "  Services: sudo systemctl {status|restart|stop} ${SERVICE_NAME} ${STATION_SERVICE_NAME}"
+        echo "  Logs:     journalctl -u ${SERVICE_NAME} -f      (the camera: -u ${STATION_SERVICE_NAME})"
+    else
+        echo "  Service:  sudo systemctl {status|restart|stop} ${SERVICE_NAME}"
+        echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
+    fi
 else
     echo "  Start it: cd ${DIR} && ./scripts/start.sh     (the server and this machine's camera)"
     echo "  or the two by hand, each in its own terminal:"
@@ -371,5 +403,7 @@ else
     echo "            venv/bin/python station_client.py --server http://localhost:${port}"
     echo "  Or run both as services (start on boot): $0 --service"
 fi
-echo "  Camera:   which one, and its name: http://localhost:8080 (the station's setup page)"
+if wants_station; then
+    echo "  Camera:   which one, and its name: http://localhost:8080 (the station's setup page)"
+fi
 echo "  Update:   $0 --update"

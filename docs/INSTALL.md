@@ -275,8 +275,10 @@ card database**, or the Database counter when it shows a dot).
 
 One machine can be server and camera at once, by running both programs: the server
 (`app.py`) and a camera station (`station_client.py`) that sends its cards to it. The server
-itself opens no camera (it could until 2026-10-12; a machine set up before that needs
-`./scripts/deploy.sh --service` once more, which adds the station's service).
+itself opens no camera. It could until 2026-10-12: on a machine set up as a service before
+that, `./scripts/deploy.sh --update` adds the station's service itself, so the camera keeps
+scanning after the update - unless `config.yaml` says `camera.type: remote` ("no camera on
+this machine"), which installs and starts only the server.
 `scripts/deploy.sh` sets both up on a Linux PC (apt, pacman, dnf, zypper):
 
 ```bash
@@ -290,17 +292,19 @@ git clone https://github.com/SilentKernel81/scanner-server.git && cd scanner-ser
 `http://localhost:5000` lists the cameras - this machine's among them, under the machine's
 name - and other stations can connect as well. The camera, its name and the server's address
 can be changed on the station's setup page, `http://localhost:8080`.
-`./scripts/start.sh --no-station` starts only the server, for a machine without a camera.
+`./scripts/start.sh --no-station` starts only the server, for a machine without a camera
+(as does `camera.type: remote` in `config.yaml`).
 
 Tried on a PC: the start script with a server and a station on one machine (the station
 connected, Ctrl+C stopped both), and both service files checked with `systemd-analyze
-verify`. Not tried: `deploy.sh --service` installing and starting the two services, and
-scanning with a camera this way.
+verify`. Not tried: `deploy.sh --service` installing and starting the two services,
+`--update` adding the station's service to an older installation, and scanning with a camera
+this way.
 
 | Option | What it does |
 |---|---|
 | `--service` / `--remove-service` | Install and start / stop and remove the two systemd services: `mtg-scanner` (the server) and `mtg-scanner-station` (this machine's camera). Your data is kept |
-| `--update` | Pull the latest code first, then update packages and restart the services |
+| `--update` | Pull the latest code first, then update packages and restart the services. An installation from before 2026-10-12 gets the camera's service added here |
 | `--camera N` | Use USB camera `/dev/videoN` (sets `camera.usb_index` in `config.yaml`) |
 | `--picamera` | Raspberry Pi camera module (this option of the script is untested; the camera module itself was tried as a station, see below) |
 | `--skip-database` / `--refresh-cards` | Don't download the card data / download the latest |
