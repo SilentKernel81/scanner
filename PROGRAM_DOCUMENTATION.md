@@ -359,8 +359,28 @@ scanning stays on the camera's page on the server.
   whole or not at all; mode 600, it can hold the token) and restarts the station: the page's
   thread raises a flag, the main thread ends `Station.run()` - which releases the camera - and
   replaces the program by a new copy of itself (`os.execv`), so a container keeps running.
-  Captures still waiting to be sent when that happens stay as files in `scanned_cards/` and
-  are not sent by the new run (as with any restart of a station).
+  Captures still waiting to be sent are not lost by it: see *Captures that are not on the
+  server yet* below. One that is on its way gets up to 10 s to arrive first.
+- **Captures that are not on the server yet** (`station_client.py`: `write_note`,
+  `load_pending`, `send_until_settled`): the upload queue is in memory, so every queued
+  capture also has a note beside its picture, `scanned_cards/<image>.upload.json` - its
+  `capture_id`, mode, foil picture, and where it was going (server address, station id).
+  A new start queues the notes it finds, oldest first, under the same `capture_id`: a
+  capture that may or may not have arrived before the program ended is sent again and is
+  still one card (the server counts an id once). The note goes when the server has the
+  capture, or has refused it for good (the picture is then kept, as before). This holds for
+  a restart from the setup page, a stopped container and a power cut alike; in Docker the
+  folder is the volume `station-captures`, so it also outlives a new image.
+  - *Taken for another server, or under another station id* (the setup page changed one
+    while captures waited): they are **held** - kept, not sent. The old server may have moved
+    to a new address, or the station may have been pointed at another collection; the
+    program cannot know which. The setup page's status shows them with *Send them to this
+    server* and *Delete them* (asked twice).
+  - The token is not in the note: a capture is sent with the token the station has now, so
+    correcting a wrong token on the setup page lets the waiting captures through.
+  - Until this was added (2026-10-11, found by a Codex review of the setup page), a
+    station's unsent captures were only sent by the run that took them, and the setup
+    page's restart made that a common case.
 - **The camera in Config** (`apply_camera`): the saved camera and crop are put into `Config`
   before the scanner is created, and only where the environment did not decide.
 - **Show picture** (`SetupPage.picture`): a free camera is opened for one picture and closed.
@@ -371,7 +391,8 @@ scanning stays on the camera's page on the server.
 - **The token never reaches the page** (only whether one is saved).
 - **Login** (`station_login.py`): the page asks for a password - one password, no user names.
   At the first visit it asks to choose one (at least 8 characters); `SCANNER_SETUP_PASSWORD`
-  fixes it from outside instead. Until a password exists, whoever opens the page first
+  fixes it from outside instead (kept the same way: a hash and a random key in the file,
+  rotated when the variable's password changes). Until a password exists, whoever opens the page first
   chooses it. Everything but the page's HTML and the login itself answers 401 without a
   login.
   - *Kept hashed, not encrypted*: `data/station_login.json` (mode 600) holds a random salt,
@@ -381,7 +402,11 @@ scanning stays on the camera's page on the server.
   - *Sessions*: a cookie with an expiry time (30 days) and its HMAC-SHA256 signature made
     with that key (`HttpOnly`, `SameSite=Strict`). The station keeps no list of logins, so a
     login survives the restart after *Save and restart*. Changing the password makes a new
-    key: every browser has to log in again.
+    key: every browser has to log in again. The key is always random and this station's
+    own - never made from the password. (The first version made it from
+    `SCANNER_SETUP_PASSWORD` with one SHA-256: a password guess could then be tested by
+    signing a cookie with it, without a login, scrypt or the lock, and stations with the same
+    password accepted each other's cookies. Found by the same review; fixed before release.)
   - *Wrong passwords*: the next attempt has to wait 1 s, then 2, 4 ... up to 30 s. The wait
     is for everyone, so someone guessing can make the owner wait up to 30 s.
   - *Forgotten*: delete `data/station_login.json` on the station and restart it.
@@ -395,7 +420,14 @@ and while scanning; settings kept over a restart of the container; the page driv
 headless Chromium (picture shown, a crop dragged, no script errors). On a PC only setup mode
 and the page's routes were tried; choosing between two USB cameras has not been tried at all.
 `tests/test_station_setup.py` covers who wins, the form's checks, the file, and the password
-(hashing, the lock after wrong attempts, session cookies). The login was tried on a PC in
+(hashing, the lock after wrong attempts, session cookies, that a cookie cannot be made from
+the environment's password); `tests/test_station_uploads.py` the notes (a restart with
+captures waiting, a capture sent twice under one id, held captures sent or deleted) against
+a stand-in for the server. Tried on a PC: a capture left waiting, the station restarted from
+its page - the new run queued it and went on trying; two captures for another server shown
+as kept, and deleted with the page's buttons in a headless Chromium. Not tried: a real
+server accepting a capture re-sent after a restart (the server's side of that, the same
+`capture_id` twice, was measured 2026-10-08). The login was tried on a PC in
 setup mode: every route refused without it, a second "choose a password" refused, a forged
 cookie refused, the old cookie refused after a change; and its form driven in a headless
 Chromium.
@@ -1626,7 +1658,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 |---|---|
 | `config.yaml` | The camera (`camera.usb_index`, `resolution`, `fps`), detection and auto-capture thresholds |
 | Environment, or `.env` beside `docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
-| `scanned_cards/` | Captures not sent yet (deleted once the server has them); `data/debug_frames/` with debug trace on |
+| `scanned_cards/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
 
 ## Performance
 
@@ -1698,8 +1730,8 @@ container with its own data folder and port.
 - **No login**: the web interface and, without a token, the upload are open to the network.
   For a home or shop network, not the internet.
 - **A station without a connection** shows no live view and no result until it is back; the
-  captures wait (computer station: until the client is stopped - its unsent captures are files
-  in its `scanned_cards/`, sent only by that run; phone: kept across restarts of the app).
+  captures wait, and are kept across restarts of the station and of the app (a computer
+  station: pictures with a note each in its `scanned_cards/`; see the station's setup page).
 - **One camera per station**, opened by one process.
 - **Raspberry Pi camera modules** go through `picamera2`, which is not in the client's Docker
   image: the station runs from the Pi's own Python there (see [Pi camera module](#pi-camera-module)).

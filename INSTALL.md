@@ -116,7 +116,10 @@ server, the station's name and the camera:
 - **Status**: connected or not, the camera and its pictures a second, the temperature.
 
 *Save and restart* writes the choices to the volume `station-data` (`data/station.json`) and
-restarts the station with them.
+restarts the station with them. Cards captured but not yet on the server are kept through
+this and any other restart (volume `station-captures`) and sent afterwards. If the server
+address or the station's id was changed while some were waiting, the page shows them as
+*kept, not sent* and asks whether to send them to the server it has now or delete them.
 
 The page is behind a **password**. The first time it is opened it asks you to choose one (at
 least 8 characters) - until then, whoever opens it first chooses it, so do that right after

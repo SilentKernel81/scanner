@@ -69,16 +69,9 @@ class Login:
         self.failures = 0              # wrong passwords in a row
         self.locked_until = 0.0        # no attempt is accepted before this time
         self.fixed = bool(os.getenv(PASSWORD_VARIABLE))
+        self.record = self._load()
         if self.fixed:
-            # The password comes from the environment and is not written to any file. The
-            # salt and the cookie key are made from it, so that they are the same after a
-            # restart (logins survive) and change when the password is changed.
-            password = os.getenv(PASSWORD_VARIABLE)
-            seed = hashlib.sha256(b'station-login:' + password.encode('utf-8')).hexdigest()
-            self.record = {'salt': seed[:32], 'cost': dict(SCRYPT), 'key': seed[32:]}
-            self.record['hash'] = hash_password(password, self.record['salt'])
-        else:
-            self.record = self._load()
+            self._adopt_environment_password(os.getenv(PASSWORD_VARIABLE))
 
     @staticmethod
     def _load():
@@ -90,6 +83,48 @@ class Login:
         except (OSError, ValueError, AttributeError):
             pass
         return None
+
+    def _adopt_environment_password(self, password):
+        """
+        The password comes from the environment (SCANNER_SETUP_PASSWORD). It is treated like
+        one chosen on the page: a record with a random salt, its scrypt hash and a random
+        cookie key is kept in the file - never the password itself.
+
+        The cookie key must NOT be made from the password. An earlier version did that (one
+        SHA-256 of it), which let anyone test a password guess without ever asking the
+        station to log in: make the key from the guess, sign a cookie with it, see if the
+        station accepts the cookie - millions of guesses, past scrypt and past the lock after
+        wrong attempts. Two stations with the same password also accepted each other's
+        cookies. A random key that only this station's file holds allows neither.
+
+        At each start the saved hash says whether the environment's password is still the
+        one the record was made for. If it is, the record - and with it every login - is
+        kept; if it changed, a new record with a new key is made and everyone logs in again.
+        """
+        record = self.record
+        if record is not None and hmac.compare_digest(hash_password(password, record['salt'], record.get('cost')), record['hash']):
+            return
+        self.record = self._new_record(password)
+        try:
+            self._write(self.record)
+        except OSError:
+            pass  # data/ cannot be written: the record lives until this program ends, then logins are asked again
+
+    @staticmethod
+    def _new_record(password):
+        """A fresh record for a password: a new random salt and a new random cookie key"""
+        salt = secrets.token_hex(16)  # 16 random bytes; secrets = random numbers fit for security
+        return {'salt': salt, 'cost': dict(SCRYPT), 'hash': hash_password(password, salt), 'key': secrets.token_hex(32)}
+
+    @staticmethod
+    def _write(record):
+        """Save a record: whole or not at all (as station_setup.save), readable by this user only"""
+        LOGIN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = LOGIN_FILE.with_suffix('.json.tmp')
+        # Created private from the start (not written first and restricted after)
+        with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as file:
+            json.dump(record, file, indent=2)
+        os.replace(temporary, LOGIN_FILE)
 
     def has_password(self):
         return self.record is not None
@@ -104,15 +139,8 @@ class Login:
         password = str(password or '')
         if len(password) < MINIMUM_LENGTH:
             raise ValueError(f"The password needs at least {MINIMUM_LENGTH} characters")
-        salt = secrets.token_hex(16)  # 16 random bytes; secrets = random numbers fit for security
-        record = {'salt': salt, 'cost': dict(SCRYPT), 'hash': hash_password(password, salt),
-                  'key': secrets.token_hex(32)}
-        LOGIN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        temporary = LOGIN_FILE.with_suffix('.json.tmp')
-        # Created readable by this user only from the start (not written and restricted after)
-        with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as file:
-            json.dump(record, file, indent=2)
-        os.replace(temporary, LOGIN_FILE)  # whole or not at all, as station_setup.save
+        record = self._new_record(password)
+        self._write(record)
         with self.lock:
             self.record, self.failures, self.locked_until = record, 0, 0.0
 

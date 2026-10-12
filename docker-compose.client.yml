@@ -44,8 +44,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # What the setup page saved (station.json), and the debug trace's frames
       - station-data:/app/data
+      # Captured cards that are not on the server yet (pictures and their notes): kept when
+      # the container is replaced by a new image, and sent by the new one
+      - station-captures:/app/scanned_cards
     device_cgroup_rules:
       - "c 81:* rmw"
 
 volumes:
   station-data:
+  station-captures:

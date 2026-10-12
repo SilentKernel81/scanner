@@ -221,10 +221,53 @@ class ThePagePassword(CleanEnvironment):
         login = station_login.Login()
         self.assertTrue(login.fixed and login.has_password())
         self.assertTrue(login.check('from the compose file'))
-        self.assertFalse(station_login.LOGIN_FILE.exists())  # nothing is written
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError):  # not changeable on the page
             login.set_password('a new password')
-        self.assertTrue(station_login.Login().valid_session(login.new_session()))  # logins survive a restart
+        # Kept like a chosen password: a hash in the private file, never the password
+        self.assertNotIn('from the compose file', station_login.LOGIN_FILE.read_text())
+        self.assertEqual(oct(station_login.LOGIN_FILE.stat().st_mode & 0o777), '0o600')
+        # The same password at the next start: the same record, so logins survive a restart
+        self.assertTrue(station_login.Login().valid_session(login.new_session()))
+
+    def test_a_cookie_cannot_be_made_from_the_environment_s_password(self):
+        # What an earlier version allowed: its cookie key was SHA-256 of the password, so a
+        # guess could be tested by signing a cookie with it - no login, no scrypt, no lock.
+        import hashlib
+        import hmac
+        import time
+        password = 'from the compose file'
+        os.environ[station_login.PASSWORD_VARIABLE] = password
+        login = station_login.Login()
+        expiry = int(time.time()) + 3600
+        for guessed_key in (hashlib.sha256(b'station-login:' + password.encode()).hexdigest()[32:],
+                            hashlib.sha256(password.encode()).hexdigest()):
+            forged = hmac.new(bytes.fromhex(guessed_key), str(expiry).encode(), hashlib.sha256).hexdigest()
+            self.assertFalse(login.valid_session(f"{expiry}.{forged}"))
+
+    def test_two_stations_with_the_same_password_do_not_share_logins(self):
+        os.environ[station_login.PASSWORD_VARIABLE] = 'the same everywhere'
+        first = station_login.Login()
+        session = first.new_session()
+        station_login.LOGIN_FILE.unlink()  # another station: its own, empty data folder
+        second = station_login.Login()
+        self.assertTrue(second.check('the same everywhere'))
+        self.assertFalse(second.valid_session(session))
+        self.assertNotEqual(first.record['key'], second.record['key'])
+
+    def test_changing_the_environment_s_password_logs_everyone_out(self):
+        os.environ[station_login.PASSWORD_VARIABLE] = 'the first one'
+        session = station_login.Login().new_session()
+        os.environ[station_login.PASSWORD_VARIABLE] = 'the second one'
+        login = station_login.Login()
+        self.assertFalse(login.valid_session(session))
+        self.assertTrue(login.check('the second one'))
+        self.assertFalse(login.check('the first one'))
+
+    def test_the_environment_s_password_replaces_one_chosen_on_the_page(self):
+        station_login.Login().set_password('chosen on the page')
+        os.environ[station_login.PASSWORD_VARIABLE] = 'from the compose file'
+        login = station_login.Login()
+        self.assertTrue(login.check('from the compose file'))
 
     def test_cookie_header_is_read_back(self):
         login = station_login.Login()

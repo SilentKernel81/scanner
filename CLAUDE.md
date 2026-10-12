@@ -66,7 +66,8 @@ this machine is Python 3.12 and has both.
 moves, clears) and backups; `tests/test_database.py` the cases of DATABASE_REVIEW.md (failed
 writes rolled back, reads that do not write, captures that count once, the card data swap, the
 web cache) - all on temporary databases; `tests/test_station_setup.py` a station's setup
-page (which setting wins, the form's checks, the password and its sessions). Nothing else is
+page (which setting wins, the form's checks, the password and its sessions);
+`tests/test_station_uploads.py` a station's unsent captures across restarts. Nothing else is
 automated: verify changes
 by running the programs, and for scanner logic by feeding recorded / synthetic frames through
 `CardScanner` with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
@@ -129,7 +130,8 @@ container - or a second container with its own data folder and port.
   never sent to the page. It uses Python's built-in web server: no Flask on a station.
   Every route but the page's HTML and the login needs a session (`logged_in()`): a new route
   goes below that check. The password is only ever stored as its scrypt hash
-  (`station_login.py`) - never write it, or the station token, to a log.
+  (`station_login.py`) - never write it, or the station token, to a log. The cookie key is
+  random and the station's own: never derive it from the password.
 - **`RemoteScanner` mirrors `CardScanner`.** Anything `app.py` reads or calls on `scanner` must
   exist on both: a new attribute goes into the client's `state()` and one of `DECIDED` / `SENT`
   / `REPORTED`; a new method into `METHODS` on both sides.
@@ -156,6 +158,11 @@ container - or a second container with its own data folder and port.
   by whatever its result writes (`add_card(capture_key=)`, `review.add(capture_key=)`), in the
   same commit. A new place a capture's result is written to must take `capture_key()` too. Keep
   both when touching `station_capture`, `submit_capture` or the clients' retry loops.
+  On a computer station a queued capture is on disk before it is in the queue
+  (`write_note`: `scanned_cards/<image>.upload.json` with its `capture_id` and destination)
+  and is queued again by the next start (`load_pending`); one taken for another server or
+  station id is held for the setup page to decide, never sent on its own. Anything new that a
+  capture needs to be sent must go into the note.
 - **A change is whole or not at all.** Inventory methods that write are `@_writes` (rolled back
   when they fail) and commit through `_commit()` (thumbnails of deleted captures go only then);
   deck changes are inside `with self._writing()`. **Reads never write**: no DELETE / UPDATE in a

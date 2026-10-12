@@ -369,6 +369,8 @@ class SetupPage:
         POST /api/save      the settings; the station then restarts with them
         POST /api/restart   restart without changing anything
         POST /api/password  {password, new_password}  change the page's password
+        POST /api/held      {action: 'send' | 'delete'}  captures taken for another server
+                            (station_client.py: "Captures that are not on the server yet")
     """
 
     def __init__(self, station, values, fixed, restart, port=DEFAULT_PORT):
@@ -449,6 +451,8 @@ class SetupPage:
                         self.send_json(page.save(data))
                     except ValueError as e:
                         self.send_json({'error': str(e)}, 400)
+                elif self.path == '/api/held':
+                    self.send_json(page.held(data.get('action')))
                 elif self.path == '/api/restart':
                     self.send_json({'ok': True})
                     page.restart()
@@ -518,7 +522,10 @@ class SetupPage:
                 'camera_error': getattr(scanner, 'camera_error', None) if scanner else None,
                 'scanning': bool(scanner and scanner.camera is not None),
                 'frames_per_second': round(scanner.frame_rate, 1) if scanner and scanner.camera is not None else None,
-                'waiting_uploads': station.uploads.qsize() if station else 0,
+                'waiting_uploads': station.pending_count() if station else 0,
+                # Captures an earlier run took for another server or station id: kept until
+                # the page says what to do with them ({count, server, station, oldest} or None)
+                'held_uploads': station.held_summary() if station else None,
                 'temperature': machine_temperature(),
             },
         }
@@ -579,6 +586,19 @@ class SetupPage:
         if needs_token and not token:
             return {'ok': False, 'address': server, 'message': message + " - it asks for a station token"}
         return {'ok': True, 'address': server, 'message': message}
+
+    def held(self, action):
+        """
+        What to do with captures that were taken for another server or under another station
+        id: 'send' them to the server this station has now, or 'delete' them. Only a person
+        can know which is right - the old server may have moved to a new address (send), or
+        the station may have been pointed at a different collection (don't).
+        """
+        if self.station is None or action not in ('send', 'delete'):
+            return {'error': 'Nothing to do'}
+        count = self.station.send_held() if action == 'send' else self.station.delete_held()
+        logger.info(f"Setup page: {count} held captures {'queued for this server' if action == 'send' else 'deleted'}")
+        return {'ok': True, 'count': count}
 
     def save(self, data):
         """Check and save the form, then restart the station so that it runs with it"""

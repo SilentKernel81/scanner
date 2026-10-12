@@ -253,6 +253,7 @@ async function refresh() {
 }
 
 function showStatus() {
+  if (heldAsking) return;  // "Really delete?" is showing: leave it until it is answered
   const s = state.status, rows = [];
   const row = (name, value, kind) => rows.push(`<dt>${name}</dt><dd class="${kind || ''}">${value}</dd>`);
   if (!s.set_up) row('Station', 'Not set up yet - type the server address below and save', 'warn');
@@ -264,11 +265,34 @@ function showStatus() {
                                        `${s.frames_per_second} pictures a second)`, 'good');
     else row('Camera', 'Opens when the server has answered', '');
     if (s.waiting_uploads) row('Waiting to be sent', s.waiting_uploads + ' captured cards', 'warn');
+    // Captures an earlier run took for another server (or under another id): the station
+    // keeps them and sends nothing until one of the two buttons is pressed
+    const held = s.held_uploads;
+    if (held) row('Kept, not sent',
+      `${held.count} captured card${held.count === 1 ? '' : 's'} taken for ${escapeHtml(held.server || '?')}` +
+      ` as "${escapeHtml(held.station || '?')}" (since ${escapeHtml(held.oldest || '?')}).<br>` +
+      `<button type="button" onclick="heldCaptures('send')">Send them to this server</button> ` +
+      `<button type="button" onclick="heldCaptures('delete', this)">Delete them</button>`, 'warn');
   }
   if (s.temperature !== null)
     row('Temperature', s.temperature + ' °C', s.temperature >= 80 ? 'bad' : s.temperature >= 72 ? 'warn' : '');
   $('status').innerHTML = rows.join('');
 }
+
+// The two buttons of "Kept, not sent". Deleting cannot be undone, so it asks once more: the
+// first press only changes the button's text, the second one deletes.
+async function heldCaptures(action, button) {
+  if (action === 'delete' && button && !button.dataset.sure) {
+    button.dataset.sure = '1';
+    button.textContent = 'Really delete? Press again';
+    heldAsking = true;  // keep the status from being redrawn (and the button reset) meanwhile
+    return;
+  }
+  heldAsking = false;
+  await api('/api/held', { action });
+  refresh();
+}
+let heldAsking = false;
 
 // Text from the station goes into HTML: make sure it stays text
 function escapeHtml(text) {
