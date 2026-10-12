@@ -23,7 +23,7 @@ from collections import deque
 import logging
 import re
 from datetime import datetime
-from config import Config
+from config import Config, camera_index_or_none
 from object_detector import ObjectDetector, warp_card
 from settings import Settings
 
@@ -714,13 +714,15 @@ class CardScanner:
             elif self._test_picamera():
                 return 'picamera'
             else:
-                raise Exception(f"No camera found (USB camera {Config.USB_CAMERA_INDEX} or a Pi camera)")
+                raise Exception(f"No camera found (USB camera {Config.USB_CAMERA_SOURCE} or a Pi camera)")
         else:
             raise Exception(f"Unknown camera type: {camera_type}")
     
     def _usb_camera_present(self):
         """False when the USB camera's device is missing (opening it would only make OpenCV complain)"""
         index = Config.USB_CAMERA_INDEX
+        if index is None:
+            return False  # named by its device path, and that path is not there: unplugged
         if not sys.platform.startswith('linux') or not isinstance(index, int):
             return True
         return os.path.exists(f'/dev/video{index}')
@@ -762,6 +764,10 @@ class CardScanner:
     def _open_camera(self):
         """Open the configured camera. False, with camera_error set, when it is not available"""
         try:
+            # Which /dev/videoN the configured camera is right now - looked up at every attempt:
+            # a camera named by its device path has none while unplugged, and may come back
+            # under another number
+            Config.USB_CAMERA_INDEX = camera_index_or_none(Config.USB_CAMERA_SOURCE)
             self.camera_type = self.detect_camera_type()
 
             if self.camera_type == 'usb':
@@ -855,8 +861,9 @@ class CardScanner:
         # CRITICAL: Use V4L2 backend directly instead of GStreamer
         # GStreamer has issues with format changes on Raspberry Pi
         if not self._usb_camera_present():
-            raise Exception(f"USB camera {Config.USB_CAMERA_INDEX} is not connected "
-                            f"(/dev/video{Config.USB_CAMERA_INDEX} not found)")
+            missing = (Config.USB_CAMERA_SOURCE if Config.USB_CAMERA_INDEX is None
+                       else f"/dev/video{Config.USB_CAMERA_INDEX}")
+            raise Exception(f"USB camera is not connected ({missing} not found)")
         self.camera = cv2.VideoCapture(Config.USB_CAMERA_INDEX, cv2.CAP_V4L2)
 
         if not self.camera.isOpened():

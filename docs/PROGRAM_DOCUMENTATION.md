@@ -332,8 +332,14 @@ settings are read from the saved values, so the page still shows them.
 - **The same id connecting again** replaces its earlier connection.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml`, or
   `SCANNER_CAMERA_INDEX` - a number, or a `/dev/v4l/by-id/...` path, which stays the same
-  camera when the numbers change (`config.usb_camera_index`) - or chosen on the station's
-  setup page.
+  camera when the numbers change (`config.configured_camera`) - or chosen on the station's
+  setup page. The path is turned into its `/dev/videoN` at every attempt to open the camera
+  (`camera_index_or_none`, `scanner._open_camera`), not once at the start: while the camera
+  is unplugged the path does not exist, which used to stop the station from starting at all
+  (in Docker it restarted without end - found on the Pi 5 with its webcam removed,
+  2026-10-11). Now the station starts, connects, says "No camera" and finds the camera when
+  it is plugged in again, also under another number. Tried on that Pi 5 without its camera;
+  plugging the camera back in has not been tried.
 
 #### The station's setup page
 

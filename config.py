@@ -29,16 +29,33 @@ def camera_index_from(value, source="SCANNER_CAMERA_INDEX"):
     return int(digits)
 
 
-def usb_camera_index():
+def configured_camera():
     """
-    The USB camera's /dev/videoN number: camera.usb_index in config.yaml, or SCANNER_CAMERA_INDEX
-    (see camera_index_from). A station's setup page can choose another one later
-    (station_setup.apply_camera).
+    Which USB camera was asked for: camera.usb_index in config.yaml, or SCANNER_CAMERA_INDEX -
+    a number, or a device path as text (see camera_index_from). A station's setup page can
+    choose another one later (station_setup.apply_camera).
     """
     value = os.getenv('SCANNER_CAMERA_INDEX')
     if not value:
         return config.get('camera', 'usb_index', default=0)
-    return camera_index_from(value)
+    return int(value) if value.isdigit() else value
+
+
+def camera_index_or_none(source):
+    """
+    The N of /dev/videoN for a configured camera, or None when it is not there right now.
+
+    A camera named by its /dev/v4l/by-id/... path has no number while it is unplugged: the
+    path does not exist then. That used to be an error at the moment this file was imported,
+    so a station whose camera was unplugged did not start at all - in Docker it restarted
+    over and over. A missing camera is not an error (the scanner waits for it): it is None
+    here, and looked up again at every attempt to open the camera (scanner._open_camera),
+    which also finds a camera that came back under another number.
+    """
+    try:
+        return camera_index_from(source)
+    except ValueError:
+        return None
 
 
 class Config:
@@ -61,7 +78,8 @@ class Config:
     # Camera settings
     # 'remote': the camera is at a station (station_client.py) - also from the environment
     CAMERA_TYPE = os.getenv('SCANNER_CAMERA') or config.get('camera', 'type', default='auto')
-    USB_CAMERA_INDEX = usb_camera_index()
+    USB_CAMERA_SOURCE = configured_camera()  # as configured: a number, or a device path
+    USB_CAMERA_INDEX = camera_index_or_none(USB_CAMERA_SOURCE)  # its /dev/videoN now; None = not plugged in
     CAMERA_RESOLUTION = tuple(config.get('camera', 'resolution', default=[2560, 1440]))
     CAMERA_PREVIEW_RESOLUTION = tuple(config.get('camera', 'preview_resolution', default=[640, 480]))
     CAMERA_FPS = config.get('camera', 'fps', default=20)
