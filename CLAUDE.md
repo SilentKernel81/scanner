@@ -279,6 +279,12 @@ container - or a second container with its own data folder and port.
   settings button stay in the same place on every page - only the `.topbar-page` part is a
   page's own; each page defines `openSettings()` and `inventoryChanged()`). `scanner.js` runs
   scanner-only code on load - never include it in another page.
+- **Nothing from the internet.** The pages load only from the server: the font is in
+  `static/fonts/`, Socket.IO's client in `static/js/vendor/` (its version is in the file's
+  name - a new version is a new file and a change in `scanner.html` and `collection.html`;
+  keep it matching the server's python-socketio). No `<script>` or stylesheet from a CDN:
+  a station network without internet must still work. Card pictures from Scryfall are the
+  one thing that does come from outside.
 - **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.
 
