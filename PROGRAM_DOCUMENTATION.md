@@ -368,15 +368,37 @@ scanning stays on the camera's page on the server.
   using: the scanner shows only its crop, so it lets go of the camera for the moment
   (`CardScanner.with_camera_released` - the capture thread closes it, the picture is taken,
   it opens again; 4.5 s on a Pi 4, scanning pauses meanwhile).
-- **The token never reaches the page** (only whether one is saved), and the page has no
-  login: anyone on the network can open it and point the station elsewhere.
+- **The token never reaches the page** (only whether one is saved).
+- **Login** (`station_login.py`): the page asks for a password - one password, no user names.
+  At the first visit it asks to choose one (at least 8 characters); `SCANNER_SETUP_PASSWORD`
+  fixes it from outside instead. Until a password exists, whoever opens the page first
+  chooses it. Everything but the page's HTML and the login itself answers 401 without a
+  login.
+  - *Kept hashed, not encrypted*: `data/station_login.json` (mode 600) holds a random salt,
+    the scrypt hash of the password (N 2^14, r 8, p 1) and a random key - never the password.
+    An encrypted password could be decrypted by whoever has the key, and the key would lie
+    beside it; a hash cannot be turned back.
+  - *Sessions*: a cookie with an expiry time (30 days) and its HMAC-SHA256 signature made
+    with that key (`HttpOnly`, `SameSite=Strict`). The station keeps no list of logins, so a
+    login survives the restart after *Save and restart*. Changing the password makes a new
+    key: every browser has to log in again.
+  - *Wrong passwords*: the next attempt has to wait 1 s, then 2, 4 ... up to 30 s. The wait
+    is for everyone, so someone guessing can make the owner wait up to 30 s.
+  - *Forgotten*: delete `data/station_login.json` on the station and restart it.
+  - *Not protected*: the page is plain HTTP - the password crosses the network unencrypted
+    when it is typed. This keeps out the curious on a home network, not someone listening
+    on it. The server's own pages still have no login.
 
 Tried 2026-10-11 on the Pi 4 below, from its own Python and in the container: setup mode →
 *Test connection* → save → restarted, connected and scanning; a picture in setup mode (2 s)
 and while scanning; settings kept over a restart of the container; the page driven in a
 headless Chromium (picture shown, a crop dragged, no script errors). On a PC only setup mode
 and the page's routes were tried; choosing between two USB cameras has not been tried at all.
-`tests/test_station_setup.py` covers who wins, the form's checks and the file.
+`tests/test_station_setup.py` covers who wins, the form's checks, the file, and the password
+(hashing, the lock after wrong attempts, session cookies). The login was tried on a PC in
+setup mode: every route refused without it, a second "choose a password" refused, a forged
+cookie refused, the old cookie refused after a change; and its form driven in a headless
+Chromium.
 
 Measured 2026-10-08 (laptop, Ryzen 5 7235HS, Anker PowerConf C200, Wi-Fi; server in Docker):
 manual capture to card on the page 2.7 s when the AI had to read it, auto-capture to added
@@ -1203,6 +1225,20 @@ Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 
   page. No session of cards has run from the container yet.
 - **Heat**: with a heatsink the Pi 4 ran at 77-79 °C while only watching the box, 1-3 °C under
   the point where it slows itself down. It was never seen throttling, but it has no margin.
+- **Container against the Pi's own Python** (`scripts/benchmark_station.py`, the same camera,
+  crop and card in view, two runs each, alternating, 20 s a phase):
+
+  | | Python | Container |
+  |---|---|---|
+  | Scanning, frames a second | 14.3, 14.2 | 14.3, 14.4 |
+  | ... processor (100% = one core) | 93%, 119% | 92%, 93% |
+  | Scanning with the live view, frames a second | 14.3, 14.0 | 14.3, 14.3 |
+  | ... processor | 140%, 165% | 138%, 139% |
+  | Detector alone, ms a frame (afresh / following) | 22.6 / 32.3, 22.5 / 32.1 | 25.1 / 34.7, 23.0 / 32.6 |
+
+  No difference beyond what two runs of the same thing differ by: both run the same Debian
+  packages on the same kernel, and a container adds no layer between a program and the
+  processor. 14.3 is the sensor's limit in its full-resolution mode.
 - A card on the bottom of the box is 637x891 px, about 10 px per mm; a manual capture of it
   was confirmed by OCR (name, number, set, foil marker) in 0.5 s. One card, once.
 - The lens: sharpest for that card at lens position 0, the far end of its range, where things

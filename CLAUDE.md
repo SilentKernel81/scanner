@@ -65,7 +65,9 @@ this machine is Python 3.12 and has both.
 **Testing.** `tests/test_ownership.py` covers which station scanned what (splits, merges,
 moves, clears) and backups; `tests/test_database.py` the cases of DATABASE_REVIEW.md (failed
 writes rolled back, reads that do not write, captures that count once, the card data swap, the
-web cache) - all on temporary databases. Nothing else is automated: verify changes
+web cache) - all on temporary databases; `tests/test_station_setup.py` a station's setup
+page (which setting wins, the form's checks, the password and its sessions). Nothing else is
+automated: verify changes
 by running the programs, and for scanner logic by feeding recorded / synthetic frames through
 `CardScanner` with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
 **Never test against a server's real `data/`** (adds, clears, forgets, imports, load tests):
@@ -101,6 +103,8 @@ container - or a second container with its own data folder and port.
 | **Camera station** | |
 | Connection, status, preview, commands, uploads | `station_client.py`: `Station` (`hello`, `report_loop`, `on_command`, `on_set`, `auto_captured`, `manual_capture`, `upload_loop`), `ServerSettings` |
 | The station's own setup page (server, name, camera, a Pi camera's crop) | `station_setup.py`: `resolve` (command line > environment > `data/station.json` > default), `apply_camera`, `checked`, `list_cameras`, `take_picture`, `SetupPage`; `station_setup.html`; `station_client.py`: `main` (setup mode, `request_restart`); `scanner.py`: `with_camera_released` |
+| The setup page's password (scrypt hash, signed session cookie, lock after wrong attempts) | `station_login.py`: `Login` (`set_password`, `check`, `new_session`, `valid_session`), `data/station_login.json`; `station_setup.py`: `logged_in`, `log_in` |
+| How fast a station runs on a machine (container against plain Python, one Pi against another) | `scripts/benchmark_station.py` (the station stopped first) |
 | Capture loop, stillness, auto-capture, new-card detection, fixed area | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`, `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / drift tracking | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe`, `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` |
@@ -123,6 +127,9 @@ container - or a second container with its own data folder and port.
   from the command line or the environment wins over the saved file and is shown as fixed -
   keep that order (`resolve`), or stations set up by `.env` change behaviour. The token is
   never sent to the page. It uses Python's built-in web server: no Flask on a station.
+  Every route but the page's HTML and the login needs a session (`logged_in()`): a new route
+  goes below that check. The password is only ever stored as its scrypt hash
+  (`station_login.py`) - never write it, or the station token, to a log.
 - **`RemoteScanner` mirrors `CardScanner`.** Anything `app.py` reads or calls on `scanner` must
   exist on both: a new attribute goes into the client's `state()` and one of `DECIDED` / `SENT`
   / `REPORTED`; a new method into `METHODS` on both sides.

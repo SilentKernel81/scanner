@@ -1,7 +1,8 @@
 """
 A camera station's setup page (station_setup.py): which of command line, environment and
 saved file wins; what a "Save" from the page may contain; that the file survives being
-written and read. No camera and no network are used, and the settings file is a temporary one.
+written and read - and the page's password (station_login.py): how it is kept, checked and
+remembered by a browser. No camera and no network are used, and the files are temporary ones.
 
     venv/bin/python -m unittest discover tests
 """
@@ -15,6 +16,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import station_login  # noqa: E402
 import station_setup  # noqa: E402
 from config import Config  # noqa: E402
 
@@ -36,6 +38,10 @@ class CleanEnvironment(unittest.TestCase):
         self.addCleanup(environment.stop)
         for variable in station_setup.ENVIRONMENT.values():
             os.environ.pop(variable, None)
+        os.environ.pop(station_login.PASSWORD_VARIABLE, None)
+        login_patch = mock.patch.object(station_login, 'LOGIN_FILE', Path(self.folder.name) / 'station_login.json')
+        login_patch.start()
+        self.addCleanup(login_patch.stop)
 
 
 class WhoWins(CleanEnvironment):
@@ -142,6 +148,93 @@ class TheCameraInConfig(CleanEnvironment):
         before = Config.USB_CAMERA_INDEX
         station_setup.apply_camera({'camera': 'usb', 'camera_index': '/dev/v4l/by-id/usb-unplugged-video-index0'}, {})
         self.assertEqual(Config.USB_CAMERA_INDEX, before)
+
+
+class ThePagePassword(CleanEnvironment):
+    def test_no_password_until_one_is_chosen(self):
+        login = station_login.Login()
+        self.assertFalse(login.has_password())
+        self.assertFalse(login.check('anything'))
+        self.assertFalse(login.valid_session('9999999999.abc'))
+
+    def test_too_short_is_refused(self):
+        with self.assertRaises(ValueError):
+            station_login.Login().set_password('seven77')
+        self.assertFalse(station_login.LOGIN_FILE.exists())
+
+    def test_chosen_password_is_checked_and_survives_a_restart(self):
+        station_login.Login().set_password('correct horse')
+        login = station_login.Login()  # a new start reads the file
+        self.assertTrue(login.has_password())
+        self.assertTrue(login.check('correct horse'))
+
+    def test_the_file_holds_no_password_and_is_private(self):
+        station_login.Login().set_password('correct horse')
+        text = station_login.LOGIN_FILE.read_text()
+        self.assertNotIn('correct horse', text)
+        self.assertEqual(oct(station_login.LOGIN_FILE.stat().st_mode & 0o777), '0o600')
+        # The same password, chosen again, is saved differently: a new salt each time
+        first = json.loads(text)
+        station_login.Login().set_password('correct horse')
+        second = json.loads(station_login.LOGIN_FILE.read_text())
+        self.assertNotEqual((first['salt'], first['hash']), (second['salt'], second['hash']))
+
+    def test_wrong_passwords_lock_the_next_attempts(self):
+        login = station_login.Login()
+        login.set_password('correct horse')
+        with mock.patch.object(station_login.time, 'time', return_value=1000.0):
+            self.assertFalse(login.check('guess one'))
+            with self.assertRaises(ValueError):  # at once: locked, even with the right password
+                login.check('correct horse')
+        with mock.patch.object(station_login.time, 'time', return_value=1001.5):  # the 1 s is over
+            self.assertFalse(login.check('guess two'))
+        with mock.patch.object(station_login.time, 'time', return_value=1003.0):  # now it is 2 s
+            with self.assertRaises(ValueError):
+                login.check('correct horse')
+        with mock.patch.object(station_login.time, 'time', return_value=1004.0):
+            self.assertTrue(login.check('correct horse'))
+
+    def test_session_cookie(self):
+        login = station_login.Login()
+        login.set_password('correct horse')
+        session = login.new_session()
+        self.assertTrue(login.valid_session(session))
+        self.assertTrue(station_login.Login().valid_session(session))  # after a restart of the station
+        expiry, signature = session.split('.')
+        self.assertFalse(login.valid_session(f"{int(expiry) + 1}.{signature}"))  # a later expiry, same signature
+        self.assertFalse(login.valid_session(f"{expiry}.{'0' * len(signature)}"))
+        for junk in ('', 'abc', '.', '12.', '-5.abc'):
+            self.assertFalse(login.valid_session(junk), junk)
+        with mock.patch.object(station_login.time, 'time', return_value=int(expiry) + 1):
+            self.assertFalse(login.valid_session(session))  # expired
+
+    def test_changing_the_password_logs_everyone_out(self):
+        login = station_login.Login()
+        login.set_password('correct horse')
+        session = login.new_session()
+        login.set_password('another one 2')
+        self.assertFalse(login.valid_session(session))
+        self.assertFalse(login.check('correct horse'))
+
+    def test_password_from_the_environment(self):
+        os.environ[station_login.PASSWORD_VARIABLE] = 'from the compose file'
+        login = station_login.Login()
+        self.assertTrue(login.fixed and login.has_password())
+        self.assertTrue(login.check('from the compose file'))
+        self.assertFalse(station_login.LOGIN_FILE.exists())  # nothing is written
+        with self.assertRaises(ValueError):
+            login.set_password('a new password')
+        self.assertTrue(station_login.Login().valid_session(login.new_session()))  # logins survive a restart
+
+    def test_cookie_header_is_read_back(self):
+        login = station_login.Login()
+        login.set_password('correct horse')
+        session = login.new_session()
+        header = login.cookie_header(session)
+        self.assertIn('HttpOnly', header)
+        self.assertIn('SameSite=Strict', header)
+        self.assertEqual(station_login.session_from(f"other=1; {header.split(';')[0]}; more=2"), session)
+        self.assertEqual(station_login.session_from(None), '')
 
 
 if __name__ == '__main__':

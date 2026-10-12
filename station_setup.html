@@ -6,6 +6,9 @@
 
   How it works: the script asks /api/state for everything it shows, fills the form, and
   sends the form to /api/save. The station then restarts and the page waits for it.
+
+  The page is behind a password (station_login.py). The station answers 401 to anything
+  asked without a login; the script then shows the login form instead of the settings.
 -->
 <html lang="en">
 <head>
@@ -60,6 +63,19 @@
   <p class="lead">Where this station sends its cards, what it is called, and which camera it uses.
     Focus, rotation and auto scanning are set on the camera's page on the server.</p>
 
+  <!-- Shown instead of everything below while the browser is not logged in -->
+  <section id="loginSection" style="display:none">
+    <h2 id="loginTitle">Log in</h2>
+    <p class="hint" id="loginHint"></p>
+    <label for="loginPassword" id="loginLabel">Password</label>
+    <div class="row">
+      <input type="password" id="loginPassword" autocomplete="current-password">
+      <button type="button" class="primary" id="loginButton">Log in</button>
+    </div>
+    <p class="message" id="loginMessage"></p>
+  </section>
+
+  <div id="setup" style="display:none">
   <section>
     <h2>Status</h2>
     <dl id="status"><dt>Station</dt><dd>loading…</dd></dl>
@@ -128,6 +144,25 @@
       <span class="message" id="saveMessage" style="margin:0"></span>
     </div>
   </section>
+
+  <section>
+    <h2>This page's password</h2>
+    <div id="passwordForm">
+      <label for="oldPassword">Current password</label>
+      <input type="password" id="oldPassword" autocomplete="current-password">
+      <label for="newPassword">New password</label>
+      <input type="password" id="newPassword" autocomplete="new-password">
+      <p class="hint">At least 8 characters. Forgotten: delete data/station_login.json on the station
+        and restart it - the page then asks for a new one.</p>
+    </div>
+    <p class="hint" id="passwordFixed"></p>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" id="passwordButton">Change password</button>
+      <button type="button" id="logoutButton">Log out</button>
+      <span class="message" id="passwordMessage" style="margin:0"></span>
+    </div>
+  </section>
+  </div>
 </main>
 
 <script>
@@ -141,8 +176,48 @@ async function api(path, body) {
   const options = body === undefined ? {} :
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
   const response = await fetch(path, options);
-  return response.json();
+  const answer = await response.json();
+  // 401 = not logged in (or the login ran out): show the login form. `answer.login` says
+  // whether a password exists ('needed') or has to be chosen first ('create').
+  if (response.status === 401 && answer.login) showLogin(answer.login);
+  return answer;
 }
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+let loginKind = null;  // 'needed', 'create', or null while logged in
+
+function showLogin(kind) {
+  if (loginKind === kind) return;  // already showing: don't wipe what is being typed
+  loginKind = kind;
+  const create = kind === 'create';
+  $('setup').style.display = 'none';
+  $('loginSection').style.display = 'block';
+  $('loginTitle').textContent = create ? 'Choose a password' : 'Log in';
+  $('loginLabel').textContent = create ? 'New password' : 'Password';
+  $('loginButton').textContent = create ? 'Set password' : 'Log in';
+  $('loginPassword').autocomplete = create ? 'new-password' : 'current-password';
+  $('loginHint').textContent = create
+    ? 'This station has no password for its setup page yet. Choose one (at least 8 characters): ' +
+      'it will be asked for from now on.'
+    : '';
+  $('loginPassword').focus();
+}
+
+async function logIn() {
+  const password = $('loginPassword').value;
+  say('loginMessage', '');
+  const answer = await api('/api/login', loginKind === 'create' ? { new_password: password } : { password });
+  if (answer.error) return say('loginMessage', answer.error, 'bad');
+  $('loginPassword').value = '';
+  loginKind = null;
+  $('loginSection').style.display = 'none';
+  formFilled = false;  // fill the form with what the station now tells us
+  refresh();
+}
+$('loginButton').onclick = logIn;
+$('loginPassword').onkeydown = event => { if (event.key === 'Enter') logIn(); };
 
 // Put a sentence under a field, coloured by kind ('good', 'bad', 'warn' or nothing)
 function say(id, text, kind) {
@@ -171,6 +246,8 @@ async function refresh() {
   } catch (error) {
     return;  // the station is restarting: keep what is shown, the next refresh will get it
   }
+  if (!state.status) return;  // not logged in: api() has put up the login form
+  $('setup').style.display = 'block';
   showStatus();
   if (!formFilled) { fillForm(); formFilled = true; }
 }
@@ -230,6 +307,12 @@ function fillForm() {
 
   crop = settings.crop || null;
   showCropText();
+
+  // The page's password: fixed when it comes from the station's environment
+  $('passwordForm').style.display = state.password_fixed ? 'none' : 'block';
+  $('passwordButton').style.display = state.password_fixed ? 'none' : '';
+  $('passwordFixed').textContent = state.password_fixed
+    ? 'Set by SCANNER_SETUP_PASSWORD in the environment - change it there.' : '';
 
   // Fields decided by the environment or the command line: shown, but not editable
   for (const hint of document.querySelectorAll('[data-fixed-for]')) {
@@ -362,7 +445,8 @@ async function waitForRestart(prefix) {
   await new Promise(resolve => setTimeout(resolve, 2500));
   for (let attempt = 0; attempt < 40; attempt++) {
     try {
-      state = await api('/api/state');
+      const answer = await api('/api/state');
+      if (!answer.status) return say('saveMessage', '');  // asked to log in again
       formFilled = false;
       $('token').value = '';
       await refresh();
@@ -373,6 +457,21 @@ async function waitForRestart(prefix) {
   }
   say('saveMessage', 'The station did not come back - look at its log.', 'bad');
 }
+
+// ---------------------------------------------------------------------------
+// The page's password
+// ---------------------------------------------------------------------------
+$('passwordButton').onclick = async () => {
+  const answer = await api('/api/password', { password: $('oldPassword').value, new_password: $('newPassword').value });
+  if (answer.error) return say('passwordMessage', answer.error, 'bad');
+  $('oldPassword').value = $('newPassword').value = '';
+  say('passwordMessage', 'Password changed. Other browsers have to log in again.', 'good');
+};
+
+$('logoutButton').onclick = async () => {
+  await api('/api/logout', {});
+  refresh();  // the answer is 401, which puts up the login form
+};
 
 // ---------------------------------------------------------------------------
 refresh();

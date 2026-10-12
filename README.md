@@ -398,6 +398,7 @@ backups.py           Backups of the collection, scanned cards and decks; full ba
 storage.py           Database connections and migrations
 station_client.py    Camera station: runs next to the camera, talks to the server
 station_setup.py     ... its setup page (server, name, camera), station_setup.html
+station_login.py     ... and that page's password
 scanner.py           Camera capture thread, detection, stability, auto-capture, focus
 object_detector.py   Card outline detection + perspective correction
 config.yaml          Settings (loaded by config.py / config_loader.py)
