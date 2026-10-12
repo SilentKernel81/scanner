@@ -258,7 +258,9 @@ cards and to build decks. It works on a phone too.
   much of their usual deck you already have, and the preconstructed decks by how much of each
   you own. These read other sites, so they need internet; if a site doesn't answer, only that
   list is missing.
-- **Preconstructed decks** - **View cards** shows what is in one without saving anything;
+- **Preconstructed decks** - Commander and Challenger decks, theme and intro decks, starter
+  kits, duel decks and Jumpstart packs (as in the Beginner Box), by name, set, year or kind.
+  **View cards** shows what is in one without saving anything;
   **Create deck** there makes a deck list to change as you like; **I own
   it** also adds its cards to your inventory (the printings and foils that come in the box).
 - **Trades** - promised some cards to someone? Tick them and press **Set aside for trade**

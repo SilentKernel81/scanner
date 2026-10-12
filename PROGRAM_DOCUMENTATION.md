@@ -1553,15 +1553,16 @@ decks 1 day; a 403/404 is cached too), requests to one site are at least 1 s apa
 | Source | Used for |
 |---|---|
 | EDHREC `json.edhrec.com/pages/commanders/<slug>.json`, `/average-decks/<slug>.json` | Suggestions for a Commander deck (inclusion % = decks with the card / decks that could play it, synergy), "Start from the average deck", and the commander ranking. A pair is filed under one order of the names; the other order answers with a `redirect` that is followed |
-| MTGJSON `DeckList.json`, `decks/<file>.json` | Preconstructed decks (Commander, Challenger, Pioneer Challenger) - the only source that is published for programs |
+| MTGJSON `DeckList.json`, `decks/<file>.json` | Preconstructed decks (the deck types in `PRECON_TYPES`: Commander, Challenger, theme and intro decks, starter kits, duel decks, Jumpstart packs ...) - the only source that is published for programs |
 | Archidekt `api/decks/v3/?commanderName=` / `?deckFormat=`, `api/decks/<id>/` | Most viewed public decks of a commander or format; a deck by its address |
 | Moxfield `api2.moxfield.com/v2/decks/search?fmt=`, `/v3/decks/all/<id>` | Most viewed public decks of a format (its search can't be narrowed to a commander by name); a deck by its address. Unofficial - Moxfield may refuse it |
 
 "What can I build?" (`run_deck_ideas`) needs one request per item, so it runs in a background
 thread and the page polls `GET /api/decks/ideas/<kind>`: `commanders` ranks the legendary
 creatures in the inventory by the share (weighted by inclusion) of their EDHREC cards that is
-owned; `precons` ranks the preconstructed decks by the share of their cards owned (about 230
-lists the first time, then cached); `card` ("Build around a card": the page lists the owned
+owned; `precons` ranks the preconstructed decks by the share of their cards owned (only the kind chosen on
+the page, JSON `type`, or all of them; one request per list the first time, then cached - about
+230 Commander and Challenger lists took about a minute, all kinds together were never timed); `card` ("Build around a card": the page lists the owned
 cards legal in a format - `/api/cards/search?owned=1&format=`, with `free=1` for the "Not in a deck" tick and `commander=1` for "Commanders only" (legendary creatures and "can be your commander" cards, offered for formats with a commander). The search has one printing per name; a card that is owned is returned in the printing owned (`InventoryManager.owned_printing_by_name`: the one with most copies), so its image is the card on the shelf. A click shows the card - `chooseAround` - and **Find
 decks** starts the run, **Stop** in its place while it runs: `findAround`, `renderAround`) reads the
 ten most viewed Archidekt decks of that format with the card (`?cardName=&deckFormat=`, which
@@ -1571,7 +1572,15 @@ them by the share of each that is owned. `POST` starts a run and replaces one th
 started a search stops it while it runs.
 
 **Preconstructed decks.** The Decks tab lists them from `GET /api/precons` (one cached request)
-with a search; the ranking only adds the share owned. "View cards" shows a list
+with a search and a choice of kind (MTGJSON's deck `type`). `PRECON_TYPES` says which types are
+listed and the format each becomes as a deck: printed decks only - nothing that exists only
+online, no Secret Lair drops, bundles or box sets. MTGJSON does not name a format, so decks
+sold beside a set are `standard` (an old one's page then lists its cards as no longer legal
+there) and reprint products `legacy`; a Jumpstart list is one 20-card pack - the Foundations
+Beginner Box's ten are of that type - and its page reports it as short of 60 cards. Until
+2026-10-11 only Commander and Challenger decks were listed (about 230); now 1,472. The
+list and one Beginner Box pack were read from MTGJSON that day; the page's kind filter was
+**not tested in a browser**. The ranking only adds the share owned. "View cards" shows a list
 (`GET /api/precons/<file>`, `precon_cards`: its cards by board, with how many of each are
 owned) and saves nothing - the button was "Open as deck" and created the deck at once, which
 left decks nobody asked for. "Create deck" in that window creates a deck from the list

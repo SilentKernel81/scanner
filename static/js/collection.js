@@ -1056,14 +1056,21 @@ async function loadPrecons() {
         return;
     }
     precons = data.precons;
+    // The kinds in the list, the ones with most decks first
+    const kinds = {};
+    precons.forEach(item => { kinds[item.type] = (kinds[item.type] || 0) + 1; });
+    $('precon-type').innerHTML = optionsHtml([['', 'Any kind'],
+        ...Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([kind, count]) => [kind, `${kind} (${count})`])]);
     renderPrecons();
 }
 
 function renderPrecons() {
     if (!precons) return;
     const words = searchWords('precon-search');
+    const kind = $('precon-type').value;
     const ranked = Object.keys(preconRank).length > 0;
     let rows = precons.filter(item => {
+        if (kind && item.type !== kind) return false;
         const text = `${item.name} ${item.set} ${item.type} ${item.released.slice(0, 4)}`.toLowerCase();
         return words.every(word => text.includes(word));
     });
@@ -2038,7 +2045,9 @@ function bindDeckHomeEvents() {
         if (data) openDeck(data.deck);
     });
     document.querySelectorAll('[data-ideas]').forEach(button => button.addEventListener('click', () =>
-        button.dataset.running ? stopIdeas(button.dataset.ideas) : pollIdeas(button.dataset.ideas, true)));
+        button.dataset.running ? stopIdeas(button.dataset.ideas)
+            // The precon ranking reads only the kind of deck that is chosen
+            : pollIdeas(button.dataset.ideas, true, button.dataset.ideas === 'precons' ? {type: $('precon-type').value} : {})));
 
     // Build around a card
     $('around-format').innerHTML = optionsHtml(gameInfo.deck_formats);
@@ -2067,6 +2076,7 @@ function bindDeckHomeEvents() {
         if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});
     });
     $('precon-search').addEventListener('input', debounce(renderPrecons, 150));
+    $('precon-type').addEventListener('change', renderPrecons);
     $('ideas-precons').addEventListener('click', event => {
         const button = event.target.closest('[data-precon]');
         const row = event.target.closest('[data-file]');

@@ -41,7 +41,9 @@ DAY = 86400
 CACHE_FILE = Config.DATA_DIR / 'web_cache.db'
 MAX_AGE = 90 * DAY            # nothing is asked for with a longer max_age (precon lists: 90 days)
 # Measured 2026-10-09 on the collection in use: 419 answers, 138 MB of JSON, the largest
-# 0.98 MB (a precon list); compressed, 37 MB together. Ranking every precon reads ~230 lists
+# 0.98 MB (a precon list); compressed, 37 MB together. Ranking every precon read ~230 lists
+# then; since 2026-10-11 the list has 1,472 decks (most of them much shorter than a Commander
+# deck) - what ranking all of them takes and stores has not been measured
 MAX_BYTES = 200 * 1024 ** 2   # of compressed bodies
 MAX_ENTRY_BYTES = 8 * 1024 ** 2   # one answer, compressed (the largest seen: 0.98 MB before compression)
 PRUNE_EVERY = 25              # writes between two clean-ups
@@ -51,9 +53,29 @@ MTGJSON = 'https://mtgjson.com/api/v5'
 ARCHIDEKT = 'https://archidekt.com/api/decks'
 MOXFIELD = 'https://api2.moxfield.com'
 
-# MTGJSON deck type -> deck format here (the products that are complete, playable decks)
-PRECON_TYPES = {'Commander Deck': 'commander', 'Challenger Deck': 'standard',
-                'Pioneer Challenger Deck': 'pioneer'}
+# MTGJSON deck type -> deck format here: the printed products that are a deck (or, for
+# Jumpstart, half of one). Left out on purpose: what only exists online (MTGO, Arena), and
+# what is a pile of cards rather than a deck (Secret Lair drops, bundles, box sets, toolkits).
+# A deck must have one of our formats, and MTGJSON does not say which a product was made for:
+#   - 'standard' for what was sold to be played in Standard when it came out. An old one is
+#     no longer legal there and its deck page says so, card by card - true, and the format
+#     can be changed on that page.
+#   - 'legacy' for what was built from cards of many years (reprint products, Jumpstart):
+#     the format here in which nearly every card is legal.
+# A Jumpstart list is one 20-card pack (two are shuffled together to play), so its deck page
+# reports it as short of 60 cards. The Foundations Beginner Box's packs are of this type.
+PRECON_TYPES = {
+    'Commander Deck': 'commander',
+    'Challenger Deck': 'standard', 'Pioneer Challenger Deck': 'pioneer',
+    # Sold beside a set, made of its cards (the yearly two-deck Starter Kits among them)
+    'Theme Deck': 'standard', 'Intro Pack': 'standard', 'Planeswalker Deck': 'standard',
+    'Starter Kit': 'standard', 'Arena Starter Kit': 'standard', 'Spellslinger Starter Kit': 'standard',
+    'Starter Deck': 'standard', 'Welcome Deck': 'standard', 'Event Deck': 'standard',
+    'Clash Pack': 'standard',
+    # Reprints from many sets
+    'Jumpstart': 'legacy', 'Duel Deck': 'legacy', 'Game Night Deck': 'legacy', 'Guild Kit': 'legacy',
+    'Premium Deck': 'legacy', 'World Championship Deck': 'legacy', 'Modern Event Deck': 'modern',
+}
 # Archidekt's deckFormat numbers
 ARCHIDEKT_FORMATS = {'standard': 1, 'modern': 2, 'commander': 3, 'legacy': 4, 'vintage': 5,
                      'pauper': 6, 'pioneer': 15}
