@@ -16,34 +16,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Camera station setup</title>
 <style>
-  /* Colours in one place; the dark set is used when the device asks for dark pages */
-  :root { --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #667085; --line: #d7dbe3;
-          --accent: #2f6fed; --good: #18794e; --bad: #b42318; --warn: #b54708; }
+  /* Colours in one place; the dark set is used when the device asks for dark pages.
+     The look follows the server's pages (static/css/style.css), without their font file */
+  :root { --bg: #f5f6f9; --card: #fff; --field: #fff; --text: #171717; --muted: #525252; --line: #d4d4d4;
+          --accent: #1955ae; --accent-hover: #134287; --fill: #1955ae; --ring: #79a7ec;
+          --good: #15803d; --bad: #dc2626; --warn: #b45309;
+          --shadow: 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1); }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #14171d; --card: #1d222b; --text: #e7eaf0; --muted: #98a2b3; --line: #343b48;
-            --accent: #6f9dff; --good: #4ade80; --bad: #f97066; --warn: #fdb022; }
+    :root { --bg: #141414; --card: #1f1f1f; --field: #171717; --text: #f5f5f5; --muted: #a3a3a3; --line: #454545;
+            --accent: #79a7ec; --accent-hover: #a8c5f3; --fill: #2563c9; --ring: #79a7ec;
+            --good: #4ade80; --bad: #f87171; --warn: #fbbf24;
+            --shadow: 0 10px 15px -3px rgba(0, 0, 0, .5), 0 4px 6px -4px rgba(0, 0, 0, .4); }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
-         font: 15px/1.45 system-ui, sans-serif; }
+  body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+         font: 15px/1.5 Roboto, system-ui, sans-serif; }
   main { max-width: 760px; margin: 0 auto; }
-  h1 { font-size: 22px; margin: 4px 0 2px; }
-  h2 { font-size: 16px; margin: 0 0 10px; }
-  p.lead { margin: 0 0 16px; color: var(--muted); }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-            padding: 16px; margin-bottom: 14px; }
+  h1 { font-size: 28px; font-weight: 700; margin: 4px 0 2px; }
+  h2 { font-size: 18px; font-weight: 700; margin: 0 0 10px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+            padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
   label { display: block; font-weight: 600; margin: 12px 0 4px; }
   label:first-of-type { margin-top: 0; }
   .hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  a { color: var(--accent); }
   input[type=text], input[type=password], select {
-    width: 100%; padding: 9px 10px; font: inherit; color: var(--text); background: var(--bg);
-    border: 1px solid var(--line); border-radius: 7px; }
+    width: 100%; padding: 8px 12px; font: inherit; color: var(--text); background: var(--field);
+    border: 1px solid var(--line); border-radius: 6px; }
+  input:focus, select:focus { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--accent); }
   input:disabled, select:disabled { opacity: .6; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .row > input, .row > select { flex: 1 1 220px; }
-  button { padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; border-radius: 7px;
-           border: 1px solid var(--line); background: var(--card); color: var(--text); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* Buttons: pills, outlined; the one that matters filled */
+  button { padding: 5px 16px; font: inherit; font-weight: 700; cursor: pointer; border-radius: 999px;
+           border: 2px solid var(--accent); background: var(--card); color: var(--accent); }
+  button:hover:not(:disabled) { border-color: var(--accent-hover); color: var(--accent-hover);
+                                text-decoration: underline; }
+  button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  button.primary { background: var(--fill); border-color: var(--fill); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   .message { margin: 8px 0 0; font-size: 14px; min-height: 1.2em; }
   .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
@@ -52,7 +64,7 @@
   dt { color: var(--muted); } dd { margin: 0; }
   /* The picture, with a canvas of the same size on top of it for drawing the crop */
   #pictureBox { position: relative; margin-top: 12px; display: none; line-height: 0; }
-  #picture { width: 100%; border-radius: 7px; }
+  #picture { width: 100%; border-radius: 8px; }
   #cropCanvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
   .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 </style>

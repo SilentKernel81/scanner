@@ -31,24 +31,29 @@ a.btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 14px;
+    padding: 4px 8px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text);
     font: inherit;
-    font-weight: 550;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
+}
+
+.tab .icon {
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
 }
 
 .tab:hover {
     background: var(--surface-2);
-    color: var(--text);
 }
 
 .tab.is-active {
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--surface-3);
 }
 
 /* Filters */
@@ -69,7 +74,7 @@ a.btn {
 .filter-row .select,
 .filter-row .text-input {
     width: auto;
-    padding: 7px 10px;
+    padding: 6px 10px;
 }
 
 .filter-row .select {
@@ -155,7 +160,7 @@ a.btn {
 /* List / grid switch and other two-or-three-way choices */
 .segmented {
     display: inline-flex;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     overflow: hidden;
 }
@@ -176,12 +181,12 @@ a.btn {
 }
 
 .segmented button + button {
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--border-strong);
 }
 
 .segmented button.is-active {
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--surface-3);
+    color: var(--text);
 }
 
 .segmented.wide {
@@ -197,7 +202,7 @@ a.btn {
 /* Bulk actions */
 .bulk-bar {
     position: sticky;
-    top: 62px;
+    top: calc(var(--topbar-nav) + 8px);
     z-index: 20;
     display: flex;
     flex-wrap: wrap;
@@ -205,8 +210,8 @@ a.btn {
     gap: 8px;
     margin-bottom: 12px;
     padding: 10px 14px;
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
+    border: 1px solid var(--ring);
+    border-radius: var(--radius-lg);
     background: var(--surface);
     box-shadow: var(--shadow);
 }
@@ -278,8 +283,12 @@ a.btn {
     border-radius: 6px;
 }
 
+/* The page's main list: the white card the page is about */
+.collection-list {
+    box-shadow: var(--shadow);
+}
+
 .collection-list .inventory-card.is-selected {
-    border-color: var(--accent);
     background: var(--accent-soft);
 }
 
@@ -307,13 +316,19 @@ a.btn {
 
 .inventory-badge.tag {
     background: var(--surface-3);
-    color: var(--text-muted);
+    color: var(--text);
 }
 
+/* As pictures: each card its own tile, no frame around them all */
 .collection-list.is-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
 }
 
 .grid-card {
@@ -419,7 +434,8 @@ a.btn {
 }
 
 .filter-chip:hover {
-    background: var(--accent);
+    background: var(--accent-solid);
+    border-color: var(--accent-solid);
     color: #fff;
 }
 
@@ -730,7 +746,7 @@ details.trade .trade-row {
 
 .builder-head .select {
     width: auto;
-    padding: 7px 10px;
+    padding: 6px 10px;
 }
 
 .deck-name {
@@ -749,8 +765,8 @@ details.trade .trade-row {
 
 .builder-side {
     position: sticky;
-    top: 70px;
-    max-height: calc(100vh - 86px);
+    top: calc(var(--topbar-nav) + 16px);
+    max-height: calc(100vh - var(--topbar-nav) - 32px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -845,9 +861,9 @@ details.trade .trade-row {
     min-width: 26px;
     height: 26px;
     padding: 0 6px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
     font: inherit;
     font-size: 12px;
@@ -871,7 +887,7 @@ details.trade .trade-row {
     align-items: center;
     gap: 4px;
     padding: 1px 7px;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;

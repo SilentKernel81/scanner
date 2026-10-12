@@ -602,7 +602,7 @@ function showPage(number) {
     page = number;
     renderInventory();
     // The buttons are below the list: back to its first row, when that is out of sight
-    const topbar = document.querySelector('.topbar');
+    const topbar = document.querySelector('.topbar-nav');  // the row of the header that stays at the top
     const above = $('inventory-list').getBoundingClientRect().top - (topbar ? topbar.offsetHeight : 0) - 12;
     if (above < 0) window.scrollBy(0, above);
 }
