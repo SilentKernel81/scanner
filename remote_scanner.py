@@ -2,7 +2,7 @@
 """
 A camera at a station (camera.type: remote): station_client.py runs the real CardScanner -
 camera, outline detection, auto-capture, focus - next to the camera and connects here
-(Socket.IO namespace /station). RemoteScanner is what app.py holds in its place, one per
+(Socket.IO namespace /station). RemoteScanner is what the server holds in its place, one per
 station: the same attributes and methods, answered from the state the client reports several
 times a second, or passed on to the client and waited for. CameraHub takes the connections
 and gives each to its station's RemoteScanner.
@@ -14,7 +14,7 @@ and gives each to its station's RemoteScanner.
                      log, captured (the capture beep)
   server -> client   command (a CardScanner method, waited for), set (attributes)
 
-The captured cards themselves come in over HTTP (app.py: station_capture).
+The captured cards themselves come in over HTTP (server/stations_api.py: station_capture).
 """
 
 import hmac
@@ -49,7 +49,7 @@ NOT_CONNECTED = "No camera station connected - start station_client.py next to t
 
 class RemoteScanner:
     """
-    One station's camera, as app.py sees it. Reading an attribute answers from what the client
+    One station's camera, as the server sees it. Reading an attribute answers from what the client
     last reported (or, with no client connected, from the saved settings); setting one of the
     DECIDED / SENT attributes sends it to the client; the methods below run on the client and
     wait for its answer.
@@ -77,7 +77,7 @@ class RemoteScanner:
     # ------------------------------------------------------------------------
 
     def __setattr__(self, name, value):
-        # `scanner.card_under_review = False` in app.py: remembered here and sent to the client.
+        # `scanner.card_under_review = False` in the server: remembered here and sent to the client.
         # A DECIDED value is kept apart from the client's reports, which never overwrite it
         if name in DECIDED or name in SENT:
             if name in DECIDED:
@@ -133,7 +133,7 @@ class RemoteScanner:
 
     def log(self, message, level="info"):
         if self.log_callback:
-            self.log_callback(message, level)  # app.py's log_to_client: the log file and the station's pages
+            self.log_callback(message, level)  # server/desks.py's log_to_client: the log file and the station's pages
         else:
             getattr(logger, 'info' if level == 'success' else level, logger.info)(message)
 

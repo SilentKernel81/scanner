@@ -2,7 +2,7 @@
 """
 Stations: the cameras that send captured cards to this server (a phone, a laptop with a
 webcam, ...). A station finds and captures the card itself and uploads the image
-(app.py: station_capture); everything after that happens here.
+(server/stations_api.py: station_capture); everything after that happens here.
 
 A station is known by an id it chooses and keeps (it appears on its first capture) and has a
 name and the inventory location its cards are put in. Kept in data/stations.json.

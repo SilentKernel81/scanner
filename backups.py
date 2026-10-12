@@ -387,7 +387,7 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
     managers: the objects that write (each with ._lock) - held, in this order, while the
         snapshots are taken: nothing of theirs is half way (a move between two files, a capture
         being settled) and no file they point at is deleted meanwhile;
-    barrier: a lock held by whatever else settles captures or deletes pictures (app.py:
+    barrier: a lock held by whatever else settles captures or deletes pictures (server/state.py:
         maintenance_barrier);
     databases: the database files; linked: [(folder name in the backup, source folder,
         database file, SQL giving the file names)] - the pictures the rows point at, as hard

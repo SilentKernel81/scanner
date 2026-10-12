@@ -4,7 +4,7 @@ The camera side of the scanner: CardScanner reads the camera, finds the card in 
 (object_detector.py), decides when it lies still and whether it is a new card, takes the
 capture, and keeps the lens in focus.
 
-It runs next to the camera: inside station_client.py on a camera station, or inside app.py when
+It runs next to the camera: inside station_client.py on a camera station, or inside the server when
 the server has a camera of its own. It knows nothing about card data, OCR or the AI - a capture
 is handed to auto_capture_callback (or taken with capture_card_image_only) and read elsewhere.
 Its settings object only needs get(key, default) and set(key, value): Settings here,

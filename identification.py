@@ -38,7 +38,7 @@ class Job:
         self.foil_image = foil_image
         self.game_id = game_id  # the game being scanned at capture: not read as another game's card
         self.on_done = on_done  # on_done(card_info or None, seconds since submit)
-        # scope(): a context manager the job's work runs in - app.py makes the log lines go
+        # scope(): a context manager the job's work runs in - the server makes the log lines go
         # to the page of the camera the capture came from
         self.scope = scope or contextlib.nullcontext
         self.submitted = time.time()
