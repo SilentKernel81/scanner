@@ -215,7 +215,7 @@ a confirmed printing is added to the scanned cards, anything else goes to the st
 queue. The answer:
 
 ```
-{"capture": 12, "status": "added", "seconds": 0.31,
+{"capture": 12, "status": "added", "seconds": 0.31, "sync_key": "5f0c...",
  "card": {"name": ..., "set": ..., "number": ..., "finish": ..., "quantity": 1},
  "read": {"name": ..., "number": ..., "set": ..., "foil": ..., "reader": "light-ocr"}}
 {"capture": 13, "status": "review", "reason": "printing not confirmed" | "not found" | "not read" | "game switched", ...}
@@ -223,17 +223,81 @@ queue. The answer:
 
 or `202` with `"status": "pending"` when the card isn't settled within `wait` (it still is,
 afterwards). Errors: `400` (bad id, no readable picture), `401` (token), `413` (over 30 MB).
+Every settled answer - this one, the same capture sent again, and the outcome asked for later,
+also after a restart - has `capture` (the station's capture number) and `sync_key` (the
+capture's identity on the server; see [Capture synchronization](#capture-synchronization)).
 
 | Also | |
 |---|---|
 | `GET /api/stations/<id>/captures/<n>` | The outcome of a capture that was still pending (`202` while it still is). Outcomes of the last 500 captures are kept in memory: `404` after a restart |
+| `GET /api/stations/<id>/captures/<n>/sync` | Where that capture's copy is now: `{"success": true, "state": "pending" \| "scanned" \| "review" \| "resolved"}` (below) |
+| `DELETE /api/stations/<id>/captures/<n>/sync` | Remove that capture's copy from the scanned cards or the review queue - never from the collection: `"state": "removed"`, or `"pending"` / `"resolved"` when there was nothing to remove |
 | `POST /api/stations/<id>/undo` | Take back the station's last automatic add |
 | `GET /api/stations` | The stations, with whether each is connected, sees a card, is scanning, and how many cards it has in review |
 | `PUT /api/stations/<id>` | Rename it (`name`) or set where its cards are put (`location`) |
 | `DELETE /api/stations/<id>` | Forget it - after clearing its scanned cards and review items (`clear_camera`, every game), so nothing of it is left where no page shows it. Cards already in the collection stay |
 
+#### Capture synchronization
+
+A phone keeps a row for every card it scanned, and the two sides are kept in step through
+the capture: removing a row on the phone removes that card on the server, and a card that
+left the scanned cards (moved into the collection, or removed on a page) disappears from the
+phone. The Android app asks `GET .../sync` about every 10 s for each row that has a
+`sync_key`, and sends `DELETE .../sync` when a row is removed (`station_capture_sync`).
+
+| `state` | Meaning |
+|---|---|
+| `pending` | Still being read - or failed and kept to be read again at the next start. A `DELETE` removes nothing and says `pending` too: the phone asks again |
+| `scanned` | Its copy is in the scanned cards |
+| `review` | It waits in the review queue |
+| `resolved` | Known, and in neither place: moved into the collection, or removed, skipped or cleared on the server. Also the answer to a `DELETE` repeated after `removed` |
+| `removed` | This `DELETE` took it out |
+
+- **The state is the one of this moment**, not what the capture first became: queued for review
+  and added from there it is `scanned`; once in the collection, `resolved`.
+- **Exactly this copy.** Each photographed copy in the scanned cards is a row of
+  `inventory_captures`, which now carries the capture's uid (`capture_key`; the uid is the one
+  from `pending.py` that already makes a capture count once, and it is the `sync_key`). The
+  row stays with its copy when an entry is split, merged or given another printing
+  (`_move_captures`), so `InventoryManager.captured_copy` finds the entry the copy is in now
+  and removes that photo, one copy, and the station's claim on it - of three identical cards
+  scanned in a row, the one named. A review item carries the same uid (`review_queue.capture_key`),
+  and the card added from it takes it along (`handle_add_inventory`).
+- **The collection is out of reach.** `take_from` copies the photos without the key and deletes
+  the rows in the scanned cards: afterwards there is no row to find, in either file. A `DELETE`
+  then answers `resolved` and changes nothing.
+- **Unknown is never `resolved`.** A capture the server has no outcome for - a number the
+  station never had, or one settled more than 30 days ago (`pending.KEEP_DAYS`) - is `404`. A
+  capture it knows but cannot follow is `409` with a message: settled before this was added
+  (no `sync_key`), failed for good, shown on the camera's page instead of added (`mode:
+  review`), added without a photo (`unfollowed_captures`: the thumbnail could not be made), or
+  a copy that is another station's. The phone keeps its row in both cases.
+- **Removed stays removed.** The uid stays in `applied_captures`: the capture sent or read
+  again after its copy went adds nothing.
+- **Numbers can come round again.** The capture is named by station and number, and a station
+  forgotten on the server (`DELETE /api/stations/<id>`) counts from 1 again: a row the phone
+  kept from before then names a new capture. `?sync_key=<key>` on either request makes it
+  exact - a number that belongs to another capture now is refused (`409`). The Android app
+  does not send it yet (2026-10-12).
+- **Pages**: a removal from the scanned cards sends `inventory_updated` (`cleared: true`) to every
+  page, which count and list again; one from the review queue sends `review_queue_update` to the
+  station's page, and closes the item there if it was the one open (`review_item` with
+  `id: null`) - or its Add would still add the card.
+- **Migration**: two columns that may be empty (`inventory_captures.capture_key`,
+  `review_queue.capture_key`), a unique index on each and one small table
+  (`unfollowed_captures`) are added in place at the first start; no table is rebuilt. Tried on
+  copies of the real databases (5,407 cards in 2,151 entries, 4,107 photos, 15 decks, 147
+  settled outcomes): every row of every table was the same before and after. What was scanned
+  before has no `sync_key` and stays as it is: the phone is answered `409` for it.
+- Tested (`tests/test_capture_sync.py`, 34 cases on temporary databases, the routes through
+  Flask's test client): duplicates, repeated removal, two stations, pending and failed
+  captures, restarts, review removal and hand-off, splits, merges, printing changes, the move
+  into the collection with a location (collection rows compared before and after a `DELETE`),
+  forgotten outcomes, a number used again. **Not tried**: against the Android app, or on a
+  running server.
+
 - **Token**: with `stations.token` in `config.yaml` (or `SCANNER_STATION_TOKEN`) set, uploads,
-  the outcome, undo and the `/station` connection need it (header `X-Station-Token`, or `token`
+  the outcome, the capture synchronization, undo and the `/station` connection need it (header `X-Station-Token`, or `token`
   in the connection's `auth`). Without it anyone on the network can send cards - like the web
   interface itself, which has no login.
 - **Order**: a card the AI had to read is added after cards dropped later that OCR confirmed.
@@ -1038,8 +1102,10 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 
 **`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
-`scanned_cards/` are deleted after `cleanup.days`), `captured_at`, and `station` (which station's
-capture it is). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card
+`scanned_cards/` are deleted after `cleanup.days`), `captured_at`, `station` (which station's
+capture it is) and `capture_key` (the uid of the capture the copy came from, unique; empty in
+the collection and for copies from before 2026-10-12 - see
+[Capture synchronization](#capture-synchronization)). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card
 (`card['capture']`, so a queued automatic add can't take another card's photo), and
 `pending_capture` keeps the one under review for a manual search (the automatic "not found"
 dismissal keeps it, Skip drops it). Several finishes added at once arrive as one

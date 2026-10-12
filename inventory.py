@@ -70,9 +70,17 @@ CAPTURES_TABLE = '''
         inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
         file TEXT NOT NULL,
         captured_at TEXT NOT NULL,
-        station TEXT
+        station TEXT,
+        capture_key TEXT    -- the uid of the capture this copy came from (pending.py): see captured_copy
     )
 '''
+# A capture whose card was added without a photo row (the thumbnail could not be made): there
+# is then no row above that says where its copy is, so nothing can say whether it is still in
+# the scanned cards. Noted here in the commit that adds the card, so that a phone asking about
+# it is told "cannot be followed" instead of "gone" (captured_copy). Not beside an entry and
+# in no backup: it only ever makes an answer more careful.
+UNFOLLOWED_CAPTURES_TABLE = ('CREATE TABLE IF NOT EXISTS unfollowed_captures '
+                             '(key TEXT PRIMARY KEY, station TEXT, noted_at TEXT NOT NULL)')
 SOURCES_TABLE = '''
     CREATE TABLE {table} (
         inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
@@ -120,7 +128,11 @@ TRADE_TRIGGERS = (
 )
 INVENTORY_INDEXES = ('CREATE INDEX IF NOT EXISTS idx_inventory_game_name ON inventory(game, card_name COLLATE NOCASE)',
                      'CREATE INDEX IF NOT EXISTS idx_inventory_timestamp ON inventory(timestamp DESC)')
-CAPTURES_INDEXES = ('CREATE INDEX IF NOT EXISTS idx_captures_entry ON inventory_captures(inventory_id)',)
+# One row per capture: the database refuses a second copy under the same capture, whatever
+# the code that asks first does. (In this list, so a rebuilt table gets the index again.)
+CAPTURES_INDEXES = ('CREATE INDEX IF NOT EXISTS idx_captures_entry ON inventory_captures(inventory_id)',
+                    'CREATE UNIQUE INDEX IF NOT EXISTS idx_captures_key ON inventory_captures(capture_key) '
+                    'WHERE capture_key IS NOT NULL')
 CONSTRAINTS_MIGRATION = 'inventory_constraints_1'
 KEY_COLUMNS = ('game', 'card_name', 'set_name', 'card_number', 'condition', 'finish', 'location')
 UPSERT = '''
@@ -298,6 +310,12 @@ class InventoryManager:
                 self.conn.execute(CAPTURES_TABLE.format(table='inventory_captures'))
             elif 'station' not in {row['name'] for row in self.conn.execute('PRAGMA table_info(inventory_captures)')}:
                 self.conn.execute('ALTER TABLE inventory_captures ADD COLUMN station TEXT')
+            # Which capture each photographed copy came from (2026-10-12; captured_copy). A new
+            # column that may be empty: added in place, no rebuild - the copies that are there
+            # already have none and cannot be followed (the phone is told so)
+            if 'capture_key' not in {row['name'] for row in self.conn.execute('PRAGMA table_info(inventory_captures)')}:
+                self.conn.execute('ALTER TABLE inventory_captures ADD COLUMN capture_key TEXT')
+            self.conn.execute(UNFOLLOWED_CAPTURES_TABLE)
             for index in CAPTURES_INDEXES:
                 self.conn.execute(index)
             if 'inventory_sources' not in tables:
@@ -352,7 +370,8 @@ class InventoryManager:
                 ('inventory', INVENTORY_TABLE, f'SELECT {entry} FROM inventory WHERE CAST(quantity AS INTEGER) > 0',
                  INVENTORY_INDEXES),
                 ('inventory_captures', CAPTURES_TABLE,
-                 f'SELECT id, inventory_id, file, captured_at, station FROM inventory_captures WHERE {valid}', CAPTURES_INDEXES),
+                 f'SELECT id, inventory_id, file, captured_at, station, capture_key FROM inventory_captures WHERE {valid}',
+                 CAPTURES_INDEXES),
                 ('inventory_sources', SOURCES_TABLE,
                  'SELECT inventory_id, station, CAST(quantity AS INTEGER) FROM inventory_sources '
                  f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0', ()),
@@ -668,15 +687,23 @@ class InventoryManager:
                 [values[c] for c in KEY_COLUMNS]).fetchone()
             capture_id = None
             if thumbnail:
+                # capture_key: this row is the capture's copy from here on - it moves with the
+                # copy through splits, merges and printing changes (_move_captures), and is
+                # gone when the copy is (captured_copy reads it)
                 capture_id = self.conn.execute(
-                    'INSERT INTO inventory_captures (inventory_id, file, captured_at, station) VALUES (?, ?, ?, ?)',
-                    (row['id'], thumbnail, values['timestamp'], source)).lastrowid
+                    'INSERT INTO inventory_captures (inventory_id, file, captured_at, station, capture_key) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (row['id'], thumbnail, values['timestamp'], source, capture_key)).lastrowid
             if source:
                 # Beside the entry, not in it: the same printing scanned by two cameras is one entry
                 self.conn.execute('''INSERT INTO inventory_sources (inventory_id, station, quantity) VALUES (?, ?, ?)
                                      ON CONFLICT(inventory_id, station) DO UPDATE SET quantity = quantity + excluded.quantity''',
                                   (row['id'], source, quantity))
             if capture_key:
+                if capture_id is None:
+                    # No photo row to carry the capture: where its copy is cannot be followed
+                    self.conn.execute('INSERT OR IGNORE INTO unfollowed_captures (key, station, noted_at) VALUES (?, ?, ?)',
+                                      (capture_key, source, now()))
                 self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                   (capture_key, f"inventory:{row['id']}", now()))
             self._commit()
@@ -715,6 +742,58 @@ class InventoryManager:
             self._commit()
         self.log(f"Undid add: {quantity}x {row['card_name']}")
         return row['card_name']
+
+    @_writes
+    def captured_copy(self, capture_key, station, remove=False):
+        """
+        Where the copy of one capture is (a phone asks about its scans; server/stations_api.py:
+        station_capture_sync), and - with remove - that copy taken out. Returns (state, card name):
+
+          'scanned'      the copy is here                            (remove=False)
+          'removed'      it was here and is gone now                 (remove=True)
+          'unfollowed'   it was added, but without a photo row, or its row belongs to another
+                         station: nothing says where it is now - never reported as gone
+          None           no copy of this capture is here: it went to the collection, was
+                         removed, or was never added (the caller knows which captures exist)
+
+        The copy is the row of inventory_captures that carries the capture's key - not "a copy
+        of that card": of three identical cards scanned in a row, the one asked for goes. The
+        row stays with its copy when entries are split, merged or given another printing, so
+        the entry is whichever one it is in now. The collection is another file and never
+        touched from here: once "Add to collection" has moved the copy, there is no row and
+        nothing to remove. What the capture's upload noted (applied_captures) stays as it is, so
+        a capture sent or read again after its copy was removed does not bring the card back.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                '''SELECT c.id, c.inventory_id, c.station, i.card_name, i.quantity FROM inventory_captures c
+                   JOIN inventory i ON i.id = c.inventory_id WHERE c.capture_key = ?''', (capture_key,)).fetchone()
+            if row is None:
+                unfollowed = self.conn.execute('SELECT 1 FROM unfollowed_captures WHERE key = ?', (capture_key,)).fetchone()
+                return ('unfollowed' if unfollowed else None), None
+            if row['station'] != station:
+                return 'unfollowed', None  # not this station's to ask about or remove
+            if not remove:
+                return 'scanned', row['card_name']
+            entry = row['inventory_id']
+            self._delete_captures('id = ?', (row['id'],))
+            # The station gives up the copy it scanned. After a split its row beside this
+            # entry may be missing (which station owns a moved copy is worked out from the
+            # newest photos, _move_sources): then the stations together must still not claim
+            # more copies than are left
+            had = self.conn.execute('SELECT quantity FROM inventory_sources WHERE inventory_id = ? AND station = ?',
+                                    (entry, station)).fetchone()
+            if had:
+                self._set_source(entry, station, had['quantity'] - 1)
+            self._trim_sources(entry, row['quantity'] - 1)
+            self._take_copies(entry, 1)  # the entry itself goes with its last copy
+            # The station's Undo would take another copy of this entry if it pointed here
+            last = self.last_added.get(station)
+            if last and (last[0] == entry or last[2] == row['id']):
+                self.last_added.pop(station, None)
+            self._commit()
+        self.log(f"Removed from the scanned cards: {row['card_name']} (its capture was removed at the station)")
+        return 'removed', row['card_name']
 
     # ------------------------------------------------------------------------
     # Reading
