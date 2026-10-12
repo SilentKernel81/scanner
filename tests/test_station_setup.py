@@ -87,7 +87,8 @@ class SavingTheForm(CleanEnvironment):
 
     def test_bad_values_are_refused_with_a_sentence(self):
         for form in ({'id': 'two words'}, {'id': 'x' * 41}, {'camera': 'webcam'}, {'crop': [0.1, 0.1, 0.12, 0.9]},
-                     {'crop': ['a', 0, 1, 1]}, {'camera': 'usb', 'camera_index': '/dev/null'}):
+                     {'crop': ['a', 0, 1, 1]}, {'camera': 'usb', 'camera_index': '/dev/null'},
+                     {'server': 'http://server:bad'}, {'server': 'http://:5000'}):
             with self.assertRaises(ValueError, msg=form):
                 station_setup.checked(form, {})
 
@@ -148,6 +149,97 @@ class TheCameraInConfig(CleanEnvironment):
         before = Config.USB_CAMERA_INDEX
         station_setup.apply_camera({'camera': 'usb', 'camera_index': '/dev/v4l/by-id/usb-unplugged-video-index0'}, {})
         self.assertEqual(Config.USB_CAMERA_INDEX, before)
+
+
+class Answer:
+    """What requests.get() returns, as far as the connection test looks at it"""
+
+    def __init__(self, status_code, body):
+        self.status_code, self.body = status_code, body
+
+    def json(self):
+        if self.body is None:
+            raise ValueError("not JSON")
+        return self.body
+
+
+class TestConnection(CleanEnvironment):
+    """The page's "Test connection" (SetupPage.test), with requests.get replaced by a stand-in"""
+
+    def run_test(self, form, *answers, saved_token=''):
+        """Call the test with `answers` handed out one per request; returns (result, the requests made)"""
+        page = station_setup.SetupPage(None, {'id': 'desk', 'token': saved_token}, {}, restart=lambda: None)
+        asked = []
+
+        def get(url, timeout=None, headers=None):
+            asked.append((url, (headers or {}).get('X-Station-Token')))
+            answer = answers[len(asked) - 1]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with mock.patch.object(station_setup.requests, 'get', get):
+            return page.test(form), asked
+
+    OPEN = Answer(200, {'stations': [{}, {}], 'token_required': False})
+    WANTS_TOKEN = Answer(200, {'stations': [], 'token_required': True})
+    NO_SUCH_CAPTURE = Answer(404, {'success': False})   # what the right token gets
+    WRONG_TOKEN = Answer(401, {'success': False})
+
+    def test_a_server_without_a_token(self):
+        result, asked = self.run_test({'server': '10.0.0.5:5000'}, self.OPEN)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['address'], 'http://10.0.0.5:5000')
+        self.assertEqual(len(asked), 1)  # nothing to check a token against
+
+    def test_a_server_that_wants_a_token_and_none_is_given(self):
+        result, _ = self.run_test({'server': 'http://s:5000'}, self.WANTS_TOKEN)
+        self.assertFalse(result['ok'])
+        self.assertIn('asks for a station token', result['message'])
+
+    def test_a_wrong_token_is_not_reported_as_working(self):
+        # The list of stations is given to anyone: only the second request tells
+        result, asked = self.run_test({'server': 'http://s:5000', 'token': 'wrong'}, self.WANTS_TOKEN, self.WRONG_TOKEN)
+        self.assertFalse(result['ok'])
+        self.assertIn('does not accept', result['message'])
+        self.assertEqual(asked[1], ('http://s:5000/api/stations/desk/captures/0', 'wrong'))
+
+    def test_the_right_token(self):
+        result, _ = self.run_test({'server': 'http://s:5000', 'token': 'right'}, self.WANTS_TOKEN, self.NO_SUCH_CAPTURE)
+        self.assertTrue(result['ok'])
+        self.assertIn('accepted', result['message'])
+
+    def test_the_saved_token_is_checked_when_none_is_typed(self):
+        result, asked = self.run_test({'server': 'http://s:5000'}, self.WANTS_TOKEN, self.NO_SUCH_CAPTURE, saved_token='saved')
+        self.assertTrue(result['ok'])
+        self.assertEqual(asked[1][1], 'saved')
+
+    def test_an_address_that_cannot_be_requested(self):
+        # Refused before any request ...
+        result, asked = self.run_test({'server': 'http://server:bad'})
+        self.assertFalse(result['ok'])
+        self.assertEqual(asked, [])
+        # ... and if requests itself refuses one: an answer for the page, not an exception
+        # (InvalidURL is both a "request failed" error and a ValueError)
+        import requests
+        result, _ = self.run_test({'server': 'http://s:5000'}, requests.exceptions.InvalidURL("no"))
+        self.assertFalse(result['ok'])
+        self.assertIn('No answer', result['message'])
+
+    def test_no_answer_and_an_answer_that_is_not_a_scanner_server(self):
+        import requests
+        result, _ = self.run_test({'server': 'http://s:5000'}, requests.ConnectionError("refused"))
+        self.assertIn('No answer', result['message'])
+        for other in (Answer(200, None), Answer(200, ['a list']), Answer(200, {'stations': 'text'}), Answer(404, {'stations': []})):
+            result, _ = self.run_test({'server': 'http://s:5000'}, other)
+            self.assertFalse(result['ok'])
+            self.assertIn('not as a scanner server', result['message'])
+
+    def test_the_token_check_itself_failing(self):
+        import requests
+        result, _ = self.run_test({'server': 'http://s:5000', 'token': 't'}, self.WANTS_TOKEN, requests.Timeout("slow"))
+        self.assertFalse(result['ok'])
+        self.assertIn('could not be checked', result['message'])
 
 
 class ThePagePassword(CleanEnvironment):
