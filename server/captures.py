@@ -301,6 +301,12 @@ def submit_capture(image_path, image, foil_image, number, game_id, station=None,
                 outcome = announce_and_route(image_path, card_info, number, game_id, seconds, fast=True,
                                              station=station, captured_at=captured_at)
                 outcome['seconds'] = round(seconds, 2)
+                # The capture's own identity, in every answer about it from here on (this one,
+                # a repeated upload, a later question - also after a restart: it is settled
+                # with the outcome). A phone names the capture by its number and asks with it
+                # where the copy is, or removes it (stations_api.py: station_capture_sync);
+                # an outcome without it is of a capture that cannot be followed.
+                outcome['sync_key'] = uid
                 pending.settle(pending_id, outcome)  # off the queue, its outcome on record
             except Exception as e:
                 logger.exception(f"Capture {Path(image_path).name} could not be added or queued for review: {e}")

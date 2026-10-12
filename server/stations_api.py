@@ -15,14 +15,15 @@ from stations import Stations
 
 from server.state import (
     app, camera_hub, capture_accept_lock, capture_outcomes, capture_outcomes_lock, identification,
-    pending, review, scan_inventory, seen_captures, socketio, stations,
+    maintenance_barrier, pending, review, scan_inventory, seen_captures, socketio, stations,
 )
 from server.logs import logger
 from server.desks import (
     desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
 )
 from server.captures import (
-    announce_and_route, foil_file, remember_outcome, scan_stats, station_prefix, submit_capture,
+    announce_and_route, foil_file, remember_outcome, scan_stats, set_pending_capture, station_prefix,
+    submit_capture,
 )
 from server.inventory_api import clear_camera
 
@@ -114,6 +115,8 @@ def station_capture(station_id):
     The card is read (OCR, then the vision AI), and - as when adding automatically - added to
     the scanned cards if its printing is confirmed, else queued for review.
     Answers {'capture': n, 'status': 'added' | 'review' | 'pending', ...}; 202 while pending.
+    A settled answer also has 'sync_key', the capture's identity here: the station can then
+    ask where that copy is, or remove it (station_capture_sync).
     """
     if not Stations.valid_id(station_id):
         return jsonify({'success': False, 'message': 'Station ids are 1-40 letters, digits, - or _'}), 400
@@ -211,6 +214,108 @@ def station_capture_outcome(station_id, number):
     if not station_token_ok():
         return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
     return capture_outcome_response(station_id, number)
+
+
+def refuse_sync(message, code=409):
+    return jsonify({'success': False, 'message': message}), code
+
+
+@app.route('/api/stations/<station_id>/captures/<int:number>/sync', methods=['GET', 'DELETE'])
+def station_capture_sync(station_id, number):
+    """
+    A phone keeps a row for each card it scanned. GET: where that capture's copy is now -
+    {'success': True, 'state': ...}:
+
+      'pending'   still being read (also for DELETE: nothing is removed yet, ask again)
+      'scanned'   in the scanned cards
+      'review'    waiting in the review queue
+      'resolved'  in neither: moved into the collection, or removed / skipped / cleared here
+      'removed'   DELETE took it out just now (of the scanned cards or the review queue)
+
+    The state is the one of this moment, not what the capture first became: a card queued for
+    review and added from there is 'scanned', and 'resolved' once it is in the collection.
+    DELETE removes this capture's copy and no other - of identical cards scanned in a row, the
+    one named - and never anything in the collection: what "Add to collection" moved is not in
+    the scanned cards any more, so there is nothing here to remove ('resolved'). Asked again,
+    a DELETE finds nothing and says 'resolved'.
+
+    Refused, never answered 'resolved': a capture this server does not know (404 - also one
+    whose outcome was forgotten, after pending.KEEP_DAYS), and one it knows but cannot follow
+    (409: from before 2026-10-12, failed, shown on the station's page instead of added, or
+    added without a photo). The phone keeps its row then.
+
+    ?sync_key=<the key the phone was given> is optional and makes the question exact: the
+    capture is named by its number, and a station that was forgotten here starts counting
+    from 1 again - a row the phone kept from before would then name a new capture. With the
+    key, a number that now belongs to another capture is refused (409) instead of answered.
+    """
+    if not station_token_ok():
+        return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
+    remove = request.method == 'DELETE'
+    # Not while a capture's result is being applied or a full backup is copying the files
+    with maintenance_barrier:
+        # Being read - or failed and kept to be read again at the next start (its outcome in
+        # this run says 'error', but the card may still arrive): not settled, so not gone
+        if pending.has(station_id, number):
+            return jsonify({'success': True, 'state': 'pending'})
+        with capture_outcomes_lock:
+            outcome = capture_outcomes.get((station_id, number))
+        outcome = outcome or pending.outcome(station_id, number)  # settled before a restart
+        if outcome is None:
+            return refuse_sync('No such capture (its outcome is not on record here)', 404)
+        key = outcome.get('sync_key')
+        if not key:
+            if outcome.get('status') == 'error':
+                return refuse_sync('This capture failed on the server: nothing was added for it')
+            return refuse_sync('This capture cannot be followed (it is from before scan synchronization, '
+                               'or was shown on the camera page): remove it on the server')
+        asked_for = request.args.get('sync_key')
+        if asked_for and asked_for != key:
+            return refuse_sync(f'Capture {number} of this station is another capture now (the station was '
+                               'forgotten on the server and counts again): nothing was changed')
+        # The scanned cards first: a card added from the review queue is there, with the
+        # capture's identity handed on (scan_events.py: handle_add_inventory)
+        state, name = scan_inventory.captured_copy(key, station_id, remove)
+        if state == 'unfollowed':
+            return refuse_sync('This capture has no copy that can be followed here: remove it on the server')
+        if state == 'removed':
+            removed_from_scanned(station_id, name)
+        if state is None:
+            item = review.by_capture(key)
+            if item is not None and item['station'] != station_id:
+                return refuse_sync('This capture has no copy that can be followed here: remove it on the server')
+            if item is None:
+                state = 'resolved'  # known, and in neither place any more
+            elif remove:
+                review.remove(item['id'])
+                removed_from_review(station_id, item)
+                state = 'removed'
+            else:
+                state = 'review'
+        return jsonify({'success': True, 'state': state})
+
+
+def removed_from_scanned(station_id, name):
+    """A station removed one of its scanned cards: its page says so, and every page counts again"""
+    with in_desk(desk_for(station_id)):
+        log_to_client(f"{station_prefix(stations.get(station_id))}Removed {name} from the scanned cards "
+                      "(removed at the station)", level="warning")
+    # 'cleared': cards went, nothing was added - the pages reload their counters and open
+    # lists (each its own: a camera's page counts that camera's cards)
+    socketio.emit('inventory_updated', {'auto': True, 'cleared': True}, namespace='/')
+
+
+def removed_from_review(station_id, item):
+    """A station removed a capture that waited for review: off its page's queue - and off the
+    page itself if it was the item open there, or its Add would still add the card"""
+    with in_desk(desk_for(station_id)) as its_desk:
+        log_to_client(f"{station_prefix(stations.get(station_id))}Removed a card from the review queue "
+                      "(removed at the station)", level="warning")
+        if its_desk.current_review_id == item['id']:
+            its_desk.current_review_id = its_desk.review_sid = its_desk.current_card_info = None
+            set_pending_capture(None)
+            emit_desk('review_item', {'id': None, 'total': 0})
+        emit_desk('review_queue_update', {'count': review.count(item['game'], its_desk.review_filter)})
 
 
 def undo_station_add(station):

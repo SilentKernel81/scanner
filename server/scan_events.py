@@ -151,6 +151,12 @@ def handle_add_inventory(data):
         if capture == desk().pending_capture:
             set_pending_capture(None)
         added_rows = []
+        # Added from the review queue: the card is the copy of the capture that waited there,
+        # and takes its identity along (review.py: capture_key) - the phone that scanned it
+        # then finds it in the scanned cards, and can still remove exactly this copy. It goes
+        # with the first finish added, like the photo.
+        reviewed = review.get(desk().current_review_id) if desk().current_review_id is not None else None
+        sync_key = reviewed.get('capture_key') if reviewed else None
 
         for item in items:
             finish = item.get('finish') or game.default_finish
@@ -161,8 +167,10 @@ def handle_add_inventory(data):
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
             added_rows.append(scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish,
                                                       condition, quantity, capture=capture,
-                                                      location=scan_location(), source=desk().id))
+                                                      location=scan_location(), source=desk().id,
+                                                      capture_key=sync_key))
             capture = None
+            sync_key = None
 
             # Send updated stats and what was added (the page offers an Undo)
             emit('inventory_updated', {'auto': False, 'stats': scan_stats(game.id),

@@ -349,6 +349,14 @@
    "station_capture_outcome"
   ],
   [
+   "/api/stations/<station_id>/captures/<int:number>/sync",
+   [
+    "DELETE",
+    "GET"
+   ],
+   "station_capture_sync"
+  ],
+  [
    "/api/stations/<station_id>/undo",
    [
     "POST"

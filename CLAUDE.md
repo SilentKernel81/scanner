@@ -69,7 +69,9 @@ writes rolled back, reads that do not write, captures that count once, the card 
 web cache) - all on temporary databases; `tests/test_app_surface.py` the server's routes and
 events against the recorded list (`tests/app_surface.json`); `tests/test_station_setup.py` a station's setup
 page (which setting wins, the form's checks, the password and its sessions);
-`tests/test_station_uploads.py` a station's unsent captures across restarts. Nothing else is
+`tests/test_station_uploads.py` a station's unsent captures across restarts;
+`tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
+the two routes, through Flask's test client). Nothing else is
 automated: verify changes
 by running the programs, and for scanner logic by feeding recorded / synthetic frames through
 `CardScanner` with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
@@ -84,6 +86,7 @@ container - or a second container with its own data folder and port.
 | **Server** | |
 | One desk per camera: whose card, review and events this is | `server/desks.py`: `Desk`, `desk`, `desk_for`, `in_desk`, `at_station`, `emit_desk`, the `scanner` proxy, `make_remote_scanner`; `server/scan_events.py`: `handle_connect` (`page_stations`) |
 | A station's capture arriving; kept until settled | `server/stations_api.py`: `station_capture`; `server/captures.py`: `submit_capture`, `resume_pending`; `server/stations_api.py`: `capture_outcome_response`; `server/state.py`: `seen_captures`; `pending.py`: `PendingCaptures` (`settle`, `fail`, `settled`), `APPLIED_CAPTURES_TABLE` (`data/pending_captures.db`) |
+| Where one capture's copy is, and removing it (the phone's list) | `server/stations_api.py`: `station_capture_sync`, `removed_from_scanned`, `removed_from_review`; `inventory.py`: `captured_copy`, `UNFOLLOWED_CAPTURES_TABLE`; `review.py`: `by_capture`; `server/scan_events.py`: `handle_add_inventory` (the key handed on); `server/captures.py`: `submit_capture` (`sync_key`) |
 | Reading a card: OCR stage, AI stage, their queues and workers, AI provider / OCR switch | `identification.py`: `Identification` (`submit` → `_ocr_worker` → `_ai_worker` → `_done_worker`; `identify` in the caller's thread; `set_ai_provider`, `set_ocr_enabled`, `last_capture`) |
 | OCR reader process and parsers | `card_ocr.py`: `CardOcr`, `parse_magic`, `PARSERS`; `ocr/server.mjs` (Node.js); `Game.confirmed_read` |
 | AI providers, foil check, Ollama warm-up | `card_identifier.py`: `_ask_*`, `identify_card`, `read_foil_symbol`, `warm_up` |
@@ -179,6 +182,13 @@ container - or a second container with its own data folder and port.
   remembered, counted). Cards come back on `Identification`'s one results thread (`on_done`) -
   never route a card from the OCR / AI workers themselves. Station captures arrive on request
   threads, several at once.
+- **A capture's copy can be asked about and removed by its station** (`station_capture_sync`,
+  for the Android app's list). Its identity is the capture's uid (the `sync_key` in settled
+  outcomes), carried by the copy's photo row (`inventory_captures.capture_key`) or its review
+  item (`review_queue.capture_key`): anything new that moves copies must keep moving the photo
+  rows with them, and a new way from review to the scanned cards must hand the key on. Never
+  answer `resolved` for a capture that is unknown or cannot be followed (404 / 409), and never
+  give the collection's photo rows a key - that is what keeps a phone out of the collection.
 - **Uploads are "at least once", a capture counts once.** `capture_id` makes a repeat the same
   capture (`seen_captures`, and `settled_captures` across a restart); a capture's `uid` is noted
   by whatever its result writes (`add_card(capture_key=)`, `review.add(capture_key=)`), in the

@@ -43,10 +43,19 @@ class ReviewQueue:
                     card_id TEXT,           -- best match, if any
                     match TEXT,             -- how it was matched (Game.confirmed_matches)
                     created_at TEXT NOT NULL,
-                    station TEXT            -- stations.py id the capture came from (NULL: nobody's - see _of)
+                    station TEXT,           -- stations.py id the capture came from (NULL: nobody's - see _of)
+                    capture_key TEXT        -- the uid of the capture it is (pending.py); see by_capture
                 )''')
-            if 'station' not in {row['name'] for row in self.conn.execute('PRAGMA table_info(review_queue)')}:
+            columns = {row['name'] for row in self.conn.execute('PRAGMA table_info(review_queue)')}
+            if 'station' not in columns:
                 self.conn.execute('ALTER TABLE review_queue ADD COLUMN station TEXT')
+            # Which capture an item is, on the item itself (2026-10-12): applied_captures knows
+            # it too, but forgets after KEEP_DAYS, and an item can wait longer than that. Items
+            # that are there already have none: a phone asking about them is told so
+            if 'capture_key' not in columns:
+                self.conn.execute('ALTER TABLE review_queue ADD COLUMN capture_key TEXT')
+            self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_review_capture_key '
+                              'ON review_queue(capture_key) WHERE capture_key IS NOT NULL')
             # Captures that were queued here already (add's capture_key; pending.py)
             self.conn.execute(APPLIED_CAPTURES_TABLE)
             prune_applied(self.conn)
@@ -73,10 +82,10 @@ class ReviewQueue:
         with self._lock:
             item_id = self.conn.execute(
                 'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
-                'station) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'station, capture_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (game, file, name or '', number or '', set_code or '', foil or 'unknown',
                  card['id'] if card else None, card.get('match') if card else None,
-                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station)).lastrowid
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key)).lastrowid
             if capture_key:
                 self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                   (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -135,6 +144,13 @@ class ReviewQueue:
             if row['file']:
                 (REVIEW_DIR / row['file']).unlink(missing_ok=True)
         return len(rows)
+
+    def by_capture(self, capture_key):
+        """The item a capture is waiting as (its uid, pending.py), or None: resolved - added from
+        the review, skipped or cleared - or never queued"""
+        with self._lock:
+            row = self.conn.execute('SELECT * FROM review_queue WHERE capture_key = ?', (capture_key,)).fetchone()
+        return dict(row) if row else None
 
     def remove(self, item_id):
         """Resolve an item (added or skipped): delete it and its capture copy"""
