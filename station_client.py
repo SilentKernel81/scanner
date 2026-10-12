@@ -13,11 +13,15 @@ http://<this machine>:8080), where the server, the station's name and the camera
 and saved in data/station.json.
 
 Little else is kept here: camera settings (focus, rotation, fixed area) are saved on the
-server, and a captured image is deleted once the server has it. Resolution and the capture
-thresholds are in config.yaml. See remote_scanner.py for the messages.
+server, and a captured image is deleted once the server has it. Until then it lies in
+scanned_cards/ with a note beside it (<image>.upload.json) saying what it is and where it
+goes, so that a capture taken while the server was away is still sent after this program -
+or the whole machine - has been restarted. Resolution and the capture thresholds are in
+config.yaml. See remote_scanner.py for the messages.
 """
 
 import argparse
+import json
 import logging
 import os
 import queue
@@ -39,6 +43,7 @@ from config import Config
 NAMESPACE = '/station'
 STATUS_INTERVAL = 0.2    # seconds between status reports
 PREVIEW_INTERVAL = 0.08  # at most ~12 preview frames a second, while the page is watched
+NOTE_SUFFIX = '.upload.json'  # the note beside a capture that is not on the server yet
 # What the server may call and set (remote_scanner.py: METHODS, DECIDED, SENT)
 METHODS = ('set_rotation', 'set_refocus_every', 'set_fixed_area', 'set_detection_enabled',
            'set_continuous_autofocus', 'reset_focus', 'detected_area')
@@ -83,6 +88,12 @@ class Station:
         self.preview_wanted = False
         self.stopping = False  # Set to leave run(): the setup page saved new settings (request_restart)
         self.uploads = queue.Queue()
+        self.upload_idle = threading.Event()  # Clear while a capture is being sent (wait_for_upload)
+        self.upload_idle.set()
+        # Captures found at the start that were taken for another server or under another
+        # station id: kept, not sent, until the setup page says what to do with them
+        self.held = []
+        self.held_lock = threading.Lock()
         self.sio = socketio.Client(reconnection=True, reconnection_delay=1, reconnection_delay_max=5)
         self.sio.on('connect', self.on_connect, namespace=NAMESPACE)
         self.sio.on('disconnect', self.on_disconnect, namespace=NAMESPACE)
@@ -94,6 +105,7 @@ class Station:
     # ------------------------------------------------------------------------
 
     def run(self):
+        self.load_pending()  # captures an earlier run could not send, before any new one
         threading.Thread(target=self.upload_loop, daemon=True, name="Uploads").start()
         while not self.stopping:
             try:
@@ -267,46 +279,189 @@ class Station:
             # Fixed area: the capture is the area, the foil check uses the outlined card
             foil_path = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
             cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
-        self.uploads.put({'image': Path(image_path), 'foil': foil_path, 'mode': mode,
-                          'foil_is_image': foil_image is card_image, 'capture_id': uuid.uuid4().hex})
+        item = {'image': Path(image_path), 'foil': foil_path, 'mode': mode,
+                'foil_is_image': foil_image is card_image, 'capture_id': uuid.uuid4().hex}
+        # The note first, then the queue: from here on the capture is on record on disk,
+        # whatever happens to this program
+        self.write_note(item)
+        self.uploads.put(item)
+
+    # ------------------------------------------------------------------------
+    # Captures that are not on the server yet
+    #
+    # The queue above lives in memory only. If this program ends with captures in it - a
+    # restart from the setup page, a power cut, `docker compose up --build` - they used to
+    # stay behind as pictures nobody would ever send. So each queued capture also has a
+    # small note on disk beside its picture, and a new start reads the notes back.
+    #
+    # The note holds the capture's capture_id. That id is what makes sending a capture
+    # twice harmless: the server counts an id once (app.py: seen_captures, settled_captures).
+    # A capture that was being sent when the program ended may or may not have arrived - it
+    # is sent again with the same id, and is one card either way.
+    #
+    # The note also holds where the capture was going: the server's address and this
+    # station's id. A capture is only sent on its own if both are still the same. If the
+    # setup page changed either, the capture is "held": it may belong to another server's
+    # collection, and which one is not for this program to guess - the setup page shows the
+    # held captures and asks (send_held / delete_held).
+    # ------------------------------------------------------------------------
+
+    @staticmethod
+    def note_path(image):
+        """card_3_1791754770.jpg -> card_3_1791754770.upload.json"""
+        return Path(image).with_name(Path(image).stem + NOTE_SUFFIX)
+
+    def write_note(self, item):
+        """Put a capture on record on disk (written whole or not at all, as station_setup.save)"""
+        note = {'capture_id': item['capture_id'], 'mode': item['mode'], 'foil_is_image': bool(item['foil_is_image']),
+                'image': item['image'].name, 'foil': item['foil'].name if item['foil'] else None,
+                'server': self.server, 'station': self.id, 'taken': time.strftime('%Y-%m-%d %H:%M:%S')}
+        path = self.note_path(item['image'])
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(note, indent=2))
+        os.replace(temporary, path)
+
+    @staticmethod
+    def remove_capture(item, keep_pictures=False):
+        """A capture is settled: its note goes, and its pictures unless they are to be kept"""
+        Station.note_path(item['image']).unlink(missing_ok=True)
+        if not keep_pictures:
+            for path in (item['image'], item['foil']):
+                if path:
+                    path.unlink(missing_ok=True)
+
+    def load_pending(self):
+        """
+        At the start: queue the captures an earlier run left behind, oldest first. Those
+        taken for another server or under another station id are held instead (see above).
+        """
+        notes = sorted(Config.IMAGES_DIR.glob('*' + NOTE_SUFFIX), key=lambda path: path.stat().st_mtime)
+        queued = 0
+        for path in notes:
+            try:
+                note = json.loads(path.read_text())
+                item = {'image': path.with_name(note['image']),
+                        'foil': path.with_name(note['foil']) if note.get('foil') else None,
+                        'mode': note['mode'], 'foil_is_image': bool(note.get('foil_is_image')),
+                        'capture_id': note['capture_id'],
+                        'server': note.get('server'), 'station': note.get('station'), 'taken': note.get('taken')}
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logger.warning(f"{path.name} is not a capture's note ({e}) - left alone")
+                continue
+            if not item['image'].is_file():
+                path.unlink(missing_ok=True)  # the picture is gone: nothing to send
+                continue
+            if (item['server'], item['station']) == (self.server, self.id):
+                self.uploads.put(item)
+                queued += 1
+            else:
+                with self.held_lock:
+                    self.held.append(item)
+        if queued:
+            logger.info(f"{queued} captured card{'s' if queued != 1 else ''} from before the restart will be sent now")
+        if self.held:
+            logger.warning(f"{len(self.held)} captured cards were taken for {self.held[0]['server']} "
+                           f"(station {self.held[0]['station']}) and are kept, not sent - the setup page asks what to do with them")
+
+    def pending_count(self):
+        """Captures taken but not on the server yet (queued or being sent), for the setup page"""
+        return self.uploads.qsize() + (0 if self.upload_idle.is_set() else 1)
+
+    def held_summary(self):
+        """What the setup page shows about held captures: how many, and where they were going"""
+        with self.held_lock:
+            if not self.held:
+                return None
+            return {'count': len(self.held), 'server': self.held[0]['server'], 'station': self.held[0]['station'],
+                    'oldest': self.held[0]['taken']}
+
+    def send_held(self):
+        """The setup page's "Send them to this server": the held captures join the queue"""
+        with self.held_lock:
+            held, self.held = self.held, []
+        for item in held:
+            self.write_note(item)  # the note now names this server: sent on its own from here on
+            self.uploads.put(item)
+        return len(held)
+
+    def delete_held(self):
+        """The setup page's "Delete them": the held captures' pictures and notes are removed"""
+        with self.held_lock:
+            held, self.held = self.held, []
+        for item in held:
+            self.remove_capture(item)
+        return len(held)
+
+    def wait_for_upload(self, seconds):
+        """
+        Before a restart: give a capture that is being sent right now the time to arrive.
+        Not required for safety (it would be sent again under the same capture_id), but it
+        spares the server a duplicate to recognise.
+        """
+        return self.upload_idle.wait(seconds)
 
     def upload_loop(self):
         """Send captures in order; one that can't be sent is tried again until it is"""
         session = requests.Session()
+        while not self.stopping:
+            try:
+                item = self.uploads.get(timeout=0.5)  # not forever: `stopping` is looked at twice a second
+            except queue.Empty:
+                continue
+            self.upload_idle.clear()
+            try:
+                self.send_until_settled(session, item)
+            finally:
+                self.upload_idle.set()
+
+    def send_until_settled(self, session, item):
+        """
+        Send one capture, again and again until the server has it or refuses it for good. Left
+        early only when the station is stopping: the capture's note stays, and the next start
+        sends it.
+        """
+        delay = 1.0
+        while not self.stopping:
+            verdict = self.send_once(session, item)
+            if verdict == 'accepted':
+                self.remove_capture(item)
+                return
+            if verdict == 'refused':
+                # The server will never take this picture (unreadable, too large): it is kept
+                # here, but its note goes - it is not sent again, now or after a restart
+                self.remove_capture(item, keep_pictures=True)
+                return
+            # Wait before the next try, in short steps so that a restart is not held up
+            deadline = time.time() + delay
+            while time.time() < deadline and not self.stopping:
+                time.sleep(0.1)
+            delay = min(delay * 2, 15.0)
+
+    def send_once(self, session, item):
+        """One attempt to send a capture: 'accepted', 'refused' or 'retry' (see upload_verdict)"""
         headers = {'X-Station-Token': self.token} if self.token else {}
-        while True:
-            item = self.uploads.get()
-            delay = 1.0
-            kept = False
-            while True:
-                try:
-                    files = {'image': (item['image'].name, item['image'].read_bytes(), 'image/jpeg')}
-                    if item['foil']:
-                        files['foil_image'] = (item['foil'].name, item['foil'].read_bytes(), 'image/jpeg')
-                    response = session.post(
-                        f"{self.server}/api/stations/{self.id}/captures", files=files, headers=headers, timeout=90,
-                        # wait 0: the outcome is shown on the station's page, nobody waits for it here.
-                        # capture_id: this same capture sent again (no answer came) is still one card
-                        data={'name': self.name, 'camera': '1', 'mode': item['mode'], 'wait': '0',
-                              'capture_id': item['capture_id'], 'foil_is_image': '1' if item['foil_is_image'] else '0'})
-                    verdict = upload_verdict(response)
-                    if verdict == 'accepted':
-                        break
-                    if verdict == 'refused':
-                        # The server will never take this picture (unreadable, too large): it is
-                        # kept here, not sent again
-                        logger.error(f"The server refused {item['image'].name}: {response.text[:200]} - the picture is kept")
-                        kept = True
-                        break
-                    logger.warning(f"Unexpected answer {response.status_code} for {item['image'].name} - trying again in {delay:.0f} s")
-                except (requests.RequestException, OSError) as e:
-                    logger.warning(f"Could not send {item['image'].name} ({type(e).__name__}) - trying again in {delay:.0f} s")
-                time.sleep(delay)
-                delay = min(delay * 2, 15.0)
-            if not kept:
-                for path in (item['image'], item['foil']):
-                    if path:
-                        path.unlink(missing_ok=True)
+        try:
+            files = {'image': (item['image'].name, item['image'].read_bytes(), 'image/jpeg')}
+            if item['foil']:
+                files['foil_image'] = (item['foil'].name, item['foil'].read_bytes(), 'image/jpeg')
+            response = session.post(
+                f"{self.server}/api/stations/{self.id}/captures", files=files, headers=headers, timeout=90,
+                # wait 0: the outcome is shown on the station's page, nobody waits for it here.
+                # capture_id: this same capture sent again (no answer came) is still one card
+                data={'name': self.name, 'camera': '1', 'mode': item['mode'], 'wait': '0',
+                      'capture_id': item['capture_id'], 'foil_is_image': '1' if item['foil_is_image'] else '0'})
+        except FileNotFoundError:
+            logger.error(f"{item['image'].name} is gone - nothing to send")
+            return 'refused'  # settled in the only way left: its note is removed
+        except (requests.RequestException, OSError) as e:
+            logger.warning(f"Could not send {item['image'].name} ({type(e).__name__}) - trying again")
+            return 'retry'
+        verdict = upload_verdict(response)
+        if verdict == 'refused':
+            logger.error(f"The server refused {item['image'].name}: {response.text[:200]} - the picture is kept")
+        elif verdict == 'retry':
+            logger.warning(f"Unexpected answer {response.status_code} for {item['image'].name} - trying again")
+        return verdict
 
 
 def upload_verdict(response):
@@ -388,6 +543,10 @@ def main():
         # up when it ends). os.execv replaces this program by a new copy of itself with the
         # same command line - in a container that keeps the container running, where simply
         # ending would rely on Docker to start it again.
+        # Captures that are still waiting are not lost by this: each has its note on disk,
+        # and the new copy sends them (Station.load_pending).
+        if station:
+            station.wait_for_upload(10)  # one that is on its way right now may finish
         time.sleep(0.5)  # let the page's "saved" answer go out first
         logger.info("Restarting")
         os.execv(sys.executable, [sys.executable] + sys.argv)
