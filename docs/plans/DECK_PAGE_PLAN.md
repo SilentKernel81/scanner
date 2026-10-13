@@ -327,3 +327,15 @@ The stations were not touched: they have no part in this.
 Still open: the fourth tab the user asked for ("to keep the build stuff we currently
 have") - which parts that means is to be asked; and the mockups folder, which is not in
 Git.
+
+**Added afterwards, the same day: every deck is shown as a card, its cover** (4bbfe04; asked
+for by the user after seeing the pages). The list's tiles are whole cards; a deck with two
+commanders shows the first with a button to turn to the other; a deck without a commander
+shows its most valuable card that is not a land; any card can be chosen with its Cover
+button. One column more in the decks table (`deck_cover_1`). Deployed to the server at
+09:53: a backup first, the deck list and all 15 decks compared card by card before and
+after - the same - and the server's own log: "Migration deck_cover_1 ... applied (every row
+kept)", with its copy of the file. Looked at there, reading only: 15 cards in the list, the
+five decks without a commander each with a cover of their own, one deck with the turn
+button. Not tried on the real server: choosing a cover (it writes; it was tried on the test
+server, by the check script).
