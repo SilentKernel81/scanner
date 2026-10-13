@@ -268,7 +268,8 @@ a phone too; the deck pages are made for a screen with a pointer.
   have no price, and the list cannot be changed here: Arena
   is where that collection lives. Decks are **Physical** or **Arena** (the Decks page
   filters by it): an Arena deck counts what you own in Arena and shows what is missing in
-  wildcards. **What can I build?** asks about either collection (Build from: Physical |
+  wildcards. **Duplicate** asks which kind the copy is to be: an Arena deck copied as
+  Physical shows what you would have to buy to own it on paper. **What can I build?** asks about either collection (Build from: Physical |
   Arena). (Tried with one export of one account, 1,946 cards and three decks; a deck
   with a sideboard or commander in the export, and the wildcard counts against Arena
   itself, were not.) **Add cards** opens a

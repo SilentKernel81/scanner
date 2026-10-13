@@ -1761,7 +1761,11 @@ the decks the last import brought by the ones this one brings (a deck still ther
 its cover); decks made here, also Arena ones, have no `arena_id` and stay. So a change
 made here to a deck that came from Arena lasts until the next import with a deck file.
 The deck list filters All | Physical | Arena (`decks.js`: `deckKindShown`); New deck asks
-for the kind. Arena's formats were added for these decks (Historic, Timeless, Alchemy,
+for the kind, and so does **Duplicate** (`POST /api/decks/<id>/duplicate` with `kind`;
+`DeckManager.duplicate(kind)`): a copy of the other kind is the same list counted against
+the other collection - an Arena deck copied as Physical shows what of it is on the shelf
+and what the rest costs to buy (cards cannot be bought singly in Arena, on paper they
+can). Such a copy is named "... (Physical)" / "... (Arena)" and is a deck made here. Arena's formats were added for these decks (Historic, Timeless, Alchemy,
 Brawl, Standard Brawl - keys of Scryfall's legalities like the others) and any deck can
 have them. **"What can I build?"** has the same choice, Build from Physical | Arena
 (`decks.js`: `buildKind`, `showBuildKind`): it decides whose cards "Build around a card"

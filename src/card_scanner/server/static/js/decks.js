@@ -1238,7 +1238,22 @@ function bindBuilderEvents() {
         window.location = `/api/decks/${deck.id}/export/buylist`;
     });
     $('deck-duplicate').addEventListener('click', async () => {
-        const data = await api(`/api/decks/${deck.id}/duplicate`, {method: 'POST'});
+        // With a digital collection the copy can be of either kind: an Arena deck copied as
+        // Physical shows what you own of it on paper and what the rest costs to buy; a
+        // Physical deck copied as Arena, what you have in Arena and the wildcards for the rest
+        let kind = deck.kind;
+        if (gameInfo.arena) {
+            showDeckMenu(false);
+            kind = await choiceDialog({
+                title: `Duplicate ${deck.name}`,
+                message: 'As a deck of which collection? The copy counts what you own there, and what is missing: '
+                    + 'to buy for a Physical deck, to craft with wildcards for an Arena deck.',
+                choices: [{label: 'Physical', value: 'paper', style: deck.kind === 'paper' ? 'primary' : undefined},
+                          {label: 'Arena', value: 'arena', style: deck.kind === 'arena' ? 'primary' : undefined},
+                          {label: 'Cancel', value: null}]});
+            if (!kind) return;
+        }
+        const data = await api(`/api/decks/${deck.id}/duplicate`, {method: 'POST', body: {kind}});
         if (data) openDeck(data.deck);
     });
     $('deck-delete').addEventListener('click', async () => {

@@ -331,7 +331,11 @@ def deck_duplicate(deck_id):
     deck, error = get_deck_or_404(deck_id)
     if error:
         return error
-    return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_store.duplicate(deck_id)))})
+    # JSON kind: 'paper' or 'arena' - the copy's kind (none: the deck's own)
+    kind = (request.get_json(silent=True) or {}).get('kind')
+    if kind not in (None, 'paper', 'arena'):
+        return jsonify({'success': False, 'error': 'Unknown kind of deck'}), 400
+    return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_store.duplicate(deck_id, kind)))})
 
 
 @app.route('/api/decks/<int:deck_id>/cards', methods=['POST'])
