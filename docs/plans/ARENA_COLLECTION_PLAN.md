@@ -239,6 +239,15 @@ the view changes.
   cards): identical before and after, all `paper`.
 - 235 unit tests (20 new in `tests/test_arena_collection.py`, three of them backups).
 
+**After the user looked at it** (a preview server on copied data, a real browser; the
+import through the page's button worked): the rows of the Arena list were laid out for
+the checkbox it no longer has, and names wrapped - fixed; Arena cards are stored and
+shown without a price; the second small picture of a row is left out there; either
+exporter file can be imported alone (the collection file had been required); "What can I
+build?" got the same choice, Physical | Arena. A review then found that a price filter
+remembered from the paper view emptied the Arena list - the hidden filters are no longer
+applied there. `scripts/check_arena_pages.py` is at 32 of 32.
+
 **Not tried:**
 
 - A sideboard or a commander in the exporter's deck file (read as `sideboard` /
@@ -246,7 +255,8 @@ the view changes.
 - Another version of the exporter, another account, an export with mythic wildcards.
 - Whether the wildcard counts agree with what Arena asks: the rarity is the printed
   card's.
-- The upload from a real browser (the checks posted the files to the route; the page's
-  button and file dialog were not clicked), and the pages in a browser with a pointer.
+- The results of "What can I build?" for Arena (the rankings ask other sites; checked
+  only that they start for the Arena collection and that a deck started there is an
+  Arena deck).
 - A backup with the digital collection restored on a running server (the unit tests
   restore one on temporary files).

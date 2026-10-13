@@ -263,11 +263,13 @@ a phone too; the deck pages are made for a screen with a pointer.
 - **Your MTG Arena collection** (Magic) - the collection page has a switch **Physical |
   Arena**. Arena shows what you have in the digital game: run an Arena collection exporter
   (a separate, third-party tool that reads the game while it runs), then **Import from
-  Arena** with its `mtga_collection.json` - and `mtga_decks.json` with it for your Arena
-  decks. Each import replaces the one before, and the list cannot be changed here: Arena
+  Arena** with its `mtga_collection.json` (your cards) and `mtga_decks.json` (your Arena
+  decks) - both at once or one at a time. Each import replaces the one before, Arena cards
+  have no price, and the list cannot be changed here: Arena
   is where that collection lives. Decks are **Physical** or **Arena** (the Decks page
   filters by it): an Arena deck counts what you own in Arena and shows what is missing in
-  wildcards. (Tried with one export of one account, 1,946 cards and three decks; a deck
+  wildcards. **What can I build?** asks about either collection (Build from: Physical |
+  Arena). (Tried with one export of one account, 1,946 cards and three decks; a deck
   with a sideboard or commander in the export, and the wildcard counts against Arena
   itself, were not.) **Add cards** opens a
   panel that searches the whole card database: click to add. Every card shows whether you own it, are missing
@@ -512,7 +514,7 @@ those to one camera.
 | `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned, issues and its `covers`; rename / change format / choose the `cover` card; delete |
 | `POST /api/decks/<id>/cards`, `/import`, `/duplicate` | Change cards; add cards from a list or a deck address; copy a deck |
 | `GET /api/decks/<id>/export/<text\|buylist\|arena>`, `GET /api/decks/<id>/arena` | Download the decklist, the cards not owned, or the list for MTG Arena's Import button; the same Arena list with the names it leaves out |
-| `GET /api/arena`, `POST /api/arena/import` | The digital collection (MTG Arena): when it is from, its size, the wildcards; replace it with an exporter's files (form field `files`: `mtga_collection.json`, optionally `mtga_decks.json`). Its cards: `GET /api/inventory?area=arena` (read only) |
+| `GET /api/arena`, `POST /api/arena/import` | The digital collection (MTG Arena): when it is from, its size, the wildcards; replace it with an exporter's files (form field `files`: `mtga_collection.json`, `mtga_decks.json`, or both - each replaces its own part). Its cards: `GET /api/inventory?area=arena` (read only) |
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
 | `GET` / `POST /api/decks/ideas/<commanders\|precons\|card>` | "What can I build?" searches: state / start a run / stop it |
 | `GET /api/precons`, `GET /api/precons/covers?files=`, `GET /api/precons/<file>`, `POST /api/precons/<file>/own` | Preconstructed decks; the card that stands for each of up to 8 of them; one's cards with their pictures and how many of each are owned (nothing saved); add one's cards to the inventory and open it as a deck |

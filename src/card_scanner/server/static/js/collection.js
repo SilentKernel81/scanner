@@ -26,6 +26,11 @@ function inArena() {
     return inventoryArea === 'arena';
 }
 
+function priceText(amount) {
+    // A card in Arena has no price: what the paper printing costs says nothing about it
+    return inArena() ? '–' : money(amount);
+}
+
 async function showCollection(kind) {
     // A delete that still waits for its undo time was made in the collection shown until
     // now: it is sent before the area changes, or its ids would go to the other collection
@@ -52,7 +57,7 @@ async function loadArenaInfo() {
     const info = arenaInfo;
     const wild = info && info.wildcards ? ['common', 'uncommon', 'rare', 'mythic'].map(rarity => `${info.wildcards[rarity] || 0} ${rarity}`).join(', ') : '';
     $('arena-text').innerHTML = !info || !info.imported
-        ? 'Nothing imported yet. Run the Arena exporter, then choose its <strong>mtga_collection.json</strong> here (and <strong>mtga_decks.json</strong> with it for your Arena decks).'
+        ? 'Nothing imported yet. Run the Arena exporter, then choose its <strong>mtga_collection.json</strong> and <strong>mtga_decks.json</strong> here - both at once, or one at a time.'
         : `<strong>Your Arena collection</strong> as exported ${escapeHtml((info.exported || '').slice(0, 16).replace('T', ' '))}: `
           + `${plural(info.cards, 'card')} · wildcards: ${escapeHtml(wild)}`
           + (info.summary && info.summary.unknown && info.summary.unknown.length
@@ -68,10 +73,15 @@ async function importArena(files) {
     const data = await api('/api/arena/import', {method: 'POST', body: form});
     $('arena-import').disabled = false;
     if (data) {
-        const unknown = (data.arena.summary.unknown || []).length;
-        notify(`Arena collection imported: ${plural(data.arena.cards, 'card')}`
-               + (data.decks !== null ? `, ${plural(data.decks, 'deck')}` : ' (no deck file: the Arena decks were left as they are)')
-               + (unknown ? ` - ${plural(unknown, 'card')} not in the card data` : ''), 'success');
+        // Either file alone is an import: the message says which part was replaced
+        const unknown = data.collection ? ((data.arena.summary || {}).unknown || []).length : 0;
+        const missing = (data.deck_unknown || []).length;
+        notify(!data.collection
+               ? `Arena decks imported: ${plural(data.decks, 'deck')} (no collection file: the cards were left as they are)`
+               : `Arena collection imported: ${plural(data.arena.cards, 'card')}`
+                 + (data.decks !== null ? `, ${plural(data.decks, 'deck')}` : ' (no deck file: the Arena decks were left as they are)')
+                 + (unknown ? ` - ${plural(unknown, 'card')} not in the card data` : ''), 'success');
+        if (missing) notify(`Not in the card data, and left out of the decks: ${data.deck_unknown.slice(0, 12).join(', ')}`, 'warning');
         if (data.warning) notify(data.warning, 'warning');
     }
     await loadArenaInfo();
@@ -355,13 +365,15 @@ function activeFilters() {
     chosen('filter-rarity', 'Rarity');
     chosen('filter-set', 'Set');
     chosen('filter-finish', 'Finish');
-    chosen('filter-location', 'Location');
-    chosen('filter-tag', 'Tag');
+    // (not in Arena view, where these three are neither shown nor applied: applyFilters)
+    const digital = inArena();
+    if (!digital) chosen('filter-location', 'Location');
+    if (!digital) chosen('filter-tag', 'Tag');
     if ($('filter-added').value) chips.push({text: $('filter-added').selectedOptions[0].textContent, clear: () => { $('filter-added').value = ''; }});
     if ($('filter-free').checked) chips.push({text: 'Not in a deck', clear: () => { $('filter-free').checked = false; }});
     if ($('filter-spare').checked) chips.push({text: 'No use in my decks', clear: () => { $('filter-spare').checked = false; }});
     const min = $('filter-price-min').value, max = $('filter-price-max').value;
-    if (min || max) {
+    if ((min || max) && !digital) {
         chips.push({text: 'Price: ' + (min && max ? `$${min} – $${max}` : min ? `from $${min}` : `up to $${max}`),
                     clear: () => { $('filter-price-min').value = ''; $('filter-price-max').value = ''; }});
     }
@@ -393,11 +405,17 @@ function applyFilters() {
         && terms.every(term => SEARCH_FIELDS[term.field](card, term.value, setCodes) !== term.not);
     const textNot = $('filter-text-not').checked;
     const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
-    const finish = $('filter-finish').value, location = $('filter-location').value, tag = $('filter-tag').value;
+    // Arena view hides the filters by location, tag and price (its cards have none of the
+    // three: collection.css, body.arena-view). A filter that cannot be seen must not filter:
+    // a minimum price set for the paper cards would otherwise hide every Arena card, whose
+    // price is 0. The values stay in their fields, for the Physical view.
+    const digital = inArena();
+    const finish = $('filter-finish').value;
+    const location = digital ? '' : $('filter-location').value, tag = digital ? '' : $('filter-tag').value;
     const added = $('filter-added').value;
     const free = $('filter-free').checked;
     const spare = $('filter-spare').checked && suggested;
-    const min = parseFloat($('filter-price-min').value), max = parseFloat($('filter-price-max').value);
+    const min = digital ? NaN : parseFloat($('filter-price-min').value), max = digital ? NaN : parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         // "Not" turns the text search around: the cards that don't have the text anywhere
         if ((phrase || terms.length) && textMatches(card) === textNot) return false;
@@ -463,7 +481,7 @@ function gridCardHtml(card) {
             <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
             ${card.quantity > 1 ? `<span class="grid-qty">${card.quantity}×</span>` : ''}
             <div class="grid-name" title="${escapeHtml(card.name)}">${escapeHtml(card.name)}</div>
-            <div class="grid-meta"><span>${escapeHtml((card.set_code || card.set_name).toUpperCase())} ${escapeHtml(card.number)}</span><span>${money(card.price)}</span></div>
+            <div class="grid-meta"><span>${escapeHtml((card.set_code || card.set_name).toUpperCase())} ${escapeHtml(card.number)}</span><span>${priceText(card.price)}</span></div>
             <div class="inventory-card-meta">${badgesHtml(card)}</div>
         </div>`;
 }
@@ -473,10 +491,14 @@ function listRowHtml(card) {
     // downloaded picture, small - the pointer on it shows it large (showPreview)
     const picture = (card.details && card.details.image_uri) || '';
     const image = (card.captures[0] && card.captures[0].url) || picture;
+    // Arena view: nothing was scanned, so the picture on the left is the card's own. It is
+    // the one to point at for the large picture (data-image), and the small second copy by
+    // the buttons - there to compare a capture with the card - is left out
+    const digital = inArena();
     return `
         <div class="inventory-card ${selected.has(card.id) ? 'is-selected' : ''} ${waiting(card) ? 'is-pending' : ''}" data-id="${card.id}">
             <input type="checkbox" class="row-check" ${selected.has(card.id) ? 'checked' : ''} aria-label="Select">
-            ${image ? `<button class="inventory-thumb" title="${card.captures.length ? plural(card.captures.length, 'capture') : 'Card image'}">
+            ${image ? `<button class="inventory-thumb" ${digital ? `data-image="${escapeHtml(picture)}"` : ''} title="${card.captures.length ? plural(card.captures.length, 'capture') : digital ? '' : 'Card image'}">
                            <img src="${escapeHtml(image)}" alt="" loading="lazy"></button>`
                     : '<div class="inventory-thumb empty" title="No image"></div>'}
             <div class="inventory-card-info">
@@ -491,12 +513,12 @@ function listRowHtml(card) {
                 <div class="inventory-card-meta">${badgesHtml(card)}<span>${escapeHtml(card.condition)}</span></div>
             </div>
             <div class="inventory-card-price">
-                <div class="inventory-price-value">${money(card.price * card.quantity)}</div>
-                ${card.quantity > 1 ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
+                <div class="inventory-price-value">${priceText(card.price * card.quantity)}</div>
+                ${card.quantity > 1 && !digital ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
                 <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
             </div>
             <div class="inventory-card-actions">
-                ${picture ? `<span class="card-peek" data-image="${escapeHtml(picture)}" title="The card's picture - rest the pointer here to see it large">
+                ${picture && !digital ? `<span class="card-peek" data-image="${escapeHtml(picture)}" title="The card's picture - rest the pointer here to see it large">
                                  <img src="${escapeHtml(picture.replace('/normal/', '/small/'))}" alt="" loading="lazy"></span>` : ''}
                 <button class="btn-trade" title="Set aside for a trade: it stays in your collection until you confirm the trade"><svg class="icon"><use href="#i-swap"/></svg></button>
                 <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
@@ -509,7 +531,7 @@ function renderInventory() {
     const list = $('inventory-list');
     const cards = totalQuantity(shown);
     const value = shown.reduce((sum, card) => sum + card.price * card.quantity, 0);
-    $('inventory-summary').innerHTML = `<strong>${entriesText(shown.length)}</strong> · ${plural(cards, 'card')} · <strong>${money(value)}</strong>`
+    $('inventory-summary').innerHTML = `<strong>${entriesText(shown.length)}</strong> · ${plural(cards, 'card')}${inArena() ? '' : ` · <strong>${money(value)}</strong>`}`
         + (shown.length !== inventory.length ? ` (of ${inventory.length})` : '');
     list.classList.toggle('is-grid', inventoryView === 'grid');
     markSwitch('view-switch', 'view', inventoryView);
@@ -867,11 +889,14 @@ function renderStats() {
         <div class="inventory-stat"><div class="inventory-stat-value">${number}</div><div class="inventory-stat-label">${label}</div></div>`;
     $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
         + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
-        + tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card');
-    markSwitch('stats-measure', 'measure', statsMeasure);
-    const format = statsMeasure === 'value' ? money : number => number.toLocaleString();
+        + (inArena() ? '' : tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card'));
+    // Arena cards have no price: the bars count cards there, and the choice is not offered
+    const measure = inArena() ? 'cards' : statsMeasure;
+    $('stats-measure').closest('.stats-controls').hidden = inArena();
+    markSwitch('stats-measure', 'measure', measure);
+    const format = measure === 'value' ? money : number => number.toLocaleString();
     const chart = (title, keyOf, limit) => `
-        <div class="panel"><h3 class="section-title">${title}</h3>${barsHtml(groupTotals(inventory, keyOf, statsMeasure), format, limit)}</div>`;
+        <div class="panel"><h3 class="section-title">${title}</h3>${barsHtml(groupTotals(inventory, keyOf, measure), format, limit)}</div>`;
     const valuable = [...inventory].sort((a, b) => b.price - a.price).slice(0, 10)
         .map(card => [`${card.name} (${(card.set_code || '').toUpperCase()}${card.finish !== defaultFinish() ? ', ' + finishLabel(card.finish) : ''})`, card.price]);
     $('stats-grid').innerHTML = chart('Color', colorGroup) + chart('Type', mainType)

@@ -765,3 +765,8 @@
 .arena-check-cards .rarity-uncommon { border-left-color: #b8c4cc; }
 .arena-check-cards .rarity-rare { border-left-color: #d4b24c; }
 .arena-check-cards .rarity-mythic { border-left-color: #e0672a; }
+
+/* "What can I build?": from which collection, above the panels */
+.build-kind {
+    margin-bottom: 12px;
+}

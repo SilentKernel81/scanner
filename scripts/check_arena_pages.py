@@ -73,6 +73,18 @@ def main():
               f"{b.js('inventory.length')} entries")
         check('Arena: the bar says when it is from and the wildcards', b.js("(t => !document.getElementById('arena-bar').hidden && /wildcards: 18 common, 30 uncommon, 1 rare, 0 mythic/.test(t) && /3061 cards/.test(t))(document.getElementById('arena-text').textContent)"),
               b.js("document.getElementById('arena-text').textContent"))
+        # A price filter set for the paper cards (it is remembered) must not empty the Arena list,
+        # where the fields are hidden and every card's price is 0
+        b.js("(() => { const f = document.getElementById('filter-price-min'); f.value = '5'; f.dispatchEvent(new Event('input', {bubbles: true})); f.dispatchEvent(new Event('change', {bubbles: true})); filtersChanged(); })()")
+        b.settle(0.5)
+        check('Arena: a price filter of the paper view hides nothing and shows no chip',
+              b.js("shown.length") == arena['entries'] and b.js("!/Price/.test(document.getElementById('filter-chips').textContent)"), f"{b.js('shown.length')} shown")
+        b.js("document.querySelector('#collection-kind [data-collection=paper]').click()")
+        b.settle(3)
+        check('... and filters the paper list again', b.js("shown.length < inventory.length && shown.every(card => card.price >= 5) && /Price/.test(document.getElementById('filter-chips').textContent)"))
+        b.js("(() => { document.getElementById('filter-price-min').value = ''; filtersChanged(); })()")
+        b.js("document.querySelector('#collection-kind [data-collection=arena]').click()")
+        b.settle(4)
         hidden = b.js("""['#inventory-list .row-check', '#inventory-list .btn-edit', '#inventory-list .btn-delete', '#inventory-list .btn-trade',
                          '#select-all-label', '#import-button', '#filter-location', '#filter-tag', '#filter-spare-label', '.tab[data-tab=trades]']
                          .filter(s => getComputedStyle(document.querySelector(s)).display !== 'none')""")
