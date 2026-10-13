@@ -2,6 +2,9 @@
 
 Date: 2026-10-12
 
+**The move itself was done on 2026-10-13** (phases 0, 1 and 3; a real camera and the machines
+are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+
 A plan for the step that [SRC_MOVE_PLAN.md](SRC_MOVE_PLAN.md) left for later (its decision
 1): the modules that lie flat in `src/` become one package with a name, sorted into folders
 by which program they belong to. Nothing here is implemented. The numbers were counted at
@@ -279,3 +282,63 @@ lines by hand, three new launchers and three new tests; the Dockerfile's three t
 three scripts, one unit; the documents of two repositories; four machines. In code about
 the size of the last move; the checks are written, the machines' steps are known, and the
 systemd container makes `deploy.sh` testable this time before anyone is told how to update.
+
+## How it went (2026-10-13)
+
+Phases 0, 1 and 3 are done, on the branch `package`. **Not done: phase 2 (the Pi 4's camera on
+a test image) and phase 4 (the machines)** - every machine still runs the layout of
+2026-10-12, which goes on working.
+
+Done as planned. What differed or was added:
+
+- **`cleanup.py` is started by its launcher as a module run under the name `__main__`**
+  (its command line is not in a `main()`), so that not a line of it had to move.
+- **`.dockerignore` kept compiled files out of the top folder only.** The station images
+  now copy a folder, and the laptop's `__pycache__` came along with it: the pattern is
+  `**/__pycache__/` now.
+- **A machine that only runs the server gets a station's service from the update** that
+  crosses this change: the script from before asks `config.py` about the camera under the
+  module's old name, gets no answer and takes that for a camera. Seen in a container; the
+  new script removes such a service where `camera.type` is `remote`, and INSTALL.md says to
+  run it once more on such a machine. The plan's risk 3 had expected the station's unit to
+  point at a missing file instead - it does not: the old script already writes the units
+  anew at every update, from the files the pull has just brought.
+
+Checked, on the laptop:
+
+| | |
+|---|---|
+| The rewrite | 218 import statements in 54 files, the number counted beforehand |
+| Every file before and after, without its import lines | 62 compared, 10 differ - by the lines changed on purpose (listed in the commit) |
+| All tests | 198 pass, none skipped. The layout's: no import by an old name, no relative import, every import of the project names something that exists, every module can be imported, the station and `core/` stand alone, the three `__init__.py` run nothing |
+| ... that the layout test notices | before the move, on a scratch copy: an import of `inventory` planted in `scanner.py` and one of `server.state` in `database.py` were both reported with file and line |
+| Undefined names (pyflakes) | none |
+| The recorded walk, 73 steps with a card's picture | the commit before against the new tree, twice each on one fresh copy: four identical recordings (and identical to every recording since 2026-10-12); the same against the server image |
+| Logger names in `app.log` of those walks | the same before and after |
+| `docker compose config`, four combinations and `compose.yaml` | identical |
+| Inside the images | `config` from `/app/src/card_scanner`; the station image holds `station.py`, `config.yaml`, the four shared modules and `station/` - no `core/`, no `server/`; the server image the two launchers, `card_scanner/` and `ocr/` |
+| The station image against a local server | connected, restarted from its setup page (the same container, `station.py` run again), connected again |
+| The three pages in headless Chromium | no script error, no file of the server's missing |
+| `deploy.sh` in a fresh clone (Arch, Python 3.15), `start.sh` in a terminal with the laptop's camera, Ctrl+C | installed; server and station up and connected; both ended at once |
+| `scripts/cleanup.py --stats`, `scripts/setup_database.py`, `station.py --help` | each starts its program |
+| `deploy.sh` in an ordinary container with a **stand-in for `systemctl`** (it writes down what it is asked): installed with services at the layout of 2026-10-12, `--update` across | one run: both unit files written anew, the station's starts `station.py`, which exists |
+| ... a later `--update` that brings a newer script | "carrying on with the new version of this script", once; with nothing new, "Already up to date" |
+| ... on a server-only installation | the update across adds the station's service (above); the next run of the new script removes it |
+
+Not checked:
+
+- **real services**: what the units do when systemd starts them. The stand-in checks what
+  the script writes and asks for. The command a unit runs was started by hand in that
+  container (`station.py`: setup page up, looking for its server; `app.py`: imports, 62
+  routes);
+- the `client-pi` image and any real camera on the new layout; a server with a GPU;
+- the machines.
+
+**What went wrong on the way, and is not the change's doing:** to try `deploy.sh --service`
+with a real systemd I started a *privileged* container running systemd on the laptop, as
+the evening before. This time its image no longer had the login and console services
+switched off; the container's systemd took the laptop's console, the desktop session
+ended and the machine was restarted. Nothing committed was lost - the move had been
+committed minutes earlier - but everything in the temporary folder was (the recordings,
+the helper scripts). That way of testing is not used again; the stand-in above replaced
+it.

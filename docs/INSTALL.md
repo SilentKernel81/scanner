@@ -170,7 +170,7 @@ blocked by its firewall from inside a container.
 git clone https://github.com/SilentKernel81/scanner-server.git && cd scanner-server
 python3 -m venv venv && venv/bin/pip install -r requirements-client.txt
 sudo apt install v4l-utils         # v4l2-ctl: focus control (pacman -S v4l-utils, ...)
-venv/bin/python src/station_client.py --server http://<server>:5000
+venv/bin/python station.py --server http://<server>:5000
 ```
 
 Options `--id`, `--name`, `--token`, or the environment variables above. Your user needs
@@ -206,10 +206,10 @@ Without Docker the same station runs from the Pi's own Python:
 ```bash
 sudo apt install --no-install-recommends python3-picamera2 python3-opencv python3-socketio \
      python3-websocket python3-requests python3-yaml
-# in a copy of the project (git clone), or a folder that holds config.yaml and, in a folder
-# src/ inside it: station_client.py, station_setup.py, station_login.py, station_setup.html,
-# scanner.py, object_detector.py, settings.py, config.py, config_loader.py and paths.py
-python3 src/station_client.py      # then the setup page, http://<the Pi>:8080
+# in a copy of the project (git clone). Of it a station needs: station.py and config.yaml,
+# and in src/card_scanner/ the folder station/ and the files __init__.py, paths.py, config.py,
+# config_loader.py and settings.py - laid out as they are in the project
+python3 station.py                 # then the setup page, http://<the Pi>:8080
 ```
 
 ### When something is away
@@ -252,7 +252,35 @@ docker compose -f deploy/docker-compose.client.yml up -d --build   # camera stat
 Update the server first: a station reconnects by itself a few seconds after the server is
 back, and scanning continues.
 
-**Coming from a version with the code in the top folder** (before 2026-10-12): the Python
+**Coming from a version before the package** (before 2026-10-13: the Python files flat in
+`src/`, or still in the top folder): the code is one package now, `src/card_scanner/`, with a
+camera station's part in `station/`. `git pull` moves the files; your `data/`,
+`scanned_cards/`, `config.yaml` and `.env` stay where they are, `python app.py` still starts
+the server, and the OCR reader stays in `src/ocr/`. What changes:
+
+- with Docker: nothing but a rebuild (`up -d --build`), of the server and of each station;
+- a station without Docker is started as **`python station.py --server ...`**; the card data
+  is downloaded with `python scripts/setup_database.py`, old pictures are removed with
+  `python scripts/cleanup.py`;
+- an installation made with `scripts/deploy.sh`: `./scripts/deploy.sh --update`.
+  Coming from the layout with the files in `src/`, that one run writes both services anew
+  (the station's now starts `station.py`). **If the machine only runs the server**
+  (`camera.type: remote`), run `./scripts/deploy.sh` once more afterwards: the update is
+  carried out by the script from before it, which can no longer ask the settings about the
+  camera and installs a station's service by mistake - the second run removes it.
+  Coming from the layout with the code in the top folder, run it twice in any case (see
+  below). From now on the script hands over to its new version after a pull, so later
+  updates are one run. Tried on 2026-10-13 in a container with a stand-in for `systemctl`
+  (what the script writes and asks for - not services really starting), not on an
+  installed machine;
+- a station whose files were copied by hand: lay them out as under the Pi camera above;
+- a copy of the project made without Git (rsync, a zip unpacked over the old one) keeps the
+  old files. Delete them: in `src/` everything but `card_scanner/` and `ocr/`; in the top
+  folder every `.py` except `app.py` and `station.py`, and the folders `server/`, `games/`,
+  `templates/`, `static/` and `ocr/` if they are still there.
+
+**Coming from a version with the code in the top folder** (before 2026-10-12; what follows
+describes the step to the layout of that day, which the paragraph above then continues): the Python
 files are in `src/` now, the pages in `src/server/` and the OCR reader in `src/ocr/`.
 `git pull` moves them; your `data/`, `scanned_cards/`, `config.yaml` and `.env` stay where
 they are and are used as before, and `python app.py` still starts the server. What changes:
