@@ -8,7 +8,6 @@ and editing a deck never changes the inventory.
     decks.add_card(deck_id, 'Llanowar Elves', 'main', 1)
 """
 import contextlib
-import sqlite3
 import threading
 
 import storage

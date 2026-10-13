@@ -9,7 +9,6 @@ cleaned after cleanup.days) until resolved.
 """
 import logging
 import shutil
-import sqlite3
 import threading
 import uuid
 from datetime import datetime

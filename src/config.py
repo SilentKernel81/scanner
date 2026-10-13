@@ -7,7 +7,7 @@
 # ============================================================================
 import os
 from config_loader import get_config_loader
-from paths import SRC, TOP
+from paths import TOP
 
 # Load YAML configuration
 config = get_config_loader()
@@ -69,9 +69,6 @@ class Config:
     # folder above, also when both programs run from one checkout: the server deletes old
     # pictures from scanned_cards/ (cleanup.days), and must never reach these
     STATION_CAPTURES_DIR = BASE_DIR / 'station_captures'
-    # The server's pages and their files belong to the code, not to the top folder
-    TEMPLATES_DIR = SRC / 'server' / 'templates'
-    STATIC_DIR = SRC / 'server' / 'static'
 
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')

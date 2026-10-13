@@ -96,7 +96,7 @@ def delete_inventory_card(row_id):
         if success:
             return jsonify({
                 'success': True,
-                'message': f'Card deleted from inventory'
+                'message': 'Card deleted from inventory'
             })
         else:
             return jsonify({'success': False, 'error': 'Failed to delete card'}), 400

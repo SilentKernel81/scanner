@@ -178,7 +178,7 @@ def main():
         print(f"✓ Vision AI enabled ({ai})")
     else:
         logger.warning("Vision AI disabled - no API key configured")
-        print(f"⚠ Vision AI disabled")
+        print("⚠ Vision AI disabled")
         print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
 
     print("✓ Cameras: at the stations - each connects by itself (station_client.py, the Android app)")
@@ -194,10 +194,10 @@ def main():
     print("\n" + "="*60)
     print("Web Interface Starting...")
     print("="*60)
-    print(f"\n✓ Access the scanner at:")
+    print("\n✓ Access the scanner at:")
     print(f"  • Local:   http://localhost:{Config.PORT}")
     print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
-    print(f"\n✓ Logs are being written to: data/logs/app.log")
+    print("\n✓ Logs are being written to: data/logs/app.log")
     print("\nPress Ctrl+C to stop")
     print("="*60 + "\n")
 

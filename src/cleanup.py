@@ -3,11 +3,8 @@ Cleanup utility for scanned card images.
 Automatically removes old scanned images to free up disk space.
 """
 
-import os
 import time
 import logging
-from pathlib import Path
-from datetime import datetime, timedelta
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -186,7 +183,7 @@ if __name__ == '__main__':
 
     if args.stats:
         stats = get_images_stats()
-        print(f"\nScanned Images Statistics:")
+        print("\nScanned Images Statistics:")
         print(f"  Files: {stats['count']}")
         print(f"  Total size: {stats['total_size_mb']:.2f} MB")
         print(f"  Oldest file: {stats['oldest_days']:.1f} days old")
