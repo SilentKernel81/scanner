@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=5">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -37,6 +37,13 @@
             <section class="deck-tab" id="deck-tab-mine">
                 <div class="deck-tools">
             <div class="filter-row deck-filters" id="deck-filters" hidden>
+                <!-- Which decks: of paper cards, of MTG Arena, or both (decks.js: deckKindShown).
+                     Hidden for a game without a digital collection -->
+                <div class="segmented" id="deck-kind" hidden>
+                    <button data-kind="all" class="is-active">All</button>
+                    <button data-kind="paper" title="Decks of the cards you own on paper">Physical</button>
+                    <button data-kind="arena" title="Decks in MTG Arena: counted against your Arena collection">Arena</button>
+                </div>
                 <input type="search" id="deck-filter-text" class="text-input filter-text" placeholder="Deck or commander...">
                 <select id="deck-filter-format" class="select" title="Format"></select>
                 <span class="spacer"></span>
@@ -240,6 +247,14 @@
                     <label for="new-deck-format">Format</label>
                     <select id="new-deck-format"></select>
                 </div>
+                <!-- Which collection the deck is built from (a game with a digital collection only) -->
+                <div class="input-group" id="deck-modal-kind-group" hidden>
+                    <label>Kind</label>
+                    <div class="segmented" id="new-deck-kind">
+                        <button type="button" data-kind="paper" class="is-active" title="A deck of paper cards: what you own is counted in your collection">Physical</button>
+                        <button type="button" data-kind="arena" title="A deck for MTG Arena: what you own is counted in your Arena collection, what is missing in wildcards">Arena</button>
+                    </div>
+                </div>
                 <div class="input-group">
                     <label for="new-deck-url">From another site (optional)</label>
                     <input type="url" id="new-deck-url" placeholder="moxfield.com/decks/... or archidekt.com/decks/...">
@@ -274,6 +289,8 @@
                 <textarea id="arena-text" class="text-input arena-text" rows="14" readonly spellcheck="false"></textarea>
                 <div class="hint">Copy the list, then in Arena: <strong>Decks</strong> &rarr; <strong>Import</strong>. Arena makes the deck from what is on the clipboard, in the printings you have there.</div>
                 <div class="callout warning" id="arena-left-out" hidden></div>
+                <!-- Can it be built there? The deck against the Arena collection (decks.js: arenaCheckHtml) -->
+                <div class="arena-check" id="arena-check" hidden></div>
                 <div class="modal-actions">
                     <button class="btn btn-primary" id="arena-copy">Copy</button>
                     <button class="btn" id="arena-download">Download</button>
@@ -329,6 +346,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=5"></script>
 </body>
 </html>

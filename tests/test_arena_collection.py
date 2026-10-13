@@ -147,6 +147,7 @@ class ReplacingAnInventory(Temporary):
     def setUp(self):
         super().setUp()
         self.store = InventoryManager(db_file=self.path / 'arena.db')
+        arena.prepare(self.store)   # as the server does at start
         self.addCleanup(self.store.conn.close)
 
     def contents(self):

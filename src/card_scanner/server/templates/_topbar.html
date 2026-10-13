@@ -69,6 +69,12 @@
             </nav>
             {% else %}
             <nav class="tabs topbar-page" id="tabs">
+                {# Which collection the page shows: the cards on the shelf, or what the user has in
+                   MTG Arena (collection.js: showCollection). Hidden for a game without a digital client #}
+                <div class="segmented collection-kind" id="collection-kind" hidden>
+                    <button data-collection="paper" class="is-active" title="The cards you own on paper">Physical</button>
+                    <button data-collection="arena" title="The cards you have in MTG Arena, as the last import said">Arena</button>
+                </div>
                 <button class="tab is-active" data-tab="inventory"><svg class="icon"><use href="#i-list"/></svg> Inventory</button>
                 <button class="tab" data-tab="stats"><svg class="icon"><use href="#i-chart"/></svg> Statistics</button>
                 <button class="tab" data-tab="trades"><svg class="icon"><use href="#i-swap"/></svg> Trades</button>

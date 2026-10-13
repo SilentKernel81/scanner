@@ -43,6 +43,10 @@ async function loadDecks() {
     $('deck-filter-format').innerHTML = optionsHtml([['', 'Any format'], ...gameInfo.deck_formats.filter(([key]) => formats.includes(key))]);
     $('deck-filter-format').value = formats.includes(chosen) ? chosen : '';
     $('deck-filters').hidden = deckList.length < 2;
+    // The kind switch only when there is something to tell apart: a game with a digital
+    // collection, and at least one Arena deck (or the switch standing on a kind)
+    $('deck-kind').hidden = !gameInfo.arena || !(deckList.some(item => item.kind === 'arena') || deckKindShown !== 'all');
+    markSwitch('deck-kind', 'kind', deckKindShown);
     renderDeckList();
 }
 
@@ -55,12 +59,29 @@ const DECK_SORTS = {
     cards: (a, b) => b.cards - a.cards || a.name.localeCompare(b.name),
 };
 
+// Decks are of two kinds: of paper cards ('paper', called Physical on the page) or of MTG
+// Arena ('arena'). The kind says which collection "owned" is counted in. The list shows
+// both, or one of them:
+let deckKindShown = recall('deckKindShown', 'all');   // 'all' | 'paper' | 'arena'
+
+function wildcardsHtml(wildcards) {
+    // What crafting the missing cards costs, by rarity, beside what the account has:
+    // "3 rare (you have 1)" - marked when the account has too few
+    if (!wildcards) return '';
+    const parts = ['common', 'uncommon', 'rare', 'mythic'].filter(rarity => wildcards.needed[rarity]).map(rarity => {
+        const have = wildcards.have[rarity] || 0;
+        return `<span class="${have < wildcards.needed[rarity] ? 'wild-short' : ''}">${wildcards.needed[rarity]} ${rarity} <small>(you have ${have})</small></span>`;
+    });
+    return parts.length ? parts.join(', ') : '';
+}
+
 function renderDeckList() {
     const words = searchWords('deck-filter-text');
     const format = $('deck-filter-format').value;
     const shown = deckList.filter(item => {
         const text = `${item.name} ${item.commanders.join(' ')}`.toLowerCase();
-        return (!format || item.format === format) && words.every(word => text.includes(word));
+        return (deckKindShown === 'all' || item.kind === deckKindShown)
+            && (!format || item.format === format) && words.every(word => text.includes(word));
     }).sort(DECK_SORTS[$('deck-sort').value] || DECK_SORTS.changed);
     $('deck-list').innerHTML = !shown.length && deckList.length
         ? '<div class="empty-state">No deck matches.</div>'
@@ -113,13 +134,15 @@ function deckTileHtml(item) {
                 ${cover && cover.image_uri
                     ? `<img src="${escapeHtml(cover.image_uri)}" alt="${escapeHtml(cover.name)}" title="${escapeHtml(cover.name)}" loading="lazy">`
                     : '<span class="deck-tile-empty">No cards yet</span>'}
+                ${item.kind === 'arena' ? `<span class="deck-kind-badge" title="${item.from_arena
+                    ? 'A deck from MTG Arena: the next import brings it again as it is there' : 'A deck for MTG Arena, made here'}">Arena</span>` : ''}
                 ${(item.covers || []).length > 1
                     ? `<button class="deck-flip" data-flip title="Show the other commander: ${escapeHtml(item.covers[(coverIndex(item) + 1) % item.covers.length].name)}"><svg class="icon"><use href="#i-swap"/></svg></button>` : ''}
             </span>
             <span class="deck-tile-body">
                 <span class="deck-tile-head"><span class="deck-tile-name">${escapeHtml(item.name)}</span><span>${identityHtml(colours)}</span></span>
                 <span class="deck-tile-meta" title="${escapeHtml(formatLabel(item.format))}">${escapeHtml(item.commanders.length ? item.commanders.join(' + ') : formatLabel(item.format))}</span>
-                <span class="meter" title="${item.owned} of ${item.cards} owned"><span style="width: ${item.owned_percent}%"></span></span>
+                <span class="meter" title="${item.owned} of ${item.cards} ${item.kind === 'arena' ? 'in your Arena collection' : 'owned'}"><span style="width: ${item.owned_percent}%"></span></span>
                 <span class="deck-tile-foot"><span>${plural(item.cards, 'card')} · ${item.owned_percent}% owned</span><span title="Last changed">${escapeHtml(item.updated_at.slice(0, 10))}</span></span>
             </span>
         </a>`;
@@ -147,6 +170,9 @@ function openDeckModal({text = '', importInto = null} = {}) {
     $('new-deck-text').value = text;
     $('new-deck-replace').checked = false;
     $('new-deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
+    // The kind is chosen for a new deck only; it starts as the kind the list is showing
+    $('deck-modal-kind-group').hidden = !!importInto || !gameInfo.arena;
+    markSwitch('new-deck-kind', 'kind', deckKindShown === 'arena' ? 'arena' : 'paper');
     $('deck-modal').classList.add('show');
     (importInto ? $('new-deck-url') : $('new-deck-name')).focus();
 }
@@ -172,7 +198,9 @@ async function saveDeckModal() {
         data = await api(`/api/decks/${importInto}/import`, {method: 'POST', body: {...body, replace: $('new-deck-replace').checked}});
     } else {
         // A deck from another site keeps that site's format unless the list is pasted
+        const chosen = $('new-deck-kind').querySelector('.is-active');
         data = await api('/api/decks', {method: 'POST', body: {...body, name: $('new-deck-name').value.trim() || undefined,
+                                                              kind: gameInfo.arena && chosen ? chosen.dataset.kind : 'paper',
                                                               format: body.url ? undefined : $('new-deck-format').value}});
     }
     button.disabled = false;
@@ -579,7 +607,7 @@ function ownState(entry, wanted) {
     if (entry.owned >= wanted + elsewhere) return ['have', '✓', `You own ${entry.owned}${others ? ' - also ' + others : ''}`];
     if (entry.owned >= wanted) return ['shared', '⇄', `You own ${entry.owned}, but other decks want it too: ${others}`];
     if (entry.owned > 0) return ['partly', `${entry.owned}/${wanted}`, `You own ${entry.owned} of ${wanted}`];
-    return ['none', '✕', 'Not in your inventory'];
+    return ['none', '✕', deck && deck.kind === 'arena' ? 'Not in your Arena collection' : 'Not in your inventory'];
 }
 
 function ownHtml(entry, wanted) {
@@ -714,11 +742,17 @@ function renderDeck() {
         : deck.issues.length ? `<span class="deck-chip ${problems ? 'bad' : 'warn'}">${problems ? '✕' : '!'} ${plural(deck.issues.length, 'problem')}</span>`
         : `<span class="deck-chip ok">✓ Legal in ${escapeHtml(formatLabel(deck.format))}</span>`;
     const owned = totals.cards ? Math.round(100 * (totals.cards - totals.missing) / totals.cards) : 0;
+    // An Arena deck: owned means "in the Arena collection", and what is missing costs
+    // wildcards, not money (its paper value says nothing about it and is left out)
+    const digital = deck.kind === 'arena';
+    const wild = digital ? wildcardsHtml(deck.wildcards) : '';
     $('deck-totals').innerHTML = `
+        ${digital ? `<span class="deck-kind-badge" title="${deck.from_arena ? 'This deck came from MTG Arena: the next import replaces it with what it is there then - changes made here are lost' : 'A deck for MTG Arena, made here: counted against your Arena collection'}">Arena</span>` : ''}
         <span><strong>${totals.cards}</strong> cards${totals.side ? ` <small>+ ${totals.side} ${considering ? 'considered' : 'sideboard'}</small>` : ''}</span>
-        <span><strong>${money(totals.price)}</strong> value</span>
-        <span title="${totals.missing ? `${plural(totals.missing, 'card')} missing` : 'You own every card'}"><strong>${owned}%</strong> owned${
-            totals.missing ? ` <small>${totals.missing} missing, ${money(totals.missing_price)}</small>` : ''}</span>`;
+        ${digital ? '' : `<span><strong>${money(totals.price)}</strong> value</span>`}
+        <span title="${totals.missing ? `${plural(totals.missing, 'card')} missing` : digital ? 'Every card is in your Arena collection' : 'You own every card'}"><strong>${owned}%</strong> ${digital ? 'in Arena' : 'owned'}${
+            totals.missing ? ` <small>${totals.missing} missing${digital ? '' : ', ' + money(totals.missing_price)}</small>` : ''}</span>
+        ${wild ? `<span title="One wildcard of a card's rarity crafts one copy. The rarity is the printed card's, which Arena shares for nearly every card">to craft: ${wild}</span>` : ''}`;
     // The problems themselves, under the banner (a legal deck has its chip above and nothing here)
     $('deck-issues').innerHTML = deck.issues.map(issue => `
         <div class="issue ${issue.level}">${issue.level === 'error' ? '✕' : '!'} ${escapeHtml(issue.message)}${issue.cards.length
@@ -787,9 +821,35 @@ async function openArena() {
     $('arena-left-out').hidden = !out.length;
     $('arena-left-out').textContent = out.length
         ? `Not on Arena, and left out of the list: ${out.slice(0, 40).join(', ')}${out.length > 40 ? ` and ${out.length - 40} more` : ''}` : '';
+    $('arena-check').hidden = false;
+    $('arena-check').innerHTML = arenaCheckHtml(data.check, data.cards);
     $('arena-copy').disabled = $('arena-download').disabled = !data.text;
     $('arena-modal').classList.add('show');
     $('arena-text').select();
+}
+
+function arenaCheckHtml(check, onArena) {
+    // "Can I build this in Arena?" - the deck against the Arena collection as last imported:
+    // how many of its copies are there already, which cards would be crafted and what that
+    // costs in wildcards, how many Arena does not have at all (named above the check)
+    if (!check.imported) {
+        return '<div class="hint">To see which of these cards you already have in Arena, import your Arena collection (the collection page, <strong>Arena</strong>).</div>';
+    }
+    const copies = totalQuantity(check.craft.map(card => ({quantity: card.copies})));
+    const wild = wildcardsHtml(check.wildcards);
+    const short = ['common', 'uncommon', 'rare', 'mythic'].some(rarity => (check.wildcards.needed[rarity] || 0) > (check.wildcards.have[rarity] || 0));
+    const verdict = !copies && !check.not_on_arena ? '<span class="deck-chip ok">✓ You have every card in Arena</span>'
+        : !copies ? '<span class="deck-chip warn">! You have every card that is on Arena</span>'
+        : short ? '<span class="deck-chip bad">✕ Not with the wildcards you have</span>'
+        : '<span class="deck-chip warn">! Buildable by crafting</span>';
+    return `
+        <h3 class="section-title">Can you build it in Arena? ${verdict}</h3>
+        <div class="arena-check-row"><strong>${check.have}</strong> of ${onArena} ${onArena === 1 ? 'copy is' : 'copies are'} in your Arena collection
+            <small>(as exported ${escapeHtml(check.imported.slice(0, 10))}; basic lands are free)</small></div>
+        ${copies ? `<div class="arena-check-row"><strong>${copies}</strong> to craft: ${wild || 'no wildcards needed'}</div>
+            <div class="arena-check-cards">${check.craft.map(card =>
+                `<span class="rarity-${escapeHtml(card.rarity)}" title="${escapeHtml(card.rarity)}">${card.copies} ${escapeHtml(card.name)}</span>`).join('')}</div>` : ''}
+        ${check.not_on_arena ? `<div class="arena-check-row"><strong>${check.not_on_arena}</strong> not on Arena (named above)</div>` : ''}`;
 }
 
 async function copyArena() {
@@ -923,6 +983,7 @@ async function runSearch(more = false) {
     add('rarity', $('search-rarity').value);
     add('colors', [...searchColors].join(''));
     add('owned', $('search-owned').checked ? '1' : '');
+    add('kind', deck.kind === 'arena' ? 'arena' : '');   // an Arena deck: "owned" is the Arena collection
     if ($('search-free').checked) {
         params.set('free', '1');
         params.set('deck_id', deck.id);
@@ -1012,6 +1073,13 @@ function bindDeckHomeEvents() {
         renderDeckList();
     });
     $('deck-filter-format').addEventListener('change', renderDeckList);
+    bindSwitch('deck-kind', button => {
+        deckKindShown = button.dataset.kind;
+        remember('deckKindShown', deckKindShown);
+        renderDeckList();
+    });
+    // Only marks the choice; saveDeckModal reads it
+    bindSwitch('new-deck-kind', button => markSwitch('new-deck-kind', 'kind', button.dataset.kind));
     $('deck-filter-text').addEventListener('input', debounce(renderDeckList, 150));
     $('deck-modal-save').addEventListener('click', saveDeckModal);
     $('deck-list').addEventListener('click', async event => {
@@ -1257,7 +1325,8 @@ const refreshOwned = debounce(() => {
 }, 500);
 
 // The inventory changes while scanning on another tab or device
-['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated'].forEach(name => socket.on(name, refreshOwned));
+// - and so does the Arena collection, when an export is imported (the list then has other Arena decks)
+['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated', 'arena_updated'].forEach(name => socket.on(name, refreshOwned));
 socket.on('game_changed', () => window.location.reload());
 socket.on('database_update_progress', data => { $('deck-data-progress').textContent = data.message; });
 socket.on('database_update_complete', () => {
