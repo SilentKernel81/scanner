@@ -48,7 +48,9 @@ folder" from their own file's location. Moved into `src/`, each of them would si
 `src/` - and a server whose `Config.DATA_DIR` is `src/data` starts on an empty collection.
 Started from a checkout it would do so without complaint (it creates the folder); in the
 server's image it would probably fail at once instead, because only `data/` and
-`scanned_cards/` belong to the user it runs as - neither was tried:
+`scanned_cards/` belong to the user it runs as. (Tried in phase 0, on a copy: a move with
+nothing repaired is loud - `config.yaml` is not found and nothing imports. The quiet case
+begins the moment that one line is repaired and the others are not.)
 
 | Place | What it finds from its own location |
 |---|---|
@@ -220,7 +222,7 @@ recommended; 4 the other way. The plan is written for these answers.
 |---|---|---|
 | **A paths test** (new, `tests/test_paths.py`): `Config.DATA_DIR`, `IMAGES_DIR`, `STATION_CAPTURES_DIR`, the loaded `config.yaml` and `server.ROOT` are in the folder that holds `app.py`; Flask's template folder holds `scanner.html` and its static folder `js/scanner.js`; `card_ocr.OCR_DIR` holds `server.mjs`; `station_setup.PAGE_FILE` exists | the empty-data mistake, in every form; pages or an OCR reader that are looked for where they no longer are | written first, against today's code - it says "is there", not "is in this folder", so the same test must pass before and after |
 | **No Python file but `app.py` in the top folder** (in the same test, from `git ls-files`) | a module left behind, or added there later out of habit | every commit |
-| **The 182 tests**, the surface test among them | a module that is no longer found | after the move |
+| **The 189 tests** (182 and the paths test's 7), the surface test among them | a module that is no longer found | after the move |
 | **Undefined names** (pyflakes on `src/`) | - | after the move. pyflakes is not in the venv: installed for this, as for the split |
 | **The recorded walk** (`scripts/walk_server.py`), before and after on fresh copies of the laptop's test data | a route that answers differently; a server on the wrong data folder answers with different numbers at the first step | before, after |
 | **`docker compose ... config`** for the four combinations of files | a volume or build path that moved | before, after: the output must be identical |
@@ -243,6 +245,37 @@ imports nothing.
 - Decide the five points above.
 - Agree a time when no other session edits the code: every file is renamed, and a change
   made meanwhile would have to be carried over by hand (the split's risk 1, unchanged).
+
+**Done on 2026-10-12, all but the last point:**
+
+- **`tests/test_paths.py`**: 7 tests, passing on today's layout; the one about the top
+  folder holding no Python file but `app.py` is skipped until there is a `src/`. The file
+  looks for the code in `src/` when that exists and beside `app.py` otherwise, so it is
+  the same file before and after.
+- **That it catches the mistake** was tried on a throwaway copy of the project with the
+  files moved and nothing repaired: every test stops at once (`config.yaml` not found).
+  With only that line repaired - the state in which a server would start on an empty
+  `src/data` - four tests fail: the data folders, `server.ROOT`, the pages, the OCR reader.
+- **The walk**: 73 steps, with a recorded picture of a card uploaded as a station does
+  (read by `light-ocr`, added, the same capture sent again counted once). Two walks, each
+  on a server of its own from a fresh copy of the code and of the laptop's test data, port
+  5001: no step different. `scripts/walk_server.py` needed one addition first: a capture's
+  `sync_key`, which did not exist when the script was written, is random and now counted
+  among what differs from run to run.
+- **Docker Compose**: the output of `config` kept for the four combinations of files and
+  for `compose.yaml` in the top folder (which gives exactly the server's). The laptop has no
+  `.env`, so this is the files' own defaults; on the server the same comparison is part of
+  the deployment (`config | grep source:`).
+- **Where the recordings are**: outside the repository, in this session's temporary
+  folder - they hold the laptop's paths and test data and are not worth keeping. In phase 1
+  the "before" is made again from the commit before the move (a second checkout of it),
+  on the same fresh copy of the data as the "after", minutes apart: test data that changed
+  in between cannot then look like a difference.
+- One thing learned for that: a server started in the background by a script ignores
+  Ctrl+C's signal, and the next "fresh" server then fails to start on the taken port while
+  the walk happily talks to the old one. So: the port is seen free before each server is
+  started and after it is stopped, and a walk only counts when that server's `ai.log` says
+  `light-ocr ready` - a server without its OCR reader reads the card another way.
 
 ### 1. The move
 

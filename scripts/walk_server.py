@@ -43,8 +43,10 @@ SURFACE = Path(__file__).resolve().parent.parent / 'tests' / 'app_surface.json'
 # never end (the camera's stream)
 SKIP = {'/video_feed', '/api/decks/popular', '/api/precons', '/api/local_ai_models', '/api/ai_models'}
 # Keys whose values differ from run to run. Their presence is still recorded.
+# (sync_key: a capture's uid, random for each capture - what a phone asks about it with)
 VOLATILE = re.compile(r'(time|date|_at$|^at$|created|modified|updated|last_seen|elapsed|duration|seconds|'
-                      r'timestamp|uptime|^id$|_id$|backup|file|path|uid|capture$|number$|image|^url$)', re.I)
+                      r'timestamp|uptime|^id$|_id$|backup|file|path|uid|capture$|number$|image|^url$|'
+                      r'^sync_key$)', re.I)
 
 
 def tidy(value, key=''):
