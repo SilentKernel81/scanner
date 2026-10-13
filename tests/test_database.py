@@ -14,12 +14,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
-import backups  # noqa: E402
-import inventory as inv  # noqa: E402
-import pending as pending_store  # noqa: E402
-import recommendations  # noqa: E402
-import review as review_store  # noqa: E402
-from database import CardDatabase  # noqa: E402
+from card_scanner.core import backups  # noqa: E402
+from card_scanner.core import inventory as inv  # noqa: E402
+from card_scanner.core import pending as pending_store  # noqa: E402
+from card_scanner.core import recommendations  # noqa: E402
+from card_scanner.core import review as review_store  # noqa: E402
+from card_scanner.core.database import CardDatabase  # noqa: E402
 from test_ownership import CARD, GAME, OTHER, TemporaryData  # noqa: E402
 
 
@@ -492,7 +492,7 @@ class Constraints(TemporaryData):
         return path
 
     def test_an_older_file_is_rebuilt_with_them_once(self):
-        import storage
+        from card_scanner.core import storage
         try:
             path = self.old_file()
             old = inv.InventoryManager(db_file=path)
@@ -519,7 +519,7 @@ class Constraints(TemporaryData):
             storage._backed_up.clear()
 
     def test_a_file_from_before_stations(self):
-        import storage
+        from card_scanner.core import storage
         try:
             old = inv.InventoryManager(db_file=self.old_file(with_stations=False))
             self.assertEqual(old.get_stats(GAME)['total_cards'], 7)
@@ -558,7 +558,7 @@ class Constraints(TemporaryData):
         self.assertEqual((count('inventory_captures'), count('inventory_sources')), (0, 0))
 
     def test_old_decks_are_rebuilt_too(self):
-        import storage
+        from card_scanner.core import storage
         try:
             path = self.tmp / 'olddecks.db'
             conn = sqlite3.connect(str(path))
@@ -573,7 +573,7 @@ class Constraints(TemporaryData):
                               (13, 4, 'None', 0, 'main')])
             conn.commit()
             conn.close()
-            from decks import DeckManager
+            from card_scanner.core.decks import DeckManager
             decks = DeckManager(db_file=path)
             self.assertEqual([(card['name'], card['quantity'], card['board']) for card in decks.get(4)['cards']],
                              [('A', 1, 'main'), ('B', 3, 'side')])
@@ -651,7 +651,7 @@ class StationUploads(unittest.TestCase):
         import importlib.util
         if importlib.util.find_spec('socketio') is None:
             self.skipTest('the station client needs python-socketio')
-        from station_client import upload_verdict
+        from card_scanner.station.station_client import upload_verdict
 
         class Answer:
             def __init__(self, status, body):

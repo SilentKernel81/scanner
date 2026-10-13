@@ -19,8 +19,8 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
-import station_client  # noqa: E402
-from config import Config  # noqa: E402
+from card_scanner.station import station_client  # noqa: E402
+from card_scanner.config import Config  # noqa: E402
 
 SERVER = 'http://server-a:5000'
 
@@ -221,7 +221,7 @@ class Uploads(unittest.TestCase):
         # that has waited longer than that (the server away, a wrong token) must survive it.
         import os
         import time
-        import cleanup
+        from card_scanner.core import cleanup
         station = self.station()
         waiting = self.capture(station, 1, with_foil=True)
         received = self.server_pictures / 'desk_7_1791000000.jpg'
