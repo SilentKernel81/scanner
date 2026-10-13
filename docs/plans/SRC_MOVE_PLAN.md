@@ -429,11 +429,11 @@ Checked, on the laptop:
 Not checked:
 
 - a card *read* through a real camera on the moved code (the box was dark, see below);
-- **`scripts/deploy.sh`**, neither a fresh installation nor `--update` on a machine with the
-  services installed; `bash -n` only. And one thing the plan's risk 3 had not seen: the
-  `--update` that crosses this change is still run by the *old* script (it is already
-  running when `git pull` replaces it), so the new unit and the OCR packages only come with
-  a second run of the script. INSTALL.md says to run it twice;
+- **`scripts/deploy.sh`** was not checked that day beyond `bash -n` - see *The scripts,
+  tried* below. One thing the plan's risk 3 had not seen: the `--update` that crosses this
+  change is still run by the *old* script (it is already running when `git pull` replaces
+  it), so the new unit and the OCR packages only come with a second run of the script.
+  INSTALL.md says to run it twice;
 - **a server with a GPU**: the laptop has none, so OCR ran on the CPU there;
 - other people's checkouts (INSTALL.md says what changes for them).
 
@@ -502,5 +502,27 @@ started (`config` from `/app/src`, the setup page found), then the container rep
 So a USB webcam on the moved code is seen too. Still not seen, anywhere: a card *read*
 through a camera since the move.
 
-Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` are not
-marked executable in Git, though the documents run them as `./scripts/start.sh`.
+Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` were not
+marked executable in Git, though the documents run them as `./scripts/start.sh` (fixed
+afterwards).
+
+**The scripts, tried** (the same night, on the laptop, at the user's request - in a clone of
+the repository in a temporary folder and in a throwaway container, never in the checkout):
+
+| | |
+|---|---|
+| `deploy.sh`, a clone at the commit before the move (Arch, Python 3.15, Node.js 26) | venv, libraries and the OCR reader installed |
+| ... then `--update` across the move | carried out by the old script, as predicted: the code is the new one, the OCR reader's packages are still in `ocr/` and the server would run without OCR |
+| ... then the script once more | the packages taken along to `src/ocr/`, OCR found again. The old folder stayed behind with a `package-lock.json` the old script's `npm install` had written into it - the script now removes that too |
+| `deploy.sh --camera 0` | the laptop's own camera set in `config.yaml` |
+| `start.sh` in that clone, on a copy of the test data | server and station up; the station connected with the laptop's camera, 48 frames of live view in 4 s, the setup page answering, `light-ocr ready (webgpu)` |
+| Ctrl+C typed into the terminal `start.sh` runs in | both programs ended at once, both ports free |
+| `backup.sh` against that server, into a scratch folder | the server's own snapshot, an archive with the 4 database files |
+| `deploy.sh --service` in a Debian 13 container running systemd (Python 3.13), at the commit before the move | both services running, the station connected |
+| ... then `--update` across the move | "Restarted mtg-scanner-station" - and the service does not start: `can't open file .../station_client.py`. The server runs the new code |
+| ... then the script once more | both services running, the station's unit names `src/station_client.py`, the station connected |
+| ... `--update` with nothing new, `--remove-service`, and `--service` afresh with the new script | each as it says; after the last, both running and connected |
+
+Not tried: a card captured through these (the laptop's camera looks at the person in front
+of it), the Pi camera option of `deploy.sh`, the other package managers (dnf, zypper), and
+OCR in the container (Debian 13 has Node.js 20; the reader needs 22).
