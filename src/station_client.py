@@ -5,7 +5,7 @@ once it is still and keeps the focus (CardScanner - the same code and thresholds
 sends each captured card to the scanner server, which reads it, matches it and keeps the
 collection. The server's scanner page shows this camera's live view and controls it.
 
-    python station_client.py --server http://192.168.1.20:5000
+    python src/station_client.py --server http://192.168.1.20:5000
     (or SCANNER_SERVER / SCANNER_STATION_ID / SCANNER_STATION_NAME / SCANNER_STATION_TOKEN)
 
 or without any of that: the station then serves its setup page (station_setup.py,
