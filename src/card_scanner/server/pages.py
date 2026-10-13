@@ -13,6 +13,17 @@ from card_scanner.server.captures import scan_stats
 from card_scanner.server.card_data import data_update_notices, data_updates_running
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """
+    The pages' icon, at the address a browser asks for by itself: when it opens something
+    that is not one of the pages (a picture, an /api/ answer) it has no <link> to tell it
+    where the icon is and tries /favicon.ico. The pages themselves name the file in static/
+    (templates/_favicon.html); this is the same file, so that the answer is not a 404.
+    """
+    return send_from_directory(app.static_folder, 'favicon.ico', max_age=86400)
+
+
 @app.route('/')
 def index():
     """The cameras (stations), each with a link to its page"""

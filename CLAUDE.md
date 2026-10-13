@@ -373,6 +373,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   settings button stay in the same place on every page - only the `.topbar-page` part is a
   page's own; each page defines `openSettings()` and `inventoryChanged()`). `scanner.js` runs
   scanner-only code on load - never include it in another page.
+- **The tab's icon** is said once, in `templates/_favicon.html` (included in each page's
+  `<head>`): `static/favicon.svg` and `static/favicon.ico`, the same drawing - change both,
+  and the copy written into `station_setup.html` as a `data:` address, and raise the `?v=`
+  in the snippet. `/favicon.ico` is a route of its own (`server/pages.py`).
 - **Nothing from the internet.** The pages load only from the server: the font is in
   `static/fonts/`, Socket.IO's client in `static/js/vendor/` (its version is in the file's
   name - a new version is a new file and a change in `scanner.html` and `collection.html`;

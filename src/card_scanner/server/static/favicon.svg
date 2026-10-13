@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The pages' icon in a browser tab: the header's brand mark - a card's outline, white on
+       the brand colour (style.css: brand) - without the two lines inside it, which are a blur
+       at 16 pixels. favicon.ico beside this file is the same drawing at 16, 32, 48 and 64
+       pixels, for browsers that ask for /favicon.ico whatever a page says. Change both
+       together (the .ico was drawn with Pillow from these same numbers). -->
+  <rect width="32" height="32" rx="6" fill="#cd2355"/>
+  <rect x="9.5" y="5.5" width="13" height="21" rx="2.5" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+</svg>
