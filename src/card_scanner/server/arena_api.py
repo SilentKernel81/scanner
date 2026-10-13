@@ -9,7 +9,7 @@ from flask import jsonify, request
 from card_scanner.core import arena
 from card_scanner import games
 
-from card_scanner.server.state import app, arena_inventory, database, deck_store, socketio
+from card_scanner.server.state import app, arena_inventory, database, deck_store, maintenance_barrier, socketio
 from card_scanner.server.logs import logger
 
 UPLOAD_MAX_BYTES = 20 * 1024 ** 2   # the export this was written against is 0.4 MB
@@ -88,21 +88,24 @@ def arena_import():
     account = {'exported': collection['exported'], 'imported': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                'wildcards': collection['wildcards'], 'gold': collection['gold'], 'gems': collection['gems'],
                'summary': {**summary, 'unknown': summary['unknown'][:200]}}
-    try:
-        with arena_inventory._lock:
-            # The account first and uncommitted: replace_all commits both, or rolls both back
-            arena.save_account(arena_inventory, account)
-            arena_inventory.replace_all(game.id, entries)
-    except Exception as e:
-        logger.error(f"Arena import failed: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': f'The import failed and nothing was changed: {e}'}), 500
     deck_error = None
-    if decks is not None:
+    # Two files, two commits: the barrier keeps a full backup (backups.create_full) from
+    # being taken between them, with the new collection beside the decks of before
+    with maintenance_barrier:
         try:
-            deck_store.replace_arena_decks(game.id, new_decks)
+            with arena_inventory._lock:
+                # The account first and uncommitted: replace_all commits both, or rolls both back
+                arena.save_account(arena_inventory, account)
+                arena_inventory.replace_all(game.id, entries)
         except Exception as e:
-            logger.error(f"Arena import: the decks failed: {e}", exc_info=True)
-            deck_error = f'The collection was imported, but the decks were not: {e}'
+            logger.error(f"Arena import failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': f'The import failed and nothing was changed: {e}'}), 500
+        if decks is not None:
+            try:
+                deck_store.replace_arena_decks(game.id, new_decks)
+            except Exception as e:
+                logger.error(f"Arena import: the decks failed: {e}", exc_info=True)
+                deck_error = f'The collection was imported, but the decks were not: {e}'
     result = arena_summary(game)
     logger.info(f"Arena import: {result['cards']} cards in {result['entries']} entries "
                 f"({summary['by_printing']} by set and number, {summary['by_name']} by name, "
