@@ -16,6 +16,23 @@ from card_scanner.core.database import search_key
 from card_scanner.core.inventory import now
 
 BOARDS = ('commander', 'main', 'side')
+# cover: the name of the card of the deck whose picture stands for it - in the deck list and
+# behind the deck's name. Empty: not chosen, the page then shows the commander, or for a deck
+# without one its most valuable card (server/decks_api.py: deck_covers). A name that is no
+# longer in the deck counts as empty: nothing has to be cleaned up when a card is taken out.
+DECKS_TABLE = '''
+    CREATE TABLE {table} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game TEXT NOT NULL,
+        name TEXT NOT NULL,
+        format TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        cover TEXT NOT NULL DEFAULT ''
+    )
+'''
+COVER_MIGRATION = 'deck_cover_1'
 # card_id: the printing shown (image); the card itself is identified by its name. A deck's
 # cards go with the deck (ON DELETE CASCADE, on connections from storage.connect)
 DECK_CARDS_TABLE = '''
@@ -42,16 +59,10 @@ class DeckManager:
         self.db_file = db_file or Config.DATABASE_FILE
         self.conn = storage.connect(self.db_file)
         with self._lock:
-            self.conn.execute('''
-                CREATE TABLE IF NOT EXISTS decks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    format TEXT NOT NULL,
-                    notes TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )''')
+            if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'decks'").fetchone():
+                # A new file has the table as it is today: nothing to migrate later
+                self.conn.execute(DECKS_TABLE.format(table='decks'))
+                storage.record(self.conn, COVER_MIGRATION, 'new file')
             if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'deck_cards'").fetchone():
                 self.conn.execute(DECK_CARDS_TABLE.format(table='deck_cards'))
                 storage.record(self.conn, CONSTRAINTS_MIGRATION, 'new file')
@@ -68,6 +79,19 @@ class DeckManager:
                 lambda conn: tuple(conn.execute(
                     f'SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0), COALESCE(MAX(id), 0) '
                     f'FROM deck_cards WHERE {valid}').fetchone()))
+            # Files from before a deck could have a cover (2026-10-13): the decks table gets the
+            # column, every deck as it was and without a cover chosen. A named migration like
+            # the one above - a backup of the file first, one transaction, and the decks counted
+            # and their names and dates compared before and after - although SQLite could add
+            # this column in place: the same care for every change to a table that holds what
+            # someone made.
+            storage.rebuild(self.db_file, COVER_MIGRATION, [
+                ('decks', DECKS_TABLE,
+                 "SELECT id, game, name, format, notes, created_at, updated_at, '' FROM decks", ())],
+                lambda conn: (tuple(conn.execute('SELECT COUNT(*), COALESCE(MAX(id), 0) FROM decks').fetchone()),
+                              [tuple(row) for row in conn.execute(
+                                  'SELECT id, game, name, format, notes, created_at, updated_at FROM decks ORDER BY id')],
+                              tuple(conn.execute('SELECT COUNT(*) FROM deck_cards').fetchone())))
 
     @contextlib.contextmanager
     def _writing(self):
@@ -128,14 +152,16 @@ class DeckManager:
                 (game, name.strip() or 'New deck', deck_format, notes or '', now(), now())).lastrowid
         return deck_id
 
-    def update(self, deck_id, name=None, deck_format=None, notes=None):
+    def update(self, deck_id, name=None, deck_format=None, notes=None, cover=None):
+        """Change what is given (None: as it is). cover: a card's name, or '' for none chosen"""
         with self._writing():
             deck = self.conn.execute('SELECT * FROM decks WHERE id = ?', (deck_id,)).fetchone()
             if not deck:
                 return False
-            self.conn.execute('UPDATE decks SET name = ?, format = ?, notes = ?, updated_at = ? WHERE id = ?', (
+            self.conn.execute('UPDATE decks SET name = ?, format = ?, notes = ?, cover = ?, updated_at = ? WHERE id = ?', (
                 (name.strip() if name is not None else '') or deck['name'], deck_format or deck['format'],
-                notes if notes is not None else deck['notes'], now(), deck_id))
+                notes if notes is not None else deck['notes'],
+                cover if cover is not None else deck['cover'], now(), deck_id))
         return True
 
     def delete(self, deck_id):
@@ -151,6 +177,8 @@ class DeckManager:
                 return None
             new_id = self.create(deck['game'], f"{deck['name']} (copy)", deck['format'], deck['notes'])
             self.import_cards(new_id, deck['cards'])
+            if deck['cover']:  # the copy looks like the deck it was made from
+                self.conn.execute('UPDATE decks SET cover = ? WHERE id = ?', (deck['cover'], new_id))
         return new_id
 
     # -- Cards ---------------------------------------------------------------

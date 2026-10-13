@@ -75,6 +75,32 @@ def resolve_entries(game, entries, deck_format):
     return resolved, unknown
 
 
+def deck_covers(deck, cards):
+    """
+    The cards whose picture stands for a deck - in the deck list and behind the deck's name:
+    [{'name', 'image_uri'}], the first one shown first.
+
+    cards: the deck's entries as [{'name', 'board', 'image_uri', 'price', 'type_line'}].
+      1. the card chosen as cover (decks.cover), while it is in the deck;
+      2. else the commanders, in the order they were added - two of them are both given, and
+         the page shows the first with a button to see the other;
+      3. else the deck's most valuable card that is not a land (a deck of a format without a
+         commander looks like something before anyone chose) - any card if it has only lands.
+    Empty only for a deck without cards the card data knows.
+    """
+    face = lambda card: {'name': card['name'], 'image_uri': card.get('image_uri') or ''}
+    chosen = [card for card in cards if card['name'] == deck.get('cover')]
+    if chosen:
+        return [face(chosen[0])]
+    commanders = [card for card in cards if card['board'] == 'commander']
+    if commanders:
+        return [face(card) for card in commanders]
+    played = [card for card in cards if card['board'] == 'main' and card.get('image_uri')]
+    spells = [card for card in played if 'Land' not in (card.get('type_line') or '').split(' // ')[0]]
+    best = max(spells or played, key=lambda card: card.get('price') or 0, default=None)
+    return [face(best)] if best else []
+
+
 def deck_payload(deck):
     """A deck as the page shows it: card data, copies owned, other decks wanting them, issues, totals"""
     game = games.get(deck['game'])
@@ -113,6 +139,11 @@ def deck_payload(deck):
     return {
         'id': deck['id'], 'name': deck['name'], 'format': deck['format'], 'notes': deck['notes'],
         'updated_at': deck['updated_at'], 'cards': cards,
+        # cover: the card chosen to stand for the deck ('' when none is, or it left the deck);
+        # covers: what is shown - that card, or what stands in for it (deck_covers)
+        'cover': deck.get('cover') if any(card['name'] == deck.get('cover') for card in cards) else '',
+        'covers': deck_covers(deck, [{'name': card['name'], 'board': card['board'], **{
+            key: (card['card'] or {}).get(key) for key in ('image_uri', 'price', 'type_line')}} for card in cards]),
         'issues': game.check_deck(deck['format'], checked),
         'totals': {
             'cards': sum(card['quantity'] for card in played if card['board'] != 'side'),
@@ -165,31 +196,35 @@ def decks_collection():
     if request.method == 'GET':
         owned = inventory.owned_by_name(game.id)
         considering = commander_formats(game)
-        listed, faces = [], {}   # faces: deck id -> its commander entries, for the list's pictures
+        listed, entries_of = [], {}   # entries_of: deck id -> its entries, for the tiles' pictures
         for deck in deck_store.list_decks(game.id):
             wanted = {}
-            for card in deck_store.get(deck['id'])['cards']:
+            entries_of[deck['id']] = deck_store.get(deck['id'])['cards']
+            for card in entries_of[deck['id']]:
                 if not (card['board'] == 'side' and deck['format'] in considering):
                     wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
-                if card['board'] == 'commander':
-                    faces.setdefault(deck['id'], []).append(card)
             have = sum(min(count, owned.get(search_key(name), 0)) for name, count in wanted.items())
             total = sum(wanted.values())
             listed.append({**deck, 'owned': have, 'owned_percent': round(100 * have / total) if total else 0})
-        # What a deck's tile shows of its commanders: the picture of the printing the deck
-        # has (as the deck's own page shows it) and the colours. Asked for all decks at once -
+        # What a deck's tile shows: its cover (deck_covers: the card chosen, else the
+        # commanders, else its most valuable card), in the printing the deck has - as the
+        # deck's own page shows it - and the commanders' colours. Asked for all decks at once:
         # two look-ups, not two per deck.
-        entries = [entry for cards in faces.values() for entry in cards]
+        entries = [entry for cards in entries_of.values() for entry in cards]
         printings = game.card_details([entry['card_id'] for entry in entries]) if entries else {}
         by_name = game.cards_by_names([entry['name'] for entry in entries]) if entries else {}
         for deck in listed:
-            deck['commander_cards'] = []
-            for entry in faces.get(deck['id'], []):
+            known = []
+            for entry in entries_of[deck['id']]:
                 card = by_name.get(search_key(entry['name']))
-                deck['commander_cards'].append({
-                    'name': entry['name'],
-                    'image_uri': (printings.get(entry['card_id']) or {}).get('image_uri') or '',
-                    'identity': (game.deck_card_payload(card) or {}).get('identity', []) if card else []})
+                data = game.deck_card_payload(card) if card else {}
+                known.append({'name': entry['name'], 'board': entry['board'],
+                              'image_uri': (printings.get(entry['card_id']) or {}).get('image_uri') or data.get('image_uri') or '',
+                              'price': data.get('price'), 'type_line': data.get('type_line'),
+                              'identity': data.get('identity') or []})
+            deck['covers'] = deck_covers(deck, known)
+            deck['commander_cards'] = [{'name': card['name'], 'image_uri': card['image_uri'], 'identity': card['identity']}
+                                       for card in known if card['board'] == 'commander']
         return jsonify({'success': True, 'decks': listed, 'has_deck_data': bool(game.has_deck_data())})
 
     data = request.get_json(silent=True) or {}
@@ -230,7 +265,11 @@ def deck_item(deck_id):
             return jsonify({'success': False, 'error': f'Unknown format: {deck_format}'}), 400
         name = str(data['name'])[:80] if data.get('name') is not None else None
         notes = str(data['notes'])[:4000] if data.get('notes') is not None else None
-        deck_store.update(deck_id, name=name, deck_format=deck_format, notes=notes)
+        # cover: the name of one of the deck's cards, or '' to go back to what stands in for it
+        cover = str(data['cover']) if data.get('cover') is not None else None
+        if cover and not any(card['name'] == cover for card in deck['cards']):
+            return jsonify({'success': False, 'error': f'{cover} is not in this deck'}), 400
+        deck_store.update(deck_id, name=name, deck_format=deck_format, notes=notes, cover=cover)
         deck = deck_store.get(deck_id)
     return jsonify({'success': True, 'deck': deck_payload(deck)})
 

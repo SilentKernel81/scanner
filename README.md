@@ -251,7 +251,10 @@ a phone too; the deck pages are made for a screen with a pointer.
 - **Decks** (Magic; pages of their own, `/decks`) - Commander, Standard, Pioneer, Modern,
   Legacy, Vintage and Pauper. The list shows each deck by its commander's picture; a deck
   has an address (`/decks/<id>`) and two views - **Columns**, the decklist as text, and
-  **Stacks**, the cards themselves - grouped by type, cost or colour. **Add cards** opens a
+  **Stacks**, the cards themselves - grouped by type, cost or colour. In the list a deck is
+  shown as a card, its **cover**: the commander (with two, a button turns to the other), or
+  for a deck without one its most valuable card - or any card of the deck you choose with
+  its **Cover** button. **Add cards** opens a
   panel that searches the whole card database: click to add. Every card shows whether you own it, are missing
   it, or need it in another deck too; the deck shows what is not legal or unfinished, its mana
   curve, its price and what completing it costs, and **Buy list** downloads the missing cards.
@@ -491,7 +494,7 @@ those to one camera.
 | `POST /api/backups/<id>/restore`, `DELETE /api/backups/<id>` | Put the collection, scanned cards and decks back as in a backup (the current state is backed up first); delete a backup |
 | `GET /api/cards/search`, `GET /api/cards/printings?name=` | Deck builder card search; every printing of a card with the copies owned |
 | `GET /api/decks`, `POST /api/decks` | List decks (each with `commander_cards`: name, picture and colours of its commanders); create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
-| `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned and issues; rename / change format; delete |
+| `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned, issues and its `covers`; rename / change format / choose the `cover` card; delete |
 | `POST /api/decks/<id>/cards`, `/import`, `/duplicate` | Change cards; add cards from a list or a deck address; copy a deck |
 | `GET /api/decks/<id>/export/<text\|buylist>` | Download the decklist, or the cards not owned |
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
