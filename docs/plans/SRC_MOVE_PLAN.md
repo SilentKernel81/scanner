@@ -2,8 +2,8 @@
 
 Date: 2026-10-12
 
-**The move itself was done the same day** (phases 0 to 3, and the server of phase 4; the three
-stations are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+**Done on 2026-10-12**, all phases - see *How it went* at the end. What follows is the plan
+as it was written.
 
 A plan for the last step of the folder reorganisation: the Python code out of the top folder
 into `src/`, and a `pyproject.toml`. Nothing here is implemented. The numbers below were
@@ -396,9 +396,8 @@ the documents of two repositories and four machines to update. Smaller than the 
 code, larger in machines: the split touched only the server, this rebuilds every station.
 ## How it went (2026-10-12)
 
-Phases 0 to 3 are done and merged into `main` (both repositories). Of phase 4 the server is
-done; **the three stations still run their images from before the move**, which work with
-the new server as before.
+All phases are done and merged into `main` (both repositories): the server and the three
+stations run the moved code.
 
 Done as planned, with these differences:
 
@@ -429,8 +428,7 @@ Checked, on the laptop:
 
 Not checked:
 
-- a card *read* through a real camera on the moved code (the box was dark, see below), and
-  a USB webcam on it - the laptop's test station was given no camera;
+- a card *read* through a real camera on the moved code (the box was dark, see below);
 - **`scripts/deploy.sh`**, neither a fresh installation nor `--update` on a machine with the
   services installed; `bash -n` only. And one thing the plan's risk 3 had not seen: the
   `--update` that crosses this change is still run by the *old* script (it is already
@@ -488,6 +486,21 @@ Not seen yet on the real server: a card scanned through it since. And one thing 
 was not in the plan: after the start, Docker's untagged images were pruned there (15.8 GB)
 - among them the server's image from before the move, so going back would mean building
 it again from commit 71df153, not starting the old image.
+
+**Phase 4, the stations, 22:32-22:36.** Both Pis idle, nothing waiting to be sent. On each,
+the folder was compared with the new tree first: what lay there and is not in the tree
+was exactly the 70 moved files (and the Pi 5's `.env`, which stays). Those deleted, the
+tree copied, the image built while the old container ran and looked into before it was
+started (`config` from `/app/src`, the setup page found), then the container replaced.
+
+| Station | Image | After |
+|---|---|---|
+| Pi 5, USB webcam | `client`, built there in 24 s | connected as "Pi camera", the webcam opened by its `/dev/v4l/by-id` name, a card in view detected |
+| Pi 4, Camera Module 3 | `client-pi`, built there in 5 s (only the copied files were new) | connected, the camera opened, its crop and its setup page's password in the volume as before |
+| Laptop | `client` | rebuilt and the container created again with the settings it had; left not started, as it was |
+
+So a USB webcam on the moved code is seen too. Still not seen, anywhere: a card *read*
+through a camera since the move.
 
 Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` are not
 marked executable in Git, though the documents run them as `./scripts/start.sh`.
