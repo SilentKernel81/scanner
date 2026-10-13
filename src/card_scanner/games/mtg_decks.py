@@ -206,3 +206,75 @@ def format_decklist(entries, format_id=None):
         if lines:
             parts.append('\n'.join([titles[board]] + lines))
     return '\n\n'.join(parts) + '\n'
+
+
+# -- MTG Arena ----------------------------------------------------------------------
+# Arena (the digital game) has an "Import" button in its Decks screen that reads a decklist
+# from the clipboard. What follows writes a deck that way. NOT TESTED IN ARENA: there is no
+# Arena here to paste into. The layout is the one Arena's own export and the sites that
+# write for it use (sections "Commander" / "Deck" / "Sideboard", lines "4 Card Name");
+# what is uncertain is said where it is decided.
+
+# A card exists on Arena when it has a say in one of the formats only Arena has. Scryfall's
+# data has no simpler sign that our card table keeps (its "games" list is not stored), and
+# "timeless" alone covers nearly all of it: every card on Arena is legal, restricted or
+# banned there. The others are a safety net for a card data from before timeless existed.
+ARENA_FORMATS = ('timeless', 'historic', 'brawl', 'standardbrawl', 'alchemy', 'explorer')
+
+
+def on_arena(card):
+    """Whether a card (a row of the card data, with 'legalities') can be had on Arena"""
+    legalities = (card or {}).get('legalities') or {}
+    return any(legalities.get(name) in ('legal', 'restricted', 'banned') for name in ARENA_FORMATS)
+
+
+def arena_name(name, type_line):
+    """
+    A card's name as Arena writes it. Only two-part names ("A // B") are in question:
+      - a split card (both halves are spells: "Fire // Ice") and a Room keep both names;
+      - everything else is known by its front: an adventure card ("Brazen Borrower"), a
+        card that transforms, a modal double-faced card.
+    Decided from the type line, as the card table has no 'layout'. This is how Arena's own
+    lists look as far as known; if Arena refuses a two-part card on import, this is the
+    place to change.
+    """
+    if ' // ' not in name:
+        return name
+    faces = [part.strip() for part in (type_line or '').split(' // ')]
+    spell = lambda face: face.startswith(('Instant', 'Sorcery')) and 'Adventure' not in face
+    if len(faces) == 2 and (all(spell(face) for face in faces) or all('Room' in face for face in faces)):
+        return name
+    return name.split(' // ')[0]
+
+
+def format_arena(entries, format_id, cards):
+    """
+    A deck as text for Arena's Import button: (text, [names left out]).
+
+    entries: the deck's [{'name', 'quantity', 'board'}]; cards: {name: card row} for what the
+    card data knows. Left out, and returned by name: cards that do not exist on Arena, and
+    cards the card data does not know (it cannot say whether they do) - Arena would stop at
+    them. Names only, no set and number: the deck's printings are paper ones, which Arena
+    often does not have, and with a name alone Arena takes a printing you own there.
+    The 'side' board is the sideboard of a 60-card deck; in a Commander deck it holds cards
+    being considered, which are not part of the deck and are not written.
+    """
+    is_commander = DECK_FORMATS.get(format_id, {}).get('commander')
+    titles = {'commander': 'Commander', 'main': 'Deck', 'side': None if is_commander else 'Sideboard'}
+    parts, left_out = [], []
+    for board in BOARDS:
+        if not titles[board]:
+            continue
+        lines = []
+        for entry in sorted(entries, key=lambda e: e['name']):
+            if entry['board'] != board or entry['quantity'] <= 0:
+                continue
+            card = cards.get(entry['name'])
+            if not on_arena(card):
+                left_out.append(entry['name'])
+                continue
+            lines.append(f"{entry['quantity']} {arena_name(entry['name'], card.get('type_line'))}")
+        if lines:
+            parts.append('\n'.join([titles[board]] + lines))
+    return ('\n\n'.join(parts) + '\n' if parts else ''), sorted(set(left_out))
+

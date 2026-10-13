@@ -201,6 +201,12 @@ class Magic(Game):
     def format_decklist(self, entries, deck_format=None):
         return mtg_decks.format_decklist(entries, deck_format)
 
+    def arena_decklist(self, entries, deck_format=None):
+        """A deck as text for MTG Arena's Import button: (text, [names it leaves out]) - mtg_decks.format_arena"""
+        by_key = self.db.cards_by_names([entry['name'] for entry in entries])
+        cards = {entry['name']: by_key.get(search_key(entry['name'])) for entry in entries}
+        return mtg_decks.format_arena(entries, deck_format, cards)
+
     def export_formats(self):
         return {'moxfield': ('Moxfield', 'moxfield_export', write_moxfield), **super().export_formats()}
 

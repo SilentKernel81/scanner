@@ -72,7 +72,8 @@ page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts;
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
 the two routes, through Flask's test client); `tests/test_deck_cover.py` a deck's cover (the
-table's new column on an old file, which card is shown when); `tests/test_paths.py` that the data, `config.yaml`,
+table's new column on an old file, which card is shown when); `tests/test_arena_export.py` the
+list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_paths.py` that the data, `config.yaml`,
 the pages and the OCR reader are where the programs look for them (it must pass before and
 after any move of files - see docs/plans/SRC_MOVE_PLAN.md); `tests/test_layout.py` which
 part of the package may import which, and that every import statement - also inside
@@ -125,7 +126,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Backups of the collection, scanned cards and decks | `backups.py`: `create` (`keep`), `create_scheduled`, `restore` (`RESTORABLE`), `archive` / `add_archive`, `list_backups`, `INVENTORY_TABLES` (`data/backups/<date_time>/`); `server/backups_api.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups` |
 | Everything at one moment (all database files + pictures) | `backups.py`: `create_full`; `server/backups_api.py`: `full_backup`; `server/state.py`: `maintenance_barrier`; `scripts/backup.sh` |
 | Database connections, migrations, measurements | `storage.py`: `connect`, `rebuild`, `schema_migrations`; `scripts/benchmark_db.py` (on copies only) |
-| Decks, deck checks, decklist text | `decks.py`: `DeckManager` (`DECKS_TABLE`, `cover`); `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `server/decks_api.py`: `deck_payload`, `deck_covers` (which card stands for a deck), `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
+| Decks, deck checks, decklist text | `decks.py`: `DeckManager` (`DECKS_TABLE`, `cover`); `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`, `format_arena` (the list for MTG Arena: `on_arena`, `arena_name`; `Game.arena_decklist`); `server/decks_api.py`: `deck_payload`, `deck_covers` (which card stands for a deck), `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `server/decks_api.py`: `deck_suggestions`; `server/deck_ideas_api.py`: `popular_decks`, `run_deck_ideas`, `precon_covers` (the card a preconstructed deck is shown by; `decks.js`: `loadPreconCovers`, asked for as tiles come into view) |
 | Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js` (inventory, trades, statistics, backups), `decks.html` + `decks.js` + `decks.css` (the deck list and one deck: `/decks`, `/decks/<id>`; `showWhatTheAddressSays`, `renderDeckList`, `renderDeck`, `showDeckView`, `deckGroups`, `showAdding`); shared by all: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html`; shared by the collection and deck pages: `library.js`, `_value_dialog.html` |
 | **Camera station** | |

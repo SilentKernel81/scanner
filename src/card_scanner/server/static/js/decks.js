@@ -773,6 +773,46 @@ function renderDeckCharts(entries) {
         <div><div class="chart-title">Mana symbols</div>${barsHtml(Object.entries(pips).map(([color, count]) => [colorNames[color], count]), number => String(number), 5)}</div>`;
 }
 
+// -- The deck for MTG Arena ---------------------------------------------------------
+
+async function openArena() {
+    // Arena's Import button makes a deck from the text on the clipboard. The window shows
+    // that text - only the cards that exist on Arena - and says which of the deck's cards
+    // had to be left out.
+    const data = await api(`/api/decks/${deck.id}/arena`);
+    if (!data) return;
+    $('arena-text').value = data.text;
+    $('arena-subtitle').textContent = `${deck.name}: ${plural(data.cards, 'card')} of ${deck.totals.cards + (hasCommander(deck.format) ? 0 : deck.totals.side)}`;
+    const out = data.left_out;
+    $('arena-left-out').hidden = !out.length;
+    $('arena-left-out').textContent = out.length
+        ? `Not on Arena, and left out of the list: ${out.slice(0, 40).join(', ')}${out.length > 40 ? ` and ${out.length - 40} more` : ''}` : '';
+    $('arena-copy').disabled = $('arena-download').disabled = !data.text;
+    $('arena-modal').classList.add('show');
+    $('arena-text').select();
+}
+
+async function copyArena() {
+    // navigator.clipboard only exists on pages loaded over https or from this very machine,
+    // and the scanner's pages usually come over plain http from another machine: there the
+    // old way is used - select the text in its field and ask the browser to copy the selection
+    const field = $('arena-text');
+    let copied = false;
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(field.value);
+            copied = true;
+        }
+    } catch (error) { /* refused: the old way below */ }
+    if (!copied) {
+        field.focus();
+        field.select();
+        try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+    }
+    notify(copied ? 'Copied - in Arena: Decks, then Import' : 'The browser did not copy it: select the text and press Ctrl+C',
+           copied ? 'success' : 'warning');
+}
+
 // -- Printing of a deck card ------------------------------------------------------
 
 let printingEntry = null;   // {name, board} of the entry whose printing is being chosen
@@ -1092,6 +1132,11 @@ function bindBuilderEvents() {
     $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
     $('deck-import').addEventListener('click', () => openDeckModal({importInto: deck}));
     $('deck-export').addEventListener('click', () => { window.location = `/api/decks/${deck.id}/export/text`; });
+    // Only a game that has a digital client to write for (games/: arena_decklist) shows the button
+    $('deck-arena').hidden = !gameInfo.arena;
+    $('deck-arena').addEventListener('click', openArena);
+    $('arena-copy').addEventListener('click', copyArena);
+    $('arena-download').addEventListener('click', () => { window.location = `/api/decks/${deck.id}/export/arena`; });
     $('deck-buylist').addEventListener('click', () => {
         if (!deck.totals.missing) return notify('You own every card of this deck', 'success');
         window.location = `/api/decks/${deck.id}/export/buylist`;
@@ -1244,6 +1289,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ['printing-modal', () => closeModal('printing-modal')],
         ['precon-modal', () => closeModal('precon-modal')],
         ['deck-modal', () => closeModal('deck-modal')],
+        ['arena-modal', () => closeModal('arena-modal')],
         ['add-drawer', () => showAdding(false)],   // Escape closes the panel for adding cards
     ]);
     window.addEventListener('popstate', showWhatTheAddressSays);

@@ -49,6 +49,8 @@ def game_info(game):
         # Deck builder formats: [[id, label, has a commander]] (none: the game has no deck builder)
         'deck_formats': [[key, rules['label'], bool(rules.get('commander'))]
                          for key, rules in game.deck_formats.items()],
+        # Whether a deck can be written for the game's digital client (the deck page's Arena button)
+        'arena': bool(game.arena_decklist),
     }
 
 
