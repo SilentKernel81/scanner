@@ -153,7 +153,7 @@ def main():
     # Check if database exists
     if not Config.DATABASE_FILE.exists() or Config.DATABASE_FILE.stat().st_size == 0:
         print("\n⚠ WARNING: No card database found!")
-        print("Please run 'python3 setup_database.py' first")
+        print("Please run 'python3 src/setup_database.py' first")
         print("to download the card database.")
         logger.warning("Card database not found - cannot start application")
         return

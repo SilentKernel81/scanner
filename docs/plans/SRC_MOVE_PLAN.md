@@ -428,7 +428,8 @@ Checked, on the laptop:
 
 Not checked:
 
-- a card *read* through a real camera on the moved code (the box was dark, see below);
+- a card *read* through a real camera on the moved code, that evening's test (the box was
+  dark, see below) - seen later, on the real server, see the stations' update;
 - **`scripts/deploy.sh`** was not checked that day beyond `bash -n` - see *The scripts,
   tried* below. One thing the plan's risk 3 had not seen: the `--update` that crosses this
   change is still run by the *old* script (it is already running when `git pull` replaces
@@ -499,8 +500,9 @@ started (`config` from `/app/src`, the setup page found), then the container rep
 | Pi 4, Camera Module 3 | `client-pi`, built there in 5 s (only the copied files were new) | connected, the camera opened, its crop and its setup page's password in the volume as before |
 | Laptop | `client` | rebuilt and the container created again with the settings it had; left not started, as it was |
 
-So a USB webcam on the moved code is seen too. Still not seen, anywhere: a card *read*
-through a camera since the move.
+So a USB webcam on the moved code is seen too. A card *read* through a camera since the
+move came a quarter of an hour later: the user scanned two with the Pi 5's station (22:47
+and 22:48), both read by `light-ocr` on the server and found in the card data.
 
 Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` were not
 marked executable in Git, though the documents run them as `./scripts/start.sh` (fixed

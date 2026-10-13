@@ -5,7 +5,7 @@
 #
 # Why it exists: a station used to be set up with environment variables and
 # config.yaml only, which means logging into the machine. With this page a
-# station is started (the Docker image, or `python station_client.py`) and set
+# station is started (the Docker image, or `python src/station_client.py`) and set
 # up from a browser: http://<the station's address>:8080
 #
 # What is here, top to bottom:
@@ -106,7 +106,7 @@ def resolve(arguments, saved, machine_name):
     What the station really runs with, and which of it the page may not change.
 
     Each setting is looked for in this order, the first place that has it wins:
-        1. the command line          (python station_client.py --server ...)
+        1. the command line          (python src/station_client.py --server ...)
         2. the environment           (SCANNER_SERVER=..., as the Docker image is given them)
         3. the file the page saved   (data/station.json)
         4. the default
