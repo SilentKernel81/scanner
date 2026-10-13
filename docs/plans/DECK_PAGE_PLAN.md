@@ -7,7 +7,7 @@ as it was written.
 
 A plan for taking the decks out of the collection page and giving them a new layout. Nothing
 here is implemented. The layout was chosen by the user from four static mockups
-(`docs/plans/deck_mockups/`, not in Git): **A, "Columns"**, with **C, "Stacks"**, as a second
+(they were in `docs/plans/deck_mockups/`, never in Git, and deleted once the pages were built): **A, "Columns"**, with **C, "Stacks"**, as a second
 view of the same deck. The numbers below were counted at commit 0072a90.
 
 ## Why
@@ -298,7 +298,7 @@ Checked, on the laptop, against a server on copied data:
 | `scripts/check_deck_pages.py`, headless Chromium | 54 checks, all passing: the list (tiles, filter, sort, tabs), a deck made from a pasted list with an unknown card reported, copies, moves, printings, both views and the three groupings, the panel, the menu, search and add, rename, format, import, the two exports, the addresses (reload, Back, a deck that is gone), duplicate, delete - and the collection page that was cut: its three tabs, the location filter, the settings drawer, "New deck..." from a selection |
 | The recorded walk, `main` against the branch | 70 steps, 2 different: `GET /decks` exists, and `GET /api/decks` has the new field |
 | All tests; the route list recorded again | pass; two routes more (`/decks`, `/decks/<id>`) |
-| Screenshots of the list, both views, the groupings, the panel, and with the pointer on a row and on a stacked card | looked at beside the mockups (`docs/plans/deck_mockups/screenshots/new_*.png`) |
+| Screenshots of the list, both views, the groupings, the panel, and with the pointer on a row and on a stacked card | looked at beside the mockups (the pictures went with the mockups folder) |
 
 Of the 50 things in the table above, the script tries those that need no other site.
 **Not tried**: what asks EDHREC, Archidekt, Moxfield or MTGJSON - suggestions and "start from
@@ -325,8 +325,8 @@ a deck without a commander left a small gap before its format in the banner.
 The stations were not touched: they have no part in this.
 
 Still open: the fourth tab the user asked for ("to keep the build stuff we currently
-have") - which parts that means is to be asked; and the mockups folder, which is not in
-Git.
+have") - which parts that means is to be asked. The mockups folder was deleted at the
+user's word on 2026-10-13: it showed their decks and was never in Git.
 
 **Added afterwards, the same day: every deck is shown as a card, its cover** (4bbfe04; asked
 for by the user after seeing the pages). The list's tiles are whole cards; a deck with two
