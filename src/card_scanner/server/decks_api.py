@@ -1,14 +1,16 @@
 # ============================================================================
 # FILE: server/decks_api.py
-# Decks (collection page): lists of cards; what is owned comes from the inventory.
+# Decks (the deck pages): lists of cards; what is owned comes from the collection a deck is
+# of - the collection for a deck of paper cards, the digital collection for an Arena deck.
 # ============================================================================
 from flask import Response, jsonify, request
 
+from card_scanner.core import arena
 from card_scanner.core.database import search_key
 from card_scanner import games
 from card_scanner.core.recommendations import Unavailable
 
-from card_scanner.server.state import app, deck_store, inventory, recommend
+from card_scanner.server.state import app, arena_inventory, deck_store, inventory, recommend
 from card_scanner.server.logs import logger
 
 
@@ -101,13 +103,27 @@ def deck_covers(deck, cards):
     return [face(best)] if best else []
 
 
+def collection_of(kind):
+    """The inventory a deck of this kind counts as "owned": the digital collection (what the
+    user has in MTG Arena) for an Arena deck, the collection for a deck of paper cards"""
+    return arena_inventory if kind == 'arena' else inventory
+
+
+def is_basic_land(card):
+    """A basic land (Forest, Snow-Covered Island, Wastes): Arena gives as many as a deck wants"""
+    front = ((card or {}).get('type_line') or '').split(' // ')[0]
+    return 'Basic' in front and 'Land' in front
+
+
 def deck_payload(deck):
     """A deck as the page shows it: card data, copies owned, other decks wanting them, issues, totals"""
     game = games.get(deck['game'])
+    kind = deck.get('kind') or 'paper'
     considering = deck['format'] in commander_formats(game)  # its 'side' board isn't played
     by_name = game.cards_by_names([card['name'] for card in deck['cards']])
-    owned = inventory.owned_by_name(game.id)
-    needed = deck_store.needed_by_name(game.id, commander_formats(game))
+    # Owned: in the collection the deck is of. And only decks of that kind want the same copies
+    owned = collection_of(kind).owned_by_name(game.id)
+    needed = deck_store.needed_by_name(game.id, commander_formats(game), kind)
     # The image is the printing the deck entry was added with (a precon's own printing, the
     # search result clicked); the rest is the card's data, the same for every printing
     printings = game.card_details([entry['card_id'] for entry in deck['cards']])
@@ -133,12 +149,30 @@ def deck_payload(deck):
     wanted = {}
     for card in played:
         wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
+    if kind == 'arena':
+        # Arena hands out basic lands freely: an Arena deck has as many as it plays, whatever
+        # the export counted (it lists one of each printing you were given)
+        for card in cards:
+            if is_basic_land(card['card']):
+                card['owned'] = max(card['owned'], wanted.get(card['name'], card['quantity']))
     price = lambda card: (card['card'] or {}).get('price') or 0.0
     first = {card['name']: card for card in played}
     missing = {name: max(0, count - first[name]['owned']) for name, count in wanted.items()}
+    wildcards = None
+    if kind == 'arena':
+        # What the missing cards cost in Arena: a wildcard of the card's rarity each (the
+        # card data's rarity - of one paper printing, which Arena shares for nearly every
+        # card), beside the wildcards the account had at the last import
+        wildcards = {'needed': arena.wildcards_needed(
+                         [((first[name]['card'] or {}).get('rarity'), count) for name, count in missing.items() if count]),
+                     'have': arena.account(arena_inventory).get('wildcards') or {}}
     return {
         'id': deck['id'], 'name': deck['name'], 'format': deck['format'], 'notes': deck['notes'],
         'updated_at': deck['updated_at'], 'cards': cards,
+        # kind: 'paper' or 'arena' - which collection "owned" was counted in; from_arena: the
+        # deck came with an Arena export (the next import replaces it); wildcards: an Arena
+        # deck's missing cards as what crafting them costs
+        'kind': kind, 'from_arena': bool(deck.get('arena_id')), 'wildcards': wildcards,
         # cover: the card chosen to stand for the deck ('' when none is, or it left the deck);
         # covers: what is shown - that card, or what stands in for it (deck_covers)
         'cover': deck.get('cover') if any(card['name'] == deck.get('cover') for card in cards) else '',
@@ -194,7 +228,8 @@ def decks_collection():
     if not game.deck_formats:
         return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
     if request.method == 'GET':
-        owned = inventory.owned_by_name(game.id)
+        # Each deck counts what is owned in the collection it is of (collection_of)
+        owned_in = {'paper': inventory.owned_by_name(game.id), 'arena': arena_inventory.owned_by_name(game.id)}
         considering = commander_formats(game)
         listed, entries_of = [], {}   # entries_of: deck id -> its entries, for the tiles' pictures
         for deck in deck_store.list_decks(game.id):
@@ -203,9 +238,9 @@ def decks_collection():
             for card in entries_of[deck['id']]:
                 if not (card['board'] == 'side' and deck['format'] in considering):
                     wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
-            have = sum(min(count, owned.get(search_key(name), 0)) for name, count in wanted.items())
-            total = sum(wanted.values())
-            listed.append({**deck, 'owned': have, 'owned_percent': round(100 * have / total) if total else 0})
+            listed.append({**deck, 'from_arena': bool(deck['arena_id']), '_wanted': wanted})
+        # (how much of each is owned is counted below, once the cards' data is at hand: an
+        # Arena deck's basic lands count as owned, and that needs their type)
         # What a deck's tile shows: its cover (deck_covers: the card chosen, else the
         # commanders, else its most valuable card), in the printing the deck has - as the
         # deck's own page shows it - and the commanders' colours. Asked for all decks at once:
@@ -225,6 +260,12 @@ def decks_collection():
             deck['covers'] = deck_covers(deck, known)
             deck['commander_cards'] = [{'name': card['name'], 'image_uri': card['image_uri'], 'identity': card['identity']}
                                        for card in known if card['board'] == 'commander']
+            wanted, owned = deck.pop('_wanted'), owned_in[deck['kind']]
+            basics = {card['name'] for card in known if is_basic_land(card)} if deck['kind'] == 'arena' else set()
+            have = sum(count if name in basics else min(count, owned.get(search_key(name), 0)) for name, count in wanted.items())
+            total = sum(wanted.values())
+            deck['owned'], deck['owned_percent'] = have, round(100 * have / total) if total else 0
+            del deck['arena_id']   # Arena's id for the deck is nothing a page needs
         return jsonify({'success': True, 'decks': listed, 'has_deck_data': bool(game.has_deck_data())})
 
     data = request.get_json(silent=True) or {}
@@ -242,7 +283,9 @@ def decks_collection():
     if entries is None and data.get('commander'):
         entries = [{'name': data['commander'], 'quantity': 1, 'board': 'commander'}]
     unknown = []
-    deck_id = deck_store.create(game.id, str(data.get('name') or source_name or 'New deck')[:80], deck_format)
+    # kind: 'arena' for a deck planned against the digital collection; anything else is a paper deck
+    deck_id = deck_store.create(game.id, str(data.get('name') or source_name or 'New deck')[:80], deck_format,
+                                kind='arena' if data.get('kind') == 'arena' else 'paper')
     if entries:
         resolved, unknown = resolve_entries(game, entries, deck_format)
         deck_store.import_cards(deck_id, resolved)
@@ -345,7 +388,7 @@ def deck_export(deck_id, kind):
     game = games.get(deck['game'])
     entries = deck['cards']
     if kind == 'buylist':
-        owned = inventory.owned_by_name(game.id)
+        owned = collection_of(deck.get('kind')).owned_by_name(game.id)
         wanted = {}
         for entry in entries:
             if not (entry['board'] == 'side' and deck['format'] in commander_formats(game)):
@@ -380,7 +423,46 @@ def deck_arena(deck_id):
         return jsonify({'success': False, 'error': f'No digital client for {game.label}'}), 400
     text, left_out = game.arena_decklist(deck['cards'], deck['format'])
     count = sum(int(line.split(' ', 1)[0]) for line in text.splitlines() if line[:1].isdigit())
-    return jsonify({'success': True, 'text': text, 'left_out': left_out, 'cards': count})
+    return jsonify({'success': True, 'text': text, 'left_out': left_out, 'cards': count,
+                    'check': arena_check(game, deck, left_out)})
+
+
+def arena_check(game, deck, left_out):
+    """
+    Can this deck be built in Arena? Its cards against the digital collection (the last
+    import of an Arena export), for the Arena window of any deck:
+
+      'imported'   when that import was ('' : never - then there is nothing to compare with)
+      'have'       copies of the deck that are in the Arena collection
+      'craft'      [{'name', 'rarity', 'copies'}] - on Arena, but not (enough) in the collection
+      'wildcards'  {'needed': {rarity: n}, 'have': {rarity: n}} - what crafting them costs
+                   (core/arena.py: wildcards_needed), beside what the account had
+      'not_on_arena'  how many copies are of cards Arena does not have (their names: left_out)
+
+    A Commander deck's considered cards are not part of the deck and not counted; basic
+    lands are free in Arena.
+    """
+    account = arena.account(arena_inventory)
+    owned = arena_inventory.owned_by_name(game.id)
+    by_name = game.cards_by_names([entry['name'] for entry in deck['cards']])
+    considering = deck['format'] in commander_formats(game)
+    wanted = {}
+    for entry in deck['cards']:
+        if not (considering and entry['board'] == 'side'):
+            wanted[entry['name']] = wanted.get(entry['name'], 0) + entry['quantity']
+    have, craft, absent = 0, [], 0
+    for name, copies in sorted(wanted.items()):
+        card = by_name.get(search_key(name))
+        if name in left_out:
+            absent += copies
+            continue
+        got = copies if is_basic_land(card) else min(copies, owned.get(search_key(name), 0))
+        have += got
+        if got < copies:
+            craft.append({'name': name, 'rarity': (card or {}).get('rarity') or '', 'copies': copies - got})
+    return {'imported': account.get('exported') or '', 'have': have, 'craft': craft, 'not_on_arena': absent,
+            'wildcards': {'needed': arena.wildcards_needed([(card['rarity'], card['copies']) for card in craft]),
+                          'have': account.get('wildcards') or {}}}
 
 
 @app.route('/api/cards/search')
@@ -390,12 +472,15 @@ def search_cards():
     if not game.deck_formats:
         return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
     args = request.args
-    owned = inventory.owned_by_name(game.id)
+    # kind=arena: the search is for an Arena deck - "owned" is what the digital collection has,
+    # and only other Arena decks can be using a card
+    kind = 'arena' if args.get('kind') == 'arena' else 'paper'
+    owned = collection_of(kind).owned_by_name(game.id)
     # free=1: leave out the cards other decks use (deck_id: the deck being built, which doesn't count)
     taken = None
     if args.get('free'):
         current = int(args['deck_id']) if (args.get('deck_id') or '').isdigit() else None
-        taken = [key for key, used in deck_store.needed_by_name(game.id, commander_formats(game)).items()
+        taken = [key for key, used in deck_store.needed_by_name(game.id, commander_formats(game), kind).items()
                  if any(deck['deck_id'] != current for deck in used)]
     try:
         cmc = float(args['cmc']) if args.get('cmc') not in (None, '') else None
@@ -409,7 +494,7 @@ def search_cards():
         return jsonify({'success': False, 'error': str(e)}), 400
     # A card that is owned is shown in the printing owned (the search picks one printing per
     # name, which for a card from a preconstructed deck is usually another art)
-    printing = inventory.owned_printing_by_name(game.id)
+    printing = collection_of(kind).owned_printing_by_name(game.id)
     details = game.card_details([printing.get(search_key(card['name'])) for card in cards])
     results = []
     for card in cards:
@@ -452,8 +537,8 @@ def deck_suggestions(deck_id):
     if not found:
         return jsonify({'success': True, 'categories': [], 'message': 'EDHREC has no data for this commander'})
     in_deck = {search_key(card['name']) for card in deck['cards']}
-    owned = inventory.owned_by_name(game.id)
-    elsewhere = {key for key, used in deck_store.needed_by_name(game.id, commander_formats(game)).items()
+    owned = collection_of(deck.get('kind')).owned_by_name(game.id)
+    elsewhere = {key for key, used in deck_store.needed_by_name(game.id, commander_formats(game), deck.get('kind') or 'paper').items()
                  if any(other['deck_id'] != deck['id'] for other in used)}
     by_name = game.cards_by_names([card['name'] for category in found['categories'] for card in category['cards']])
     categories = []

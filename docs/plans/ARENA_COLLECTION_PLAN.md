@@ -50,8 +50,15 @@ again. "Which cards exist on Arena" is known since the Arena list (`mtg_decks.on
 - **An import replaces everything.** The export is the whole collection, and Arena keeps
   the original: nothing in the digital collection is worth merging or keeping.
 - **No scanning.** The digital collection is never added to from a camera.
-- **Paper decks get a check: can this be built in Arena?** Decks stay what they are; they do
-  not have to be declared "paper" or "Arena".
+- **Paper decks get a check: can this be built in Arena?**
+- **Decks are of two kinds, Physical and Arena** (decided after the plan was first written,
+  replacing "decks stay what they are" and open decision 3): the Decks page filters by
+  kind; the import brings the exporter's Arena decks, and **replaces** the ones it brought
+  before (a deck deleted in Arena goes here too) - an Arena deck made here is left alone;
+  an Arena deck counts what is owned in the digital collection, and what is missing in
+  wildcards. No "copy as Arena deck": the Arena list is pasted into Arena, and the deck
+  comes back with the next import.
+- Open decisions 1, 2 and 4 as recommended.
 
 ## Design
 

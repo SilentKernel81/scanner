@@ -36,6 +36,20 @@
    "get_ai_provider"
   ],
   [
+   "/api/arena",
+   [
+    "GET"
+   ],
+   "arena_info"
+  ],
+  [
+   "/api/arena/import",
+   [
+    "POST"
+   ],
+   "arena_import"
+  ],
+  [
    "/api/backups",
    [
     "GET",

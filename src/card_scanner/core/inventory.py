@@ -714,6 +714,37 @@ class InventoryManager:
         return row['id']
 
     @_writes
+    def replace_all(self, game, entries):
+        """
+        Everything of a game in this inventory replaced by `entries`, as one change: either
+        the old contents are gone and the new ones are in, or nothing happened. For an
+        inventory that mirrors something kept elsewhere - the digital collection, which is a
+        copy of what MTG Arena has (core/arena.py) - where merging would only keep what is
+        no longer true.
+
+        entries: [{'fields' (Game.inventory_fields), 'finish', 'quantity'}]; two entries for
+        the same printing and finish are added up. Returns how many entries there are now.
+        Not for the collection or the scanned cards: it asks nobody, keeps no undo, and
+        takes captures and stations' counts with it.
+        """
+        moment = now()
+        self._delete_entries('game = ?', (game,))
+        for entry in entries:
+            fields = entry['fields']
+            self.conn.execute(UPSERT, {
+                'game': game, 'card_id': fields.get('card_id'), 'card_name': fields['name'],
+                'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
+                'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
+                'type_line': fields.get('type_line'), 'mana_cost': fields.get('mana_cost'),
+                'colors': fields.get('colors'), 'color_identity': fields.get('color_identity'),
+                'price_usd': float(fields.get('price') or 0), 'quantity': max(1, int(entry.get('quantity') or 1)),
+                'condition': 'Near Mint', 'finish': entry['finish'], 'timestamp': moment, 'added_at': moment,
+                'location': '', 'tags': ''})
+        self._commit()
+        self.last_added = {}
+        return self.conn.execute('SELECT COUNT(*) FROM inventory WHERE game = ?', (game,)).fetchone()[0]
+
+    @_writes
     def set_price(self, row_id, price):
         with self._lock:
             self.conn.execute('UPDATE inventory SET price_usd = ? WHERE id = ?', (float(price), row_id))
