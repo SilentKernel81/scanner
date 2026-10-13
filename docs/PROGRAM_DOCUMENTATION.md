@@ -1716,7 +1716,9 @@ does not have.
 **The digital collection (MTG Arena)** - since 2026-10-13; plan and record in
 `docs/plans/ARENA_COLLECTION_PLAN.md`. A third inventory, `arena_inventory`
 (`data/arena_inventory.db`, the same tables once more), holds what the user has in Arena.
-Arena gives no list of that; a third-party exporter writes one while the game runs, and
+Arena gives no list of that; an exporter - the same author's
+[mtga-export](https://github.com/SilentKernel81/mtga-export), a separate program for Linux
+(Steam / Proton) - writes one while the game runs, and
 the collection page's **Arena** view uploads its files (`POST /api/arena/import`,
 `server/arena_api.py`): `mtga_collection.json`, `mtga_decks.json`, or both - each replaces
 its own part (the cards; the decks Arena brought) and leaves the other. The cards are

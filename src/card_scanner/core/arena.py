@@ -1,8 +1,9 @@
 """
 The digital collection: what the user has in MTG Arena, read from the files an exporter writes.
 
-Arena itself gives no list of what you own. A third-party exporter reads it while the game
-runs and writes, among other files:
+Arena itself gives no list of what you own. An exporter - mtga-export, a separate program
+of the same author (github.com/SilentKernel81/mtga-export) - reads it while the game runs
+and writes, among other files:
 
     mtga_collection.json   {'export_date', 'cards': [{'count', 'name', 'set',
                            'collector_number', 'rarity', 'rebalanced', ...}],
