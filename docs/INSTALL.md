@@ -170,7 +170,7 @@ blocked by its firewall from inside a container.
 git clone https://github.com/SilentKernel81/scanner-server.git && cd scanner-server
 python3 -m venv venv && venv/bin/pip install -r requirements-client.txt
 sudo apt install v4l-utils         # v4l2-ctl: focus control (pacman -S v4l-utils, ...)
-venv/bin/python station_client.py --server http://<server>:5000
+venv/bin/python src/station_client.py --server http://<server>:5000
 ```
 
 Options `--id`, `--name`, `--token`, or the environment variables above. Your user needs
@@ -206,9 +206,10 @@ Without Docker the same station runs from the Pi's own Python:
 ```bash
 sudo apt install --no-install-recommends python3-picamera2 python3-opencv python3-socketio \
      python3-websocket python3-requests python3-yaml
-# in a folder with station_client.py, station_setup.py, station_login.py, station_setup.html,
-# scanner.py, object_detector.py, settings.py, config.py, config_loader.py and config.yaml
-python3 station_client.py          # then the setup page, http://<the Pi>:8080
+# in a copy of the project (git clone), or a folder that holds config.yaml and, in a folder
+# src/ inside it: station_client.py, station_setup.py, station_login.py, station_setup.html,
+# scanner.py, object_detector.py, settings.py, config.py, config_loader.py and paths.py
+python3 src/station_client.py      # then the setup page, http://<the Pi>:8080
 ```
 
 ### When something is away
@@ -250,6 +251,25 @@ docker compose -f deploy/docker-compose.client.yml up -d --build   # camera stat
 
 Update the server first: a station reconnects by itself a few seconds after the server is
 back, and scanning continues.
+
+**Coming from a version with the code in the top folder** (before 2026-10-12): the Python
+files are in `src/` now, the pages in `src/server/` and the OCR reader in `src/ocr/`.
+`git pull` moves them; your `data/`, `scanned_cards/`, `config.yaml` and `.env` stay where
+they are and are used as before, and `python app.py` still starts the server. What changes:
+
+- with Docker: nothing but a rebuild (`up -d --build`), of the server and of each station;
+- a station without Docker is started as `python src/station_client.py ...`, the card data
+  is downloaded with `python src/setup_database.py`;
+- an installation made with `scripts/deploy.sh`: run `./scripts/deploy.sh --update`. It
+  writes the two services again (the station's names the new file) and takes the OCR
+  reader's installed packages along to `src/ocr/`. This path of the script was read, not
+  tried on an installed machine;
+- a station whose files were copied by hand into one folder no longer starts that way: the
+  code looks for `config.yaml` in the folder *above* its own - lay it out as described under
+  the Pi camera above;
+- a copy of the project made without Git (rsync, a zip unpacked over the old one) keeps the
+  old files in the top folder. Delete them: every `.py` there except `app.py`, and the
+  folders `server/`, `games/`, `templates/`, `static/` and `ocr/`.
 
 **Coming from a version with the Docker files in the top folder** (before 2026-10-12): they
 are in `deploy/` now, and the documents in `docs/`. `git pull` moves them; your `data/`,
@@ -310,7 +330,7 @@ this way.
 | `--skip-database` / `--refresh-cards` | Don't download the card data / download the latest |
 
 The script is safe to run again: each step is skipped when it is already done. It installs
-[light-ocr](https://github.com/arcships/light-ocr) into `ocr/` when Node.js 22+ with npm is
+[light-ocr](https://github.com/arcships/light-ocr) into `src/ocr/` when Node.js 22+ with npm is
 there (it needs glibc 2.38 or newer - Debian 13, Ubuntu 24.04); without it every card goes to
 the vision AI. `scripts/backup.sh` archives `data/`, the capture images and `.env` to
 `~/scanner-backups/`, and `scripts/start.sh` starts the app after checking the key and the
@@ -351,7 +371,7 @@ port in `SCANNER_SERVER`).
 and `docker info` lists the `nvidia` runtime.
 
 **OCR did not start** - `data/logs/ocr.log` has the reason. Outside Docker it is usually an
-older system library (light-ocr needs glibc 2.38) or a missing `npm install` in `ocr/`.
+older system library (light-ocr needs glibc 2.38) or a missing `npm install` in `src/ocr/`.
 
 **"Vision AI disabled"** - no API key for the selected provider: enter one in Settings, or
 switch to a local model.

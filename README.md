@@ -382,10 +382,24 @@ after a capture); correct them there and search again, or pick the printing from
 
 ## Project structure
 
+All the code is in `src/`; the top folder keeps what you start, set and own.
+
 ```
-app.py               Starts the server (python app.py)
+app.py               Starts the server (python app.py) - the only Python file in the top folder
+config.yaml          Settings (loaded by src/config.py / config_loader.py)
+pyproject.toml       What the project is and which Python it needs (the libraries are in requirements*.txt)
+compose.yaml         `docker compose up` in this folder starts the server (it points into deploy/)
+data/                Card data, collection, settings, backups, logs (created at runtime)
+scanned_cards/       Capture images the server received (created at runtime)
+station_captures/    A camera station's captures that are not on the server yet (created at runtime)
+
+src/                 The code - every name below is in here
+paths.py             Where the two folders are: the top folder (data, settings) and src/ (code)
 server/              The server: web pages, routes, events, one desk per camera, station captures -
                      one module per area (server/__init__.py lists them)
+server/templates/, server/static/
+                     Web interface: the cameras, a camera's page, the collection. The font and
+                     Socket.IO's client are in static/ too: the pages load nothing from the internet
 identification.py    Reading a card: OCR queue, AI queue, shared by every camera
 card_ocr.py, ocr/    light-ocr reader (Node.js) and the parser for what it reads
 card_identifier.py   Vision AI providers, card identification, foil marker check
@@ -406,19 +420,16 @@ station_setup.py     ... its setup page (server, name, camera), station_setup.ht
 station_login.py     ... and that page's password
 scanner.py           Camera capture thread, detection, stability, auto-capture, focus
 object_detector.py   Card outline detection + perspective correction
-config.yaml          Settings (loaded by config.py / config_loader.py)
-templates/, static/  Web interface: the cameras, a camera's page, the collection. The font and
-                     Socket.IO's client are in static/ too: the pages load nothing from the internet
-tests/               Automated tests (camera ownership, backups, database, a station's setup page and uploads)
-compose.yaml         `docker compose up` in this folder starts the server (it points into deploy/)
+config.py, config_loader.py, settings.py
+                     Reading config.yaml and the saved settings
+
+tests/               Automated tests (camera ownership, backups, database, a station's setup page and uploads,
+                     where the programs look for their folders)
 deploy/              Everything about Docker: the Dockerfile (images server, client, client-pi) and
                      the compose files - server, server with GPU, camera station, station with a Pi camera
 docs/                How it works, installation, the Docker guide, the manual test list; docs/plans/
 scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker;
                      benchmark_db.py, benchmark_station.py
-data/                Card data, collection, settings, backups, logs (created at runtime)
-scanned_cards/       Capture images the server received (created at runtime)
-station_captures/    A camera station's captures that are not on the server yet (created at runtime)
 ```
 
 [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md) explains how everything works inside
