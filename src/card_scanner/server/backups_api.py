@@ -14,7 +14,8 @@ from card_scanner.core.pending import PENDING_FILE
 from card_scanner.core.review import REVIEW_DIR
 
 from card_scanner.server.state import (
-    SCAN_INVENTORY_FILE, app, app_settings, database, deck_store, inventory, maintenance_barrier,
+    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, app_settings, arena_inventory, database, deck_store, inventory,
+    maintenance_barrier,
     pending, review, scan_inventory, socketio,
 )
 from card_scanner.server.logs import logger
@@ -35,7 +36,7 @@ def scheduled_backup(note='Automatic'):
     """Make the automatic backup if one is due (backups.create_scheduled); its info, or None"""
     schedule = backup_schedule()
     return backups.create_scheduled(inventory, scan_inventory, deck_store, schedule['every_hours'],
-                                    schedule['keep'], note=note)
+                                    schedule['keep'], note=note, arena_inventory=arena_inventory)
 
 
 def run_backup_schedule():
@@ -73,9 +74,9 @@ def full_backup():
     """Everything the server keeps, at one moment (backups.create_full): the manifest"""
     pictures = 'SELECT file FROM inventory_captures'
     return backups.create_full(
-        managers=[inventory, scan_inventory, deck_store, review, pending, database],  # the order take_from locks in
+        managers=[inventory, scan_inventory, arena_inventory, deck_store, review, pending, database],  # the order take_from locks in
         barrier=maintenance_barrier,
-        databases=[Config.DATABASE_FILE, SCAN_INVENTORY_FILE, PENDING_FILE],
+        databases=[Config.DATABASE_FILE, SCAN_INVENTORY_FILE, ARENA_INVENTORY_FILE, PENDING_FILE],
         linked=[('captures', inventory_captures_dir(), Config.DATABASE_FILE, pictures),
                 ('captures', inventory_captures_dir(), SCAN_INVENTORY_FILE, pictures),
                 ('review', REVIEW_DIR, Config.DATABASE_FILE, 'SELECT file FROM review_queue'),
@@ -107,7 +108,7 @@ def collection_backups():
     if request.method == 'POST':
         note = str((request.get_json(silent=True) or {}).get('note') or '')
         try:
-            made = backups.create(inventory, scan_inventory, deck_store, note)
+            made = backups.create(inventory, scan_inventory, deck_store, note, arena_inventory=arena_inventory)
         except Exception as e:
             logger.error(f"Backup failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': f'The backup failed: {e}'}), 500
@@ -119,7 +120,7 @@ def collection_backups():
 def restore_backup(backup_id):
     """Put the collection, scanned cards and decks back as in a backup (the current state is backed up first)"""
     try:
-        result = backups.restore(backup_id, inventory, scan_inventory, deck_store)
+        result = backups.restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=arena_inventory)
     except backups.BackupError as e:
         logger.error(f"Restoring backup {backup_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -129,6 +130,7 @@ def restore_backup(backup_id):
     log_to_client(f"Backup of {result['restored']['created']} restored", level="success")
     # Every open page shows the restored cards
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(games.active().id)}, namespace='/')
+    socketio.emit('arena_updated')   # ... and the restored digital collection
     return jsonify({'success': True, **result, 'backups': backups.list_backups()})
 
 
