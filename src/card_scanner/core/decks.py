@@ -29,10 +29,20 @@ DECKS_TABLE = '''
         notes TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        cover TEXT NOT NULL DEFAULT ''
+        cover TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'paper' CHECK (kind IN ('paper', 'arena')),
+        arena_id TEXT NOT NULL DEFAULT ''
     )
 '''
 COVER_MIGRATION = 'deck_cover_1'
+# kind: which collection a deck is of - 'paper' (cards on a shelf: the collection) or 'arena'
+# (MTG Arena: the digital collection, data/arena_inventory.db). It decides what "owned" and
+# "missing" are counted against, and the deck list can be filtered by it.
+# arena_id: for a deck that came in with an Arena export, the id Arena has for it. The next
+# import replaces exactly those decks (replace_arena_decks); a deck made here has none and
+# is nobody's to replace.
+KINDS = ('paper', 'arena')
+KIND_MIGRATION = 'deck_kind_1'
 # card_id: the printing shown (image); the card itself is identified by its name. A deck's
 # cards go with the deck (ON DELETE CASCADE, on connections from storage.connect)
 DECK_CARDS_TABLE = '''
@@ -63,6 +73,7 @@ class DeckManager:
                 # A new file has the table as it is today: nothing to migrate later
                 self.conn.execute(DECKS_TABLE.format(table='decks'))
                 storage.record(self.conn, COVER_MIGRATION, 'new file')
+                storage.record(self.conn, KIND_MIGRATION, 'new file')
             if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'deck_cards'").fetchone():
                 self.conn.execute(DECK_CARDS_TABLE.format(table='deck_cards'))
                 storage.record(self.conn, CONSTRAINTS_MIGRATION, 'new file')
@@ -85,13 +96,30 @@ class DeckManager:
             # and their names and dates compared before and after - although SQLite could add
             # this column in place: the same care for every change to a table that holds what
             # someone made.
-            storage.rebuild(self.db_file, COVER_MIGRATION, [
+            decks_as_they_are = lambda conn: (
+                tuple(conn.execute('SELECT COUNT(*), COALESCE(MAX(id), 0) FROM decks').fetchone()),
+                [tuple(row) for row in conn.execute(
+                    'SELECT id, game, name, format, notes, created_at, updated_at FROM decks ORDER BY id')],
+                tuple(conn.execute('SELECT COUNT(*) FROM deck_cards').fetchone()))
+            # A file from before covers goes straight to today's table: the SELECT gives the
+            # cover's place an empty text and the two newer columns their values for a deck
+            # of before - and the kind migration below then finds its work done
+            if storage.rebuild(self.db_file, COVER_MIGRATION, [
+                    ('decks', DECKS_TABLE,
+                     "SELECT id, game, name, format, notes, created_at, updated_at, '', 'paper', '' FROM decks", ())],
+                    decks_as_they_are):
+                with self._lock:
+                    storage.record(self.conn, KIND_MIGRATION, f'with {COVER_MIGRATION}')
+                    self.conn.commit()
+            # Files from before decks had a kind (2026-10-13): every deck there is a deck of
+            # cards on a shelf - 'paper' - and none came from Arena. The same care as above:
+            # the file copied first, one transaction, the decks compared before and after
+            # (their covers too, now that they have them).
+            storage.rebuild(self.db_file, KIND_MIGRATION, [
                 ('decks', DECKS_TABLE,
-                 "SELECT id, game, name, format, notes, created_at, updated_at, '' FROM decks", ())],
-                lambda conn: (tuple(conn.execute('SELECT COUNT(*), COALESCE(MAX(id), 0) FROM decks').fetchone()),
-                              [tuple(row) for row in conn.execute(
-                                  'SELECT id, game, name, format, notes, created_at, updated_at FROM decks ORDER BY id')],
-                              tuple(conn.execute('SELECT COUNT(*) FROM deck_cards').fetchone())))
+                 "SELECT id, game, name, format, notes, created_at, updated_at, cover, 'paper', '' FROM decks", ())],
+                lambda conn: (decks_as_they_are(conn),
+                              [tuple(row) for row in conn.execute('SELECT id, cover FROM decks ORDER BY id')]))
 
     @contextlib.contextmanager
     def _writing(self):
@@ -120,7 +148,7 @@ class DeckManager:
     # -- Decks ---------------------------------------------------------------
 
     def list_decks(self, game):
-        """A game's decks, most recently changed first, with their card counts"""
+        """A game's decks of both kinds, most recently changed first, with their card counts"""
         with self._lock:
             rows = self.conn.execute('''
                 SELECT d.*, COALESCE(SUM(CASE WHEN c.board != 'side' THEN c.quantity END), 0) AS cards,
@@ -145,12 +173,41 @@ class DeckManager:
         return {**dict(deck), 'cards': [{'name': row['card_name'], 'card_id': row['card_id'],
                                          'quantity': row['quantity'], 'board': row['board']} for row in cards]}
 
-    def create(self, game, name, deck_format, notes=''):
+    def create(self, game, name, deck_format, notes='', kind='paper', arena_id=''):
+        if kind not in KINDS:
+            raise ValueError(f"Unknown kind of deck: {kind}")
         with self._writing():
             deck_id = self.conn.execute(
-                'INSERT INTO decks (game, name, format, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-                (game, name.strip() or 'New deck', deck_format, notes or '', now(), now())).lastrowid
+                'INSERT INTO decks (game, name, format, notes, created_at, updated_at, kind, arena_id) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (game, name.strip() or 'New deck', deck_format, notes or '', now(), now(), kind, arena_id or '')).lastrowid
         return deck_id
+
+    def replace_arena_decks(self, game, decks):
+        """
+        The decks an Arena export brought are replaced by the ones the next export brings -
+        all at once, or not at all: a deck that is gone from Arena goes here, one that
+        changed there changes here, and a deck that is still there keeps its cover (found
+        again by Arena's id for it). Decks made here - also Arena ones - have no arena_id
+        and are not touched.
+
+        decks: [{'arena_id', 'name', 'format', 'cards': [{'name', 'card_id', 'quantity',
+        'board'}]}]. Returns the new decks' ids.
+        """
+        with self._writing():
+            covers = {row['arena_id']: row['cover'] for row in self.conn.execute(
+                "SELECT arena_id, cover FROM decks WHERE game = ? AND arena_id != ''", (game,))}
+            for row in self.conn.execute("SELECT id FROM decks WHERE game = ? AND arena_id != ''", (game,)).fetchall():
+                self.delete(row['id'])
+            made = []
+            for deck in decks:
+                deck_id = self.create(game, deck['name'], deck['format'], kind='arena', arena_id=deck['arena_id'])
+                self.import_cards(deck_id, deck['cards'])
+                names = {card['name'] for card in deck['cards']}
+                if covers.get(deck['arena_id']) in names:
+                    self.conn.execute('UPDATE decks SET cover = ? WHERE id = ?', (covers[deck['arena_id']], deck_id))
+                made.append(deck_id)
+        return made
 
     def update(self, deck_id, name=None, deck_format=None, notes=None, cover=None):
         """Change what is given (None: as it is). cover: a card's name, or '' for none chosen"""
@@ -175,7 +232,8 @@ class DeckManager:
             deck = self.get(deck_id)
             if not deck:
                 return None
-            new_id = self.create(deck['game'], f"{deck['name']} (copy)", deck['format'], deck['notes'])
+            # The copy is of the same kind; it is made here, so it is not one of Arena's (no arena_id)
+            new_id = self.create(deck['game'], f"{deck['name']} (copy)", deck['format'], deck['notes'], kind=deck['kind'])
             self.import_cards(new_id, deck['cards'])
             if deck['cover']:  # the copy looks like the deck it was made from
                 self.conn.execute('UPDATE decks SET cover = ? WHERE id = ?', (deck['cover'], new_id))
@@ -266,17 +324,19 @@ class DeckManager:
             self._touch(deck_id)
         return added
 
-    def needed_by_name(self, game, commander_formats=()):
+    def needed_by_name(self, game, commander_formats=(), kind='paper'):
         """
-        {search_key(card name): [{'deck_id', 'deck', 'quantity'}]} over every deck of a game -
-        which decks want a card, to tell when two decks need the same copy. The 'side' board of
-        a deck in commander_formats is a list of cards being considered, not counted.
+        {search_key(card name): [{'deck_id', 'deck', 'quantity'}]} over every deck of a game
+        and a kind - which decks want a card, to tell when two decks need the same copy. Only
+        decks of one kind can compete for a copy: a paper deck and an Arena deck never use
+        the same card. The 'side' board of a deck in commander_formats is a list of cards
+        being considered, not counted.
         """
         needed = {}
         with self._lock:
             rows = self.conn.execute('''
                 SELECT d.id, d.name, d.format, c.card_name, c.board, c.quantity
-                FROM deck_cards c JOIN decks d ON d.id = c.deck_id WHERE d.game = ?''', (game,)).fetchall()
+                FROM deck_cards c JOIN decks d ON d.id = c.deck_id WHERE d.game = ? AND d.kind = ?''', (game, kind)).fetchall()
         for row in rows:
             if row['board'] == 'side' and row['format'] in commander_formats:
                 continue

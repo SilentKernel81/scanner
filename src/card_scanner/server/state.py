@@ -55,6 +55,10 @@ socketio = SocketIO(
 
 # Cards added by the scanner page, until "Add to collection" (same tables as the collection's)
 SCAN_INVENTORY_FILE = Config.DATA_DIR / 'scan_inventory.db'
+# The digital collection: what the user has in MTG Arena, as the last import said (same
+# tables again; core/arena.py). A file of its own: an import replaces all of it, and that
+# must never be able to reach the cards on the shelf
+ARENA_INVENTORY_FILE = Config.DATA_DIR / 'arena_inventory.db'
 
 
 class Services:
@@ -67,6 +71,7 @@ class Services:
     database = None
     inventory = None           # the collection (table inventory in the card database file)
     scan_inventory = None      # what the scanner page adds to, until it is moved to the collection
+    arena_inventory = None     # the digital collection (MTG Arena): filled by imports only, never by a camera
     trade_store = None        # trades.Trades: the collection's cards set aside for a trade
     review = None             # review.ReviewQueue
     deck_store = None         # decks.DeckManager
@@ -87,6 +92,7 @@ pending = LocalProxy(lambda: services.pending)
 database = LocalProxy(lambda: services.database)
 inventory = LocalProxy(lambda: services.inventory)
 scan_inventory = LocalProxy(lambda: services.scan_inventory)
+arena_inventory = LocalProxy(lambda: services.arena_inventory)
 trade_store = LocalProxy(lambda: services.trade_store)
 review = LocalProxy(lambda: services.review)
 deck_store = LocalProxy(lambda: services.deck_store)

@@ -22,7 +22,7 @@ from card_scanner.core.stations import Stations
 from card_scanner.core.trades import Trades
 
 from card_scanner.server.state import (
-    SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, services, socketio,
+    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, services, socketio,
 )
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
@@ -36,7 +36,7 @@ from card_scanner.server.settings_events import saved_debug_mode
 # from this list is a set of routes that silently does not exist (tests/test_app_surface.py
 # notices).
 from card_scanner.server import (  # noqa: F401
-    pages, decks_api, deck_ideas_api, inventory_api, trades_api, backups_api, stations_api,
+    pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, backups_api, stations_api,
     scan_events, settings_events, ai_events, card_data,
 )
 
@@ -80,6 +80,9 @@ def initialize_components():
     # Scanned cards wait in their own file: clearing them never touches the collection
     services.scan_inventory = InventoryManager(db_file=SCAN_INVENTORY_FILE, log_callback=log_to_client)
     services.inventory.finish_interrupted_moves(services.scan_inventory)  # an "Add to collection" cut short by a crash
+    # The digital collection (MTG Arena) in its own file: empty until an export is imported.
+    # No log_callback: nothing a camera does reaches it, and its imports report themselves
+    services.arena_inventory = InventoryManager(db_file=ARENA_INVENTORY_FILE)
     services.trade_store = Trades(services.inventory)
     services.review = ReviewQueue()
     services.pending = PendingCaptures()

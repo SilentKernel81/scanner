@@ -15,6 +15,15 @@ DECK_FORMATS = {
     'legacy': {'label': 'Legacy', 'size': 60, 'copies': 4, 'sideboard': 15},
     'vintage': {'label': 'Vintage', 'size': 60, 'copies': 4, 'sideboard': 15},
     'pauper': {'label': 'Pauper', 'size': 60, 'copies': 4, 'sideboard': 15},
+    # MTG Arena's own formats (the keys are Scryfall's legality keys, as above). A deck that
+    # comes in with an Arena export has one of these, or 'standard'. Brawl is Arena's
+    # Commander: one commander and no second copy of a card - 100 cards, or 60 from the
+    # Standard sets.
+    'historic': {'label': 'Historic', 'size': 60, 'copies': 4, 'sideboard': 15},
+    'timeless': {'label': 'Timeless', 'size': 60, 'copies': 4, 'sideboard': 15},
+    'alchemy': {'label': 'Alchemy', 'size': 60, 'copies': 4, 'sideboard': 15},
+    'brawl': {'label': 'Brawl', 'size': 100, 'exact': True, 'copies': 1, 'sideboard': 0, 'commander': True},
+    'standardbrawl': {'label': 'Standard Brawl', 'size': 60, 'exact': True, 'copies': 1, 'sideboard': 0, 'commander': True},
 }
 
 # Where a card sits in a deck. 'side' is the sideboard of a 60-card deck; in a Commander deck

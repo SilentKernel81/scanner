@@ -56,11 +56,11 @@ class CoverColumn(unittest.TestCase):
         decks = DeckManager(self.file)
         self.addCleanup(decks.conn.close)
         columns = [row[1] for row in decks.conn.execute('PRAGMA table_info(decks)')]
-        self.assertEqual(columns[-1], 'cover')
+        self.assertEqual(columns[-3:], ['cover', 'kind', 'arena_id'])   # kind and arena_id: test_arena_collection.py
         rows = [tuple(row) for row in decks.conn.execute('SELECT * FROM decks ORDER BY id')]
         self.assertEqual(rows, [
-            (3, 'mtg', 'Elves', 'commander', 'a note', '2026-10-01 10:00:00', '2026-10-02 11:00:00', ''),
-            (7, 'mtg', 'Lifegain', 'standard', '', '2026-10-03 10:00:00', '2026-10-03 10:00:00', '')])
+            (3, 'mtg', 'Elves', 'commander', 'a note', '2026-10-01 10:00:00', '2026-10-02 11:00:00', '', 'paper', ''),
+            (7, 'mtg', 'Lifegain', 'standard', '', '2026-10-03 10:00:00', '2026-10-03 10:00:00', '', 'paper', '')])
         self.assertTrue(storage.applied(decks.conn, COVER_MIGRATION))
         # ids go on from where they were: a new deck is not given a number a deleted one had
         self.assertEqual(decks.create('mtg', 'New', 'commander'), 8)

@@ -12,7 +12,7 @@ from card_scanner.core.database import search_key
 from card_scanner import games
 
 from card_scanner.server.state import (
-    app, deck_store, inventory, review, scan_inventory, socketio, stations, trade_store,
+    app, arena_inventory, deck_store, inventory, review, scan_inventory, socketio, stations, trade_store,
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client
@@ -21,8 +21,25 @@ from card_scanner.server.decks_api import commander_formats, copies_by_location,
 
 
 def inventory_area():
-    """The inventory a request is about: the scanner's (?area=scan) or the collection"""
-    return scan_inventory if request.args.get('area') == 'scan' else inventory
+    """The inventory a request is about: the scanner's (?area=scan), the digital collection
+    (?area=arena: what the user has in MTG Arena) or the collection"""
+    area = request.args.get('area')
+    return scan_inventory if area == 'scan' else arena_inventory if area == 'arena' else inventory
+
+
+# The routes that change an inventory. The digital collection is a copy of what MTG Arena
+# has, replaced as a whole by each import (server/arena_api.py): changed by hand it would
+# say something Arena does not, until the next import silently took it back. So these
+# routes refuse it - listing and exporting it is all that is offered.
+CHANGES_AN_INVENTORY = {'delete_inventory_card', 'update_inventory_card', 'bulk_update_inventory',
+                        'remove_inventory_batch', 'import_inventory', 'clear_inventory'}
+
+
+@app.before_request
+def digital_collection_is_read_only():
+    if request.args.get('area') == 'arena' and request.endpoint in CHANGES_AN_INVENTORY:
+        return jsonify({'success': False, 'error': 'The Arena collection is a copy of what Arena has: '
+                        'it is changed in Arena and brought here by an import'}), 400
 
 
 @app.route('/api/scan_inventory/to_collection', methods=['GET', 'POST'])

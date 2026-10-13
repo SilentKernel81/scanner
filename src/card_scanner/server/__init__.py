@@ -16,6 +16,7 @@ they build on each other - a module imports only from those above it:
     card_data        updates of the card database
     pages            the pages, the live view, thumbnails, the header's numbers
     decks_api, deck_ideas_api, inventory_api, trades_api, backups_api      the collection page
+    arena_api        the digital collection (MTG Arena): importing an export (after inventory_api)
     stations_api     the stations' routes; a station's capture arriving
     scan_events, settings_events, ai_events                                the scanner page
     startup          initialize_components (everything is created here), main()
