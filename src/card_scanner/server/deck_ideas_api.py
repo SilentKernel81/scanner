@@ -12,7 +12,7 @@ from card_scanner.core.recommendations import Unavailable
 from card_scanner.server.state import app, database, deck_store, inventory, recommend, scan_inventory, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import log_to_client
-from card_scanner.server.decks_api import deck_payload, get_deck_or_404
+from card_scanner.server.decks_api import deck_covers, deck_payload, get_deck_or_404
 
 
 @app.route('/api/inventory/suggested')
@@ -72,6 +72,64 @@ def precon_list():
         return jsonify({'success': False, 'error': str(e)}), 502
 
 
+def precon_known_cards(game, entries):
+    """
+    A preconstructed deck's entries with what the card data knows of each, for showing them:
+    [{'name', 'board', 'quantity', 'image_uri', 'price', 'type_line'}]. The picture is the
+    printing that is in the box (its Scryfall id), else any printing of the name; a card the
+    card data does not have (a set newer than the last update) has no picture and no price.
+    """
+    by_id = database.cards_by_ids([entry['scryfall_id'] for entry in entries if entry['scryfall_id']])
+    by_name = game.cards_by_names([entry['name'] for entry in entries])
+    known = []
+    for entry in entries:
+        printed = by_id.get(entry['scryfall_id'])
+        card = by_name.get(search_key(entry['name']))
+        data = game.deck_card_payload(card) if card else {}
+        known.append({'name': entry['name'], 'board': entry['board'], 'quantity': entry['quantity'],
+                      'image_uri': (printed['image_uri'] if printed else None) or data.get('image_uri') or '',
+                      'price': data.get('price'), 'type_line': data.get('type_line') or ''})
+    return known
+
+
+# The cover of each preconstructed deck that was asked about: file -> [{'name', 'image_uri'}].
+# Working one out means reading the deck's whole list (recommendations.precon: from MTGJSON the
+# first time, from the cache of its answers afterwards - a megabyte to parse either way); the
+# list is printed and does not change, so what was worked out is kept while the server runs.
+precon_cover_memo = {}
+PRECON_COVERS_AT_ONCE = 8   # per request: each deck not read before is one request to MTGJSON
+
+
+@app.route('/api/precons/covers')
+def precon_covers():
+    """
+    The card that stands for each of some preconstructed decks, for the list's tiles:
+    ?files=<file>,<file>,... (at most PRECON_COVERS_AT_ONCE) -> {'covers': {file: [{'name',
+    'image_uri'}]}}. Which card: as for a deck of your own (decks_api.deck_covers) - its
+    commander (two: both, the first shown first), else its most valuable card that is not a
+    land. A deck that could not be read right now is left out of the answer - the page asks
+    again another time; one that MTGJSON does not have gets an empty list.
+
+    The page asks only for the decks that are in view (decks.js: loadPreconCovers): there are
+    some 1,500 of them, and MTGJSON's list of decks has no pictures - only each deck's own
+    file says what is in it.
+    """
+    game = games.active()
+    files = [name for name in (request.args.get('files') or '').split(',') if name][:PRECON_COVERS_AT_ONCE]
+    covers = {}
+    for file_name in files:
+        if file_name not in precon_cover_memo:
+            try:
+                entries = recommend.precon(file_name)
+            except ValueError:
+                continue   # not a file name: nothing to say about it
+            except Unavailable:
+                continue   # MTGJSON does not answer right now: asked again later
+            precon_cover_memo[file_name] = deck_covers({'cover': ''}, precon_known_cards(game, entries)) if entries else []
+        covers[file_name] = precon_cover_memo[file_name]
+    return jsonify({'success': True, 'covers': covers})
+
+
 @app.route('/api/precons/<file_name>')
 def precon_cards(file_name):
     """A preconstructed deck's cards, to look at: nothing is saved (a deck is made with POST /api/decks, 'precon')"""
@@ -85,8 +143,10 @@ def precon_cards(file_name):
     if not entries:
         return jsonify({'success': False, 'error': 'MTGJSON does not have this deck'}), 404
     owned = inventory.owned_by_name(game.id)
-    cards = [{'name': entry['name'], 'quantity': entry['quantity'], 'board': entry['board'],
-              'owned': owned.get(search_key(entry['name']), 0)} for entry in entries]
+    # image_uri: the card's picture, shown beside the line it is pointed at in the list
+    cards = [{'name': card['name'], 'quantity': card['quantity'], 'board': card['board'],
+              'owned': owned.get(search_key(card['name']), 0), 'image_uri': card['image_uri']}
+             for card in precon_known_cards(game, entries)]
     return jsonify({'success': True, 'cards': cards})
 
 

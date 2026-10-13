@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=3">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -99,13 +99,14 @@
                             <h3 class="section-title">Preconstructed decks</h3>
                             <button class="btn btn-small" data-ideas="precons" title="Reads every list of the kind chosen below the first time: about a minute for the Commander decks, several for all kinds">Rank by what I own</button>
                         </div>
-                        <div class="hint">Printed decks (MTGJSON): Commander, Challenger, theme and intro decks, starter kits, duel decks, and Jumpstart packs - 20 cards each, as in the Beginner Box. <strong>View cards</strong> shows the list - nothing is saved until you choose <strong>Create deck</strong> there; <strong>I own it</strong> also adds its cards to your inventory.</div>
+                        <div class="hint">Printed decks (MTGJSON): Commander, Challenger, theme and intro decks, starter kits, duel decks, and Jumpstart packs - 20 cards each, as in the Beginner Box. Each is shown by its commander, or by its most valuable card. <strong>Click a deck</strong> to see its cards - nothing is saved until you choose <strong>Create deck</strong> there; <strong>I own it</strong> also adds its cards to your inventory.</div>
                         <div class="filter-row">
                             <input type="search" id="precon-search" class="text-input filter-text" placeholder="Deck name, set code or year">
                             <select id="precon-type" class="select" title="Kind of deck"></select>
                         </div>
                         <div id="precon-progress"></div>
-                        <div id="ideas-precons" class="idea-list"></div>
+                        <div id="ideas-precons" class="deck-grid"></div>
+                        <div class="hint" id="precon-more"></div>
                     </div>
             </section>
         </div>
@@ -303,7 +304,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
-    <script src="{{ url_for('static', filename='js/library.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=3"></script>
 </body>
 </html>

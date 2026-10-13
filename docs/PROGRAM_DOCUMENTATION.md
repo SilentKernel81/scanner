@@ -1757,6 +1757,21 @@ them by the share of each that is owned. `POST` starts a run and replaces one th
 `POST {"stop": true}` ends it at its next step, keeping what was found - the button that
 started a search stops it while it runs.
 
+**A preconstructed deck is shown as a card too** (since 2026-10-13), like a deck of your own.
+MTGJSON's list of decks has no pictures and does not say what is in a deck - only each deck's
+own file does, about a megabyte apiece and some 1,500 of them. So a tile starts as a plain
+card with the deck's name, and asks for its cover when it comes into view (`decks.js`:
+`watchPreconTiles`, `loadPreconCovers` - an `IntersectionObserver`, one request at a time,
+8 decks each): `GET /api/precons/covers?files=...` (`precon_covers`) reads those decks' files
+(`Recommendations.precon`: from MTGJSON the first time, 4 a second, then from the cache for
+90 days), and answers with the same choice as for your own decks (`deck_covers`: the
+commander - two: both, with the turn button - else the most valuable card that is not a
+land), in the printing that is in the box. What was worked out is kept in the server's
+memory while it runs. Measured on the laptop, nothing cached: the first 18 covers 6 seconds
+after the tab was opened. 60 tiles are shown at once; the rest is reached by typing. A click
+on a tile opens the window with the deck's cards, where pointing at a line shows its card
+(`/api/precons/<file>` gives each card's `image_uri`).
+
 **Preconstructed decks.** The Decks tab lists them from `GET /api/precons` (one cached request)
 with a search and a choice of kind (MTGJSON's deck `type`). `PRECON_TYPES` says which types are
 listed and the format each becomes as a deck: printed decks only - nothing that exists only

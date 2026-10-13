@@ -284,6 +284,13 @@
    "precon_own"
   ],
   [
+   "/api/precons/covers",
+   [
+    "GET"
+   ],
+   "precon_covers"
+  ],
+  [
    "/api/prompts",
    [
     "GET"
