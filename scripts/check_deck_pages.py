@@ -131,7 +131,17 @@ def main():
         check('sorting by name orders the tiles', names == sorted(names, key=str.lower) or names == sorted(names), str(names)[:120])
         check('"What can I build?" lists your cards', b.js("document.querySelectorAll('#around-cards .result-row').length") > 0)
         check('a tile shows its commander and is a link to the deck',
-              b.js("(() => { const t = document.querySelector('#deck-list [data-deck]'); return /^\\/decks\\/\\d+$/.test(t.getAttribute('href')) && !!t.querySelector('.deck-tile-art'); })()"))
+              b.js("(() => { const t = document.querySelector('#deck-list [data-deck]'); return /^\\/decks\\/\\d+$/.test(t.getAttribute('href')) && !!t.querySelector('.deck-tile-card'); })()"))
+        two = [d for d in api('/api/decks')['decks'] if len(d['covers']) > 1]
+        if two:   # a deck with two commanders shows the first, and a button turns to the other
+            tile = f"document.querySelector('#deck-list [data-deck=\"{two[0]['id']}\"]')"
+            first = b.js(f"{tile}.querySelector('img').alt")
+            b.js(f"{tile}.querySelector('[data-flip]').click()")
+            second = b.js(f"{tile}.querySelector('img').alt")
+            check('a deck with two commanders turns its cover', {first, second} == {c['name'] for c in two[0]['covers']} and b.js('location.pathname') == '/decks', f'{first} -> {second}')
+            b.js(f"{tile}.querySelector('[data-flip]').click()")
+        else:
+            print('  (no deck with two commanders in this data: turning a cover was not tried)')
         for tab in ('build', 'precons', 'mine'):
             b.js(f"document.querySelector('#deck-tabs [data-tab=\"{tab}\"]').click()")
             check(f'the list\'s tab "{tab}" opens',
@@ -182,6 +192,21 @@ def main():
               b.js("document.body.innerText.includes('4')"))
         check('the charts are drawn', b.js("document.getElementById('deck-charts').children.length") > 0)
         check('legality or problems are shown', b.js("document.getElementById('deck-issues').children.length") > 0)
+
+        print('The cover')
+        usual = api(f'/api/decks/{deck_id}')['deck']['covers']
+        check('a deck without a commander has a cover of its own accord', len(usual) == 1 and usual[0]['image_uri'], str(usual))
+        b.js(f"{row('Island')}.querySelector('[data-cover=\"on\"]').click()")
+        b.settle()
+        chosen = api(f'/api/decks/{deck_id}')['deck']
+        check('a card is chosen as cover', chosen['cover'] == 'Island' and [c['name'] for c in chosen['covers']] == ['Island'], str(chosen['covers']))
+        listed = next(d for d in api('/api/decks')['decks'] if d['id'] == deck_id)
+        check('... and the deck list shows it', [c['name'] for c in listed['covers']] == ['Island'])
+        check('... and its button says so', b.js(f"!!{row('Island')}.querySelector('[data-cover=\"off\"]')"))
+        b.js(f"{row('Island')}.querySelector('[data-cover=\"off\"]').click()")
+        b.settle()
+        back = api(f'/api/decks/{deck_id}')['deck']
+        check('giving the choice up brings the usual cover back', back['cover'] == '' and back['covers'] == usual, str(back['covers']))
 
         print('The two views of a deck')
         rows = b.js("document.querySelectorAll('#deck-cards .deck-row').length")

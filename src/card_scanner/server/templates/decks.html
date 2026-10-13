@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=2">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -119,6 +119,7 @@
                 <div class="deck-hero-main">
                     <input type="text" id="deck-name" class="deck-name" maxlength="80" title="The deck's name - click to change it">
                     <div class="deck-hero-sub">
+                        <button class="deck-flip" id="deck-flip" title="Show the other commander's picture" hidden><svg class="icon"><use href="#i-swap"/></svg></button>
                         <span id="deck-commanders"></span>
                         <span id="deck-identity"></span>
                         <select id="deck-format" class="select deck-format" title="Format"></select>
@@ -303,6 +304,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=1"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=2"></script>
 </body>
 </html>

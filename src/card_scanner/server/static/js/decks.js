@@ -80,16 +80,42 @@ function identityHtml(letters) {
     return manaHtml([...'WUBRG'].filter(letter => letters.includes(letter)).map(letter => `{${letter}}`).join(''));
 }
 
+// -- A deck's cover: the card whose picture stands for it --------------------------
+// The server says which cards those are (covers: the card chosen in the deck, else its
+// commanders, else its most valuable card). A deck with two commanders has two: the first
+// is shown, and a button turns to the other. Which one is showing is remembered in the
+// browser, per deck - it is a way of looking at the deck, not something about the deck.
+
+function coverIndex(item) {
+    const count = (item.covers || []).length;
+    return count > 1 ? (parseInt(recall(`deckFace:${item.id}`, '0')) || 0) % count : 0;
+}
+
+function coverOf(item) {
+    // {name, image_uri} of the cover showing, or null for a deck that has none (no cards yet)
+    return (item.covers || [])[coverIndex(item)] || null;
+}
+
+function turnCover(item) {
+    // To the deck's other commander (and back)
+    remember(`deckFace:${item.id}`, String((coverIndex(item) + 1) % item.covers.length));
+}
+
 function deckTileHtml(item) {
-    // A deck in the list: recognised by its commander's picture before its name is read.
-    // A link, so that it can be opened in a new tab; a plain click stays on this page
-    // (bindDeckHomeEvents). A deck without a commander has no picture, only its colour band.
-    const faces = (item.commander_cards || []).filter(card => card.image_uri);
+    // A deck in the list: a card - its cover - with the deck's name under it, so that the
+    // list looks like decks lying on a table. A link, so that it can be opened in a new tab;
+    // a plain click stays on this page (bindDeckHomeEvents).
+    const cover = coverOf(item);
     const colours = [...new Set((item.commander_cards || []).flatMap(card => card.identity || []))];
     return `
         <a class="deck-tile" data-deck="${item.id}" href="/decks/${item.id}">
-            <span class="deck-tile-art">${faces.map(card =>
-                `<span style="background-image: url('${escapeHtml(artOf(card.image_uri))}')"></span>`).join('')}</span>
+            <span class="deck-tile-card">
+                ${cover && cover.image_uri
+                    ? `<img src="${escapeHtml(cover.image_uri)}" alt="${escapeHtml(cover.name)}" title="${escapeHtml(cover.name)}" loading="lazy">`
+                    : '<span class="deck-tile-empty">No cards yet</span>'}
+                ${(item.covers || []).length > 1
+                    ? `<button class="deck-flip" data-flip title="Show the other commander: ${escapeHtml(item.covers[(coverIndex(item) + 1) % item.covers.length].name)}"><svg class="icon"><use href="#i-swap"/></svg></button>` : ''}
+            </span>
             <span class="deck-tile-body">
                 <span class="deck-tile-head"><span class="deck-tile-name">${escapeHtml(item.name)}</span><span>${identityHtml(colours)}</span></span>
                 <span class="deck-tile-meta" title="${escapeHtml(formatLabel(item.format))}">${escapeHtml(item.commanders.length ? item.commanders.join(' + ') : formatLabel(item.format))}</span>
@@ -491,11 +517,16 @@ function entryActionsHtml(entry) {
     if (entry.board !== 'main') moves.push(['main', 'Main', 'Move to the main deck']);
     if (entry.board !== 'side') moves.push(['side', hasCommander(deck.format) ? 'Maybe' : 'Side', `Move to: ${sideTitle()}`]);
     if (canCommand(card) && entry.board !== 'commander') moves.push(['commander', 'Cmdr', 'Make it the commander']);
+    // The deck's cover: any of its cards with a picture. The one chosen says so, and a click
+    // on it gives the choice up (the deck then shows its commander, or its most valuable card)
+    const isCover = deck.cover === entry.name;
+    const cover = card && card.image_uri ? `<button class="mini-btn ${isCover ? 'is-on' : ''}" data-cover="${isCover ? 'off' : 'on'}" title="${
+        isCover ? "This card is the deck's cover - click to go back to the usual one" : "Show this card as the deck's cover, in the list and behind its name"}">${isCover ? '★ Cover' : 'Cover'}</button>` : '';
     return `<button class="mini-btn" data-change="-1" title="One less"><svg class="icon"><use href="#i-minus"/></svg></button>
             <button class="mini-btn" data-change="1" title="One more"><svg class="icon"><use href="#i-plus"/></svg></button>
             ${card ? `<button class="mini-btn printing-btn" data-printing title="Choose the printing shown">${
                 escapeHtml(entry.printing.set_code ? `${entry.printing.set_code} ${entry.printing.number}` : 'Printing')}</button>` : ''}${moves.map(([board, label, title]) =>
-                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}`;
+                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}${cover}`;
 }
 
 function deckRowHtml(entry, wanted) {
@@ -590,9 +621,13 @@ function renderDeck() {
 
     // The banner: the commander's picture behind the deck's name, colours and numbers
     const leaders = commanders();
-    const face = leaders.find(entry => entry.card && entry.card.image_uri);
-    $('deck-hero').style.backgroundImage = face ? `url('${artOf(face.card.image_uri)}')` : '';
-    $('deck-hero').classList.toggle('no-art', !face);
+    const face = coverOf(deck);
+    const art = face && face.image_uri;
+    $('deck-hero').style.backgroundImage = art ? `url('${artOf(art)}')` : '';
+    $('deck-hero').classList.toggle('no-art', !art);
+    $('deck-hero').title = face ? `Cover: ${face.name}` : '';
+    // Two commanders: the banner shows one, this turns to the other
+    $('deck-flip').hidden = (deck.covers || []).length < 2;
     $('deck-commanders').textContent = leaders.map(entry => entry.name).join(' + ');
     $('deck-identity').innerHTML = identityHtml([...new Set(leaders.flatMap(entry => (entry.card && entry.card.identity) || []))]);
     const problems = deck.issues.filter(issue => issue.level === 'error').length;
@@ -863,6 +898,12 @@ function bindDeckHomeEvents() {
     $('deck-list').addEventListener('click', async event => {
         const tile = event.target.closest('[data-deck]');
         if (!tile) return;
+        // The button on a deck with two commanders turns its cover; it does not open the deck
+        if (event.target.closest('[data-flip]')) {
+            event.preventDefault();
+            turnCover(deckList.find(item => String(item.id) === tile.dataset.deck));
+            return renderDeckList();
+        }
         // A tile is a link (/decks/<id>). With Ctrl, Shift or the middle button it is left to
         // the browser - a new tab; a plain click opens the deck here, without loading the page
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
@@ -953,6 +994,10 @@ function bindBuilderEvents() {
         showDeckMenu($('deck-more-list').hidden);
     });
     document.addEventListener('click', () => showDeckMenu(false));   // a click anywhere else, or on one of its entries
+    $('deck-flip').addEventListener('click', () => {
+        turnCover(deck);
+        renderDeck();
+    });
     // How the deck is shown
     bindSwitch('deck-view', button => showDeckView(button.dataset.view, deckGrouping));
     bindSwitch('deck-grouping', button => showDeckView(deckView, button.dataset.grouping));
@@ -981,7 +1026,8 @@ function bindBuilderEvents() {
         const button = event.target.closest('.mini-btn');
         if (!row || !button) return;
         const card = {name: row.dataset.name, board: row.dataset.board};
-        if ('printing' in button.dataset) openPrintings(card.name, card.board);
+        if (button.dataset.cover) saveDeckInfo({cover: button.dataset.cover === 'on' ? card.name : ''});
+        else if ('printing' in button.dataset) openPrintings(card.name, card.board);
         else if (button.dataset.change) changeDeckCards([{...card, change: parseInt(button.dataset.change)}]);
         else if (button.dataset.move) changeDeckCards([{...card, move_to: button.dataset.move}]);
     });

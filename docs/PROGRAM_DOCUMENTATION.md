@@ -1677,7 +1677,20 @@ cache). Decks EDHREC has no answer for come back in `unknown` and are named in a
 **Decks** (Magic; a game without `Game.deck_formats` has no Decks tab). A deck (`decks.py`) is a
 name, a format and `deck_cards` rows: card name, count, board (`commander`, `main`, `side`) and
 a printing id for the image. The card is identified by its name, so any printing owned counts.
-Nothing a deck does changes the inventory. `deck_payload` in `server/decks_api.py` puts together what the
+Nothing a deck does changes the inventory.
+
+**A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
+that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of
+the card chosen (the **Cover** button among a card's buttons; `PUT /api/decks/<id>` with
+`cover`, `''` to give the choice up) - a column added on 2026-10-13 by the named migration
+`deck_cover_1` (`storage.rebuild`: the file copied first, every deck compared before and
+after; tried on a copy of the real database - 15 decks and 969 deck cards unchanged). What is
+shown is `deck_covers` in `server/decks_api.py`, in the answers as `covers`: the card chosen
+while it is in the deck; else the commanders in the order they were added - a deck with two
+shows the first, and a button turns to the other (which one is showing is the browser's to
+remember, `decks.js`: `coverIndex`, `turnCover`); else the deck's most valuable card that is
+not a land. A card taken out of the deck stops being its cover without anything being
+written. `deck_payload` in `server/decks_api.py` puts together what the
 page shows:
 
 - card data: one printing per name (`CardDatabase.cards_by_names` - the newest one that has an
