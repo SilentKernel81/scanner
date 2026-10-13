@@ -185,7 +185,12 @@ function placePreview() {
     const preview = $('card-preview');
     const height = 240 * 88 / 63;
     const rect = previewRow.getBoundingClientRect();
-    const left = rect.right + 250 < window.innerWidth ? rect.right + 8 : rect.left - 248;
+    // A line that spans most of the window (a card in the list of a preconstructed deck) has
+    // no room on either side: the picture goes over the line's empty middle, clear of the
+    // name at its left end and the note at its right
+    const wide = rect.width > window.innerWidth / 2;
+    const left = wide ? rect.right - 250 - 150
+        : rect.right + 250 < window.innerWidth ? rect.right + 8 : rect.left - 248;
     preview.style.left = `${Math.max(8, left)}px`;
     preview.style.top = `${Math.max(8, Math.min(rect.top - 40, window.innerHeight - height - 8))}px`;
 }

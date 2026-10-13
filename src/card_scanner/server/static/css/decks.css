@@ -138,7 +138,22 @@
 /* The tabs "What can I build?" and "Preconstructed decks": the panels they hold were laid
    out side by side under the list; each has the page's width now */
 #deck-tab-precons .idea-panel {
-    max-width: 900px;
+    max-width: none;
+}
+/* A preconstructed deck is a tile like a deck of your own, but not a link: a click shows
+   its cards. Until its cover is known the card carries the deck's name. */
+.precon-tile {
+    cursor: pointer;
+}
+.precon-tile .deck-tile-empty {
+    padding: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: center;
+}
+#precon-more {
+    margin-top: 14px;
 }
 #deck-tab-precons .idea-list,
 #deck-tab-build .idea-list {
@@ -663,4 +678,10 @@
 .deck-tile-head > span:last-child {
     flex: 0 0 auto;
     white-space: nowrap;
+}
+
+/* The card's picture beside the pointer is above everything, also the windows: a line in the
+   window with a preconstructed deck's cards shows its card too */
+.card-preview {
+    z-index: 3000;
 }

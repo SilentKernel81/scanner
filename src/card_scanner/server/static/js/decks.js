@@ -230,21 +230,100 @@ function renderPrecons() {
     });
     // Ranked: the decks you own most of first; otherwise the newest first (as loaded)
     if (ranked) rows = [...rows].sort((a, b) => ((preconRank[b.file] || {}).percent || 0) - ((preconRank[a.file] || {}).percent || 0));
-    const more = rows.length - 80;
-    $('ideas-precons').innerHTML = rows.slice(0, 80).map(item => {
-        const rank = preconRank[item.file];
-        return `
-        <div class="idea-row precon" data-file="${escapeHtml(item.file)}">
-            <div><div class="idea-name">${escapeHtml(item.name)}</div>
-                 <div class="idea-meta">${escapeHtml(item.type)} · ${escapeHtml(item.set)} · ${escapeHtml(item.released.slice(0, 7))}${rank ? ` · ${rank.owned} of ${rank.total} cards owned` : ''}</div></div>
-            ${rank ? `<div class="idea-share"><strong>${rank.percent}%</strong><div class="meter" style="width: 70px"><span style="width: ${rank.percent}%"></span></div></div>` : '<span></span>'}
-            <div class="idea-actions">
-                <button class="btn btn-small" data-precon="view" title="See what is in it - nothing is saved">View cards</button>
-                <button class="btn btn-small" data-precon="own" title="Add its cards to your inventory and open it as a deck">I own it</button>
-            </div>
-        </div>`;
-    }).join('') + (more > 0 ? `<div class="hint">${more} more - type to narrow the list</div>` : '')
+    const more = rows.length - PRECONS_SHOWN;
+    $('ideas-precons').innerHTML = rows.slice(0, PRECONS_SHOWN).map(preconTileHtml).join('')
         || '<div class="hint">No preconstructed deck matches.</div>';
+    $('precon-more').textContent = more > 0 ? `${more} more - type to narrow the list` : '';
+    watchPreconTiles();
+}
+
+// -- A preconstructed deck's cover -------------------------------------------------
+// The list of preconstructed decks (MTGJSON) has names, sets and dates - no pictures, and
+// not what is in a deck. That is in each deck's own file, a megabyte apiece and some 1,500
+// of them. So a tile starts as a plain card with the deck's name, and its cover is asked
+// for when the tile comes into view: a few decks per request (the server reads their files,
+// once), one request at a time. What was learnt is kept while the page is open.
+
+const PRECONS_SHOWN = 60;        // tiles at once; the rest is reached by typing
+const PRECON_COVERS_AT_ONCE = 8; // decks per request (the server's limit)
+const preconCovers = {};         // file -> [{name, image_uri}] ([]: read, and it has none)
+const preconFace = {};           // file -> which of two commanders is showing
+let preconWanted = new Set();    // files whose tiles are in view and have no cover yet
+let preconAsking = false;
+let preconWatcher = null;
+
+function preconCoverHtml(item) {
+    // What is inside a tile's card: the cover's picture once it is known, until then (and
+    // for a deck without one) the deck's name on a plain card
+    const covers = preconCovers[item.file];
+    const cover = covers && covers[(preconFace[item.file] || 0) % (covers.length || 1)];
+    return (cover && cover.image_uri
+            ? `<img src="${escapeHtml(cover.image_uri)}" alt="${escapeHtml(cover.name)}" title="${escapeHtml(cover.name)}" loading="lazy">`
+            : `<span class="deck-tile-empty">${escapeHtml(item.name)}</span>`)
+        + (covers && covers.length > 1
+            ? `<button class="deck-flip" data-flip title="Show the other commander"><svg class="icon"><use href="#i-swap"/></svg></button>` : '');
+}
+
+function preconTileHtml(item) {
+    // A preconstructed deck: a card, as your own decks are. A click shows what is in it
+    // (data-precon="view": the window with its cards, where a deck can be made of it)
+    const rank = preconRank[item.file];
+    return `
+        <div class="deck-tile precon-tile" data-file="${escapeHtml(item.file)}" data-precon="view" tabindex="0" title="See what is in it - nothing is saved">
+            <span class="deck-tile-card">${preconCoverHtml(item)}</span>
+            <span class="deck-tile-body">
+                <span class="deck-tile-head"><span class="deck-tile-name">${escapeHtml(item.name)}</span></span>
+                <span class="deck-tile-meta">${escapeHtml(item.type)}</span>
+                ${rank ? `<span class="meter" title="${rank.owned} of ${rank.total} cards owned"><span style="width: ${rank.percent}%"></span></span>` : ''}
+                <span class="deck-tile-foot"><span>${escapeHtml(item.set)} · ${escapeHtml(item.released.slice(0, 7))}</span><span>${rank ? `${rank.percent}% owned` : ''}</span></span>
+            </span>
+        </div>`;
+}
+
+function watchPreconTiles() {
+    // Tiles without a cover are watched; one that comes into view (or near it) is put on
+    // the list of covers to ask for
+    if (preconWatcher) preconWatcher.disconnect();
+    preconWanted = new Set();
+    preconWatcher = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            preconWanted.add(entry.target.dataset.file);
+            preconWatcher.unobserve(entry.target);
+        });
+        loadPreconCovers();
+    }, {rootMargin: '300px'});
+    document.querySelectorAll('#ideas-precons .precon-tile').forEach(tile => {
+        if (!(tile.dataset.file in preconCovers)) preconWatcher.observe(tile);
+    });
+}
+
+async function loadPreconCovers() {
+    // One request at a time, a few decks each, for as long as tiles in view are waiting.
+    // A deck the server could not read just now (MTGJSON not answering) is not in its
+    // answer: it is left alone until the list is shown again, not asked for in a loop.
+    if (preconAsking) return;
+    preconAsking = true;
+    try {
+        while (preconWanted.size) {
+            const files = [...preconWanted].slice(0, PRECON_COVERS_AT_ONCE);
+            files.forEach(file => preconWanted.delete(file));
+            let data = null;
+            try {
+                const response = await fetch(`/api/precons/covers?files=${files.map(encodeURIComponent).join(',')}`);
+                data = response.ok ? await response.json() : null;
+            } catch (error) { /* the server is away: the tiles keep their names */ }
+            if (!data || !data.covers) break;
+            Object.entries(data.covers).forEach(([file, covers]) => {
+                preconCovers[file] = covers;
+                const tile = document.querySelector(`#ideas-precons .precon-tile[data-file="${CSS.escape(file)}"]`);
+                const item = precons.find(precon => precon.file === file);
+                if (tile && item) tile.querySelector('.deck-tile-card').innerHTML = preconCoverHtml(item);
+            });
+        }
+    } finally {
+        preconAsking = false;
+    }
 }
 
 let viewedPrecon = null;     // the precon whose cards are shown
@@ -267,7 +346,7 @@ async function viewPrecon(item) {
     $('precon-cards').innerHTML = boards.map(([board, label]) => {
         const cards = data.cards.filter(card => card.board === board).sort((a, b) => byText(a.name, b.name));
         return cards.length ? `<h4>${label} (${totalQuantity(cards)})</h4>` + cards.map(card => `
-            <div class="precon-card"><span>${card.quantity}×</span><span>${escapeHtml(card.name)}</span>
+            <div class="precon-card" data-image="${escapeHtml(card.image_uri || '')}"><span>${card.quantity}×</span><span>${escapeHtml(card.name)}</span>
                 <span class="${card.owned ? '' : 'missing'}">${card.owned ? `${card.owned} owned` : 'not owned'}</span></div>`).join('') : '';
     }).join('');
     $('precon-create').disabled = $('precon-own').disabled = false;
@@ -950,14 +1029,21 @@ function bindDeckHomeEvents() {
     });
     $('precon-search').addEventListener('input', debounce(renderPrecons, 150));
     $('precon-type').addEventListener('change', renderPrecons);
-    $('ideas-precons').addEventListener('click', event => {
-        const button = event.target.closest('[data-precon]');
+    const preconClicked = event => {
         const row = event.target.closest('[data-file]');
-        const item = button && row && precons.find(precon => precon.file === row.dataset.file);
+        const item = row && precons.find(precon => precon.file === row.dataset.file);
         if (!item) return;
-        if (button.dataset.precon === 'own') ownPrecon(item);
-        else viewPrecon(item);
-    });
+        // The button on a deck with two commanders turns its cover; anything else on the
+        // tile opens the window with the deck's cards ("Create deck" and "I own it" are there)
+        if (event.target.closest('[data-flip]')) {
+            preconFace[item.file] = (preconFace[item.file] || 0) + 1;
+            row.querySelector('.deck-tile-card').innerHTML = preconCoverHtml(item);
+            return;
+        }
+        viewPrecon(item);
+    };
+    $('ideas-precons').addEventListener('click', preconClicked);
+    $('ideas-precons').addEventListener('keydown', event => { if (event.key === 'Enter') preconClicked(event); });
     $('precon-create').addEventListener('click', async () => {
         const item = viewedPrecon;
         // A second deck of the same name makes every card of the first count for two decks
