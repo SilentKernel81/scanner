@@ -259,6 +259,21 @@ def main():
             except Exception as e:  # noqa: BLE001
                 status = str(e)
             check(f'the {kind} export answers', status == 200, str(status))
+        b.js("document.getElementById('deck-arena').click()")
+        b.settle(1.5)
+        arena = b.js("document.getElementById('arena-text').value") or ''
+        told = b.js("document.getElementById('arena-left-out').textContent") or ''
+        check('"Arena" shows the deck as a list for MTG Arena', b.js("document.getElementById('arena-modal').classList.contains('show')") and arena.startswith('Deck\n') and 'Island' in arena, arena[:120])
+        check('... without the cards Arena does not have, which it names', 'Sol Ring' not in arena and 'Sol Ring' in told, told[:120])
+        b.js("document.getElementById('arena-copy').click()")
+        b.settle(0.6)
+        check('... and Copy answers', 'Arena' in (b.js("document.body.innerText") or ''))
+        try:
+            status = urllib.request.urlopen(f'{BASE}/api/decks/{deck_id}/export/arena', timeout=30).status
+        except Exception as e:  # noqa: BLE001
+            status = str(e)
+        check('the Arena export answers as a file too', status == 200, str(status))
+        b.js("closeModal('arena-modal')")
         check('Export, Buy list, Import, Duplicate and Delete are there',
               b.js("['deck-export','deck-buylist','deck-import','deck-duplicate','deck-delete'].every(id => !!document.getElementById(id))"))
         b.js("document.getElementById('deck-import').click()")

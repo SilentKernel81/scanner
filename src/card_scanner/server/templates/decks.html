@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=4">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -133,6 +133,7 @@
                         <button class="btn btn-primary" id="deck-add"><svg class="icon"><use href="#i-plus"/></svg> Add cards</button>
                         <button class="btn" id="deck-import">Import</button>
                         <button class="btn" id="deck-export" title="The deck as a text list">Export</button>
+                        <button class="btn" id="deck-arena" title="The deck as a list MTG Arena's Import button reads" hidden>Arena</button>
                         <div class="deck-menu">
                             <button class="btn" id="deck-more" title="Buy list, duplicate, delete" aria-haspopup="true">&#8943;</button>
                             <div class="deck-menu-list" id="deck-more-list" hidden>
@@ -259,6 +260,29 @@
         </div>
     </div>
 
+    <!-- The deck as a list for MTG Arena: shown, to be copied (Arena's Import reads the clipboard) -->
+    <div id="arena-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <div>
+                    <h2>For MTG Arena</h2>
+                    <div class="modal-subtitle" id="arena-subtitle"></div>
+                </div>
+                <span class="close" onclick="closeModal('arena-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <textarea id="arena-text" class="text-input arena-text" rows="14" readonly spellcheck="false"></textarea>
+                <div class="hint">Copy the list, then in Arena: <strong>Decks</strong> &rarr; <strong>Import</strong>. Arena makes the deck from what is on the clipboard, in the printings you have there.</div>
+                <div class="callout warning" id="arena-left-out" hidden></div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" id="arena-copy">Copy</button>
+                    <button class="btn" id="arena-download">Download</button>
+                    <button class="btn" onclick="closeModal('arena-modal')">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Printing of a deck card -->
     <div id="printing-modal" class="modal">
         <div class="modal-content">
@@ -305,6 +329,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=3"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=4"></script>
 </body>
 </html>

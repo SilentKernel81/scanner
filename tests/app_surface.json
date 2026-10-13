@@ -126,6 +126,13 @@
    "deck_item"
   ],
   [
+   "/api/decks/<int:deck_id>/arena",
+   [
+    "GET"
+   ],
+   "deck_arena"
+  ],
+  [
    "/api/decks/<int:deck_id>/cards",
    [
     "POST"

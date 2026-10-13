@@ -685,3 +685,13 @@
 .card-preview {
     z-index: 3000;
 }
+
+/* The list for MTG Arena: as text, in a field it can be selected and copied from */
+.arena-text {
+    width: 100%;
+    margin-bottom: 8px;
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    resize: vertical;
+}

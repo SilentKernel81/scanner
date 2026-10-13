@@ -172,6 +172,10 @@ class Game:
     def format_decklist(self, entries, deck_format=None):
         raise NotImplementedError
 
+    # A game with a digital client that reads decklists gives the deck as that client wants
+    # it: (text, [names left out]). None: the game has none, and the page shows no button.
+    arena_decklist = None
+
     # Export key -> (label, file name prefix, writer(rows, file)); rows come from
     # InventoryManager.get_all_cards
     def export_formats(self):

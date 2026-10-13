@@ -1679,6 +1679,23 @@ name, a format and `deck_cards` rows: card name, count, board (`commander`, `mai
 a printing id for the image. The card is identified by its name, so any printing owned counts.
 Nothing a deck does changes the inventory.
 
+**A deck for MTG Arena** (the deck page's **Arena** button; `GET /api/decks/<id>/arena`, and as
+a file `.../export/arena`). Arena, the digital game, makes a deck from a list on the
+clipboard (its Decks screen: Import). `games/mtg_decks.py: format_arena` writes that list:
+sections `Commander`, `Deck` and, for a 60-card deck, `Sideboard` (a Commander deck's
+considered cards are not written); lines `4 Card Name` - names only, no set and number: the
+deck's printings are paper ones, which Arena often does not have. Only cards that exist on
+Arena are written, and the window names the rest: a card is taken to be on Arena when it is
+legal, restricted or banned in a format only Arena has (`ARENA_FORMATS`, `on_arena` - mostly
+`timeless`; the card table does not keep Scryfall's `games` list). A two-part name is written
+as Arena does as far as known (`arena_name`: split cards and Rooms with both names, adventure
+cards and double-faced cards by their front), decided from the type line. Of the laptop's
+test decks, paper Commander precons, 66 to 75 of 100 cards are on Arena - Arena has no
+Commander, and such a list imports as a Brawl deck at best. The window's Copy works on plain
+http too (`copyArena`: `navigator.clipboard` exists only over https or on the machine
+itself). **Never tried in Arena**: whether it accepts the list, every name and the
+`Commander` section included, is not known.
+
 **A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
 that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of
 the card chosen (the **Cover** button among a card's buttons; `PUT /api/decks/<id>` with

@@ -355,11 +355,32 @@ def deck_export(deck_id, kind):
         text = '\n'.join(lines) + '\n'
     elif kind == 'text':
         text = game.format_decklist(entries, deck['format'])
+    elif kind == 'arena' and game.arena_decklist:
+        text, _left_out = game.arena_decklist(entries, deck['format'])
     else:
         return jsonify({'success': False, 'error': f'Unknown export: {kind}'}), 404
     file_name = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in deck['name']).strip() or 'deck'
     return Response(text, mimetype='text/plain', headers={
-        'Content-Disposition': f'attachment; filename="{file_name}{"_buylist" if kind == "buylist" else ""}.txt"'})
+        'Content-Disposition': f'attachment; filename="{file_name}{"_buylist" if kind == "buylist" else "_arena" if kind == "arena" else ""}.txt"'})
+
+
+@app.route('/api/decks/<int:deck_id>/arena')
+def deck_arena(deck_id):
+    """
+    A deck as text for MTG Arena's Import button, for the page's window (which shows it, to
+    be copied): {'text', 'left_out': [names of the deck's cards that are not on Arena, or
+    that the card data does not know], 'cards': how many are in the text}.
+    The same text as a file: GET /api/decks/<id>/export/arena.
+    """
+    deck, error = get_deck_or_404(deck_id)
+    if error:
+        return error
+    game = games.get(deck['game'])
+    if not game.arena_decklist:
+        return jsonify({'success': False, 'error': f'No digital client for {game.label}'}), 400
+    text, left_out = game.arena_decklist(deck['cards'], deck['format'])
+    count = sum(int(line.split(' ', 1)[0]) for line in text.splitlines() if line[:1].isdigit())
+    return jsonify({'success': True, 'text': text, 'left_out': left_out, 'cards': count})
 
 
 @app.route('/api/cards/search')
