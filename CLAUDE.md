@@ -73,7 +73,9 @@ page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
 the two routes, through Flask's test client); `tests/test_deck_cover.py` a deck's cover (the
 table's new column on an old file, which card is shown when); `tests/test_arena_export.py` the
-list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_paths.py` that the data, `config.yaml`,
+list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_arena_collection.py`
+the digital collection (reading an Arena export, finding its cards, replacing whole, backups)
+and the decks' two kinds; `tests/test_paths.py` that the data, `config.yaml`,
 the pages and the OCR reader are where the programs look for them (it must pass before and
 after any move of files - see docs/plans/SRC_MOVE_PLAN.md); `tests/test_layout.py` which
 part of the package may import which, and that every import statement - also inside
@@ -94,7 +96,7 @@ program a module belongs to. Module names are written bare below - this says whe
 |---|---|
 | `card_scanner/` itself (both programs) | `paths.py`, `config.py`, `config_loader.py`, `settings.py` |
 | `station/` (a camera station: all of it) | `station_client.py`, `station_setup.py` + `station_setup.html`, `station_login.py`, `scanner.py`, `object_detector.py` |
-| `core/` (no web app, no camera) | `identification.py`, `card_ocr.py`, `card_identifier.py`, `prompts.py`, `api_keys.py`; `database.py`, `card_search.py`, `setup_database.py`; `inventory.py`, `decks.py`, `trades.py`, `backups.py`, `storage.py`, `pending.py`, `review.py`, `cleanup.py`; `stations.py`, `remote_scanner.py`, `recommendations.py` |
+| `core/` (no web app, no camera) | `identification.py`, `card_ocr.py`, `card_identifier.py`, `prompts.py`, `api_keys.py`; `database.py`, `card_search.py`, `setup_database.py`; `inventory.py`, `decks.py`, `trades.py`, `arena.py`, `backups.py`, `storage.py`, `pending.py`, `review.py`, `cleanup.py`; `stations.py`, `remote_scanner.py`, `recommendations.py` |
 | `server/` (the web app) | the `server/...` modules below; its pages in `server/templates/`, `server/static/` (written `templates/...`, `static/...` below) |
 | `games/` | `base.py`, `mtg.py`, `mtg_decks.py` |
 
@@ -127,6 +129,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Everything at one moment (all database files + pictures) | `backups.py`: `create_full`; `server/backups_api.py`: `full_backup`; `server/state.py`: `maintenance_barrier`; `scripts/backup.sh` |
 | Database connections, migrations, measurements | `storage.py`: `connect`, `rebuild`, `schema_migrations`; `scripts/benchmark_db.py` (on copies only) |
 | Decks, deck checks, decklist text | `decks.py`: `DeckManager` (`DECKS_TABLE`, `cover`); `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`, `format_arena` (the list for MTG Arena: `on_arena`, `arena_name`; `Game.arena_decklist`); `server/decks_api.py`: `deck_payload`, `deck_covers` (which card stands for a deck), `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
+| The digital collection (MTG Arena) and decks of two kinds | `arena.py`: `read_collection`, `read_decks`, `find_card`, `resolve`, `save_account` / `account`, `wildcards_needed`; `inventory.py`: `replace_all`; `decks.py`: `kind`, `arena_id`, `replace_arena_decks`, `needed_by_name(kind)`; `server/arena_api.py`: `arena_import`, `arena_info`; `server/inventory_api.py`: `digital_collection_is_read_only`; `server/decks_api.py`: `collection_of`, `arena_check`; `collection.js`: `showCollection`, `inArena`, `importArena`; `decks.js`: `deckKindShown`, `arenaCheckHtml`; `scripts/check_arena_pages.py` (copied data only) |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `server/decks_api.py`: `deck_suggestions`; `server/deck_ideas_api.py`: `popular_decks`, `run_deck_ideas`, `precon_covers` (the card a preconstructed deck is shown by; `decks.js`: `loadPreconCovers`, asked for as tiles come into view) |
 | Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js` (inventory, trades, statistics, backups), `decks.html` + `decks.js` + `decks.css` (the deck list and one deck: `/decks`, `/decks/<id>`; `showWhatTheAddressSays`, `renderDeckList`, `renderDeck`, `showDeckView`, `deckGroups`, `showAdding`); shared by all: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html`; shared by the collection and deck pages: `library.js`, `_value_dialog.html` |
 | **Camera station** | |
@@ -148,14 +151,14 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 - **The server is the package `server/`** (`card_scanner.server`), not one file: `server/__init__.py` lists its
   modules in the order they build on each other, and **a module imports only from those
   before it** (state, logs, desks, captures, card_data, pages, decks_api, deck_ideas_api,
-  inventory_api, trades_api, backups_api, stations_api, scan_events, settings_events,
+  inventory_api, arena_api, trades_api, backups_api, stations_api, scan_events, settings_events,
   ai_events, startup) - an import the other way is a cycle and fails at start. What two
   modules both need lives in the earlier one. Routes are plain `@app.route` on the one app
   from `server/state.py` (no Blueprints: templates use the endpoint names). A route or event
   exists once its module is imported: **a new module must be added to the list in
   `server/startup.py`**, and `tests/app_surface.json` recorded again - the surface test
   fails otherwise, on purpose.
-- **Shared objects are proxies.** `database`, `inventory`, `scan_inventory`, `review`,
+- **Shared objects are proxies.** `database`, `inventory`, `scan_inventory`, `arena_inventory`, `review`,
   `stations`, `pending`, `identification`, `deck_store`, `trade_store`, `recommend`,
   `camera_hub`, `app_settings` are imported from `server.state` and used as plain names; the
   real objects are attributes of `services`, set by `initialize_components`. `if inventory:`
@@ -316,9 +319,20 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   inventory_fields, export_formats), never straight to `database` / `CardSearcher`. Inventory
   rows carry `game` and `finish` (a key of `game.finishes`) and are addressed by `id`; the
   inventory schema lives in `inventory.py`, not `database.py`.
-- **Two inventories**: `scan_inventory` (`data/scan_inventory.db`: what stations add) and
-  `inventory` (the collection). Decks, statistics and "owned" read `inventory`; REST routes pick
-  with `inventory_area()` (`?area=scan`).
+- **Three inventories**: `scan_inventory` (`data/scan_inventory.db`: what stations add),
+  `inventory` (the collection) and `arena_inventory` (`data/arena_inventory.db`: what the
+  user has in MTG Arena). Statistics and a paper deck's "owned" read `inventory`; an Arena
+  deck's read `arena_inventory` (`decks_api.collection_of(kind)` - never `inventory`
+  directly in deck code); REST routes pick with `inventory_area()` (`?area=scan`,
+  `?area=arena`).
+- **The digital collection is a copy, replaced whole, never edited.** Only
+  `arena_api.arena_import` writes it (`replace_all` and the account in one transaction).
+  A route that changes an inventory must be named in `inventory_api.CHANGES_AN_INVENTORY`
+  (refused for `?area=arena`), and a request of the collection page that changes one must
+  carry `areaQuery()`: the ids of Arena entries are ids of other cards in the collection,
+  so a write that forgets its area changes the paper collection. Arena decks an import
+  brought (`arena_id`) are replaced by the next import; never give that id to a deck made
+  here.
 - **Inventory key**: `location` is part of `inventory.KEY_COLUMNS` (and the table's UNIQUE);
   anything that looks an entry up by its key must include it. Changing the key means rebuilding
   the table (`_migrate_add_location` is the pattern: backup, keep ids, check counts).

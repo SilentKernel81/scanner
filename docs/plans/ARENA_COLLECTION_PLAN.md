@@ -3,10 +3,13 @@
 Date: 2026-10-13
 
 A plan for a second collection - the cards the user has in MTG Arena - filled only by
-importing the file an exporter writes, and for a check that says of a paper deck whether it
-can be built in Arena. Nothing here is implemented. What is said about the export was read
-from one real export of the user's (2026-10-13); what is said about the code was read at
-commit 204206a.
+importing the files an exporter writes, for decks of two kinds, and for a check that says
+of a paper deck whether it can be built in Arena. **Built on 2026-10-13** (branch
+`arena-collection`; *How it went* at the end says what was done, what was measured and
+what was not tried). What is said about the export was read from one real export of the
+user's (2026-10-13); what is said about the code before it was read at commit 204206a.
+The user's decisions changed the plan after it was first written: where the text below
+said otherwise it has been rewritten, and *Decided by the user* says which parts those are.
 
 ## What there is to work with
 
@@ -20,8 +23,11 @@ it, its files lay in `~/Work/mtga_collection_export/`). The one that matters is
   `WildCardRares` 1; no mythic key when there are none), gold, gems;
 - `export_date`.
 
-It also writes CSVs for other sites (Moxfield's has no collector number), the user's Arena
-decks, and what is new since its last run. None of those is needed.
+It also writes `mtga_decks.json` - the user's Arena decks: `id` (Arena's own), `name`,
+`format` ("Historic", "Standard"), and one list `deck` of cards like the collection's
+(three decks in this export; none had a sideboard or a commander, so how the exporter
+writes those was not seen) - and CSVs for other sites (Moxfield's has no collector number)
+and what is new since its last run, which are not needed.
 
 **How the entries match the card data** (the laptop's, which is the same Scryfall data as the
 server's), measured:
@@ -91,7 +97,7 @@ it fails), rather than 1,900 single adds that each commit.
 
 ### The collection page
 
-A switch at the left of the page's tabs: **Paper | Arena**. In Arena the inventory list,
+A switch at the left of the page's tabs: **Physical | Arena**. In Arena the inventory list,
 its filters and the statistics show the digital collection (`?area=arena`), **read only**:
 no edit, delete, bulk change, trade, location or tag - every change would be gone at the
 next import, and Arena is where that collection is changed. Above the list: when it was
@@ -119,21 +125,35 @@ full backup: it can be imported again, but only from a machine with Arena on it.
 from before has no such tables and leaves the digital collection as it is on restore -
 the rule that exists for tables a backup was made without.
 
-## Decisions still open
+### Decks of two kinds
 
-Each with a recommendation; the plan is written for it.
+Every deck is **Physical** (`kind = 'paper'`: every deck there was) or **Arena**
+(`'arena'`). The kind says which collection a deck is counted against - what is owned,
+which other decks want the same copies, the buy list, the card search's "owned" - and an
+Arena deck shows what is missing in wildcards by rarity, beside the wildcards the account
+had. The Decks page filters All | Physical | Arena, an Arena deck has a badge, and New deck
+asks for the kind.
 
-1. **Rebalanced `A-` cards.** **Skip them** (they are a second face of a card already
-   counted; the exporter's totals skip them too), or count them as the card they change.
-2. **The digital list read only** (above), or editable like the paper one.
-3. **The exporter's Arena decks** (`mtga_decks.json`). **Not now**: a deck can already be
-   copied out of Arena and pasted into New deck.
-4. **Where the import button is.** **On the collection page, in Arena view**; nowhere else.
+The import brings the exporter's decks as Arena decks, each with Arena's id for it
+(`decks.arena_id`), and **replaces** the ones the last import brought: a deck changed in
+Arena changes here, one deleted there goes here. An Arena deck made here has no such id
+and stays. There is no "copy as Arena deck": the Arena button's list is pasted into
+Arena, and the deck comes back with the next import.
+
+## The decisions, as they were taken
+
+1. **Rebalanced `A-` cards**: skipped in the collection (a second face of a card already
+   counted; the exporter's totals skip them too). In a deck such a card is the card it
+   changes.
+2. **The digital list is read only.**
+3. **The exporter's Arena decks**: imported, and replaced by each import (first planned as
+   "not now"; the user decided otherwise).
+4. **The import button** is on the collection page, in Arena view; nowhere else.
 
 ## What must not change
 
-- The paper collection, the scanned cards, the decks' owned marks and buy lists: they
-  never read the digital collection.
+- The paper collection and the scanned cards: nothing done with the digital collection
+  reaches them. A paper deck's owned marks and buy list read the paper collection only.
 - Every existing `/api/` answer without `area=arena` (the recorded walk).
 - The stations: nothing of this reaches them.
 
@@ -149,13 +169,15 @@ Each with a recommendation; the plan is written for it.
 
 ## Phases
 
-1. The store, `replace_all`, the import and its tests.
+1. The store, `replace_all`, the decks' kind, the import and its tests.
 2. The collection page: the switch, the read-only list, the upload.
-3. The deck check in the Arena window.
+3. The deck pages: the filter, the badge, the kind of a new deck, wildcards, the check in
+   the Arena window.
 4. Backups.
 5. Documents.
-6. Deploy to the server (a new file is created at the first start; nothing existing is
-   migrated), then the user imports their export there.
+6. Deploy to the server (a new file is created at the first start; the deck table gets
+   its two columns by the migration `deck_kind_1`), then the user imports their export
+   there.
 
 ## Risks and open points
 
@@ -170,7 +192,61 @@ Each with a recommendation; the plan is written for it.
 
 ## What this does not do
 
-- No link to Arena: the file is made by the exporter and uploaded by hand.
+- No link to Arena: the files are made by the exporter and uploaded by hand.
 - No history between imports (the exporter keeps its own "new since last time").
-- No Arena decks as their own kind of deck, and no deck counted against the digital
-  collection for its owned marks.
+- A deck's kind cannot be changed afterwards (duplicate keeps it; a new deck asks).
+- Changes made here to a deck that came from Arena are lost at the next import with a
+  deck file - the deck's badge says so on pointing; nothing stops the change.
+
+## How it went
+
+Built on 2026-10-13 in phases 1 to 5, each committed; not deployed when this was written.
+
+**What was built, beyond the design above.** `core/arena.py` (reading the two files,
+finding the cards, the account, `wildcards_needed`); `server/arena_api.py`
+(`POST /api/arena/import`, `GET /api/arena`; the event `arena_updated`);
+`InventoryManager.replace_all`; `DeckManager.replace_arena_decks` (a deck that is still
+in Arena keeps its cover); five more deck formats - Historic, Timeless, Alchemy, Brawl,
+Standard Brawl - which every deck can have; a card Arena does not have, in an Arena deck,
+is a problem of the deck ("Not on Arena") and not a wildcard; an Arena deck's basic lands
+count as owned.
+
+**The read-only list has three layers**, after a review found the first design had a
+hole: the page's deletes and bulk changes named no area, so in Arena view the ids of
+Arena entries would have been applied to the *paper* collection. Now the page hides what
+changes a collection, its handlers refuse in Arena view (nothing can be ticked;
+`changeLater` and `setAsideForTrade` return), every write of the page names its area, and
+the server refuses a write to `area=arena`. A change waiting for its undo is sent before
+the view changes.
+
+**Measured, on test servers with copies of the laptop's data:**
+
+- The user's export imported: 3,061 cards in 1,946 entries - the exporter's own totals -
+  and the same count for each of 1,602 card names. 1,891 entries found by set and number,
+  55 by name, 26 rebalanced skipped, none unknown. The three Arena decks came in (60, 60
+  and 14 cards), each fully owned. A second import gave the same; a CSV was refused and
+  changed nothing.
+- `scripts/check_arena_pages.py`, 30 of 30 in headless Chromium: the switch, the Arena
+  list and its statistics, that ticking / deleting / trading do nothing there and the
+  server answers 400 to a change sent anyway, the deck filter and badges, an Arena deck's
+  totals, a new Arena deck with a card that is not on Arena and one to craft, an import
+  leaving that deck alone, the check in a paper deck's Arena window - and the paper
+  collection the same at the end as at the start. `scripts/check_deck_pages.py` 64 of 64.
+- `scripts/walk_server.py`, `main` against the branch: 12 of 71 steps differ, all by the
+  new fields only (`kind`, `from_arena`, `wildcards`, a backup's `arena` and so its
+  fingerprint, the five formats).
+- The migration `deck_kind_1` on a copy of the server's deck tables (15 decks, 969 deck
+  cards): identical before and after, all `paper`.
+- 235 unit tests (20 new in `tests/test_arena_collection.py`, three of them backups).
+
+**Not tried:**
+
+- A sideboard or a commander in the exporter's deck file (read as `sideboard` /
+  `commander` lists if they are there - a guess at the names).
+- Another version of the exporter, another account, an export with mythic wildcards.
+- Whether the wildcard counts agree with what Arena asks: the rarity is the printed
+  card's.
+- The upload from a real browser (the checks posted the files to the route; the page's
+  button and file dialog were not clicked), and the pages in a browser with a pointer.
+- A backup with the digital collection restored on a running server (the unit tests
+  restore one on temporary files).

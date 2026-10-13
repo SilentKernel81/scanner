@@ -253,6 +253,22 @@ For data-changing tests compare database rows, summed quantities, per-finish pri
 | PRECON-03 | P0 I/E | Own same precon twice; cancel own dialog; encounter unresolved printing or failed source. | Repeated ownership represents another box with intentional quantity increase; cancel changes nothing; unresolved/partial load is reported accurately. |
 | PRECON-04 | P1 I | Request unknown precon file and traversal-like filename. | Invalid source is rejected without reading arbitrary files or creating inventory/deck data. |
 
+## 10b. The digital collection (MTG Arena) and decks of two kinds
+
+Needs the files of an Arena collection exporter. Automated in part:
+`tests/test_arena_collection.py`, and `scripts/check_arena_pages.py` on a server with copied data.
+
+| ID | Priority / layer | Setup and steps | Expected result |
+|---|---|---|---|
+| ARENA-01 | P0 I/E | Collection page, **Arena**, **Import from Arena** with `mtga_collection.json` and `mtga_decks.json`. | The bar names the export's date and the wildcards; cards and entries equal the exporter's own totals; the Arena decks appear on the Decks page. The Physical collection is unchanged. |
+| ARENA-02 | P0 I/E | Import again; import only the collection file; import a CSV or another JSON. | The same numbers, not doubled; without a deck file the Arena decks stay; a wrong file is refused and nothing changes. |
+| ARENA-03 | P0 E | In Arena view try to tick, edit, delete, trade, bulk-change (also Ctrl+A, Del, double click in the picture view). | Nothing can be changed; switching back to Physical shows the same collection as before, editable. |
+| ARENA-04 | P1 E | Decks page: All / Physical / Arena; New deck with kind Arena; open an Arena deck. | The filter shows the right decks; Arena decks carry a badge; totals say "in Arena" and what is missing in wildcards; a card Arena does not have is listed as a problem. |
+| ARENA-05 | P1 E | Change a deck that came from Arena, then import again with the deck file. Make an Arena deck here, then import. | The imported deck is as Arena has it again (its cover kept); the deck made here is untouched. |
+| ARENA-06 | P1 E | A Physical deck: **Arena**. | The window says how many copies the Arena collection has, the cards to craft with wildcards needed and had, and how many are not on Arena. Without an import it says to import first. |
+| ARENA-07 | P1 I | Back up, import another export, restore; restore a backup made before the digital collection existed. | The digital collection of the backup is back; the old backup leaves it as it is. |
+| ARENA-08 | P2 M | Never tried: an export whose decks have a sideboard or a commander; the wildcard counts compared with what Arena asks for the same cards. | Boards land where they belong; counts agree, or the difference is noted in the documentation. |
+
 ## 11. Statistics
 
 | ID | Priority / layer | Setup and steps | Expected result |

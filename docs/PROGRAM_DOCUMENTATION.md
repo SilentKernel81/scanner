@@ -1545,7 +1545,12 @@ AI and sound - `settings_url`).
 (`collection_*`) and of the scanned cards (`scanned_*`), `decks`, `deck_cards` and an `info`
 row (time, note, counts) - every game - and `captures/`, hard links to the thumbnails those
 entries point at (no extra space; they survive the app deleting its own). It is written to a
-`.tmp` folder and moved into place, under the three managers' locks.
+`.tmp` folder and moved into place, under the managers' locks. Since 2026-10-13 a backup
+also holds the digital collection (`arena_inventory`, `arena_arena_account`:
+`ARENA_TABLES`; `arena` in its info counts the cards). Restoring a backup that has no such
+part - every one made before - leaves the digital collection as it is; the full backup
+takes `data/arena_inventory.db`. (On temporary files in the tests; not tried on a running
+server.)
 
 **Automatic backups** (`backups.create_scheduled`, marked `daily` in their info whatever the
 interval) are asked for at startup (`initialize_components`, note "Application start") and
@@ -1707,6 +1712,62 @@ printing and three of another). So names alone are enough, and an adventure card
 by its front name. **Still not tried**: a whole deck written by the Arena button, the
 `Commander` and `Sideboard` sections, a split card, and what Arena says about a card it
 does not have.
+
+**The digital collection (MTG Arena)** - since 2026-10-13; plan and record in
+`docs/plans/ARENA_COLLECTION_PLAN.md`. A third inventory, `arena_inventory`
+(`data/arena_inventory.db`, the same tables once more), holds what the user has in Arena.
+Arena gives no list of that; a third-party exporter writes one while the game runs, and
+the collection page's **Arena** view uploads its files (`POST /api/arena/import`,
+`server/arena_api.py`): `mtga_collection.json`, and optionally `mtga_decks.json`.
+`core/arena.py` reads them (`read_collection`, `read_decks`; anything else is refused -
+`NotAnExport`) and finds each entry's card (`find_card`, `resolve`): by Arena's set and
+collector number **only when the card there has the entry's name** (fronts compared),
+else by name. The reason, measured on the one export there was (1,972 entries): 1,891 are
+the printed set's number, but Arena numbers the basic lands of one set its own way (its
+Forest LCI #400 is the printed set's Mountain), 26 are *rebalanced* cards ("A-Ancestral
+Katana": the number of the card they change - skipped, as the exporter's own totals do),
+and 49 are in Arena-only sets the card data lacks. Everything is read and looked up before
+anything changes; then `InventoryManager.replace_all` swaps the contents in one
+transaction, with the account (`arena_account`: the export's date, wildcards by rarity,
+gold, gems, how the import went) written in the same one. **An import replaces
+everything** - Arena has the original - and the list is **read only**: the page hides
+what changes a collection (`body.arena-view` in `collection.css`), its handlers refuse
+(`collection.js`: `inArena`, `toggleSelected`, `changeLater`, `setAsideForTrade`), every
+write of the page names its area (`areaQuery()`), and the server refuses a write to
+`?area=arena` (`inventory_api.py`: `digital_collection_is_read_only`,
+`CHANGES_AN_INVENTORY` - a new route that changes an inventory belongs in that set). The
+second and third are not decoration: an Arena entry's id sent without its area is an id
+of the *paper* collection. `GET /api/arena` gives the numbers of the page's bar; an
+import or a restore sends `arena_updated` to every page (no data; the collection page's
+Arena view and the deck pages read again).
+
+**Decks are of two kinds**: `decks.kind` is `paper` (Physical on the pages; every deck
+from before) or `arena`, and `decks.arena_id` is Arena's id of a deck an import brought
+(migration `deck_kind_1`). The kind says which collection a deck counts against
+(`decks_api.py`: `collection_of`): owned copies, the other decks that want them
+(`needed_by_name(kind=)` - a paper and an Arena deck never compete), the buy list, the
+card search (`?kind=arena`), EDHREC's suggestions. An Arena deck's basic lands count as
+owned (`is_basic_land`: Arena gives them freely); what it lacks is counted in wildcards
+(`wildcards`: `needed` by rarity from `arena.wildcards_needed`, `have` from the account) -
+the rarity is the card data's, i.e. of a printed card, so the count is close and not
+checked against Arena; and a card Arena does not have is a problem of the deck ("Not on
+Arena"), not a wildcard. `DeckManager.replace_arena_decks` replaces, in one transaction,
+the decks the last import brought by the ones this one brings (a deck still there keeps
+its cover); decks made here, also Arena ones, have no `arena_id` and stay. So a change
+made here to a deck that came from Arena lasts until the next import with a deck file.
+The deck list filters All | Physical | Arena (`decks.js`: `deckKindShown`); New deck asks
+for the kind. Arena's formats were added for these decks (Historic, Timeless, Alchemy,
+Brawl, Standard Brawl - keys of Scryfall's legalities like the others) and any deck can
+have them. **The Arena window of any deck** now also answers "can you build it in
+Arena?" (`arena_check`, `check` in `GET /api/decks/<id>/arena`; `decks.js`:
+`arenaCheckHtml`): copies already in the Arena collection, the cards to craft and their
+wildcards beside the ones the account has, and how many copies are of cards Arena does
+not have. **Measured** (test servers, copies of the laptop's data, the user's export):
+3,061 cards in 1,946 entries, the exporter's own totals, the same count for every card
+name; three decks in, fully owned; `scripts/check_arena_pages.py` 30 of 30 (on copied
+data only: it imports, and makes and deletes a deck). **Not tried**: a sideboard or a
+commander in the exporter's deck file, another version of the exporter, the wildcard
+counts against Arena, the upload dialog in a real browser.
 
 **A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
 that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of
@@ -1893,6 +1954,7 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 | `data/cards_database.db` | Card data (`cards`, `card_data_info`), the collection (`inventory`, `inventory_captures`, `inventory_sources`, and the trades: `trades`, `trade_cards`), decks (`decks`, `deck_cards`), the review queue (`review_queue`), and the captures already applied to it (`applied_captures`) |
 | `data/web_cache.db` | Answers cached from other sites (`recommendations.py`): disposable, not in backups |
 | `data/scan_inventory.db` | Cards scanned and not yet added to the collection (the same three inventory tables, and `pending_moves`) |
+| `data/arena_inventory.db` | The digital collection: what the user has in MTG Arena as the last import said (the inventory tables again, of which only `inventory` is used, and `arena_account`). Replaced as a whole by each import |
 | `data/pending_captures.db` | Captures waiting in the OCR / AI queues, queued again after a restart (`pending_captures`), and what became of uploaded ones (`settled_captures`, 30 days) |
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
@@ -1956,6 +2018,12 @@ confirming removes the copies with their photos and leaves a record, a confirm t
 changes nothing, and backups (a restore brings a trade back with its entries, over an open
 trade, from before trades). The routes and the page were tried in headless Chromium against
 the server's code on a temporary copy of test data (2026-10-10), not against the server.
+
+`tests/test_arena_collection.py` covers the digital collection and the decks' two kinds, on
+temporary files and made-up exports: reading the exporter's two files and refusing others,
+finding an entry's card (set and number only when the name agrees), an inventory replaced
+whole or not at all, the deck table's new columns on an old file, Arena's decks replaced
+while decks made here stay, and the digital collection in backups.
 
 There are no automated tests for the rest. [TEST_CASES.md](TEST_CASES.md) lists what to check
 by hand. For scanner logic, recorded or synthetic frames can be fed through `CardScanner` with
