@@ -3,7 +3,7 @@
 # @USER@, @GROUP@, @DIR@ and @PORT@.
 #
 # The server (app.py) has no camera of its own: the camera is always read by a station
-# (station_client.py), also when both are on one machine. This unit is that station. It
+# (src/station_client.py), also when both are on one machine. This unit is that station. It
 # connects to the server on this machine and tries again every few seconds while the server
 # is not up yet, so the order the two start in does not matter.
 # Logs: journalctl -u mtg-scanner-station -f
@@ -25,7 +25,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PATH=@DIR@/venv/bin:/usr/local/bin:/usr/bin:/bin
 # SCANNER_CAMERA_INDEX, SCANNER_STATION_NAME ... if you set them (see .env.station.example)
 EnvironmentFile=-@DIR@/.env
-ExecStart=@DIR@/venv/bin/python @DIR@/station_client.py --server http://localhost:@PORT@
+ExecStart=@DIR@/venv/bin/python @DIR@/src/station_client.py --server http://localhost:@PORT@
 # Ctrl+C for the station: it lets go of the camera
 KillSignal=SIGINT
 

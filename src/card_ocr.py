@@ -22,11 +22,12 @@ import time
 import cv2
 
 from config import Config
+from paths import SRC
 
 # OCR is logged with the AI: both are "what was read from the card"
 logger = logging.getLogger('ai')
 
-OCR_DIR = Config.BASE_DIR / 'ocr'
+OCR_DIR = SRC / 'ocr'  # the reader is code (Node.js): beside this file, not in the top folder
 READER = 'light-ocr'
 
 # Language codes printed after the set code ("HOB • EN")
@@ -122,7 +123,7 @@ class CardOcr:
 
     @staticmethod
     def installed():
-        """Whether Node.js and the light-ocr package (npm install in ocr/) are present"""
+        """Whether Node.js and the light-ocr package (npm install in src/ocr/) are present"""
         return bool(shutil.which('node')) and (OCR_DIR / 'node_modules' / '@arcships' / 'light-ocr').is_dir()
 
     def supports(self, game_id):

@@ -17,7 +17,7 @@ from unittest import mock
 import numpy as np
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
 import station_client  # noqa: E402
 from config import Config  # noqa: E402

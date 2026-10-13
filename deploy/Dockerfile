@@ -5,7 +5,7 @@
 # The OCR reader's packages (light-ocr: Node.js, x86-64 only)
 FROM node:24-trixie-slim AS ocr
 WORKDIR /ocr
-COPY ocr/package.json ocr/package-lock.json ./
+COPY src/ocr/package.json src/ocr/package-lock.json ./
 RUN npm ci --omit=dev
 
 
@@ -19,8 +19,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ocr /usr/local/bin/node /usr/local/bin/node
 
+# PYTHONPATH: the code is in /app/src; app.py puts it on the path itself, this is for the
+# entrypoint's `python -c "from config import ..."` and for anything run by hand in the container
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
     HOME=/tmp
 
 WORKDIR /app
@@ -28,7 +31,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-COPY --from=ocr /ocr/node_modules ocr/node_modules
+COPY --from=ocr /ocr/node_modules src/ocr/node_modules
 
 # data/ and scanned_cards/ are the volumes; the app runs as the user who owns them on the host
 RUN mkdir -p data scanned_cards && chown 1000:1000 data scanned_cards
@@ -47,20 +50,26 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 COPY requirements-client.txt .
 RUN pip install --no-cache-dir -r requirements-client.txt
 
-# Only what the station runs (station_client.py must not import the server's modules)
-COPY station_client.py station_setup.py station_login.py station_setup.html scanner.py object_detector.py settings.py \
-     config.py config_loader.py config.yaml ./
+# Only what the station runs (station_client.py must not import the server's modules), laid
+# out as in the project: the code in /app/src, config.yaml in /app - where paths.py says the
+# top folder is, and where the volumes put data/ and station_captures/.
+# A module the station newly imports must be added here AND in the client-pi target below.
+COPY src/station_client.py src/station_setup.py src/station_login.py src/station_setup.html \
+     src/scanner.py src/object_detector.py src/settings.py \
+     src/config.py src/config_loader.py src/paths.py src/
+COPY config.yaml ./
 
 # The station's setup page (station_setup.py)
 EXPOSE 8080
 
-ENTRYPOINT ["python", "station_client.py"]
+ENTRYPOINT ["python", "src/station_client.py"]
 
 
 # The camera station for a Raspberry Pi camera module (ARM64 only): the same program as
@@ -104,12 +113,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
-COPY station_client.py station_setup.py station_login.py station_setup.html scanner.py object_detector.py settings.py \
-     config.py config_loader.py config.yaml ./
+# The same files as the client target above (keep the two lists equal)
+COPY src/station_client.py src/station_setup.py src/station_login.py src/station_setup.html \
+     src/scanner.py src/object_detector.py src/settings.py \
+     src/config.py src/config_loader.py src/paths.py src/
+COPY config.yaml ./
 
 EXPOSE 8080
 
-ENTRYPOINT ["python3", "station_client.py"]
+ENTRYPOINT ["python3", "src/station_client.py"]

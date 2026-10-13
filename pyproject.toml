@@ -1,0 +1,29 @@
+# What this project is. NOT how it is installed:
+#
+#   - the libraries are listed in requirements.txt (server) and requirements-client.txt
+#     (camera station), and installed from there - by scripts/deploy.sh into venv/, and by
+#     deploy/Dockerfile in a layer of its own, so that a change of code does not install
+#     300 MB again. They are not repeated here: two lists would have to be kept equal.
+#   - the project is not pip-installed (`pip install -e .` is not a step anywhere). The
+#     image for a Raspberry Pi camera has no pip at all, and the modules have plain names
+#     (config, settings, utils, database): an installed project is found after the installed
+#     libraries, so a library of one of those names would be imported in its place.
+#     The code is run from src/ instead - see "How src/ gets onto Python's path" in
+#     docs/plans/SRC_MOVE_PLAN.md (app.py, PYTHONPATH in the images and scripts).
+#
+# So there is deliberately no [build-system] table.
+
+[project]
+name = "scanner-server"
+# The project has no numbered releases: a version is a commit. This field is required here.
+version = "0.0.0"
+description = "Camera-based scanner for Magic: The Gathering cards: a server (collection, decks, OCR, AI) and camera stations"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "SilentKernel" }]
+
+[project.urls]
+Repository = "https://github.com/SilentKernel81/scanner-server"
+"Android app" = "https://github.com/SilentKernel81/mtg-scanner-android"

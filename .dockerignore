@@ -8,7 +8,7 @@ station_captures/
 
 # Built inside the image
 venv/
-ocr/node_modules/
+src/ocr/node_modules/
 __pycache__/
 *.pyc
 

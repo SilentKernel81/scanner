@@ -11,7 +11,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
 import inventory as inv  # noqa: E402
 from games.base import write_collection_csv  # noqa: E402

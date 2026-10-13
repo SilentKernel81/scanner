@@ -33,12 +33,13 @@ from flask_socketio import SocketIO
 from werkzeug.local import LocalProxy
 
 from config import Config
-from server import ROOT
+from paths import SRC
 
-# Initialize Flask app. Its name stays 'app' and its folder the project's top folder, where
-# templates/ and static/ are - as when this was app.py (a Flask app looks for both beside
-# the module it is named after, which would now be server/)
-app = Flask('app', root_path=str(ROOT))
+# Initialize Flask app. Its name stays 'app', as when this was app.py: endpoint names and
+# url_for depend on nothing else. Its folder is server/, where templates/ and static/ are -
+# said outright (a Flask app looks for both beside the module it is named after, and there
+# is no module called 'app' in here). The address of a static file stays /static/...
+app = Flask('app', root_path=str(SRC / 'server'))
 app.config['SECRET_KEY'] = Config.SECRET_KEY
 
 # Initialize SocketIO with proper configuration

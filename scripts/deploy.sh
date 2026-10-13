@@ -4,7 +4,7 @@
 #
 # Run it on the machine that runs the scanner (Raspberry Pi or any Linux PC). It sets up the
 # two programs a single machine needs: the server (app.py) and, for the camera plugged into
-# this machine, a camera station (station_client.py) that sends its cards to that server.
+# this machine, a camera station (src/station_client.py) that sends its cards to that server.
 #   ./scripts/deploy.sh                  # install / repair
 #   ./scripts/deploy.sh --service        # ... and run both as systemd services
 #   ./scripts/deploy.sh --update         # pull the latest code, update, restart
@@ -76,6 +76,8 @@ done
 [ -z "$CAMERA_INDEX" ] || [[ "$CAMERA_INDEX" =~ ^[0-9]+$ ]] || die "--camera needs a number, e.g. --camera 2"
 
 cd "$DIR"
+# The code is in src/: for the `python -c "from config import ..."` lines of this script
+export PYTHONPATH="$DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 [ -f app.py ] && [ -f requirements.txt ] || die "Run this script from the scanner project (scripts/deploy.sh)"
 [ "$(id -u)" -ne 0 ] || die "Run as your normal user, not root (sudo is used only where needed)"
 
@@ -210,7 +212,14 @@ step "OCR reader (optional)"
 # light-ocr reads cards before the vision AI is asked (card_ocr.py); it runs on Node.js
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
         && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; then
-    if (cd ocr && npm install --no-audit --no-fund --silent); then
+    # The reader moved from ocr/ to src/ocr/ (2026-10-12). An update leaves the packages
+    # installed before that in the old folder: they are taken along instead of being
+    # downloaded again (over 100 MB), and the emptied folder goes
+    if [ -d ocr/node_modules ] && [ ! -e src/ocr/node_modules ]; then
+        mv ocr/node_modules src/ocr/node_modules
+        rmdir ocr 2>/dev/null || true
+    fi
+    if (cd src/ocr && npm install --no-audit --no-fund --silent); then
         ok "light-ocr installed (Settings > Read with OCR first)"
     else
         warn "light-ocr could not be installed - cards will be read by the vision AI only"
@@ -290,14 +299,14 @@ step "Card database"
 
 DB="data/cards_database.db"
 if [ "$SKIP_DATABASE" -eq 1 ]; then
-    warn "Skipped - download it later with: venv/bin/python setup_database.py"
+    warn "Skipped - download it later with: venv/bin/python src/setup_database.py"
 elif [ -s "$DB" ] && [ "$REFRESH_CARDS" -eq 0 ]; then
     ok "Card database present ($(du -h "$DB" | cut -f1)) - refresh with --refresh-cards"
 else
     echo "  Downloading card data from Scryfall (a few minutes)..."
-    # setup_database.py asks before replacing an existing database
-    echo y | venv/bin/python setup_database.py | grep -E "Total cards|Error|✓ Database" | sed 's/^/  /' || true
-    [ -s "$DB" ] || die "Card database download failed - run: venv/bin/python setup_database.py"
+    # src/setup_database.py asks before replacing an existing database
+    echo y | venv/bin/python src/setup_database.py | grep -E "Total cards|Error|✓ Database" | sed 's/^/  /' || true
+    [ -s "$DB" ] || die "Card database download failed - run: venv/bin/python src/setup_database.py"
     ok "Card database ready"
 fi
 
@@ -362,11 +371,16 @@ elif service_installed; then
         # so this also works from cron)
         ok "${SERVICE_NAME} keeps running and uses the new card data"
     else
+        # The units are written again at every update, not only restarted: what a unit runs
+        # can change with the code. When the code moved into src/ (2026-10-12) the station's
+        # command became src/station_client.py - a unit installed before that, only
+        # restarted, would start a file that is no longer there.
+        install_unit "$SERVICE_NAME"
+        sudo_cmd systemctl daemon-reload
         sudo_cmd systemctl restart "$SERVICE_NAME"
         ok "Restarted ${SERVICE_NAME}"
         if [ -f "$STATION_SERVICE_FILE" ]; then
-            sudo_cmd systemctl restart "$STATION_SERVICE_NAME"
-            ok "Restarted ${STATION_SERVICE_NAME}"
+            start_station_service
         elif wants_station; then
             # A machine installed before 2026-10-12: its one service, the server, read the
             # camera itself. The server no longer does, so an update that only restarted it
@@ -400,7 +414,7 @@ else
     echo "  Start it: cd ${DIR} && ./scripts/start.sh     (the server and this machine's camera)"
     echo "  or the two by hand, each in its own terminal:"
     echo "            venv/bin/python app.py"
-    echo "            venv/bin/python station_client.py --server http://localhost:${port}"
+    echo "            venv/bin/python src/station_client.py --server http://localhost:${port}"
     echo "  Or run both as services (start on boot): $0 --service"
 fi
 if wants_station; then

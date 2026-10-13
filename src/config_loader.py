@@ -7,14 +7,15 @@ Loads configuration from YAML file with environment variable overrides
 import os
 import yaml
 import re
-from pathlib import Path
+from paths import TOP
 
 
 class ConfigLoader:
     """Load and manage configuration from YAML file"""
 
     def __init__(self, config_file='config.yaml'):
-        self.config_file = Path(__file__).parent / config_file
+        # config.yaml is a person's settings file: in the project's top folder, not beside the code
+        self.config_file = TOP / config_file
         self.config = self._load_config()
 
     def _load_config(self):

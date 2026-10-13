@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 
 # The station's modules live one folder up from scripts/
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 os.chdir(Path(__file__).resolve().parent.parent)
 
 import cv2  # noqa: E402

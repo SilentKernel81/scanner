@@ -5,7 +5,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 
-from server.state import ROOT
+from server import ROOT
 
 
 def setup_logging():

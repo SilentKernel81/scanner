@@ -4,7 +4,8 @@ The scanner server: the web pages, what happens to every captured card, the coll
 Cameras are elsewhere (stations: station_client.py, the Android app) and send one picture per
 card. The server opens none itself.
 
-`python app.py` starts it (app.py only calls server.startup.main). The modules, in the order
+`python app.py` starts it (app.py puts src/ on Python's path and calls server.startup.main).
+The pages are in templates/ and static/ in this folder. The modules, in the order
 they build on each other - a module imports only from those above it:
 
     state            the Flask / Socket.IO app and the shared objects (database, inventories, ...)
@@ -29,16 +30,20 @@ This file runs before any other module of the package, and that is used for the 
 that has to happen first: API keys are put into the environment before config.py is imported,
 because config.py reads the environment when it is imported.
 """
-import sys
-from pathlib import Path
-
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent  # the project's top folder: app.py, data/, templates/, static/
+from paths import TOP
 
-# The project's own modules (config, inventory, ...) are in the top folder
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# The project's top folder: app.py, config.yaml, .env, data/ (paths.py says where it is).
+# The server's own files - this package, its templates/ and static/ - are in src/server.
+ROOT = TOP
+
+# Nothing here touches Python's path. The project's modules (config, inventory, ...) are in
+# src/, beside this package, and whatever starts a program puts src/ first on the path:
+# app.py for the server, PYTHONPATH in the images and scripts, the tests' own first lines.
+# (This file used to put the top folder there. It cannot do that for src/ - it needs paths,
+# which is in src/ - and the top folder ahead of src/ is how a module left behind in the
+# top folder would be imported instead of the one that moved.)
 
 # Load API keys etc. from .env before config is imported (config reads env vars)
 load_dotenv(ROOT / '.env')
