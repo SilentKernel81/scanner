@@ -431,7 +431,10 @@ Not checked:
 
 - **the `client-pi` image** - it builds only on a Pi - and any station with a real camera;
 - **`scripts/deploy.sh`**, neither a fresh installation nor `--update` on a machine with the
-  services installed; `bash -n` only;
+  services installed; `bash -n` only. And one thing the plan's risk 3 had not seen: the
+  `--update` that crosses this change is still run by the *old* script (it is already
+  running when `git pull` replaces it), so the new unit and the OCR packages only come with
+  a second run of the script. INSTALL.md says to run it twice;
 - **a server with a GPU**: the laptop has none, so OCR ran on the CPU there;
 - other people's checkouts (INSTALL.md says what changes for them).
 
