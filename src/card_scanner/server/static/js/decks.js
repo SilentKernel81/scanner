@@ -218,10 +218,10 @@ async function createDeck(body, message) {
     openDeck(data.deck);
 }
 
-function copyDeckClicked(event) {
-    // "Copy as deck" on a public deck's row
+function copyDeckClicked(event, kind = 'paper') {
+    // "Copy as deck" on a public deck's row (kind: of the new deck)
     const button = event.target.closest('[data-import-url]');
-    if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
+    if (button) createDeck({url: button.dataset.importUrl, kind}, 'Deck copied');
 }
 
 // -- Preconstructed decks: browse, open as a deck, or add as owned ----------------
@@ -410,6 +410,8 @@ function renderIdeas(kind, state) {
         return renderPrecons();
     }
     const list = $(`ideas-${kind}`);
+    // A run made for the other collection (Physical | Arena) counted other cards: not shown
+    if (state.started && (state.collection || 'paper') !== buildKind) return void (list.innerHTML = '');
     const progress = state.running ? `<div class="hint">Looking... ${state.done} of ${state.total || '?'}</div>`
         : state.stopped ? `<div class="hint">Stopped after ${state.done} of ${state.total}</div>` : '';
     const error = state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '';
@@ -421,7 +423,7 @@ function renderIdeas(kind, state) {
             <button class="btn btn-small" data-start-commander="${escapeHtml(item.name)}">Start deck</button>
         </div>`).join('');
     const empty = !state.running && !state.error && state.started && !state.items.length
-        ? '<div class="hint">No legendary creatures in the inventory yet.</div>' : '';
+        ? `<div class="hint">No legendary creatures in ${buildKind === 'arena' ? 'your Arena collection' : 'the inventory'} yet.</div>` : '';
     list.innerHTML = progress + error + rows + empty;
 }
 
@@ -448,6 +450,22 @@ function stopIdeas(kind) {
 
 // -- Build around a card: your cards legal in a format -> public decks that play one ----
 
+// Which collection "What can I build?" asks about: the paper cards ('paper') or the Arena
+// collection ('arena'). It decides whose cards are listed, what counts as owned in the
+// rankings, and the kind of a deck started from this tab.
+let buildKind = recall('buildKind', 'paper');
+
+function showBuildKind(kind) {
+    buildKind = kind === 'arena' && gameInfo.arena ? 'arena' : 'paper';
+    remember('buildKind', buildKind);
+    markSwitch('build-kind', 'kind', buildKind);
+    // What is on display was found in the other collection
+    aroundCard = null;
+    $('ideas-commanders').innerHTML = '';
+    renderAround();
+    loadAroundCards();
+}
+
 let aroundCard = null;   // the card on display (clicked in the list)
 let aroundState = null;  // the last answer about the search for decks
 let aroundRequest = 0;
@@ -456,6 +474,7 @@ async function loadAroundCards() {
     const request = ++aroundRequest;
     const format = $('around-format').value;
     const params = new URLSearchParams({owned: '1', format});
+    if (buildKind === 'arena') params.set('kind', 'arena');   // the cards of the Arena collection
     if ($('around-search').value.trim()) params.set('q', $('around-search').value.trim());
     if ($('around-type').value.trim()) params.set('type', $('around-type').value.trim());
     if ($('around-free').checked) params.set('free', '1');
@@ -464,7 +483,7 @@ async function loadAroundCards() {
     if ($('around-commanders').checked && hasCommander(format)) params.set('commander', '1');
     const data = await api(`/api/cards/search?${params}`);
     if (!data || request !== aroundRequest) return;  // a later search already answered
-    $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
+    $('around-cards-title').textContent = `Your ${buildKind === 'arena' ? 'Arena ' : ''}cards legal in ${formatLabel(format)}`;
     $('around-cards').innerHTML = data.cards.map(card => `
         <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}" data-type="${escapeHtml(card.type_line)}"
              data-image="${escapeHtml(card.image_uri || '')}" data-commander="${isCommanderCard(card) ? '1' : ''}">
@@ -488,13 +507,14 @@ function chooseAround(row) {
 function findAround() {
     if (!aroundCard) return;
     $('around-decks').innerHTML = '';
-    pollIdeas('card', true, {card: aroundCard.name, format: aroundCard.format});
+    pollIdeas('card', true, {card: aroundCard.name, format: aroundCard.format, collection: buildKind});
 }
 
 function renderAround(state = aroundState) {
     aroundState = state;
     const card = aroundCard;
-    const found = state && state.started && state.card ? state : null;
+    // A run made for the other collection counted other cards as owned: not shown
+    const found = state && state.started && state.card && (state.collection || 'paper') === buildKind ? state : null;
     const running = !!(found && found.running);
     const mine = found && card && found.card === card.name && found.format === card.format;
     // A search that is running stays on display (and can be stopped) while another card is looked at
@@ -1107,7 +1127,12 @@ function bindDeckHomeEvents() {
     document.querySelectorAll('[data-ideas]').forEach(button => button.addEventListener('click', () =>
         button.dataset.running ? stopIdeas(button.dataset.ideas)
             // The precon ranking reads only the kind of deck that is chosen
-            : pollIdeas(button.dataset.ideas, true, button.dataset.ideas === 'precons' ? {type: $('precon-type').value} : {})));
+            : pollIdeas(button.dataset.ideas, true, button.dataset.ideas === 'precons' ? {type: $('precon-type').value}
+                                                                                     : {collection: buildKind})));
+    $('build-kind-row').hidden = !gameInfo.arena;
+    bindSwitch('build-kind', button => showBuildKind(button.dataset.kind));
+    if (!gameInfo.arena) buildKind = 'paper';
+    markSwitch('build-kind', 'kind', buildKind);
 
     // Build around a card
     $('around-format').innerHTML = optionsHtml(gameInfo.deck_formats);
@@ -1127,13 +1152,16 @@ function bindDeckHomeEvents() {
         if (event.target.id === 'around-find') findAround();
         if (event.target.id === 'around-stop') stopIdeas('card');
         if (event.target.id === 'around-commander') {
-            createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name});
+            createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name, kind: buildKind});
         }
     });
-    $('around-decks').addEventListener('click', copyDeckClicked);
+    // A public deck copied from this tab is a deck of the collection it was ranked against
+    $('around-decks').addEventListener('click', event => copyDeckClicked(event, buildKind));
     $('ideas-commanders').addEventListener('click', event => {
         const button = event.target.closest('[data-start-commander]');
-        if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});
+        // In Arena the format with a commander is Brawl
+        if (button) createDeck({name: button.dataset.startCommander, format: buildKind === 'arena' ? 'brawl' : 'commander',
+                                commander: button.dataset.startCommander, kind: buildKind});
     });
     $('precon-search').addEventListener('input', debounce(renderPrecons, 150));
     $('precon-type').addEventListener('change', renderPrecons);

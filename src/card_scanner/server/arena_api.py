@@ -35,8 +35,8 @@ def arena_info():
 def arena_import():
     """
     Replace the digital collection by an Arena export. Form data, field 'files': the
-    exporter's mtga_collection.json, and optionally its mtga_decks.json (told apart by what
-    is in them, not by their names).
+    exporter's mtga_collection.json, its mtga_decks.json, or both (told apart by what is in
+    them, not by their names). One file alone replaces its own part and leaves the other.
 
     Everything is read and every card looked up before anything is changed; a file that is
     not the exporter's is refused and the digital collection stays as it was. Then:
@@ -65,12 +65,19 @@ def arena_import():
                 collection = arena.read_collection(text)
     except arena.NotAnExport as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-    if collection is None:
-        return jsonify({'success': False, 'error': 'Choose the collection file of the Arena exporter: mtga_collection.json'}), 400
+    if collection is None and decks is None:
+        return jsonify({'success': False, 'error': 'Choose the files of the Arena exporter: mtga_collection.json, '
+                        'mtga_decks.json, or both'}), 400
 
-    found, summary = arena.resolve(game, database, collection['cards'])
-    entries = [{'fields': game.inventory_fields(item['card'], game.suggested_finish(item['card'], 'non-foil')),
-                'finish': game.suggested_finish(item['card'], 'non-foil'), 'quantity': item['quantity']} for item in found]
+    # Either file alone is an import of its own: the collection file replaces the cards and
+    # leaves the Arena decks, the deck file replaces the decks Arena brought and leaves the cards
+    entries, summary = [], None
+    if collection is not None:
+        found, summary = arena.resolve(game, database, collection['cards'])
+        # Stored without a price: a card in Arena cannot be sold, and its paper printing's price
+        # would make the digital collection look like money (lists, statistics, exports)
+        entries = [{'fields': {**game.inventory_fields(item['card'], game.suggested_finish(item['card'], 'non-foil')), 'price': 0},
+                    'finish': game.suggested_finish(item['card'], 'non-foil'), 'quantity': item['quantity']} for item in found]
     new_decks, deck_unknown = [], []
     for deck in decks or []:
         cards, deck_summary = arena.resolve(game, database, deck['cards'], skip_rebalanced=False)
@@ -85,33 +92,39 @@ def arena_import():
                                'quantity': item['quantity'], 'board': item['board']}
         new_decks.append({**deck, 'cards': list(merged.values())})
 
-    account = {'exported': collection['exported'], 'imported': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-               'wildcards': collection['wildcards'], 'gold': collection['gold'], 'gems': collection['gems'],
-               'summary': {**summary, 'unknown': summary['unknown'][:200]}}
     deck_error = None
     # Two files, two commits: the barrier keeps a full backup (backups.create_full) from
     # being taken between them, with the new collection beside the decks of before
     with maintenance_barrier:
-        try:
-            with arena_inventory._lock:
-                # The account first and uncommitted: replace_all commits both, or rolls both back
-                arena.save_account(arena_inventory, account)
-                arena_inventory.replace_all(game.id, entries)
-        except Exception as e:
-            logger.error(f"Arena import failed: {e}", exc_info=True)
-            return jsonify({'success': False, 'error': f'The import failed and nothing was changed: {e}'}), 500
+        if collection is not None:
+            account = {'exported': collection['exported'], 'imported': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                       'wildcards': collection['wildcards'], 'gold': collection['gold'], 'gems': collection['gems'],
+                       'summary': {**summary, 'unknown': summary['unknown'][:200]}}
+            try:
+                with arena_inventory._lock:
+                    # The account first and uncommitted: replace_all commits both, or rolls both back
+                    arena.save_account(arena_inventory, account)
+                    arena_inventory.replace_all(game.id, entries)
+            except Exception as e:
+                logger.error(f"Arena import failed: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': f'The import failed and nothing was changed: {e}'}), 500
         if decks is not None:
             try:
                 deck_store.replace_arena_decks(game.id, new_decks)
             except Exception as e:
                 logger.error(f"Arena import: the decks failed: {e}", exc_info=True)
+                if collection is None:
+                    return jsonify({'success': False, 'error': f'The decks were not imported, and nothing was changed: {e}'}), 500
                 deck_error = f'The collection was imported, but the decks were not: {e}'
     result = arena_summary(game)
-    logger.info(f"Arena import: {result['cards']} cards in {result['entries']} entries "
-                f"({summary['by_printing']} by set and number, {summary['by_name']} by name, "
-                f"{summary['rebalanced']} rebalanced skipped, {len(summary['unknown'])} unknown)"
+    logger.info('Arena import: '
+                + (f"{result['cards']} cards in {result['entries']} entries "
+                   f"({summary['by_printing']} by set and number, {summary['by_name']} by name, "
+                   f"{summary['rebalanced']} rebalanced skipped, {len(summary['unknown'])} unknown)" if collection is not None
+                   else 'the collection left as it is')
                 + (f", {len(new_decks)} decks" if decks is not None and not deck_error else ''))
     socketio.emit('arena_updated')   # an open collection page or deck page shows the new state
-    return jsonify({'success': True, 'arena': result,
+    # collection: whether the cards were replaced; decks: how many came in (None: no deck file)
+    return jsonify({'success': True, 'arena': result, 'collection': collection is not None,
                     'decks': None if decks is None else len(new_decks), 'deck_unknown': sorted(set(deck_unknown)),
                     'warning': deck_error})

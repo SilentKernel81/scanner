@@ -1718,7 +1718,12 @@ does not have.
 (`data/arena_inventory.db`, the same tables once more), holds what the user has in Arena.
 Arena gives no list of that; a third-party exporter writes one while the game runs, and
 the collection page's **Arena** view uploads its files (`POST /api/arena/import`,
-`server/arena_api.py`): `mtga_collection.json`, and optionally `mtga_decks.json`.
+`server/arena_api.py`): `mtga_collection.json`, `mtga_decks.json`, or both - each replaces
+its own part (the cards; the decks Arena brought) and leaves the other. The cards are
+stored **without a price** and the Arena view shows none (`priceText`; no value in the
+summary or the statistics): what a paper printing costs says nothing about a digital card.
+The filters the view hides - price, location, tag - are not applied there either
+(`applyFilters`), or a minimum price remembered from the paper view would empty the list.
 `core/arena.py` reads them (`read_collection`, `read_decks`; anything else is refused -
 `NotAnExport`) and finds each entry's card (`find_card`, `resolve`): by Arena's set and
 collector number **only when the card there has the entry's name** (fronts compared),
@@ -1758,16 +1763,25 @@ made here to a deck that came from Arena lasts until the next import with a deck
 The deck list filters All | Physical | Arena (`decks.js`: `deckKindShown`); New deck asks
 for the kind. Arena's formats were added for these decks (Historic, Timeless, Alchemy,
 Brawl, Standard Brawl - keys of Scryfall's legalities like the others) and any deck can
-have them. **The Arena window of any deck** now also answers "can you build it in
+have them. **"What can I build?"** has the same choice, Build from Physical | Arena
+(`decks.js`: `buildKind`, `showBuildKind`): it decides whose cards "Build around a card"
+lists (`/api/cards/search?kind=arena`), which collection the two rankings count as owned
+(`collection` in the body of `POST /api/decks/ideas/<commanders|card>`, echoed in the
+state so results of the other collection are not shown), and the kind of a deck started
+there - from a commander of the Arena collection as a Brawl deck. The ranking of
+preconstructed decks stays with the paper cards. **The Arena window of any deck** now also answers "can you build it in
 Arena?" (`arena_check`, `check` in `GET /api/decks/<id>/arena`; `decks.js`:
 `arenaCheckHtml`): copies already in the Arena collection, the cards to craft and their
 wildcards beside the ones the account has, and how many copies are of cards Arena does
 not have. **Measured** (test servers, copies of the laptop's data, the user's export):
 3,061 cards in 1,946 entries, the exporter's own totals, the same count for every card
-name; three decks in, fully owned; `scripts/check_arena_pages.py` 30 of 30 (on copied
+name; three decks in, fully owned; each file imported alone; `scripts/check_arena_pages.py` 32 of 32 (on copied
 data only: it imports, and makes and deletes a deck). **Not tried**: a sideboard or a
 commander in the exporter's deck file, another version of the exporter, the wildcard
-counts against Arena, the upload dialog in a real browser.
+counts against Arena; of "What can I build?" for Arena, the results of the two rankings
+(they ask EDHREC and Archidekt - only that they start for the right collection). The
+user looked at the pages and imported through the page's button in a real browser
+(2026-10-13, a preview server on copied data).
 
 **A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
 that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of

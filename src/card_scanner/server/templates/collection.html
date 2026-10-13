@@ -10,7 +10,7 @@
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=24">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=25">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -25,7 +25,7 @@
             <div class="callout arena-bar" id="arena-bar" hidden>
                 <span id="arena-text"></span>
                 <span class="spacer"></span>
-                <button class="btn btn-small btn-primary" id="arena-import" title="Choose the Arena exporter's mtga_collection.json - and mtga_decks.json with it, to bring your Arena decks along. Everything the last import brought is replaced.">Import from Arena</button>
+                <button class="btn btn-small btn-primary" id="arena-import" title="Choose the Arena exporter's mtga_collection.json (your cards) and mtga_decks.json (your Arena decks) - both at once, or one at a time. What the last import brought of each is replaced.">Import from Arena</button>
                 <input type="file" id="arena-file-input" accept=".json,application/json" multiple style="display: none;">
             </div>
             <div class="callout" id="scanned-notice" hidden>
@@ -197,6 +197,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=42"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=45"></script>
 </body>
 </html>

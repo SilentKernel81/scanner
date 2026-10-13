@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=6">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -63,6 +63,15 @@
 
             <!-- What can I build?: from one of your cards, or from the commanders you own -->
             <section class="deck-tab" id="deck-tab-build" hidden>
+                <!-- From which collection: the cards on the shelf, or what the user has in MTG Arena
+                     (decks.js: buildKind). Hidden for a game without a digital collection -->
+                <div class="filter-row build-kind" id="build-kind-row" hidden>
+                    <span class="hint">Build from</span>
+                    <div class="segmented" id="build-kind">
+                        <button data-kind="paper" class="is-active" title="Your paper cards: decks started here are Physical decks">Physical</button>
+                        <button data-kind="arena" title="Your MTG Arena collection: decks started here are Arena decks">Arena</button>
+                    </div>
+                </div>
                 <div class="ideas">
                 <div class="panel idea-panel idea-wide">
                     <div class="panel-header">
@@ -346,6 +355,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=5"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=6"></script>
 </body>
 </html>

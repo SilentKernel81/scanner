@@ -12,7 +12,7 @@ from card_scanner.core.recommendations import Unavailable
 from card_scanner.server.state import app, database, deck_store, inventory, recommend, scan_inventory, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import log_to_client
-from card_scanner.server.decks_api import deck_covers, deck_payload, get_deck_or_404
+from card_scanner.server.decks_api import collection_of, deck_covers, deck_payload, get_deck_or_404
 
 
 @app.route('/api/inventory/suggested')
@@ -208,10 +208,14 @@ deck_ideas_lock = threading.Lock()
 def run_deck_ideas(kind, game, state):
     """Fills state['items'] in a background thread; state['stop'] ends it early"""
     try:
-        owned = inventory.owned_by_name(game.id)
+        # Which collection the question is about: the cards on the shelf, or what the user
+        # has in MTG Arena (state['collection']: 'paper' | 'arena'; the precon ranking is
+        # always of paper - a preconstructed deck is a box of cards)
+        collection = collection_of(state.get('collection') if kind != 'precons' else 'paper')
+        owned = collection.owned_by_name(game.id)
         if kind == 'commanders':
             # Legendary creatures in the inventory, by how much of what is played with them is owned
-            legends = sorted({row['name'] for row in inventory.get_all_cards(game.id)
+            legends = sorted({row['name'] for row in collection.get_all_cards(game.id)
                               if 'Legendary' in row['type_line'] and 'Creature' in row['type_line']})
             cards = game.cards_by_names(legends)
             legends = [name for name in legends if cards.get(search_key(name))
@@ -285,6 +289,8 @@ def deck_ideas_state(kind):
       commanders  owned legendary creatures, by the share of their EDHREC cards that is owned
       precons     preconstructed decks (JSON: type - only that kind; none: all), by the share owned
       card        public decks that play a card (JSON: card, format), by the share owned
+    JSON collection: 'arena' counts "owned" in the digital collection (commanders, card);
+    the answer says which collection a run was for.
     POST starts a run - replacing one that is running (answers are cached, so a second run is
     quick); POST with {"stop": true} ends it, keeping what was found; GET returns its state.
     """
@@ -304,12 +310,13 @@ def deck_ideas_state(kind):
                 state['stop'] = True  # the run it replaces ends at its next step
             state = deck_ideas[kind] = {'running': True, 'stop': False, 'done': 0, 'total': 0, 'items': [],
                                         'error': None, 'card': data.get('card'), 'format': data.get('format'),
-                                        'type': str(data.get('type') or '')}
+                                        'type': str(data.get('type') or ''),
+                                        'collection': 'arena' if data.get('collection') == 'arena' else 'paper'}
             threading.Thread(target=run_deck_ideas, args=(kind, game, state), daemon=True).start()
     if not state:
         return jsonify({'success': True, 'started': False, 'running': False, 'items': []})
     order = 'fit' if kind == 'commanders' else 'percent'
     return jsonify({'success': True, 'started': True, 'running': state['running'], 'done': state['done'],
                     'total': state['total'], 'error': state['error'], 'stopped': state['stop'],
-                    'card': state['card'], 'format': state['format'],
+                    'card': state['card'], 'format': state['format'], 'collection': state.get('collection', 'paper'),
                     'items': sorted(list(state['items']), key=lambda item: item[order], reverse=True)})

@@ -33,8 +33,22 @@ body.arena-view #batch-remove,
 body.arena-view #filter-location,
 body.arena-view #filter-tag,
 body.arena-view #filter-spare-label,
+body.arena-view .price-range,
+body.arena-view #inventory-sort option[value^="price"],
+body.arena-view #inventory-sort option[value="value_desc"],
 body.arena-view .tab[data-tab="trades"] {
     display: none !important;
+}
+
+/* A row without its checkbox: one column less, or every part moves one place to the left
+   (the name into the picture's narrow column, where it wrapped letter by letter) */
+body.arena-view .collection-list .inventory-card {
+    grid-template-columns: 72px 1fr auto auto;
+}
+
+/* The picture on the left opens nothing in Arena view (no captures): no zoom pointer */
+body.arena-view .inventory-thumb {
+    cursor: default;
 }
 
 .arena-bar {
