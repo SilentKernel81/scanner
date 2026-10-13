@@ -14,8 +14,8 @@ collection.
 
 | Program | Where it runs | Entry point |
 |---|---|---|
-| Server (Flask + Socket.IO web app; collection, decks, OCR, AI) | One machine, normally the Docker image (target `server`) | `app.py` (a launcher; the server is the package `server/`) |
-| Camera station (camera, detection, auto-capture, focus) | Each machine with a USB webcam - PC, laptop, Raspberry Pi; Docker image (target `client`) or a venv | `station_client.py` |
+| Server (Flask + Socket.IO web app; collection, decks, OCR, AI) | One machine, normally the Docker image (target `server`) | `app.py` (a launcher; the server is the package `src/server/`) |
+| Camera station (camera, detection, auto-capture, focus) | Each machine with a USB webcam - PC, laptop, Raspberry Pi; Docker image (target `client`) or a venv | `src/station_client.py` |
 | Android app, in client mode a station too | A phone | its own repository, [SilentKernel81/mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android) (checked out beside this one, `../mtg-scanner-android`) |
 
 The Android app is a Kotlin port of detection and auto-capture (and, standalone, of AI,
@@ -44,12 +44,12 @@ User docs: [README.md](README.md); installation: [docs/INSTALL.md](docs/INSTALL.
 docker compose up -d --build                                                   # data/ and scanned_cards/ are volumes
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build   # ... with OCR on an NVIDIA GPU
 venv/bin/python app.py                    # without Docker (the server never opens a camera)
-venv/bin/python setup_database.py         # (re)download the Scryfall card database
-venv/bin/python cleanup.py --stats        # capture images; --days N / --dry-run / --all
+venv/bin/python src/setup_database.py     # (re)download the Scryfall card database
+venv/bin/python src/cleanup.py --stats    # capture images; --days N / --dry-run / --all
 
 # camera station, on the machine the webcam is plugged into
 docker compose -f deploy/docker-compose.client.yml up -d --build         # SCANNER_SERVER in .env
-venv/bin/python station_client.py --server http://<server>:5000   # without Docker (requirements-client.txt)
+venv/bin/python src/station_client.py --server http://<server>:5000   # without Docker (requirements-client.txt)
 
 # tests
 venv/bin/python -m unittest discover tests
@@ -60,7 +60,7 @@ venv/bin/python -m unittest discover tests
 ```
 
 Dependencies: `requirements.txt` (server, ~300 MB, Python 3.10+; the OCR reader also needs
-Node.js 22+ and `npm install` in `ocr/`), `requirements-client.txt` (station). The dev venv on
+Node.js 22+ and `npm install` in `src/ocr/`), `requirements-client.txt` (station). The dev venv on
 this machine is Python 3.12 and has both.
 
 **Testing.** `tests/test_ownership.py` covers which station scanned what (splits, merges,
@@ -82,6 +82,12 @@ use copies of the databases in a temporary folder - as the tests do, also inside
 container - or a second container with its own data folder and port.
 
 ## Where Things Live
+
+**All the code is in `src/`** (since 2026-10-12): every module named below, `server/` and
+`games/`, the server's pages (`src/server/templates/`, `src/server/static/` - written
+`templates/...` and `static/...` below) and the OCR reader (`src/ocr/`). The top folder has
+one Python file, `app.py`, plus `config.yaml`, `.env` and the data (`data/`, `scanned_cards/`,
+`station_captures/`). Module names are written bare (`inventory.py` is `src/inventory.py`).
 
 | Area | Code |
 |---|---|
@@ -140,8 +146,19 @@ container - or a second container with its own data folder and port.
   real objects are attributes of `services`, set by `initialize_components`. `if inventory:`
   works, `inventory is None` never does; assign only through `services.x = ...`; values
   that change (`debug_mode_running`, `daily_backup_status`, `default_desk`) are always
-  written and read as `services.x`. Paths are built from `server.ROOT` (the top folder),
-  never from `__file__` - that is `server/` now.
+  written and read as `services.x`.
+- **Paths come from `paths.py`, never from `__file__`.** `paths.TOP` is the top folder: data,
+  `config.yaml`, `.env` (`Config.BASE_DIR` and `server.ROOT` are that folder). `paths.SRC` is
+  the code: use it for what belongs to the code (the pages, `ocr/`). A path built from a
+  file's own location means another folder as soon as the file moves - and a server whose
+  data folder is a new, empty one starts without complaint. `tests/test_paths.py` checks
+  every such path; a new one belongs in it.
+- **Only `app.py` in the top folder, and `src/` first on Python's path.** `app.py` puts it
+  there, the images and the scripts set `PYTHONPATH`, tests and `scripts/*.py` have their
+  own first line; `server/__init__.py` must not touch the path. A Python file in the top
+  folder would be imported ahead of the one in `src/` by `python -c` run from there (the
+  scripts do that) - the test refuses it. The project is not pip-installed (see
+  `pyproject.toml` for why); `requirements*.txt` are the lists of libraries.
 - **Changing the server without changing what it does** (moving code, renaming inside):
   `scripts/walk_server.py` records what a server answers - run it before and after on fresh
   copies of the data (never real data) and `--compare`.
@@ -152,7 +169,9 @@ container - or a second container with its own data folder and port.
   Don't add a "local camera" branch back to the server. The client must not import server
   modules (`database`, `inventory`, `identification`, Flask), and its images copy a fixed list
   of files: a new module it imports must be added to the `COPY` lines of the `client` and
-  `client-pi` targets.
+  `client-pi` targets (both lists, kept equal; `paths.py` is in them). After building an
+  image, `docker run --rm --entrypoint python <image> -c "import station_client"` shows a
+  missing one at once.
 - **The station's setup page** (`station_setup.py`, port 8080) only holds what a station needs
   before it can reach the server: the server's address, its id / name / token, the camera, a
   Pi camera's crop. Everything about scanning stays on the server (`CAMERA_SETTINGS`). A value
@@ -247,8 +266,11 @@ container - or a second container with its own data folder and port.
   with `docker compose ... config` before and after touching them (a wrong path there would
   start the server on an empty `deploy/data`). Compose reads `.env` for `${...}` from beside
   the compose file, hence the link `deploy/.env` → `../.env`; deploying with rsync must copy
-  links as links (`-l`). The image's build context is still the top folder, so `COPY` paths
-  in the Dockerfile and `.dockerignore` are unchanged.
+  links as links (`-l`). The image's build context is the top folder, and the images are laid
+  out like the project (`/app/src`, `/app/config.yaml`, `/app/data`): `COPY` paths and
+  `.dockerignore` are written from the top folder (`src/ocr/node_modules/` is ignored - the
+  image builds its own). **rsync does not delete**: a file that is moved or removed in the
+  repository stays on a machine deployed that way until it is deleted there.
 - **Docker images.** light-ocr's native library needs glibc 2.38+ (Debian 13 base images - on
   Debian 12 OCR silently fails to start), and NVIDIA's Vulkan driver needs the X11 / GLVND
   libraries plus `NVIDIA_DRIVER_CAPABILITIES=all`, or OCR falls back to the CPU. After changing

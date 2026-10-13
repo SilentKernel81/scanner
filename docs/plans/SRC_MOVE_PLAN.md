@@ -2,6 +2,9 @@
 
 Date: 2026-10-12
 
+**The move itself was done the same day** (phases 0, 1 and 3; a real station and the machines
+are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+
 A plan for the last step of the folder reorganisation: the Python code out of the top folder
 into `src/`, and a `pyproject.toml`. Nothing here is implemented. The numbers below were
 counted at commit 71df153; the design is argued from the code as it is, and none of it has
@@ -391,3 +394,46 @@ changed in code (an estimate), 8 path lines in tests, the Dockerfile's four stag
 `.dockerignore`, three scripts and one unit, plus two new small files and one new test; then
 the documents of two repositories and four machines to update. Smaller than the split in
 code, larger in machines: the split touched only the server, this rebuilds every station.
+## How it went (2026-10-12)
+
+Phases 0, 1 and 3 are done, on the branch `src-move`. **Not done: phase 2 (a real station on
+the moved code) and phase 4 (the machines).** Until phase 4 every machine runs the code from
+before the move.
+
+Done as planned, with these differences:
+
+- **`server.ROOT` stayed a name** (it is `paths.TOP`): `server/logs.py` uses it, and now takes
+  it from `server` instead of `server.state`, which no longer needs it.
+- **`Config.BASE_DIR`'s import of `Path` went** with the line that used it - the one edit that
+  is not a path.
+- **A station copied by hand into one flat folder no longer starts**: the code looks for
+  `config.yaml` in the folder above its own. The plan had not seen that case; INSTALL.md
+  described it for a Pi without Docker and now describes the two-folder layout.
+- **`deploy.sh` also takes the OCR reader's installed packages along** from `ocr/` to
+  `src/ocr/` instead of downloading 128 MB again.
+
+Checked, on the laptop:
+
+| | |
+|---|---|
+| All tests | 189 pass, none skipped: the top folder holds no Python file but `app.py` |
+| Undefined names (pyflakes on `src/`, `tests/`, `scripts/`) | none |
+| Renames | 70 files, by `git mv`; 16 files edited, 2 new (`src/paths.py`, `pyproject.toml`) |
+| The recorded walk, 73 steps with a card's picture | a server from the commit before and one from the moved tree, twice each, on one fresh copy of the test data: four identical recordings |
+| ... against the server **image** built from the moved tree, on a copy of the data | the same recording; `light-ocr ready (cpu)`, the card read by `light-ocr` |
+| Inside that image | `config` from `/app/src`, data in `/app/data`, pages in `/app/src/server`, the OCR reader installed in `/app/src/ocr`, no `.py` in `/app` but `app.py` |
+| `docker compose config`, four combinations and `compose.yaml` | identical to before the move |
+| The three pages in headless Chromium | no script error, every file of the server's found (the one 404 is `/favicon.ico`, which the project never had) |
+| The station **image** (`client`) against a local server | connected ("No camera": none was given to it), restarted from its setup page - the same container, its own command line run again - and connected again |
+| `scripts/start.sh --no-station` on a copy | the server came up on the copy's data |
+
+Not checked:
+
+- **the `client-pi` image** - it builds only on a Pi - and any station with a real camera;
+- **`scripts/deploy.sh`**, neither a fresh installation nor `--update` on a machine with the
+  services installed; `bash -n` only;
+- **a server with a GPU**: the laptop has none, so OCR ran on the CPU there;
+- other people's checkouts (INSTALL.md says what changes for them).
+
+Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` are not
+marked executable in Git, though the documents run them as `./scripts/start.sh`.

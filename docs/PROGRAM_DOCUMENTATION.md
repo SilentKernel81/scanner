@@ -80,6 +80,12 @@ Everything below about detection, auto-capture and focus is `CardScanner`, which
 
 ### Modules
 
+All the code is in `src/`: the modules below, the server's pages (`src/server/templates/`,
+`src/server/static/` - written `templates/...` and `static/...` in this document) and the OCR
+reader (`src/ocr/`). The top folder holds `app.py`, `config.yaml` and the data (`data/`,
+`scanned_cards/`, `station_captures/`); `paths.py` says where the two folders are (`TOP`,
+`SRC`), and nothing else builds a path from where its own file lies.
+
 | Module | Runs in | Responsibility |
 |---|---|---|
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
@@ -955,9 +961,9 @@ number pattern is strict on purpose: with a looser one, a `202米` read from a m
 above the collector line matched another printing of the same card. What OCR doesn't confirm
 is mostly a collector line too soft to read, which the AI still manages.
 
-The reader is `ocr/server.mjs`, started by `CardOcr` when the app starts (the models take
+The reader is `src/ocr/server.mjs`, started by `CardOcr` when the app starts (the models take
 1-2 s to load) and restarted after a failure (at most once a minute); its errors go to
-`data/logs/ocr.log`. It needs Node.js 22+ and `npm install` in `ocr/` (the server's Docker image
+`data/logs/ocr.log`. It needs Node.js 22+ and `npm install` in `src/ocr/` (the server's Docker image
 has both; `deploy.sh` does it for an installation without Docker); without them the switch is
 disabled and cards go to the AI. Its native library needs glibc 2.38 or newer, and on an NVIDIA
 GPU inside a container the Vulkan driver's X11 / GLVND libraries (see INSTALL.md). `ocr.provider` in `config.yaml`
