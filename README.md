@@ -261,8 +261,9 @@ a phone too; the deck pages are made for a screen with a pointer.
   whether you could **build the deck in Arena**: how many of its cards your Arena
   collection has, which you would craft and what that costs in wildcards.
 - **Your MTG Arena collection** (Magic) - the collection page has a switch **Physical |
-  Arena**. Arena shows what you have in the digital game: run an Arena collection exporter
-  (a separate, third-party tool that reads the game while it runs), then **Import from
+  Arena**. Arena shows what you have in the digital game: run
+  [mtga-export](https://github.com/SilentKernel81/mtga-export) (a separate program by the
+  same author, for Linux with Steam / Proton, that reads the game while it runs), then **Import from
   Arena** with its `mtga_collection.json` (your cards) and `mtga_decks.json` (your Arena
   decks) - both at once or one at a time. Each import replaces the one before, Arena cards
   have no price, and the list cannot be changed here: Arena
@@ -561,10 +562,23 @@ copyright notice is kept.
 ## Acknowledgments
 
 - Card data, prices and images: [Scryfall](https://scryfall.com)
+- Deck ideas and deck lists: [EDHREC](https://edhrec.com) (cards played with a commander),
+  [MTGJSON](https://mtgjson.com) (preconstructed decks), [Archidekt](https://archidekt.com)
+  and [Moxfield](https://moxfield.com) (public decks, and decks imported by their address)
 - Text recognition: [light-ocr](https://github.com/arcships/light-ocr)
 - Computer vision: [OpenCV](https://opencv.org)
 - Web: [Flask](https://flask.palletsprojects.com) and
   [Flask-SocketIO](https://flask-socketio.readthedocs.io)
+- Shipped with the pages, each with its licence beside it: the
+  [Socket.IO](https://socket.io) client (MIT, `static/js/vendor/`) and the
+  [Roboto](https://fonts.google.com/specimen/Roboto) font (SIL Open Font License,
+  `static/fonts/`)
+- The MTG Arena collection is read from the files of
+  [mtga-export](https://github.com/SilentKernel81/mtga-export), the same author's exporter;
+  none of its code is in this repository
+
+No code from another project was copied into this one; the libraries above are installed
+as dependencies (`requirements*.txt`, `src/ocr/package.json`).
 
 This is an unofficial fan project, not affiliated with or endorsed by Wizards of the Coast.
 Magic: The Gathering is a trademark of Wizards of the Coast LLC.

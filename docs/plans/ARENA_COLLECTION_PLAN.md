@@ -13,7 +13,8 @@ said otherwise it has been rewritten, and *Decided by the user* says which parts
 
 ## What there is to work with
 
-**The export** (a third-party exporter that reads Arena's data while it runs; the user ran
+**The export** (the user's own exporter, [mtga-export](https://github.com/SilentKernel81/mtga-export) -
+first described here as third-party, which it is not - that reads Arena's data while it runs; the user ran
 it, its files lay in `~/Work/mtga_collection_export/`). The one that matters is
 `mtga_collection.json`:
 
