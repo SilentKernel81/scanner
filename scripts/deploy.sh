@@ -214,10 +214,15 @@ if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
         && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; then
     # The reader moved from ocr/ to src/ocr/ (2026-10-12). An update leaves the packages
     # installed before that in the old folder: they are taken along instead of being
-    # downloaded again (over 100 MB), and the emptied folder goes
-    if [ -d ocr/node_modules ] && [ ! -e src/ocr/node_modules ]; then
-        mv ocr/node_modules src/ocr/node_modules
-        rmdir ocr 2>/dev/null || true
+    # downloaded again (over 100 MB). What else is left of the old folder goes with it: a
+    # package-lock.json, which the script from before the move wrote there when it ran
+    # `npm install` in the folder the update had just emptied (tried on 2026-10-12)
+    if [ -d ocr ] && [ ! -f ocr/package.json ]; then
+        if [ -d ocr/node_modules ] && [ ! -e src/ocr/node_modules ]; then
+            mv ocr/node_modules src/ocr/node_modules
+        fi
+        rm -f ocr/package-lock.json
+        rmdir ocr 2>/dev/null || true   # stays if anything else is in it: not ours to delete
     fi
     if (cd src/ocr && npm install --no-audit --no-fund --silent); then
         ok "light-ocr installed (Settings > Read with OCR first)"
