@@ -260,10 +260,15 @@ they are and are used as before, and `python app.py` still starts the server. Wh
 - with Docker: nothing but a rebuild (`up -d --build`), of the server and of each station;
 - a station without Docker is started as `python src/station_client.py ...`, the card data
   is downloaded with `python src/setup_database.py`;
-- an installation made with `scripts/deploy.sh`: run `./scripts/deploy.sh --update`. It
-  writes the two services again (the station's names the new file) and takes the OCR
-  reader's installed packages along to `src/ocr/`. This path of the script was read, not
-  tried on an installed machine;
+- an installation made with `scripts/deploy.sh`: run `./scripts/deploy.sh --update` **and
+  then `./scripts/deploy.sh` once more**. The update that crosses this change is still
+  carried out by the old script - it was already running when `git pull` replaced it - and
+  the old script restarts the station's service on a file that has moved and looks for the
+  OCR reader in the old folder. The second run is the new script: it writes the two
+  services again (the station's names the new file) and takes the OCR reader's installed
+  packages along to `src/ocr/`. Until it has run, the station's service does not start and
+  cards are read by the vision AI only. Read in the script, not tried on an installed
+  machine;
 - a station whose files were copied by hand into one folder no longer starts that way: the
   code looks for `config.yaml` in the folder *above* its own - lay it out as described under
   the Pi camera above;

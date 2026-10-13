@@ -147,7 +147,8 @@ one Python file, `app.py`, plus `config.yaml`, `.env` and the data (`data/`, `sc
   works, `inventory is None` never does; assign only through `services.x = ...`; values
   that change (`debug_mode_running`, `daily_backup_status`, `default_desk`) are always
   written and read as `services.x`.
-- **Paths come from `paths.py`, never from `__file__`.** `paths.TOP` is the top folder: data,
+- **Paths come from `paths.py`, not from `__file__`** (the one exception: a file that names
+  another lying beside it, as `station_setup.py` does its page). `paths.TOP` is the top folder: data,
   `config.yaml`, `.env` (`Config.BASE_DIR` and `server.ROOT` are that folder). `paths.SRC` is
   the code: use it for what belongs to the code (the pages, `ocr/`). A path built from a
   file's own location means another folder as soon as the file moves - and a server whose
