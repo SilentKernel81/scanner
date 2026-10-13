@@ -1746,7 +1746,12 @@ to find them again - filter by that location to move or delete them. Undo does n
 
 ## Web interface
 
-Three pages, all served by the server (`server/pages.py`), with one header (`templates/_topbar.html`):
+Three pages, all served by the server (`server/pages.py`), with one header (`templates/_topbar.html`)
+and one icon in the browser's tab (`templates/_favicon.html`: `static/favicon.svg`, and
+`static/favicon.ico` for browsers that want that - a card's outline, white on the brand
+colour, like the header's mark; `/favicon.ico` answers with the same file, for a browser
+that opens an address which is not a page). The station's own setup page carries the same
+drawing inside its one file:
 
 | Page | Template, script | What it is |
 |---|---|---|

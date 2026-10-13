@@ -422,6 +422,13 @@
    "collection"
   ],
   [
+   "/favicon.ico",
+   [
+    "GET"
+   ],
+   "favicon"
+  ],
+  [
    "/review_images/<path:name>",
    [
     "GET"

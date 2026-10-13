@@ -62,10 +62,11 @@ class WhatBelongsToTheCode(unittest.TestCase):
         from card_scanner.server.state import app
         # template_folder is given relative to the app's root_path; static_folder is absolute
         templates = Path(app.root_path) / app.template_folder
-        for page in ('stations.html', 'scanner.html', 'collection.html', '_topbar.html'):
+        for page in ('stations.html', 'scanner.html', 'collection.html', '_topbar.html', '_favicon.html'):
             self.assertTrue((templates / page).is_file(), f"{page} is not in {templates}")
         static = Path(app.static_folder)
-        for name in ('js/scanner.js', 'js/common.js', 'css/style.css', 'fonts/roboto-latin.woff2'):
+        for name in ('js/scanner.js', 'js/common.js', 'css/style.css', 'fonts/roboto-latin.woff2',
+                     'favicon.ico', 'favicon.svg'):
             self.assertTrue((static / name).is_file(), f"{name} is not in {static}")
         # The pages load Socket.IO's client from here, never from a CDN (its version is in its name)
         self.assertTrue(list((static / 'js' / 'vendor').glob('socket.io-*.min.js')),
