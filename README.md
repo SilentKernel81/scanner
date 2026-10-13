@@ -221,7 +221,8 @@ narrowed to one camera it shows that camera's copies and can't be edited from th
 ### Collection page
 
 **Collection** in the top bar (`http://<server>:5000/collection`) is the place to manage your
-cards and to build decks. It works on a phone too.
+cards; **Decks** beside it (`/decks`) the place to build decks. The collection page works on
+a phone too; the deck pages are made for a screen with a pointer.
 
 - **Inventory** - filter by name, color identity, type, rarity, set, finish, location, tag and
   price (in the search field, `set:HOB` finds that set only - not every card with "hob" in its
@@ -247,8 +248,11 @@ cards and to build decks. It works on a phone too.
   and printing, which **Import** reads back exactly as it was (the Android app writes the same
   file). **Import** also takes a Moxfield collection CSV - each row is matched to its printing
   by set code and collector number (by name when that fails, which is reported).
-- **Decks** (Magic) - Commander, Standard, Pioneer, Modern, Legacy, Vintage and Pauper. Search
-  the whole card database and click to add. Every card shows whether you own it, are missing
+- **Decks** (Magic; pages of their own, `/decks`) - Commander, Standard, Pioneer, Modern,
+  Legacy, Vintage and Pauper. The list shows each deck by its commander's picture; a deck
+  has an address (`/decks/<id>`) and two views - **Columns**, the decklist as text, and
+  **Stacks**, the cards themselves - grouped by type, cost or colour. **Add cards** opens a
+  panel that searches the whole card database: click to add. Every card shows whether you own it, are missing
   it, or need it in another deck too; the deck shows what is not legal or unfinished, its mana
   curve, its price and what completing it costs, and **Buy list** downloads the missing cards.
   A deck is only a list: it never changes the inventory. Import a pasted decklist or a
@@ -459,7 +463,7 @@ those to one camera.
 
 | Endpoint | Description |
 |---|---|
-| `GET /`, `GET /scan/<id>`, `GET /collection` | The cameras; a camera's scanner page; the collection |
+| `GET /`, `GET /scan/<id>`, `GET /collection`, `GET /decks`, `GET /decks/<id>` | The cameras; a camera's scanner page; the collection; the deck list; one deck |
 | `GET /video_feed?station=<id>` | MJPEG stream of a camera's annotated view |
 | `GET /api/detection_status?station=<id>` | Whether a card is detected and how stable it is, or why there is no camera |
 | `GET /api/stats` | Card data, scanned cards, collection and review counts |
@@ -486,7 +490,7 @@ those to one camera.
 | `GET /api/backups/<id>/download`, `POST /api/backups/upload` | A backup as a zip file, to keep elsewhere; add such a file to the list again (multipart `file`; nothing is restored by it) |
 | `POST /api/backups/<id>/restore`, `DELETE /api/backups/<id>` | Put the collection, scanned cards and decks back as in a backup (the current state is backed up first); delete a backup |
 | `GET /api/cards/search`, `GET /api/cards/printings?name=` | Deck builder card search; every printing of a card with the copies owned |
-| `GET /api/decks`, `POST /api/decks` | List decks; create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
+| `GET /api/decks`, `POST /api/decks` | List decks (each with `commander_cards`: name, picture and colours of its commanders); create one (JSON: `name`, `format`, and optionally `text`, `url`, `precon`, `commander`) |
 | `GET` / `PUT` / `DELETE /api/decks/<id>` | A deck with card data, copies owned and issues; rename / change format; delete |
 | `POST /api/decks/<id>/cards`, `/import`, `/duplicate` | Change cards; add cards from a list or a deck address; copy a deck |
 | `GET /api/decks/<id>/export/<text\|buylist>` | Download the decklist, or the cards not owned |

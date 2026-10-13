@@ -2,6 +2,9 @@
 
 Date: 2026-10-13
 
+**Built the same day** (not deployed) - see *How it went* at the end. What follows is the plan
+as it was written.
+
 A plan for taking the decks out of the collection page and giving them a new layout. Nothing
 here is implemented. The layout was chosen by the user from four static mockups
 (`docs/plans/deck_mockups/`, not in Git): **A, "Columns"**, with **C, "Stacks"**, as a second
@@ -261,3 +264,51 @@ One commit each.
 About 880 lines of script and 510 of CSS moved (the stylesheet's Decks section, lines 550-1063), perhaps half of the script's rendering
 rewritten; two templates; two routes. Larger than it looks in the mockups, because the
 mockups show about a dozen of the 50 things.
+
+## How it went (2026-10-13)
+
+Built on the branch `decks-page`, in two commits: the move (1475877), then the redesign
+(bee4924). **Not deployed**; the real server still has the decks as a tab of the collection
+page.
+
+Differently from the plan:
+
+- **One page for both addresses**, not two templates: `decks.html` holds the list and the
+  deck, and `decks.js` shows the one the address says. Opening a deck from the list, and
+  going back, then needs no new page load - and the code that was moved kept working as it
+  was. `?tab=` and `?view=` are not in the address: the tab, the view and the grouping are
+  remembered in the browser instead.
+- **The deck list's answer gained a field**, `commander_cards` (name, picture, colours).
+  The plan said no `/api/` answer would change; the tiles need the pictures, and one
+  answer with them is better than a request per deck. Nothing was taken away or renamed.
+- **The checklist script was written with the move**, not before it, and so was not seen
+  to pass on the old tab first. It was seen to *fail* by accident instead: run against a
+  server that did not have the new files yet, it reported the deck list empty.
+- **`decks.css` has only the new rules.** The plan moved the stylesheet's whole Decks
+  section; the collection page turned out to use some of those rules for other things
+  (its backup list borrows the idea rows), so they stay in `collection.css`, which the
+  deck pages load too.
+- **The header shows "Decks" on every page**; only the collection and deck pages hide it
+  for a game without deck formats (there is one game today, and it has them).
+- Phases 2, 3 and 4 are one commit.
+
+Checked, on the laptop, against a server on copied data:
+
+| | |
+|---|---|
+| `scripts/check_deck_pages.py`, headless Chromium | 54 checks, all passing: the list (tiles, filter, sort, tabs), a deck made from a pasted list with an unknown card reported, copies, moves, printings, both views and the three groupings, the panel, the menu, search and add, rename, format, import, the two exports, the addresses (reload, Back, a deck that is gone), duplicate, delete - and the collection page that was cut: its three tabs, the location filter, the settings drawer, "New deck..." from a selection |
+| The recorded walk, `main` against the branch | 70 steps, 2 different: `GET /decks` exists, and `GET /api/decks` has the new field |
+| All tests; the route list recorded again | pass; two routes more (`/decks`, `/decks/<id>`) |
+| Screenshots of the list, both views, the groupings, the panel, and with the pointer on a row and on a stacked card | looked at beside the mockups (`docs/plans/deck_mockups/screenshots/new_*.png`) |
+
+Of the 50 things in the table above, the script tries those that need no other site.
+**Not tried**: what asks EDHREC, Archidekt, Moxfield or MTGJSON - suggestions and "start from
+the average deck", popular decks, "Find decks" around a card, "Commanders you own", the
+preconstructed decks (list, view, create, "I own it", ranking), a deck from another site's
+address - whose code was moved unchanged but not run; the notice about old card data and
+its update button; a deck with two commanders, without a commander, with missing or shared
+cards (the test decks are all owned); a game without deck formats; a real person using it.
+
+Still open: the fourth tab the user asked for ("to keep the build stuff we currently
+have") - which parts that means is to be asked; and the mockups folder, which is not in
+Git.

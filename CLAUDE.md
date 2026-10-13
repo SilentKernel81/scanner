@@ -126,7 +126,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Database connections, migrations, measurements | `storage.py`: `connect`, `rebuild`, `schema_migrations`; `scripts/benchmark_db.py` (on copies only) |
 | Decks, deck checks, decklist text | `decks.py`: `DeckManager`; `games/mtg_decks.py`: `DECK_FORMATS`, `check_deck`, `parse_decklist`; `server/decks_api.py`: `deck_payload`, `resolve_entries`; `database.py`: `search_cards`, `cards_by_names` |
 | Deck ideas from other sites (EDHREC, MTGJSON, Archidekt, Moxfield) | `recommendations.py`: `Recommendations` (`_get` cache + throttle, `Unavailable`); `server/decks_api.py`: `deck_suggestions`; `server/deck_ideas_api.py`: `popular_decks`, `run_deck_ideas` |
-| Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js`; shared: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html` |
+| Pages | `templates/stations.html` (the cameras), `scanner.html` + `static/js/scanner.js` (one camera: `STATION`, `suggestedFinish`, `displayCard`, `updateDetectionStatus`), `collection.html` + `collection.js` (inventory, trades, statistics, backups), `decks.html` + `decks.js` + `decks.css` (the deck list and one deck: `/decks`, `/decks/<id>`; `showWhatTheAddressSays`, `renderDeckList`, `renderDeck`, `showDeckView`, `deckGroups`, `showAdding`); shared by all: `common.js`, `_topbar.html`, `_dialogs.html`, `_icons.html`; shared by the collection and deck pages: `library.js`, `_value_dialog.html` |
 | **Camera station** | |
 | Connection, status, preview, commands, uploads | `station_client.py`: `Station` (`hello`, `report_loop`, `on_command`, `on_set`, `auto_captured`, `manual_capture`, `upload_loop`), `ServerSettings` |
 | The station's own setup page (server, name, camera, a Pi camera's crop) | `station_setup.py`: `resolve` (command line > environment > `data/station.json` > default), `apply_camera`, `checked`, `list_cameras`, `take_picture`, `SetupPage`; `station_setup.html`; `station_client.py`: `main` (setup mode, `request_restart`); `scanner.py`: `with_camera_released` |
@@ -373,6 +373,21 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   settings button stay in the same place on every page - only the `.topbar-page` part is a
   page's own; each page defines `openSettings()` and `inventoryChanged()`). `scanner.js` runs
   scanner-only code on load - never include it in another page.
+- **Three scripts, two kinds of sharing.** `common.js` is loaded by every page;
+  `library.js` only by the collection page and the deck pages (`$`, `api`, `money`,
+  `valueDialog`, the card preview...) - never by the scanner page, whose `scanner.js`
+  declares its own `$` and `socket`: the same name declared in two files stops a page from
+  loading at all. A helper both `collection.js` and `decks.js` need goes into `library.js`.
+- **The deck pages** are one template for two addresses (`/decks`, `/decks/<id>`): `decks.js`
+  shows what the address says and changes it with `history.pushState` when a deck is opened
+  or closed. Anything that opens or leaves a deck goes through `openDeck` / `closeDeck`, or
+  the address and the page disagree. The two views of a deck (Columns, Stacks) render the
+  same entries with the same buttons (`entryActionsHtml`: `data-change`, `data-move`,
+  `data-printing` on a `.deck-row`) - a new action is added there once. They are made for a
+  pointer (buttons and pictures appear on pointing); `scripts/check_deck_pages.py` tries
+  them in a headless browser - on a server with copied data, it creates and deletes decks.
+  The rules of the deck parts that were not redesigned are still in `collection.css`
+  (its "Decks" section), which the deck pages load before `decks.css`.
 - **The tab's icon** is said once, in `templates/_favicon.html` (included in each page's
   `<head>`): `static/favicon.svg` and `static/favicon.ico`, the same drawing - change both,
   and the copy written into `station_setup.html` as a `data:` address, and raise the `?v=`
