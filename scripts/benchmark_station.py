@@ -47,9 +47,9 @@ os.chdir(Path(__file__).resolve().parent.parent)
 import cv2  # noqa: E402
 import numpy  # noqa: E402
 
-import object_detector  # noqa: E402
-import station_setup  # noqa: E402
-from config import Config  # noqa: E402
+from card_scanner.station import object_detector  # noqa: E402
+from card_scanner.station import station_setup  # noqa: E402
+from card_scanner.config import Config  # noqa: E402
 
 
 class NoServer(dict):
@@ -145,7 +145,7 @@ def main():
     print(f"  {platform.node()}, {where}; Python {platform.python_version()}, OpenCV {cv2.__version__}, "
           f"NumPy {numpy.__version__}; {os.cpu_count()} cores; {temperature()} °C at the start")
 
-    from scanner import CardScanner  # opens the camera
+    from card_scanner.station.scanner import CardScanner  # opens the camera
     scanner = CardScanner(log_callback=lambda message, level="info": None,
                           settings=NoServer(camera_rotation=0))
     try:

@@ -22,11 +22,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # test_ownership: the temporary data
 
-import inventory as inv  # noqa: E402
-import pending as pending_store  # noqa: E402
-import review as review_store  # noqa: E402
-from config import Config  # noqa: E402
-from stations import Stations  # noqa: E402
+from card_scanner.core import inventory as inv  # noqa: E402
+from card_scanner.core import pending as pending_store  # noqa: E402
+from card_scanner.core import review as review_store  # noqa: E402
+from card_scanner.config import Config  # noqa: E402
+from card_scanner.core.stations import Stations  # noqa: E402
 from test_ownership import CARD, GAME, TemporaryData  # noqa: E402
 
 OTHER_CARD = dict(CARD, name='Other Card', number='2')
@@ -234,8 +234,8 @@ class SyncRoute(TemporaryData):
     def setUp(self):
         super().setUp()
         import app as launcher  # the server's routes (nothing is started, no database opened)
-        from server import desks as desks_module
-        from server import state
+        from card_scanner.server import desks as desks_module
+        from card_scanner.server import state
         self.state, self.desks = state, desks_module
         self.saved_review_dir = review_store.REVIEW_DIR
         review_store.REVIEW_DIR = self.tmp / 'review'
@@ -514,8 +514,8 @@ class SyncRoute(TemporaryData):
     def page(self, station=None):
         """A scanner page connected to the server: a station's, or the one that shows every station's review"""
         import app as launcher
-        import games
-        patcher = mock.patch('server.scan_events.start_price_update')   # no price look-up in the background
+        from card_scanner import games
+        patcher = mock.patch('card_scanner.server.scan_events.start_price_update')   # no price look-up in the background
         patcher.start()
         self.addCleanup(patcher.stop)
         # The game being scanned, as at start-up - with no card database behind it (the card
@@ -623,7 +623,7 @@ class SyncRoute(TemporaryData):
 
     def test_a_settled_answer_carries_the_identity(self):
         """The upload's answers (first, repeated, asked later) come from the outcome on record"""
-        from server.stations_api import capture_outcome_response
+        from card_scanner.server.stations_api import capture_outcome_response
         number, uid = self.scanned()
         import app as launcher
         with launcher.app.app_context():

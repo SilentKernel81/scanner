@@ -4,7 +4,7 @@
 #
 # Run it on the machine that runs the scanner (Raspberry Pi or any Linux PC). It sets up the
 # two programs a single machine needs: the server (app.py) and, for the camera plugged into
-# this machine, a camera station (src/station_client.py) that sends its cards to that server.
+# this machine, a camera station (station.py) that sends its cards to that server.
 #   ./scripts/deploy.sh                  # install / repair
 #   ./scripts/deploy.sh --service        # ... and run both as systemd services
 #   ./scripts/deploy.sh --update         # pull the latest code, update, restart
@@ -59,6 +59,7 @@ Options:
 EOF
 }
 
+ORIGINAL_ARGS=("$@")  # as given: an update starts the new script with the same ones
 while [ $# -gt 0 ]; do
     case "$1" in
         --service) INSTALL_SERVICE=1 ;;
@@ -76,7 +77,7 @@ done
 [ -z "$CAMERA_INDEX" ] || [[ "$CAMERA_INDEX" =~ ^[0-9]+$ ]] || die "--camera needs a number, e.g. --camera 2"
 
 cd "$DIR"
-# The code is in src/: for the `python -c "from config import ..."` lines of this script
+# The code is in src/: for the `python -c "from card_scanner.config import ..."` lines of this script
 export PYTHONPATH="$DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 [ -f app.py ] && [ -f requirements.txt ] || die "Run this script from the scanner project (scripts/deploy.sh)"
 [ "$(id -u)" -ne 0 ] || die "Run as your normal user, not root (sudo is used only where needed)"
@@ -108,14 +109,29 @@ if [ "$REMOVE_SERVICE" -eq 1 ]; then
 fi
 
 # ----------------------------------------------------------------------------
-if [ "$UPDATE" -eq 1 ]; then
+if [ "$UPDATE" -eq 1 ] && [ -n "${SCANNER_DEPLOY_PULLED:-}" ]; then
+    # This is the script the update just brought, started by the one from before (below)
+    step "Updating the code"
+    ok "Updated to $(git rev-parse --short HEAD) - carrying on with the new version of this script"
+elif [ "$UPDATE" -eq 1 ]; then
     step "Updating the code"
     [ -d .git ] || die "--update needs a git checkout (git clone the project)"
     before=$(git rev-parse --short HEAD)
     # --autostash keeps local edits (e.g. your camera index in config.yaml)
     git pull --ff-only --autostash || die "git pull failed - resolve it (git status) and run again"
     after=$(git rev-parse --short HEAD)
-    if [ "$before" = "$after" ]; then ok "Already up to date ($after)"; else ok "Updated $before -> $after"; fi
+    if [ "$before" = "$after" ]; then
+        ok "Already up to date ($after)"
+    else
+        ok "Updated $before -> $after"
+        # The pull replaced this very file, but the shell goes on running the copy it
+        # started with: the rest of an update would be done the old version's way - the
+        # services of before, the folders of before. Twice (2026-10-12, 2026-10-13) that
+        # left a station's service pointing at a file the update had moved, until the
+        # script was run a second time. So the new script takes over from here, with the
+        # same options; the mark keeps it from pulling again.
+        SCANNER_DEPLOY_PULLED=1 exec "$DIR/scripts/deploy.sh" "${ORIGINAL_ARGS[@]}"
+    fi
 fi
 
 # ----------------------------------------------------------------------------
@@ -304,14 +320,14 @@ step "Card database"
 
 DB="data/cards_database.db"
 if [ "$SKIP_DATABASE" -eq 1 ]; then
-    warn "Skipped - download it later with: venv/bin/python src/setup_database.py"
+    warn "Skipped - download it later with: venv/bin/python scripts/setup_database.py"
 elif [ -s "$DB" ] && [ "$REFRESH_CARDS" -eq 0 ]; then
     ok "Card database present ($(du -h "$DB" | cut -f1)) - refresh with --refresh-cards"
 else
     echo "  Downloading card data from Scryfall (a few minutes)..."
-    # src/setup_database.py asks before replacing an existing database
-    echo y | venv/bin/python src/setup_database.py | grep -E "Total cards|Error|✓ Database" | sed 's/^/  /' || true
-    [ -s "$DB" ] || die "Card database download failed - run: venv/bin/python src/setup_database.py"
+    # setup_database.py asks before replacing an existing database
+    echo y | venv/bin/python scripts/setup_database.py | grep -E "Total cards|Error|✓ Database" | sed 's/^/  /' || true
+    [ -s "$DB" ] || die "Card database download failed - run: venv/bin/python scripts/setup_database.py"
     ok "Card database ready"
 fi
 
@@ -322,7 +338,7 @@ fi
 # the server is installed and started. Asked of config.py, so both scripts and the programs
 # read the same value.
 wants_station() {
-    [ "$(venv/bin/python -c 'from config import Config; print(str(Config.CAMERA_TYPE).lower())' 2>/dev/null)" != "remote" ]
+    [ "$(venv/bin/python -c 'from card_scanner.config import Config; print(str(Config.CAMERA_TYPE).lower())' 2>/dev/null)" != "remote" ]
 }
 
 install_unit() {  # install_unit <name>: /etc/systemd/system/<name>.service from scripts/<name>.service
@@ -377,8 +393,8 @@ elif service_installed; then
         ok "${SERVICE_NAME} keeps running and uses the new card data"
     else
         # The units are written again at every update, not only restarted: what a unit runs
-        # can change with the code. When the code moved into src/ (2026-10-12) the station's
-        # command became src/station_client.py - a unit installed before that, only
+        # can change with the code. The station's command changed twice (src/station_client.py
+        # on 2026-10-12, station.py a day later) - a unit installed before that, only
         # restarted, would start a file that is no longer there.
         install_unit "$SERVICE_NAME"
         sudo_cmd systemctl daemon-reload
@@ -419,7 +435,7 @@ else
     echo "  Start it: cd ${DIR} && ./scripts/start.sh     (the server and this machine's camera)"
     echo "  or the two by hand, each in its own terminal:"
     echo "            venv/bin/python app.py"
-    echo "            venv/bin/python src/station_client.py --server http://localhost:${port}"
+    echo "            venv/bin/python station.py --server http://localhost:${port}"
     echo "  Or run both as services (start on boot): $0 --service"
 fi
 if wants_station; then

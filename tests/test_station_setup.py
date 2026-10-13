@@ -16,9 +16,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
-import station_login  # noqa: E402
-import station_setup  # noqa: E402
-from config import Config  # noqa: E402
+from card_scanner.station import station_login  # noqa: E402
+from card_scanner.station import station_setup  # noqa: E402
+from card_scanner.config import Config  # noqa: E402
 
 NO_ARGUMENTS = {'server': None, 'id': None, 'name': None, 'token': None}
 
@@ -156,7 +156,7 @@ class TheCameraInConfig(CleanEnvironment):
         with tempfile.TemporaryDirectory() as folder:
             link = Path(folder) / 'usb-Some_Camera-video-index0'
             link.symlink_to('/dev/video7')  # what /dev/v4l/by-id holds: links to /dev/videoN
-            from config import camera_index_or_none
+            from card_scanner.config import camera_index_or_none
             self.assertEqual(camera_index_or_none(str(link)), 7)
             link.unlink()
             self.assertIsNone(camera_index_or_none(str(link)))  # unplugged: no error

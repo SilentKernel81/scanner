@@ -9,8 +9,10 @@ station_captures/
 # Built inside the image
 venv/
 src/ocr/node_modules/
-__pycache__/
-*.pyc
+# ("**/": in every folder - a pattern without it only matches in the top folder, and the
+# station images copy src/card_scanner/station as a folder, the laptop's compiled files with it)
+**/__pycache__/
+**/*.pyc
 
 .git/
 .claude/

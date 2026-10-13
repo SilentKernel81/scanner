@@ -60,11 +60,11 @@ def with_index(conn, statement, name, label, call):
 
 def main(folder):
     folder = Path(folder)
-    import inventory as inv
+    from card_scanner.core import inventory as inv
     inv.CAPTURES_DIR = folder / 'captures'
-    from database import CardDatabase
-    from decks import DeckManager
-    from review import ReviewQueue
+    from card_scanner.core.database import CardDatabase
+    from card_scanner.core.decks import DeckManager
+    from card_scanner.core.review import ReviewQueue
 
     cards = CardDatabase(db_file=folder / 'cards_database.db')
     collection = inv.InventoryManager(db_file=folder / 'cards_database.db')

@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the c
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-import backups  # noqa: E402
-import inventory as inv  # noqa: E402
-from decks import DeckManager  # noqa: E402
+from card_scanner.core import backups  # noqa: E402
+from card_scanner.core import inventory as inv  # noqa: E402
+from card_scanner.core.decks import DeckManager  # noqa: E402
 
 GAME = 'mtg'
 CARD = {'card_id': None, 'name': 'Test Card', 'set_name': 'Test Set', 'set_code': 'tst', 'number': '1', 'price': 1.0}
