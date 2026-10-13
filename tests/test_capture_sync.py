@@ -13,10 +13,8 @@ Two layers, both on temporary databases:
 
     venv/bin/python -m unittest discover tests -p test_capture_sync.py
 """
-import shutil
 import sqlite3
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock

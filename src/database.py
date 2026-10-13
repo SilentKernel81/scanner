@@ -4,16 +4,15 @@
 # ============================================================================
 import gzip
 import re
-import sqlite3
 import json
 import logging
 import requests
 import threading
+import unicodedata
 from datetime import datetime
 from difflib import SequenceMatcher, get_close_matches
 import storage
 from config import Config
-from utils import normalize_text
 
 # Create database logger
 logger = logging.getLogger('database')
@@ -127,6 +126,15 @@ def _digit_distance(read_number, collector_number):
         return None
     read, actual = read.group(), str(actual)
     return min(_edit_distance(read, actual.zfill(4)), _edit_distance(read.lstrip('0') or '0', actual))
+
+
+def normalize_text(text):
+    """Remove accents and diacritics from text for comparison"""
+    if not text:
+        return text
+    # Normalize to NFD (decomposed form) and filter out combining characters
+    normalized = unicodedata.normalize('NFD', text)
+    return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
 
 
 def search_key(text):

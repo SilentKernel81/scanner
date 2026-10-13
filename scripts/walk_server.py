@@ -142,7 +142,7 @@ class Walk:
             self.call("deck: rename", 'PUT', f"/api/decks/{deck_id}", json={'name': 'Walk test deck 2'})
             self.call("deck: delete", 'DELETE', f"/api/decks/{deck_id}")
         if self.row:
-            trade = self.call("trade: set one entry aside", 'POST', '/api/trades', json={'name': 'Walk trade', 'ids': [self.row['id']]})
+            self.call("trade: set one entry aside", 'POST', '/api/trades', json={'name': 'Walk trade', 'ids': [self.row['id']]})
             trades = self.http.get(self.server + '/api/trades', timeout=60).json().get('trades') or []
             mine = [t for t in trades if t.get('name') == 'Walk trade']
             if mine:

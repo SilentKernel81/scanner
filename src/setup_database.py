@@ -67,7 +67,7 @@ def main():
         print("Populating Database")
         print("="*60)
         
-        inserted = db.populate_database(cards_data, progress_callback)
+        db.populate_database(cards_data, progress_callback)
         
         # Show final stats
         stats = db.get_database_stats()

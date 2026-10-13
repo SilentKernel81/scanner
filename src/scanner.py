@@ -22,7 +22,6 @@ import shutil
 from collections import deque
 import logging
 import re
-from datetime import datetime
 from config import Config, camera_index_or_none
 from object_detector import ObjectDetector, warp_card
 from settings import Settings
