@@ -1435,6 +1435,25 @@ Tried on 2026-10-11, a Raspberry Pi 4 with a Camera Module 3 Wide NoIR (IMX708, 
 
 ## Collection page and decks
 
+**The decks are pages of their own since 2026-10-13** (`/decks`, `/decks/<id>`; before, a tab
+of the collection page). What follows about decks describes what they do, which did not
+change; how they look did. *The list*: a tile per deck with its commander's picture and
+colours (`GET /api/decks`: `commander_cards`), filter and sort above; the other two tabs hold
+"Build around a card" with "Commanders you own", and the preconstructed decks. *A deck*: a
+banner (the commander's picture, name, format, legality, cards, value, share owned), the
+charts in one strip, and the cards in one of two views (`decks.js`: `showDeckView`,
+`deckGroups`) - **Columns** (`deckRowHtml`: a decklist in as many columns as fit; pointing at
+a line shows the card beside it and the line's buttons) and **Stacks** (`deckCardHtml`: the
+cards themselves, overlapping, one stack per group; pointing at one pulls it out) - grouped by
+type, by cost or by colour (`groupOf`). The buttons are the same in both
+(`entryActionsHtml`): one copy more or less, the printing, move to main / maybe, make
+commander. Adding cards - search, suggestions, popular decks - is a panel that slides in
+(`showAdding`); buy list, duplicate and delete are behind a menu. The view, the grouping and
+the list's tab are remembered in the browser. Made for a screen with a pointer: on a phone
+nothing can be pointed at, and the pages were not laid out or tried there.
+`scripts/check_deck_pages.py` tries the pages in headless Chromium (on a server with copied
+data only: it creates and deletes decks).
+
 **Scanned cards and the collection are two inventories.** Scanning - every station - adds to
 `scan_inventory` - a second `InventoryManager` on its own file, `data/scan_inventory.db`, with
 the same tables - and its top bar counter, inventory window, edit / delete, Undo, export, import
@@ -1757,10 +1776,14 @@ drawing inside its one file:
 |---|---|---|
 | `/` | `stations.html` (inline script) | The cameras: each station with its state and a link to its page |
 | `/scan/<id>` | `scanner.html`, `static/js/scanner.js` | One station's scanner page. `window.STATION` tells the script which; a station without a camera gets the page without the camera panel |
-| `/collection` | `collection.html`, `static/js/collection.js` | Inventory, decks, trades, statistics, backups |
+| `/collection` | `collection.html`, `static/js/collection.js` | Inventory, trades, statistics, backups |
+| `/decks`, `/decks/<id>` | `decks.html`, `static/js/decks.js`, `static/css/decks.css` | The deck list (tabs: My decks, What can I build?, Preconstructed decks) and one deck. One page for both addresses: the script shows what the address says (`showWhatTheAddressSays`) and keeps the address in step (`showAddress`: `history.pushState`), so a deck can be bookmarked, a reload stays in it and Back leads to the list |
 
 `static/js/common.js` and `templates/_dialogs.html` hold what the pages share (text helpers,
 in-page dialogs and notifications, the edit dialog, the capture viewer, "Add to collection");
+`static/js/library.js` what the collection page and the deck pages share and the scanner page
+does not (`$`, `api`, `valueDialog` with `templates/_value_dialog.html`, the card picture
+beside the pointer - the scanner's script has its own `$`);
 `static/css/style.css` has the dark / light theme (CSS variables).
 
 **The scanner page**: top bar with counters; search bar and camera on the left, card panel on
