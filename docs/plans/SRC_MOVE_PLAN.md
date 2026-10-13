@@ -2,8 +2,7 @@
 
 Date: 2026-10-12
 
-**The move itself was done the same day** (phases 0, 1 and 3; a real station and the machines
-are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+**The move itself was done the same day** (phases 0 to 3; the machines are still to do) - see *How it went* at the end. What follows is the plan as it was written.
 
 A plan for the last step of the folder reorganisation: the Python code out of the top folder
 into `src/`, and a `pyproject.toml`. Nothing here is implemented. The numbers below were
@@ -396,9 +395,8 @@ the documents of two repositories and four machines to update. Smaller than the 
 code, larger in machines: the split touched only the server, this rebuilds every station.
 ## How it went (2026-10-12)
 
-Phases 0, 1 and 3 are done, on the branch `src-move`. **Not done: phase 2 (a real station on
-the moved code) and phase 4 (the machines).** Until phase 4 every machine runs the code from
-before the move.
+Phases 0 to 3 are done, on the branch `src-move`. **Not done: phase 4 (the machines).** Until
+then every machine runs the code from before the move.
 
 Done as planned, with these differences:
 
@@ -429,7 +427,8 @@ Checked, on the laptop:
 
 Not checked:
 
-- **the `client-pi` image** - it builds only on a Pi - and any station with a real camera;
+- a card *read* through a real camera on the moved code (the box was dark, see below), and
+  a USB webcam on it - the laptop's test station was given no camera;
 - **`scripts/deploy.sh`**, neither a fresh installation nor `--update` on a machine with the
   services installed; `bash -n` only. And one thing the plan's risk 3 had not seen: the
   `--update` that crosses this change is still run by the *old* script (it is already
@@ -437,6 +436,30 @@ Not checked:
   a second run of the script. INSTALL.md says to run it twice;
 - **a server with a GPU**: the laptop has none, so OCR ran on the CPU there;
 - other people's checkouts (INSTALL.md says what changes for them).
+
+**Phase 2, with the Pi 4's camera, the same evening.** The `client-pi` image was built from
+the moved tree on the Pi 5 (3 min 24 s; the user's choice, it is the faster machine), under
+a name of its own beside the station running there, and carried to the Pi 4. In it: Python
+3.13 from apt with picamera2 and OpenCV, `config` from `/app/src`, data in `/app/data`,
+the ten files in `/app/src` - and none of the project's 32 module names is taken by that
+system Python, which the plan had left unchecked.
+
+On the Pi 4 the real station's container was stopped for about a minute and the new image
+run in its place - with a volume of its own holding only the camera kind and the crop, so
+neither the real station's settings nor its waiting captures were in reach - against a
+server on the laptop from the moved tree, on a copy of the test data, through a tunnel:
+
+| | |
+|---|---|
+| Connection, camera | connected, Camera Module 3 opened (`picamera`), no camera error |
+| Live view through the server | 10 frames in 4 s, 14 after the restart (the station reported 6.4 a second) |
+| A manual capture from a scanner page's side | taken, uploaded, received, sent to OCR and then to the AI: no card in a dark box, "could not identify" - the whole way, without a card to read |
+| The setup page | logged in, state shown; its restart ran `src/station_client.py` again in the same container (no restart by Docker), the camera was closed and opened again, the station reconnected |
+
+Afterwards: the test container, its volume and the test images removed on both Pis, the
+real container started again - connected to the real server with its camera, its crop and
+its server address as before, nothing waiting to be sent. Nothing was written to the real
+server.
 
 Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` are not
 marked executable in Git, though the documents run them as `./scripts/start.sh`.
