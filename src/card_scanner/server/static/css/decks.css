@@ -1,0 +1,598 @@
+/* ============================================================================
+   The deck pages: /decks (the list, three tabs) and /decks/<id> (one deck).
+   Loaded after style.css and collection.css. The decks were a tab of the collection
+   page until 2026-10-13, and the rules for the parts that did not change - the result
+   rows of a search, the idea panels, the charts' bars, the printing picker - are still
+   in collection.css (its "Decks" section). This file has what the redesign added:
+   the tiles, the banner, the two views of a deck and the panel for adding cards.
+   For a screen with a pointer: buttons and pictures appear on pointing at a card.
+   ============================================================================ */
+
+/* ---------------------------------------------------------------- The list */
+
+.deck-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.deck-tools .deck-filters {
+    flex: 1;
+    margin: 0;
+}
+.deck-tools #deck-new {
+    margin-left: auto;
+}
+
+.deck-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 16px;
+}
+/* A deck: its commander's picture, then name, colours, how much of it is owned */
+.deck-grid .deck-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.deck-grid .deck-tile:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow);
+}
+/* Two commanders share the picture's width; a deck without one keeps the plain band */
+.deck-tile-art {
+    display: flex;
+    height: 130px;
+    background: linear-gradient(135deg, #334155, #1e293b);
+}
+.deck-tile-art span {
+    flex: 1;
+    background: center 20% / cover no-repeat;
+}
+.deck-tile-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px 14px;
+}
+.deck-tile-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+.deck-tile-name {
+    font-size: 16px;
+    font-weight: 650;
+}
+.deck-tile-meta {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 13px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.deck-tile-foot {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-subtle);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The tabs "What can I build?" and "Preconstructed decks": the panels they hold were laid
+   out side by side under the list; each has the page's width now */
+#deck-tab-precons .idea-panel {
+    max-width: 900px;
+}
+#deck-tab-precons .idea-list,
+#deck-tab-build .idea-list {
+    max-height: none;
+}
+
+/* ---------------------------------------------------------------- One deck */
+
+.deck-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    color: var(--accent);
+    font-size: 14px;
+    text-decoration: none;
+}
+
+/* The banner: the commander's picture, darkened on the left where the text is */
+.deck-hero {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 16px 24px;
+    padding: 22px 26px;
+    border-radius: 14px;
+    background: #1e293b center 22% / cover no-repeat;
+    color: #fff;
+    isolation: isolate;
+}
+.deck-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(15, 23, 42, 0.93) 0%, rgba(15, 23, 42, 0.74) 48%, rgba(15, 23, 42, 0.28) 100%);
+}
+.deck-hero.no-art::before {
+    background: linear-gradient(135deg, #334155, #1e293b);
+}
+.deck-hero-main {
+    flex: 1 1 380px;
+    min-width: 0;
+}
+/* The name is a field (it can be changed) that looks like a heading until it is pointed at */
+.deck-hero .deck-name {
+    width: 100%;
+    max-width: 640px;
+    padding: 2px 6px;
+    margin-left: -6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: #fff;
+    font: inherit;
+    font-size: 28px;
+    font-weight: 700;
+}
+.deck-hero .deck-name:hover,
+.deck-hero .deck-name:focus {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(15, 23, 42, 0.45);
+    outline: none;
+}
+.deck-hero-sub {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    font-size: 14px;
+}
+.deck-hero .deck-format {
+    width: auto;
+    padding: 2px 26px 2px 8px;
+    border-color: rgba(255, 255, 255, 0.35);
+    background-color: rgba(15, 23, 42, 0.45);
+    color: #fff;
+    font-size: 13px;
+}
+.deck-hero .deck-format option {
+    color: var(--text);
+    background: var(--surface);
+}
+.deck-chip {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 650;
+    background: rgba(255, 255, 255, 0.92);
+}
+.deck-chip.ok { color: #166534; }
+.deck-chip.warn { color: #92400e; }
+.deck-chip.bad { color: #b91c1c; }
+/* The numbers: how many cards, what they are worth, how much of the deck is owned */
+.deck-hero .deck-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin-top: 14px;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+}
+.deck-hero .deck-totals strong {
+    display: block;
+    color: #fff;
+    font-size: 22px;
+    font-variant-numeric: tabular-nums;
+}
+.deck-hero .deck-totals small {
+    font-size: 12px;
+    opacity: 0.85;
+}
+.deck-hero-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+}
+.deck-actions,
+.deck-views {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+/* On the picture: glass buttons; the one that matters most is solid */
+.deck-hero .btn {
+    border-color: rgba(255, 255, 255, 0.38);
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+}
+.deck-hero .btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.26);
+}
+.deck-hero .btn-primary,
+.deck-hero .btn-primary:hover:not(:disabled) {
+    border-color: #fff;
+    background: #fff;
+    color: var(--accent);
+}
+.deck-hero .segmented {
+    border-color: rgba(255, 255, 255, 0.38);
+    background: rgba(15, 23, 42, 0.45);
+}
+.deck-hero .segmented button {
+    color: rgba(255, 255, 255, 0.8);
+}
+.deck-hero .segmented button + button {
+    border-left-color: rgba(255, 255, 255, 0.3);
+}
+.deck-hero .segmented button.is-active {
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--accent);
+}
+/* The menu behind "...": what is done seldom (buy list, duplicate, delete) */
+.deck-menu {
+    position: relative;
+}
+.deck-menu-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.deck-menu-list[hidden] {
+    display: none;
+}
+.deck-menu-list button {
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+.deck-menu-list button:hover {
+    background: var(--surface-2);
+}
+.deck-menu-list button.danger {
+    color: var(--danger);
+}
+
+.decks-page .deck-issues {
+    margin: 12px 0 0;
+}
+/* A legal deck says so in the banner: the green line under it would say it twice */
+.decks-page .deck-issues .issue.ok {
+    display: none;
+}
+
+/* The charts in one strip: mana curve, types, mana symbols */
+.deck-strip {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr;
+    gap: 28px;
+    margin: 14px 0;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.deck-strip:empty {
+    display: none;
+}
+
+/* ------------------------------------------------- A deck's cards: both views */
+
+.deck-group-title {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 4px;
+    padding: 0 6px;
+    color: var(--text-subtle);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+/* Whether you own a card: a small sign, explained on pointing at it */
+.own-mark {
+    flex: 0 0 auto;
+    min-width: 16px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    cursor: help;
+}
+.own-mark.have { color: var(--success); opacity: 0.55; }
+.own-mark.shared { color: var(--info); }
+.own-mark.partly { color: var(--warning); }
+.own-mark.none { color: var(--danger); }
+
+/* --- Columns: the deck as a decklist on paper, in as many columns as fit --- */
+.deck-columns {
+    display: block;   /* the old builder laid its one long list out as a flex column */
+    max-height: none;
+    overflow: visible;
+    column-width: 310px;
+    column-gap: 28px;
+    padding: 18px 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.deck-columns .deck-group {
+    margin-bottom: 16px;
+    break-inside: avoid;
+}
+.deck-columns .deck-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 6px;
+    font-size: 14px;
+}
+.deck-columns .deck-row:hover {
+    background: var(--accent-soft);
+}
+.deck-row-qty {
+    flex: 0 0 18px;
+    color: var(--text-subtle);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.deck-row-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.deck-row-name.unknown {
+    color: var(--text-subtle);
+    font-style: italic;
+}
+.deck-row-cost {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.deck-row-price {
+    flex: 0 0 auto;
+    min-width: 44px;
+    color: var(--text-subtle);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+/* The buttons take the place of the cost and the price while the line is pointed at */
+.deck-row-actions {
+    display: none;
+    flex: 0 0 auto;
+    gap: 3px;
+}
+.deck-columns .deck-row:hover .deck-row-actions,
+.deck-columns .deck-row:focus-within .deck-row-actions {
+    display: inline-flex;
+}
+.deck-columns .deck-row:hover .deck-row-price,
+.deck-columns .deck-row:hover .deck-row-cost,
+.deck-columns .deck-row:focus-within .deck-row-price,
+.deck-columns .deck-row:focus-within .deck-row-cost {
+    display: none;
+}
+.deck-row-actions .mini-btn {
+    min-width: 24px;
+    height: 24px;
+}
+
+/* --- Stacks: the cards themselves, overlapping, one stack per group --- */
+.deck-stacks {
+    display: flex;
+    flex-direction: row;
+    max-height: none;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 24px;
+    overflow-x: auto;
+}
+.deck-stacks .deck-group {
+    flex: 1 1 0;
+    min-width: 150px;
+    max-width: 200px;
+    container-type: inline-size;   /* so that a card's height can be said from the stack's width */
+}
+/* A card in a stack shows its top strip - name and cost; the last one shows all of itself.
+   aspect-ratio keeps a card's shape before its picture has arrived */
+.stack-card {
+    position: relative;
+    display: block;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: none;
+    transition: margin 0.12s;
+}
+.stack-card:last-child {
+    height: auto;
+}
+.stack-card > img,
+.stack-card > .stack-card-name {
+    display: block;
+    width: 100%;
+    aspect-ratio: 63 / 88;
+    border-radius: 4.6% / 3.3%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.stack-card > img {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+/* Under the picture, and all there is of a card without one: a card-shaped box with its name */
+.stack-card > .stack-card-name {
+    box-sizing: border-box;
+    padding: 7px 9px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+/* Pointed at (or reached with Tab): the card is pulled out of its stack, with its price and buttons */
+.deck-stacks .stack-card:hover,
+.deck-stacks .stack-card:focus-within {
+    z-index: 5;
+    margin-bottom: calc(100% * 88 / 63 - 32px + 34px);
+    background: none;
+}
+.deck-stacks .stack-card:last-child:hover,
+.deck-stacks .stack-card:last-child:focus-within {
+    margin-bottom: 34px;
+}
+.stack-card-qty,
+.stack-card-own {
+    position: absolute;
+    top: 5px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.88);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+.stack-card-qty { right: 6px; }
+.stack-card-own { left: 6px; }
+.stack-card-own.own-mark { opacity: 1; }
+.stack-card-own.shared { color: #7dd3fc; }
+.stack-card-own.partly { color: #fcd34d; }
+.stack-card-own.none { color: #fca5a5; }
+.stack-card-foot {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+/* The foot hangs under the whole card, which is taller than the strip a stacked card shows:
+   a card is as wide as its stack (100cqw, the stack being the container) and 88 / 63 as tall */
+.stack-card:not(:last-child) .stack-card-foot {
+    top: calc(100cqw * 88 / 63 + 2px);
+}
+.stack-card:hover .stack-card-foot,
+.stack-card:focus-within .stack-card-foot {
+    display: flex;
+}
+.stack-card .deck-row-actions {
+    display: inline-flex;
+}
+
+/* ------------------------------------------- The panel for adding cards */
+
+.add-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    width: 420px;
+    max-width: 92vw;
+    padding: 16px 18px;
+    background: var(--surface);
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.18);
+    transform: translateX(105%);
+    transition: transform 0.2s;
+}
+.add-drawer.show {
+    transform: none;
+}
+.add-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.add-drawer-head h2 {
+    margin: 0;
+    font-size: 18px;
+}
+/* Each of its three parts fills what is left of the panel's height and scrolls by itself */
+.add-drawer > [id^="side-"]:not([hidden]):not(.segmented) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+.add-drawer .result-list {
+    flex: 1;
+}
+/* While the panel is open the deck keeps the rest of the width, so that both are seen at
+   once (on a screen too narrow for that, the panel lies over the deck) */
+@media (min-width: 1100px) {
+    body.adding .decks-page,
+    body.adding .topbar-inner {
+        margin-right: 420px;
+    }
+}
+
+/* The search fields were laid out for a wider side panel: here they share each row evenly */
+.add-drawer .filter-row {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.add-drawer .filter-row .text-input {
+    flex: 1 1 150px;
+    min-width: 0;
+}
+.add-drawer .filter-row .select {
+    flex: 0 1 auto;
+}
+
+/* While a line is pointed at, its name keeps as much room as it can: the owned mark
+   steps aside too (it is in the name's tooltip-sized buttons' way, and says nothing new) */
+.deck-columns .deck-row:hover .own-mark,
+.deck-columns .deck-row:focus-within .own-mark {
+    display: none;
+}

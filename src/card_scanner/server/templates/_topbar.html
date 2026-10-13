@@ -58,8 +58,15 @@
                 </div>
                 </div>
             </div>
-            {% elif page in ('stations', 'decks') %}
+            {% elif page == 'stations' %}
             <div class="topbar-page"></div>
+            {% elif page == 'decks' %}
+            {# The deck list's three tabs; hidden while one deck is open (decks.js) #}
+            <nav class="tabs topbar-page" id="deck-tabs">
+                <button class="tab is-active" data-tab="mine"><svg class="icon"><use href="#i-layers"/></svg> My decks</button>
+                <button class="tab" data-tab="build"><svg class="icon"><use href="#i-spark"/></svg> What can I build?</button>
+                <button class="tab" data-tab="precons"><svg class="icon"><use href="#i-card"/></svg> Preconstructed decks</button>
+            </nav>
             {% else %}
             <nav class="tabs topbar-page" id="tabs">
                 <button class="tab is-active" data-tab="inventory"><svg class="icon"><use href="#i-list"/></svg> Inventory</button>
