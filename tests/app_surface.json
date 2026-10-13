@@ -422,6 +422,20 @@
    "collection"
   ],
   [
+   "/decks",
+   [
+    "GET"
+   ],
+   "decks"
+  ],
+  [
+   "/decks/<int:deck_id>",
+   [
+    "GET"
+   ],
+   "decks"
+  ],
+  [
    "/favicon.ico",
    [
     "GET"

@@ -1,68 +1,11 @@
-// Collection page: inventory management, deck builder, statistics.
-// Shared helpers (escapeHtml, dialogs, notify, the edit dialog, sorts) come from common.js.
+// Collection page: inventory management, trades, statistics, and the settings drawer (backups).
+// Shared helpers come from common.js (escapeHtml, dialogs, notify, the edit dialog, sorts) and
+// library.js ($, api, money, optionsHtml, valueDialog, the card preview ...).
+// The decks were part of this page until 2026-10-13: they are pages of their own now
+// (/decks, decks.js). What is left of them here: the inventory's location filter lists the
+// decks' names apart (loadDeckList), and a selection of cards can be added to a deck.
 
 const socket = io();
-const $ = id => document.getElementById(id);
-const money = value => '$' + (value || 0).toFixed(2);
-const plural = (count, word, many = word + 's') => `${count} ${count === 1 ? word : many}`;
-const entriesText = count => plural(count, 'entry', 'entries');
-const totalQuantity = rows => rows.reduce((sum, row) => sum + row.quantity, 0);
-
-async function api(path, options = {}) {
-    // JSON request; shows the server's error and returns null when it fails
-    if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
-        options = {...options, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(options.body)};
-    }
-    try {
-        const response = await fetch(path, options);
-        const data = await response.json();
-        if (data.success === false) {
-            notify(data.error || 'Request failed', 'error');
-            return null;
-        }
-        return data;
-    } catch (error) {
-        notify(`Request failed: ${error.message}`, 'error');
-        return null;
-    }
-}
-
-function remember(key, value) {
-    try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ }
-}
-
-function recall(key, fallback) {
-    try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
-}
-
-function manaHtml(cost) {
-    // "{2}{W}{U/B}" -> colored pips
-    return (cost || '').replace(/\{([^}]+)\}/g, (_, symbol) => {
-        // Hybrid symbols ("W/U") take the first color; numbers and X are neutral
-        const color = [...'WUBRGC'].find(letter => symbol.includes(letter)) || 'N';
-        const text = symbol.replace('/', '');
-        return `<span class="mana mana-${color}${text.length > 1 ? ' is-long' : ''}">${escapeHtml(text)}</span>`;
-    });
-}
-
-function closeModal(id) {
-    $(id).classList.remove('show');
-}
-
-function optionsHtml(pairs) {
-    // [[value, label]]
-    return pairs.map(([value, label]) => `<option value="${escapeHtml(String(value))}">${escapeHtml(label)}</option>`).join('');
-}
-
-function searchWords(id) {
-    // What is typed in a filter field: every word must be found
-    return $(id).value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-}
-
-function markSwitch(id, key, value) {
-    // A row of buttons of which one is active (data-<key>)
-    document.querySelectorAll(`#${id} button`).forEach(button => button.classList.toggle('is-active', button.dataset[key] === value));
-}
 
 // ============================================================================
 // Tabs
@@ -75,13 +18,6 @@ function showTab(tab) {
     document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== `tab-${tab}`; });
     remember('collectionTab', tab);
-    if (tab === 'decks') {
-        loadDecks();
-        if (gameInfo.deck_formats.length) {
-            loadPrecons();
-            loadAroundCards();
-        }
-    }
     if (tab === 'stats') renderStats();
     if (tab === 'trades') loadTrades();
 }
@@ -90,7 +26,6 @@ function showTab(tab) {
 // Inventory
 // ============================================================================
 
-const COLORS = [['W', 'White'], ['U', 'Blue'], ['B', 'Black'], ['R', 'Red'], ['G', 'Green'], ['C', 'Colorless']];
 const MTG_TYPES = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Battle', 'Land'];
 const CONDITIONS = ['Mint', 'Near Mint', 'Excellent', 'Good', 'Played', 'Poor'];
 const PAGE_SIZES = [25, 50, 100, 200];
@@ -242,9 +177,6 @@ function fillSelect(id, label, values, labels = {}) {
     select.hidden = values.length === 0;
 }
 
-function distinct(values) {
-    return [...new Set(values.filter(Boolean))].sort(byText);
-}
 
 function fillFilterOptions() {
     fillSelect('filter-type', 'Any type', distinct(inventory.map(mainType)));
@@ -269,9 +201,16 @@ function fillFilterOptions() {
     $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
 }
 
-function colorChipsHtml(active) {
-    return COLORS.map(([key, label]) =>
-        `<button class="color-chip mana-${key} ${active.has(key) ? 'is-active' : ''}" data-color="${key}" title="${label}">${key}</button>`).join('');
+
+let deckList = [];   // the decks, for the location filter below (their names) and "Add to a deck"
+
+async function loadDeckList() {
+    // Only what this page needs of the decks; the decks themselves are at /decks
+    if (!gameInfo.deck_formats.length) return;
+    const data = await api('/api/decks');
+    if (!data) return;
+    deckList = data.decks;
+    fillLocationFilter();
 }
 
 function fillLocationFilter() {
@@ -607,37 +546,6 @@ function showPage(number) {
     if (above < 0) window.scrollBy(0, above);
 }
 
-// -- One value for a bulk action ----------------------------------------------
-
-let valueResolve = null;
-
-function valueDialog({title, label, options = [], choices = null, value = ''}) {
-    // Free text with suggestions (options), or one of choices ([[value, label]]); resolves
-    // with the value, or null when cancelled
-    return new Promise(resolve => {
-        valueResolve = resolve;
-        $('value-title').textContent = title;
-        $('value-label').textContent = label;
-        const input = $('value-input'), select = $('value-select');
-        input.hidden = !!choices;
-        select.hidden = !choices;
-        if (choices) {
-            select.innerHTML = optionsHtml(choices);
-        } else {
-            input.value = value;
-            $('value-options').innerHTML = options.map(option => `<option value="${escapeHtml(option)}"></option>`).join('');
-        }
-        $('value-modal').classList.add('show');
-        (choices ? select : input).focus();
-    });
-}
-
-function closeValueDialog(value) {
-    closeModal('value-modal');
-    const resolve = valueResolve;
-    valueResolve = null;
-    if (resolve) resolve(value);
-}
 
 async function bulkAction(action) {
     const ids = [...selected];
@@ -761,8 +669,12 @@ async function addSelectionToDeck() {
     if (!choice) return;
     const text = distinct(inventory.filter(card => selected.has(card.id)).map(card => card.name)).map(name => `1 ${name}`).join('\n');
     if (choice === 'new') {
-        showTab('decks');
-        return openDeckModal({text});
+        // The deck pages make the deck: the card names travel there in this tab's storage
+        // (an address would be too short for a long selection) and the page opens its
+        // "New deck" dialog with them (decks.js: start-up)
+        try { sessionStorage.setItem('newDeckText', text); } catch (e) { /* storage blocked: the dialog opens empty */ }
+        window.location.href = '/decks?new=1';
+        return;
     }
     const result = await api(`/api/decks/${choice}/import`, {method: 'POST', body: {text}});
     if (result) notify(`${plural(result.added, 'card')} added to ${result.deck.name}`, 'success');
@@ -864,22 +776,6 @@ async function importInventory() {
 
 let statsMeasure = 'value';
 
-function barsHtml(rows, format, limit = 12) {
-    // rows: [[label, number]] - largest first; the rest folds into "Other"
-    rows = rows.filter(([, number]) => number > 0).sort((a, b) => b[1] - a[1]);
-    if (rows.length > limit) {
-        const rest = rows.slice(limit - 1);
-        rows = [...rows.slice(0, limit - 1), [`Other (${rest.length})`, rest.reduce((sum, [, number]) => sum + number, 0)]];
-    }
-    const top = Math.max(...rows.map(([, number]) => number), 0);
-    if (!rows.length) return '<div class="hint">Nothing to show</div>';
-    return rows.map(([label, number]) => `
-        <div class="bar-row" title="${escapeHtml(label)}: ${format(number)}">
-            <span class="bar-label">${escapeHtml(label)}</span>
-            <span class="bar-track"><div class="bar-fill" style="width: ${top ? (100 * number / top).toFixed(1) : 0}%"></div></span>
-            <span class="bar-value">${format(number)}</span>
-        </div>`).join('');
-}
 
 function groupTotals(rows, keyOf, measure) {
     const totals = new Map();
@@ -911,738 +807,6 @@ function renderStats() {
         + `<div class="panel"><h3 class="section-title">Most valuable cards</h3>${barsHtml(valuable, money, 10)}</div>`;
 }
 
-// ============================================================================
-// Decks: list
-// ============================================================================
-
-let deck = null;          // the deck open in the builder (server payload)
-let deckList = [];
-
-function deckFormat(format) {
-    // [key, label, has a commander]
-    return gameInfo.deck_formats.find(([key]) => key === format);
-}
-
-function formatLabel(format) {
-    const found = deckFormat(format);
-    return found ? found[1] : format;
-}
-
-function hasCommander(format) {
-    const found = deckFormat(format);
-    return !!(found && found[2]);
-}
-
-function isCommanderCard(card) {
-    return /Legendary.*Creature|can be your commander/.test(card.type_line.split(' // ')[0] + card.oracle_text);
-}
-
-async function loadDecks() {
-    if (!gameInfo.deck_formats.length) return;
-    const data = await api('/api/decks');
-    if (!data) return;
-    deckList = data.decks;
-    fillLocationFilter();
-    $('deck-data-notice').hidden = data.has_deck_data;
-    // The formats there are decks of; a choice that is gone falls back to all
-    const formats = [...new Set(deckList.map(item => item.format))];
-    const chosen = $('deck-filter-format').value;
-    $('deck-filter-format').innerHTML = optionsHtml([['', 'Any format'], ...gameInfo.deck_formats.filter(([key]) => formats.includes(key))]);
-    $('deck-filter-format').value = formats.includes(chosen) ? chosen : '';
-    $('deck-filters').hidden = deckList.length < 2;
-    renderDeckList();
-}
-
-const DECK_SORTS = {
-    changed: (a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id,
-    name: (a, b) => a.name.localeCompare(b.name),
-    format: (a, b) => formatLabel(a.format).localeCompare(formatLabel(b.format)) || a.name.localeCompare(b.name),
-    owned: (a, b) => b.owned_percent - a.owned_percent || a.name.localeCompare(b.name),
-    missing: (a, b) => (a.cards - a.owned) - (b.cards - b.owned) || a.name.localeCompare(b.name),
-    cards: (a, b) => b.cards - a.cards || a.name.localeCompare(b.name),
-};
-
-function renderDeckList() {
-    const words = searchWords('deck-filter-text');
-    const format = $('deck-filter-format').value;
-    const shown = deckList.filter(item => {
-        const text = `${item.name} ${item.commanders.join(' ')}`.toLowerCase();
-        return (!format || item.format === format) && words.every(word => text.includes(word));
-    }).sort(DECK_SORTS[$('deck-sort').value] || DECK_SORTS.changed);
-    $('deck-list').innerHTML = !shown.length && deckList.length
-        ? '<div class="empty-state">No deck matches.</div>'
-        : deckList.length ? shown.map(item => `
-        <button class="deck-tile" data-deck="${item.id}">
-            <span class="deck-tile-name">${escapeHtml(item.name)}</span>
-            <span class="deck-tile-meta">${escapeHtml(formatLabel(item.format))} · ${plural(item.cards, 'card')}${item.commanders.length ? ' · ' + escapeHtml(item.commanders.join(' + ')) : ''}</span>
-            <span class="meter" title="${item.owned} of ${item.cards} owned"><span style="width: ${item.owned_percent}%"></span></span>
-            <span class="deck-tile-meta">${item.owned_percent}% owned · changed ${escapeHtml(item.updated_at.slice(0, 10))}</span>
-        </button>`).join('')
-        : '<div class="empty-state">No decks yet. Create one, or see below what your collection can build.</div>';
-}
-
-function openDeckModal({text = '', importInto = null} = {}) {
-    // New deck, or (importInto: a deck) add cards to an existing one
-    $('deck-modal').dataset.importInto = importInto ? importInto.id : '';
-    $('deck-modal-title').textContent = importInto ? `Import cards into ${importInto.name}` : 'New deck';
-    $('deck-modal-name-group').hidden = $('deck-modal-format-group').hidden = !!importInto;
-    $('deck-modal-replace').hidden = !importInto;
-    $('deck-modal-save').textContent = importInto ? 'Import' : 'Create';
-    $('new-deck-name').value = '';
-    $('new-deck-url').value = '';
-    $('new-deck-text').value = text;
-    $('new-deck-replace').checked = false;
-    $('new-deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
-    $('deck-modal').classList.add('show');
-    (importInto ? $('new-deck-url') : $('new-deck-name')).focus();
-}
-
-function reportUnknown(unknown) {
-    if (unknown && unknown.length) {
-        notify(`Not in the card data: ${unknown.slice(0, 6).join(', ')}${unknown.length > 6 ? ` and ${unknown.length - 6} more` : ''}`, 'warning');
-    }
-}
-
-async function saveDeckModal() {
-    const importInto = $('deck-modal').dataset.importInto;
-    const body = {text: $('new-deck-text').value.trim() || undefined, url: $('new-deck-url').value.trim() || undefined};
-    const button = $('deck-modal-save');
-    button.disabled = true;
-    let data;
-    if (importInto) {
-        if (!body.text && !body.url) {
-            notify('Paste a decklist or a deck address', 'warning');
-            button.disabled = false;
-            return;
-        }
-        data = await api(`/api/decks/${importInto}/import`, {method: 'POST', body: {...body, replace: $('new-deck-replace').checked}});
-    } else {
-        // A deck from another site keeps that site's format unless the list is pasted
-        data = await api('/api/decks', {method: 'POST', body: {...body, name: $('new-deck-name').value.trim() || undefined,
-                                                              format: body.url ? undefined : $('new-deck-format').value}});
-    }
-    button.disabled = false;
-    if (!data) return;
-    closeModal('deck-modal');
-    reportUnknown(data.unknown);
-    openDeck(data.deck);
-}
-
-async function createDeck(body, message) {
-    const data = await api('/api/decks', {method: 'POST', body});
-    if (!data) return;
-    reportUnknown(data.unknown);
-    if (message) notify(message, 'success');
-    openDeck(data.deck);
-}
-
-function copyDeckClicked(event) {
-    // "Copy as deck" on a public deck's row
-    const button = event.target.closest('[data-import-url]');
-    if (button) createDeck({url: button.dataset.importUrl}, 'Deck copied');
-}
-
-// -- Preconstructed decks: browse, open as a deck, or add as owned ----------------
-
-let precons = null;          // [{file, name, type, format, released, set}] newest first
-let preconRank = {};         // file -> {owned, total, percent}, after "Rank by what I own"
-
-async function loadPrecons() {
-    if (precons) return renderPrecons();
-    $('ideas-precons').innerHTML = '<div class="hint">Loading the list...</div>';
-    const data = await api('/api/precons');
-    if (!data) {
-        $('ideas-precons').innerHTML = '<div class="hint">The list of preconstructed decks is not available right now.</div>';
-        return;
-    }
-    precons = data.precons;
-    // The kinds in the list, the ones with most decks first
-    const kinds = {};
-    precons.forEach(item => { kinds[item.type] = (kinds[item.type] || 0) + 1; });
-    $('precon-type').innerHTML = optionsHtml([['', 'Any kind'],
-        ...Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([kind, count]) => [kind, `${kind} (${count})`])]);
-    renderPrecons();
-}
-
-function renderPrecons() {
-    if (!precons) return;
-    const words = searchWords('precon-search');
-    const kind = $('precon-type').value;
-    const ranked = Object.keys(preconRank).length > 0;
-    let rows = precons.filter(item => {
-        if (kind && item.type !== kind) return false;
-        const text = `${item.name} ${item.set} ${item.type} ${item.released.slice(0, 4)}`.toLowerCase();
-        return words.every(word => text.includes(word));
-    });
-    // Ranked: the decks you own most of first; otherwise the newest first (as loaded)
-    if (ranked) rows = [...rows].sort((a, b) => ((preconRank[b.file] || {}).percent || 0) - ((preconRank[a.file] || {}).percent || 0));
-    const more = rows.length - 80;
-    $('ideas-precons').innerHTML = rows.slice(0, 80).map(item => {
-        const rank = preconRank[item.file];
-        return `
-        <div class="idea-row precon" data-file="${escapeHtml(item.file)}">
-            <div><div class="idea-name">${escapeHtml(item.name)}</div>
-                 <div class="idea-meta">${escapeHtml(item.type)} · ${escapeHtml(item.set)} · ${escapeHtml(item.released.slice(0, 7))}${rank ? ` · ${rank.owned} of ${rank.total} cards owned` : ''}</div></div>
-            ${rank ? `<div class="idea-share"><strong>${rank.percent}%</strong><div class="meter" style="width: 70px"><span style="width: ${rank.percent}%"></span></div></div>` : '<span></span>'}
-            <div class="idea-actions">
-                <button class="btn btn-small" data-precon="view" title="See what is in it - nothing is saved">View cards</button>
-                <button class="btn btn-small" data-precon="own" title="Add its cards to your inventory and open it as a deck">I own it</button>
-            </div>
-        </div>`;
-    }).join('') + (more > 0 ? `<div class="hint">${more} more - type to narrow the list</div>` : '')
-        || '<div class="hint">No preconstructed deck matches.</div>';
-}
-
-let viewedPrecon = null;     // the precon whose cards are shown
-
-async function viewPrecon(item) {
-    // Only a look: a deck is made by "Create deck" in the window (it once was made by opening)
-    viewedPrecon = item;
-    $('precon-title').textContent = item.name;
-    $('precon-subtitle').textContent = `${item.type} · ${item.set} · ${item.released.slice(0, 7)}`;
-    $('precon-cards').innerHTML = '<div class="hint">Loading the list...</div>';
-    $('precon-create').disabled = $('precon-own').disabled = true;
-    $('precon-modal').classList.add('show');
-    const data = await api(`/api/precons/${encodeURIComponent(item.file)}`);
-    if (viewedPrecon !== item) return;  // another one was opened meanwhile
-    if (!data) return closeModal('precon-modal');
-    const total = totalQuantity(data.cards);
-    const have = data.cards.reduce((sum, card) => sum + Math.min(card.quantity, card.owned), 0);
-    $('precon-subtitle').textContent += ` · ${plural(total, 'card')}, ${have} owned`;
-    const boards = [['commander', 'Commander'], ['main', 'Main deck'], ['side', 'Sideboard']];
-    $('precon-cards').innerHTML = boards.map(([board, label]) => {
-        const cards = data.cards.filter(card => card.board === board).sort((a, b) => byText(a.name, b.name));
-        return cards.length ? `<h4>${label} (${totalQuantity(cards)})</h4>` + cards.map(card => `
-            <div class="precon-card"><span>${card.quantity}×</span><span>${escapeHtml(card.name)}</span>
-                <span class="${card.owned ? '' : 'missing'}">${card.owned ? `${card.owned} owned` : 'not owned'}</span></div>`).join('') : '';
-    }).join('');
-    $('precon-create').disabled = $('precon-own').disabled = false;
-}
-
-async function ownPrecon(item) {
-    const location = await valueDialog({
-        title: `Add ${item.name} to your inventory`,
-        label: 'Its cards are added as Near Mint, in the printings that come in the box. Location (empty: none)',
-        options: knownLocations(), value: item.name.slice(0, 60)});
-    if (location === null) return;
-    const data = await api(`/api/precons/${encodeURIComponent(item.file)}/own`, {method: 'POST', body: {name: item.name, location}});
-    if (!data) return;
-    reportUnknown(data.unknown);
-    notify(`${plural(data.added, 'card')} of ${item.name} added to your inventory`, 'success');
-    preconRank = {};  // what is owned changed
-    loadInventory();
-    openDeck(data.deck);
-}
-
-// -- "What can I build?": searches that run on the server, polled while they go ----
-
-const ideaTimers = {};
-
-function renderIdeas(kind, state) {
-    if (kind === 'card') return renderAround(state);
-    if (kind === 'precons') {
-        // The ranking fills in the browsable list
-        state.items.forEach(item => { preconRank[item.file] = item; });
-        $('precon-progress').innerHTML = (state.running ? `<div class="hint">Reading the lists... ${state.done} of ${state.total || '?'}</div>`
-                : state.stopped ? `<div class="hint">Stopped after ${state.done} of ${state.total} lists - the rest is not ranked</div>` : '')
-            + (state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '');
-        return renderPrecons();
-    }
-    const list = $(`ideas-${kind}`);
-    const progress = state.running ? `<div class="hint">Looking... ${state.done} of ${state.total || '?'}</div>`
-        : state.stopped ? `<div class="hint">Stopped after ${state.done} of ${state.total}</div>` : '';
-    const error = state.error ? `<div class="callout warning">${escapeHtml(state.error)}</div>` : '';
-    const rows = state.items.slice(0, 60).map(item => `
-        <div class="idea-row" data-image="${escapeHtml(item.image_uri || '')}">
-            <div><div class="idea-name">${escapeHtml(item.name)}</div>
-                 <div class="idea-meta">${item.decks.toLocaleString()} decks on EDHREC · you own ${item.owned} of the ${item.total} cards played with it</div></div>
-            <div class="idea-share"><strong>${item.fit}%</strong><div class="meter"><span style="width: ${item.fit}%"></span></div></div>
-            <button class="btn btn-small" data-start-commander="${escapeHtml(item.name)}">Start deck</button>
-        </div>`).join('');
-    const empty = !state.running && !state.error && state.started && !state.items.length
-        ? '<div class="hint">No legendary creatures in the inventory yet.</div>' : '';
-    list.innerHTML = progress + error + rows + empty;
-}
-
-async function pollIdeas(kind, start = false, body = {}) {
-    // start: begin a run (body: what to look for); otherwise ask how the current one is doing
-    clearTimeout(ideaTimers[kind]);
-    const state = await api(`/api/decks/ideas/${kind}`, start ? {method: 'POST', body} : {});
-    if (!state) return;
-    // The button that started it stops it while it runs
-    const button = document.querySelector(`[data-ideas="${kind}"]`);
-    if (button) {
-        button.dataset.label = button.dataset.label || button.textContent;
-        button.dataset.running = state.running ? '1' : '';
-        button.textContent = state.running ? 'Stop' : button.dataset.label;
-    }
-    renderIdeas(kind, state);
-    if (state.running) ideaTimers[kind] = setTimeout(() => pollIdeas(kind), 1500);
-}
-
-function stopIdeas(kind) {
-    // What was found so far stays
-    return pollIdeas(kind, true, {stop: true});
-}
-
-// -- Build around a card: your cards legal in a format -> public decks that play one ----
-
-let aroundCard = null;   // the card on display (clicked in the list)
-let aroundState = null;  // the last answer about the search for decks
-let aroundRequest = 0;
-
-async function loadAroundCards() {
-    const request = ++aroundRequest;
-    const format = $('around-format').value;
-    const params = new URLSearchParams({owned: '1', format});
-    if ($('around-search').value.trim()) params.set('q', $('around-search').value.trim());
-    if ($('around-type').value.trim()) params.set('type', $('around-type').value.trim());
-    if ($('around-free').checked) params.set('free', '1');
-    // Only offered for a format that has a commander
-    $('around-commanders-label').hidden = !hasCommander(format);
-    if ($('around-commanders').checked && hasCommander(format)) params.set('commander', '1');
-    const data = await api(`/api/cards/search?${params}`);
-    if (!data || request !== aroundRequest) return;  // a later search already answered
-    $('around-cards-title').textContent = `Your cards legal in ${formatLabel(format)}`;
-    $('around-cards').innerHTML = data.cards.map(card => `
-        <div class="result-row ${aroundCard && aroundCard.name === card.name ? 'is-chosen' : ''}" data-name="${escapeHtml(card.name)}" data-type="${escapeHtml(card.type_line)}"
-             data-image="${escapeHtml(card.image_uri || '')}" data-commander="${isCommanderCard(card) ? '1' : ''}">
-            <span class="result-main">
-                <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
-                <div class="result-sub">${escapeHtml(card.type_line)}</div>
-            </span>
-            <span class="result-numbers">${card.owned} owned</span>
-        </div>`).join('') + (data.more ? '<div class="hint">More cards - type a name or type to narrow the list</div>' : '')
-        || '<div class="hint">None of your cards match. Deck data missing? Update the card database.</div>';
-}
-
-function chooseAround(row) {
-    // Shows the card; looking for decks waits for "Find decks" (it asks other sites)
-    aroundCard = {name: row.dataset.name, commander: !!row.dataset.commander, format: $('around-format').value,
-                  image: row.dataset.image, type: row.dataset.type};
-    document.querySelectorAll('#around-cards .result-row').forEach(other => other.classList.toggle('is-chosen', other === row));
-    renderAround();
-}
-
-function findAround() {
-    if (!aroundCard) return;
-    $('around-decks').innerHTML = '';
-    pollIdeas('card', true, {card: aroundCard.name, format: aroundCard.format});
-}
-
-function renderAround(state = aroundState) {
-    aroundState = state;
-    const card = aroundCard;
-    const found = state && state.started && state.card ? state : null;
-    const running = !!(found && found.running);
-    const mine = found && card && found.card === card.name && found.format === card.format;
-    // A search that is running stays on display (and can be stopped) while another card is looked at
-    const shown = running || mine || !card ? found : null;
-    $('around-decks-title').textContent = shown ? `${formatLabel(shown.format)} decks with ${shown.card}` : 'Decks';
-    const status = shown ? (running ? (shown.total ? `Reading the decks... ${shown.done} of ${shown.total}`
-                : 'Asking Archidekt - for a much played card this can take half a minute...')
-            : shown.stopped ? `Stopped after ${shown.done} of ${shown.total || '?'} decks`
-            : `${plural(shown.items.length, 'deck')}, the ones you own most of first`)
-        : card ? 'Find decks looks for public decks that play it.' : '';
-    const buttons = (running ? '<button class="btn btn-small" id="around-stop">Stop</button>'
-            : card ? `<button class="btn btn-small btn-primary" id="around-find">${mine ? 'Find again' : 'Find decks'}</button>` : '')
-        + (card && card.commander && hasCommander(card.format)
-            ? '<button class="btn btn-small" id="around-commander">Start a deck with it as commander</button>' : '');
-    $('around-progress').innerHTML = (card ? `<div class="around-card">
-            ${card.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)}">` : ''}
-            <div>
-                <div class="idea-name">${escapeHtml(card.name)}</div>
-                <div class="idea-meta">${escapeHtml(card.type || '')}</div>
-                <div class="filter-row">${buttons}</div>
-                <div class="hint">${status}</div>
-            </div>
-        </div>` : buttons || status ? `<div class="filter-row"><span class="hint">${status}</span><span class="spacer"></span>${buttons}</div>` : '')
-        + (shown && shown.error ? `<div class="callout warning">${escapeHtml(shown.error)}</div>` : '');
-    $('around-decks').innerHTML = !shown
-        ? (card ? '' : '<div class="hint">Click one of your cards to see it, then Find decks to look for decks that play it.</div>')
-        : shown.items.map(item => `
-        <div class="idea-row precon">
-            <div><div class="idea-name">${escapeHtml(item.name)}</div>
-                 <div class="idea-meta">${escapeHtml(item.source)}${item.author ? ' · ' + escapeHtml(item.author) : ''} · ${item.views.toLocaleString()} views · ${item.owned} of ${item.total} cards owned</div></div>
-            <div class="idea-share"><strong>${item.percent}%</strong><div class="meter" style="width: 70px"><span style="width: ${item.percent}%"></span></div></div>
-            <div class="idea-actions">
-                <a class="mini-btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener" title="Open on ${escapeHtml(item.source)}"><svg class="icon"><use href="#i-link"/></svg></a>
-                <button class="btn btn-small" data-import-url="${escapeHtml(item.url)}" title="Open a copy as a new deck here">Copy as deck</button>
-            </div>
-        </div>`).join('') || (running || shown.error ? '' : '<div class="hint">No public decks found with this card in this format.</div>');
-}
-
-// ============================================================================
-// Decks: builder
-// ============================================================================
-
-const BOARD_TITLES = {commander: 'Commander', main: 'Main deck', side: 'Sideboard'};
-const TYPE_GROUPS = [['Creature', 'Creatures'], ['Planeswalker', 'Planeswalkers'], ['Instant', 'Instants'],
-                     ['Sorcery', 'Sorceries'], ['Artifact', 'Artifacts'], ['Enchantment', 'Enchantments'],
-                     ['Battle', 'Battles'], ['Land', 'Lands']];
-let sidePanel = 'search';
-let searchColors = new Set();
-let searchOffset = 0;
-let searchTimer = null;
-let suggestions = null;    // {deckKey, data}: loaded per commander
-
-function openDeck(payload) {
-    deck = payload;
-    suggestions = null;
-    $('deck-home').hidden = true;
-    $('deck-builder').hidden = false;
-    $('deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
-    renderDeck();
-    showSide(hasCommander(deck.format) && commanders().length && deck.totals.cards < 30 ? 'suggestions' : 'search');
-    window.scrollTo(0, 0);
-}
-
-function closeDeck() {
-    deck = null;
-    $('deck-builder').hidden = true;
-    $('deck-home').hidden = false;
-    loadDecks();
-}
-
-function commanders() {
-    return deck.cards.filter(entry => entry.board === 'commander');
-}
-
-function commanderNames() {
-    return commanders().map(entry => entry.name);
-}
-
-function updateDeck(payload) {
-    // The deck after a change, and what is shown beside it
-    deck = payload;
-    renderDeck();
-    refreshSide();
-}
-
-function sideTitle() {
-    return hasCommander(deck.format) ? 'Considering (not in the deck)' : BOARD_TITLES.side;
-}
-
-function typeGroup(entry) {
-    const front = ((entry.card && entry.card.type_line) || '').split(' // ')[0];
-    // A creature that is also an artifact or enchantment is filed as a creature; a land always as a land
-    if (front.includes('Land')) return 'Lands';
-    const found = TYPE_GROUPS.find(([type]) => front.includes(type));
-    return found ? found[1] : 'Other';
-}
-
-function ownHtml(entry, wanted) {
-    // wanted: copies of the card this deck plays over all its boards
-    const elsewhere = totalQuantity(entry.elsewhere);
-    const others = entry.elsewhere.map(other => `${other.quantity} in ${other.deck}`).join(', ');
-    if (entry.owned >= wanted + elsewhere) return `<span class="own have" title="You own ${entry.owned}${others ? ' - also ' + others : ''}">✓ owned</span>`;
-    if (entry.owned >= wanted) return `<span class="own shared" title="You own ${entry.owned}, but other decks want it too: ${escapeHtml(others)}">⇄ shared</span>`;
-    if (entry.owned > 0) return `<span class="own partly" title="You own ${entry.owned} of ${wanted}">${entry.owned} of ${wanted}</span>`;
-    return '<span class="own none" title="Not in your inventory">✕ missing</span>';
-}
-
-function deckRowHtml(entry, wanted) {
-    const moves = [];
-    if (entry.board !== 'main') moves.push(['main', 'Main', 'Move to the main deck']);
-    if (entry.board !== 'side') moves.push(['side', hasCommander(deck.format) ? 'Maybe' : 'Side', `Move to: ${sideTitle()}`]);
-    const card = entry.card;
-    if (canCommand(card) && entry.board !== 'commander') moves.push(['commander', 'Cmdr', 'Make it the commander']);
-    return `
-        <div class="deck-row" data-name="${escapeHtml(entry.name)}" data-board="${entry.board}" data-image="${escapeHtml((card && card.image_uri) || '')}">
-            <span class="qty">
-                <button class="mini-btn" data-change="-1" title="One less"><svg class="icon"><use href="#i-minus"/></svg></button>
-                <strong>${entry.quantity}</strong>
-                <button class="mini-btn" data-change="1" title="One more"><svg class="icon"><use href="#i-plus"/></svg></button>
-            </span>
-            <span class="result-main"><span class="result-name ${card ? '' : 'unknown'}">${escapeHtml(entry.name)}</span> ${card ? manaHtml(card.mana_cost) : '<span class="hint">not in the card data</span>'}</span>
-            ${ownHtml(entry, wanted)}
-            <span class="result-numbers">${card ? money(card.price * entry.quantity) : ''}</span>
-            <span class="result-actions">${card ? `<button class="mini-btn printing-btn" data-printing title="Choose the printing shown">${
-                escapeHtml(entry.printing.set_code ? `${entry.printing.set_code} ${entry.printing.number}` : 'Printing')}</button>` : ''}${moves.map(([board, label, title]) =>
-                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}</span>
-        </div>`;
-}
-
-function renderDeck() {
-    $('deck-name').value = deck.name;
-    $('deck-format').value = deck.format;
-    const totals = deck.totals;
-    const considering = hasCommander(deck.format);
-    $('deck-totals').innerHTML = `
-        <span><strong>${totals.cards}</strong> cards${totals.side ? ` + ${totals.side} ${considering ? 'considered' : 'sideboard'}` : ''}</span>
-        <span>Price <strong>${money(totals.price)}</strong></span>
-        <span>${totals.missing ? `Missing <strong>${totals.missing}</strong> cards (${money(totals.missing_price)})` : totals.cards ? '<strong>You own every card</strong>' : ''}</span>`;
-    $('deck-issues').innerHTML = deck.issues.length ? deck.issues.map(issue => `
-        <div class="issue ${issue.level}">${issue.level === 'error' ? '✕' : '!'} ${escapeHtml(issue.message)}${issue.cards.length
-            ? `<span class="issue-cards">: ${escapeHtml(issue.cards.slice(0, 12).join(', '))}${issue.cards.length > 12 ? ` and ${issue.cards.length - 12} more` : ''}</span>` : ''}</div>`).join('')
-        : (totals.cards ? `<div class="issue ok">✓ Legal ${escapeHtml(formatLabel(deck.format))} deck</div>` : '');
-
-    // Copies of each card over the boards that are played
-    const played = deck.cards.filter(entry => !(considering && entry.board === 'side'));
-    const wanted = {};
-    played.forEach(entry => { wanted[entry.name] = (wanted[entry.name] || 0) + entry.quantity; });
-    renderDeckCharts(played.filter(entry => entry.board !== 'side' && entry.card));
-
-    const sections = [];
-    const section = (title, entries) => {
-        if (!entries.length) return;
-        const count = totalQuantity(entries);
-        sections.push(`<div class="category-title">${escapeHtml(title)} (${count})</div>`
-            + entries.map(entry => deckRowHtml(entry, wanted[entry.name] || entry.quantity)).join(''));
-    };
-    section(BOARD_TITLES.commander, commanders());
-    const main = deck.cards.filter(entry => entry.board === 'main');
-    [...TYPE_GROUPS.map(([, title]) => title), 'Other'].forEach(title =>
-        section(title, main.filter(entry => typeGroup(entry) === title)));
-    section(sideTitle(), deck.cards.filter(entry => entry.board === 'side'));
-    $('deck-cards').innerHTML = sections.join('')
-        || '<div class="empty-state">No cards yet. Search on the left and click a card to add it.</div>';
-
-    $('side-suggestions').hidden = !considering;
-    $('search-identity-label').hidden = !considering;
-}
-
-function renderDeckCharts(entries) {
-    if (!entries.length) {
-        $('deck-charts').innerHTML = '';
-        return;
-    }
-    // Mana curve: spells by mana value (lands have none)
-    const curve = Array(8).fill(0);
-    const pips = {W: 0, U: 0, B: 0, R: 0, G: 0};
-    const types = new Map();
-    entries.forEach(entry => {
-        const group = typeGroup(entry);
-        types.set(group, (types.get(group) || 0) + entry.quantity);
-        if (group !== 'Lands') curve[Math.min(7, Math.floor(entry.card.cmc || 0))] += entry.quantity;
-        ((entry.card.mana_cost || '').match(/\{[^}]+\}/g) || []).forEach(symbol =>
-            Object.keys(pips).forEach(color => { if (symbol.includes(color)) pips[color] += entry.quantity; }));
-    });
-    const top = Math.max(...curve, 1);
-    const colorNames = Object.fromEntries(COLORS);
-    $('deck-charts').innerHTML = `
-        <div><div class="chart-title">Mana curve</div>
-            <div class="curve">${curve.map((count, cost) => `
-                <div class="curve-col" title="Mana value ${cost}${cost === 7 ? ' or more' : ''}: ${plural(count, 'card')}">
-                    <span>${count || ''}</span><div class="curve-bar" style="height: ${(72 * count / top).toFixed(0)}px"></div><span>${cost}${cost === 7 ? '+' : ''}</span>
-                </div>`).join('')}</div></div>
-        <div><div class="chart-title">Types</div>${barsHtml([...types.entries()], number => String(number), 9)}</div>
-        <div><div class="chart-title">Mana symbols</div>${barsHtml(Object.entries(pips).map(([color, count]) => [colorNames[color], count]), number => String(number), 5)}</div>`;
-}
-
-// -- Printing of a deck card ------------------------------------------------------
-
-let printingEntry = null;   // {name, board} of the entry whose printing is being chosen
-
-async function openPrintings(name, board) {
-    const entry = deck.cards.find(card => card.name === name && card.board === board);
-    if (!entry) return;
-    printingEntry = {name, board};
-    $('printing-title').textContent = name;
-    $('printing-grid').innerHTML = '<div class="hint">Loading the printings...</div>';
-    $('printing-modal').classList.add('show');
-    const data = await api(`/api/cards/printings?name=${encodeURIComponent(name)}`);
-    if (!data) return closeModal('printing-modal');
-    // The printings you own first, then the newest
-    const printings = [...data.printings].sort((a, b) => (b.owned > 0) - (a.owned > 0));
-    $('printing-grid').innerHTML = printings.map(printing => `
-        <button class="printing ${printing.id === entry.printing.id ? 'is-current' : ''}" data-id="${escapeHtml(printing.id)}">
-            ${printing.image_uri ? `<img src="${escapeHtml(printing.image_uri)}" alt="" loading="lazy">` : '<div class="no-image"></div>'}
-            <span class="printing-set">${escapeHtml(printing.set)}</span>
-            <span class="printing-meta">
-                <span>${escapeHtml((printing.set_code || '').toUpperCase())} #${escapeHtml(printing.number)}</span>
-                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil' : ''}</span>
-                ${printing.owned ? `<span class="own have">✓ ${printing.owned} owned</span>` : ''}
-            </span>
-            ${printing.treatments.length ? `<span class="printing-meta">${escapeHtml(printing.treatments.join(', '))}</span>` : ''}
-        </button>`).join('') || '<div class="hint">No printings found.</div>';
-}
-
-async function changeDeckCards(cards) {
-    const data = await api(`/api/decks/${deck.id}/cards`, {method: 'POST', body: {cards}});
-    if (!data) return;
-    updateDeck(data.deck);
-}
-
-async function saveDeckInfo(body) {
-    const data = await api(`/api/decks/${deck.id}`, {method: 'PUT', body});
-    if (!data) return;
-    updateDeck(data.deck);
-}
-
-// -- Left side: search, suggestions, popular decks -----------------------------
-
-function showSide(panel) {
-    sidePanel = panel;
-    markSwitch('side-switch', 'side', panel);
-    $('side-search').hidden = panel !== 'search';
-    $('side-suggestions-panel').hidden = panel !== 'suggestions';
-    $('side-popular-panel').hidden = panel !== 'popular';
-    refreshSide(true);
-}
-
-function refreshSide(opened = false) {
-    // After the deck changed: what is shown beside it depends on its cards
-    if (sidePanel === 'search') { if (opened) runSearch(); else markResults(); }
-    if (sidePanel === 'suggestions') loadSuggestions();
-    if (sidePanel === 'popular' && opened) loadPopular();
-}
-
-function inDeck(name) {
-    return totalQuantity(deck.cards.filter(entry => entry.name === name));
-}
-
-function addLabelHtml(count) {
-    // On a result's add button: the copies already in the deck
-    return count ? `${count} +` : '<svg class="icon"><use href="#i-plus"/></svg>';
-}
-
-function canCommand(card) {
-    return !!card && hasCommander(deck.format) && isCommanderCard(card);
-}
-
-function resultRowHtml(card, numbers = '') {
-    return `
-        <div class="result-row" data-name="${escapeHtml(card.name)}" data-id="${escapeHtml(card.id)}" data-image="${escapeHtml(card.image_uri || '')}" title="${escapeHtml(card.oracle_text)}">
-            <span class="result-main">
-                <div><span class="result-name">${escapeHtml(card.name)}</span> ${manaHtml(card.mana_cost)}</div>
-                <div class="result-sub">${escapeHtml(card.type_line)}</div>
-            </span>
-            <span class="result-numbers">${numbers}${card.owned ? `<span class="own have">✓ ${card.owned} owned</span>` : ''}<div>${money(card.price)}</div></span>
-            <span class="result-actions">
-                ${canCommand(card) ? '<button class="mini-btn" data-add="commander" title="Make it the commander">Cmdr</button>' : ''}
-                <button class="mini-btn" data-add="main" title="Add to the deck">${addLabelHtml(inDeck(card.name))}</button>
-            </span>
-        </div>`;
-}
-
-async function runSearch(more = false) {
-    if (!deck) return;
-    searchOffset = more ? searchOffset : 0;
-    const params = new URLSearchParams({offset: searchOffset});
-    const add = (key, value) => { if (value) params.set(key, value); };
-    add('q', $('search-text').value.trim());
-    add('type', $('search-type').value.trim());
-    add('text', $('search-oracle').value.trim());
-    add('cmc', $('search-cmc').value);
-    add('rarity', $('search-rarity').value);
-    add('colors', [...searchColors].join(''));
-    add('owned', $('search-owned').checked ? '1' : '');
-    if ($('search-free').checked) {
-        params.set('free', '1');
-        params.set('deck_id', deck.id);
-    }
-    add('format', $('search-legal').checked ? deck.format : '');
-    if (hasCommander(deck.format) && $('search-identity').checked && commanders().some(entry => entry.card)) {
-        params.set('identity', [...new Set(commanders().flatMap(entry => (entry.card && entry.card.identity) || []))].join(''));
-    }
-    const data = await api(`/api/cards/search?${params}`);
-    if (!data || !deck) return;
-    const html = data.cards.map(card => resultRowHtml(card)).join('');
-    const list = $('search-results');
-    if (more) list.insertAdjacentHTML('beforeend', html);
-    else list.innerHTML = html || '<div class="empty-state">No cards match.</div>';
-    searchOffset += data.cards.length;
-    $('search-more').hidden = !data.more;
-}
-
-function markResults() {
-    // The counts on the add buttons follow the deck
-    document.querySelectorAll('#search-results .result-row').forEach(row => {
-        row.querySelector('[data-add="main"]').innerHTML = addLabelHtml(inDeck(row.dataset.name));
-    });
-}
-
-async function loadSuggestions() {
-    const key = `${deck.id}:${commanderNames().join('|')}`;
-    if (!suggestions || suggestions.key !== key) {
-        $('suggestions-list').innerHTML = '<div class="hint">Asking EDHREC...</div>';
-        $('suggestions-source').textContent = '';
-        const data = await api(`/api/decks/${deck.id}/suggestions`);
-        if (!deck) return;
-        suggestions = {key, data: data || {categories: [], message: 'Suggestions are not available right now'}};
-    }
-    const data = suggestions.data;
-    const ownedOnly = $('suggestions-owned').checked;
-    const freeOnly = $('suggestions-free').checked;
-    $('suggestions-source').innerHTML = data.decks
-        ? `Played with this commander in ${data.decks.toLocaleString()} decks - <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">EDHREC</a>` : '';
-    const html = data.categories.map(category => {
-        const cards = category.cards.filter(card => !inDeck(card.name) && (!ownedOnly || card.owned) && (!freeOnly || !card.elsewhere));
-        return cards.length ? `<div class="category-title">${escapeHtml(category.title)}</div>` + cards.map(card => resultRowHtml(card,
-            `<span title="In ${card.inclusion}% of this commander's decks; synergy ${card.synergy > 0 ? '+' : ''}${card.synergy}%">${card.inclusion}% </span>`)).join('') : '';
-    }).join('');
-    const average = !deck.totals.cards || deck.totals.cards <= 2
-        ? '<button class="btn btn-small btn-block" id="suggestions-average">Start from EDHREC\'s average deck</button>' : '';
-    $('suggestions-list').innerHTML = (data.categories.length ? average : '') + (html
-        || `<div class="empty-state">${escapeHtml(data.message || (ownedOnly ? 'You own none of the suggested cards that are not in the deck already.' : 'No suggestions left.'))}</div>`);
-}
-
-async function startFromAverage() {
-    const data = await api(`/api/decks/${deck.id}/import`, {method: 'POST',
-        body: {average: commanderNames(), replace: true}});
-    if (!data) return;
-    reportUnknown(data.unknown);
-    notify("Filled with EDHREC's average deck", 'success');
-    updateDeck(data.deck);
-}
-
-async function loadPopular() {
-    $('popular-list').innerHTML = '<div class="hint">Looking...</div>';
-    const data = await api(`/api/decks/popular?deck_id=${deck.id}`);
-    if (!data || !deck) return;
-    $('popular-source').textContent = data.commander
-        ? `Most viewed public decks with ${data.commander} (Archidekt)`
-        : `Most viewed public ${formatLabel(deck.format)} decks (Archidekt, Moxfield)`;
-    $('popular-list').innerHTML = data.problems.map(problem => `<div class="callout warning">${escapeHtml(problem)}</div>`).join('')
-        + (data.decks.map(item => `
-            <div class="result-row">
-                <span class="result-main">
-                    <div class="result-name">${escapeHtml(item.name)}</div>
-                    <div class="result-sub">${escapeHtml(item.source)}${item.author ? ' · ' + escapeHtml(item.author) : ''} · ${item.views.toLocaleString()} views</div>
-                </span>
-                <span class="result-actions">
-                    <a class="mini-btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener" title="Open on ${escapeHtml(item.source)}"><svg class="icon"><use href="#i-link"/></svg></a>
-                    <button class="mini-btn" data-import-url="${escapeHtml(item.url)}" title="Open a copy as a new deck here">Copy</button>
-                </span>
-            </div>`).join('') || (data.problems.length ? '' : '<div class="empty-state">No decks found.</div>'));
-}
-
-// -- Card image beside the hovered row -----------------------------------------
-
-let previewRow = null;   // the row whose card is shown large
-
-function showPreview(row) {
-    const preview = $('card-preview');
-    const image = row && row.dataset.image;
-    if (!image) {
-        preview.hidden = true;
-        previewRow = null;
-        return;
-    }
-    if (preview.dataset.image !== image) {
-        // Without its old picture: a browser keeps showing that until the new one has loaded
-        // (the box itself is there at once, card-shaped)
-        preview.removeAttribute('src');
-        preview.src = image;
-        preview.dataset.image = image;
-    }
-    preview.hidden = false;
-    previewRow = row;
-    placePreview();
-}
-
-function placePreview() {
-    // Beside what the pointer is on (a deck row, the small picture of an inventory row), on
-    // the side that has room
-    if (!previewRow) return;
-    const preview = $('card-preview');
-    const height = 240 * 88 / 63;
-    const rect = previewRow.getBoundingClientRect();
-    const left = rect.right + 250 < window.innerWidth ? rect.right + 8 : rect.left - 248;
-    preview.style.left = `${Math.max(8, left)}px`;
-    preview.style.top = `${Math.max(8, Math.min(rect.top - 40, window.innerHeight - height - 8))}px`;
-}
 
 // ============================================================================
 // Settings drawer: backups of the collection, the scanned cards and the decks
@@ -1731,8 +895,7 @@ async function backupAction(row, action) {
         selected.clear();
         loadInventory();
         loadScanned();
-        if (deck) closeDeck();  // the open deck may be gone or different
-        else loadDecks();
+        loadDeckList();  // the decks' names may be different (the location filter lists them)
     } else {
         const ok = await confirmDialog({title: `Delete the backup of ${created}?`, confirmText: 'Delete', danger: true,
             message: "Your cards are not changed. This can't be undone."});
@@ -1896,31 +1059,6 @@ function bindTradeEvents() {
 // Events
 // ============================================================================
 
-function debounce(callback, delay = 250) {
-    let timer = null;
-    return () => {
-        clearTimeout(timer);
-        timer = setTimeout(callback, delay);
-    };
-}
-
-function bindSwitch(id, chosen) {
-    // A row of buttons of which one is active (markSwitch shows which)
-    $(id).addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (button) chosen(button);
-    });
-}
-
-function bindColorChips(id, colors, changed) {
-    $(id).addEventListener('click', event => {
-        const chip = event.target.closest('.color-chip');
-        if (!chip) return;
-        if (colors.has(chip.dataset.color)) colors.delete(chip.dataset.color); else colors.add(chip.dataset.color);
-        chip.classList.toggle('is-active');
-        changed();
-    });
-}
 
 function bindInventoryEvents() {
     // Filters
@@ -2022,154 +1160,7 @@ function bindInventoryEvents() {
         selected.clear();
         renderInventory();
     });
-    $('value-ok').addEventListener('click', () =>
-        closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
-    $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
-}
-
-function bindDeckHomeEvents() {
-    // Deck list
-    $('deck-new').addEventListener('click', () => openDeckModal());
-    $('deck-sort').value = recall('deckSort', 'changed');
-    $('deck-sort').addEventListener('change', event => {
-        remember('deckSort', event.target.value);
-        renderDeckList();
-    });
-    $('deck-filter-format').addEventListener('change', renderDeckList);
-    $('deck-filter-text').addEventListener('input', debounce(renderDeckList, 150));
-    $('deck-modal-save').addEventListener('click', saveDeckModal);
-    $('deck-list').addEventListener('click', async event => {
-        const tile = event.target.closest('[data-deck]');
-        if (!tile) return;
-        const data = await api(`/api/decks/${tile.dataset.deck}`);
-        if (data) openDeck(data.deck);
-    });
-    document.querySelectorAll('[data-ideas]').forEach(button => button.addEventListener('click', () =>
-        button.dataset.running ? stopIdeas(button.dataset.ideas)
-            // The precon ranking reads only the kind of deck that is chosen
-            : pollIdeas(button.dataset.ideas, true, button.dataset.ideas === 'precons' ? {type: $('precon-type').value} : {})));
-
-    // Build around a card
-    $('around-format').innerHTML = optionsHtml(gameInfo.deck_formats);
-    $('around-format').addEventListener('change', () => {
-        aroundCard = null;  // chosen for the other format
-        renderAround();
-        loadAroundCards();
-    });
-    ['around-search', 'around-type'].forEach(id => $(id).addEventListener('input', debounce(loadAroundCards)));
-    $('around-free').addEventListener('change', loadAroundCards);
-    $('around-commanders').addEventListener('change', loadAroundCards);
-    $('around-cards').addEventListener('click', event => {
-        const row = event.target.closest('.result-row');
-        if (row) chooseAround(row);
-    });
-    $('around-progress').addEventListener('click', event => {
-        if (event.target.id === 'around-find') findAround();
-        if (event.target.id === 'around-stop') stopIdeas('card');
-        if (event.target.id === 'around-commander') {
-            createDeck({name: aroundCard.name, format: aroundCard.format, commander: aroundCard.name});
-        }
-    });
-    $('around-decks').addEventListener('click', copyDeckClicked);
-    $('ideas-commanders').addEventListener('click', event => {
-        const button = event.target.closest('[data-start-commander]');
-        if (button) createDeck({name: button.dataset.startCommander, format: 'commander', commander: button.dataset.startCommander});
-    });
-    $('precon-search').addEventListener('input', debounce(renderPrecons, 150));
-    $('precon-type').addEventListener('change', renderPrecons);
-    $('ideas-precons').addEventListener('click', event => {
-        const button = event.target.closest('[data-precon]');
-        const row = event.target.closest('[data-file]');
-        const item = button && row && precons.find(precon => precon.file === row.dataset.file);
-        if (!item) return;
-        if (button.dataset.precon === 'own') ownPrecon(item);
-        else viewPrecon(item);
-    });
-    $('precon-create').addEventListener('click', async () => {
-        const item = viewedPrecon;
-        // A second deck of the same name makes every card of the first count for two decks
-        if (deckList.some(existing => existing.name.toLowerCase() === item.name.toLowerCase())
-            && !await confirmDialog({title: `You already have a deck called ${item.name}`,
-                                     message: 'Create another one with the same name?', confirmText: 'Create another'})) return;
-        closeModal('precon-modal');
-        createDeck({name: item.name, format: item.format, precon: item.file}, 'Deck created');
-    });
-    $('precon-own').addEventListener('click', () => {
-        closeModal('precon-modal');
-        ownPrecon(viewedPrecon);
-    });
-    $('deck-data-update').addEventListener('click', event => {
-        event.target.disabled = true;
-        $('deck-data-progress').textContent = 'Starting...';
-        socket.emit('update_database');
-    });
-}
-
-function bindBuilderEvents() {
-    // Header
-    $('deck-back').addEventListener('click', closeDeck);
-    $('deck-name').addEventListener('change', event => saveDeckInfo({name: event.target.value}));
-    $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
-    $('deck-import').addEventListener('click', () => openDeckModal({importInto: deck}));
-    $('deck-export').addEventListener('click', () => { window.location = `/api/decks/${deck.id}/export/text`; });
-    $('deck-buylist').addEventListener('click', () => {
-        if (!deck.totals.missing) return notify('You own every card of this deck', 'success');
-        window.location = `/api/decks/${deck.id}/export/buylist`;
-    });
-    $('deck-duplicate').addEventListener('click', async () => {
-        const data = await api(`/api/decks/${deck.id}/duplicate`, {method: 'POST'});
-        if (data) openDeck(data.deck);
-    });
-    $('deck-delete').addEventListener('click', async () => {
-        const ok = await confirmDialog({title: `Delete "${deck.name}"?`, confirmText: 'Delete', danger: true,
-            message: "The deck list is deleted. Your inventory is not touched."});
-        if (ok && await api(`/api/decks/${deck.id}`, {method: 'DELETE'})) closeDeck();
-    });
-
-    // Deck cards
-    $('deck-cards').addEventListener('click', event => {
-        const row = event.target.closest('.deck-row');
-        const button = event.target.closest('.mini-btn');
-        if (!row || !button) return;
-        const card = {name: row.dataset.name, board: row.dataset.board};
-        if ('printing' in button.dataset) openPrintings(card.name, card.board);
-        else if (button.dataset.change) changeDeckCards([{...card, change: parseInt(button.dataset.change)}]);
-        else if (button.dataset.move) changeDeckCards([{...card, move_to: button.dataset.move}]);
-    });
-
-    $('printing-grid').addEventListener('click', event => {
-        const button = event.target.closest('.printing');
-        if (!button || !printingEntry) return;
-        closeModal('printing-modal');
-        changeDeckCards([{...printingEntry, printing: button.dataset.id}]);
-    });
-
-    // Search, suggestions, popular decks
-    bindSwitch('side-switch', button => showSide(button.dataset.side));
-    ['search-text', 'search-type', 'search-oracle'].forEach(id => $(id).addEventListener('input', debounce(() => runSearch())));
-    ['search-cmc', 'search-rarity', 'search-owned', 'search-free', 'search-legal', 'search-identity']
-        .forEach(id => $(id).addEventListener('change', () => runSearch()));
-    $('search-colors').innerHTML = colorChipsHtml(searchColors);
-    bindColorChips('search-colors', searchColors, () => runSearch());
-    $('search-more').addEventListener('click', () => runSearch(true));
-    const addFromRow = event => {
-        const row = event.target.closest('.result-row[data-name]');
-        if (!row || event.target.closest('a')) return;
-        const button = event.target.closest('[data-add]');
-        changeDeckCards([{name: row.dataset.name, card_id: row.dataset.id, board: button ? button.dataset.add : 'main', change: 1}]);
-    };
-    $('search-results').addEventListener('click', addFromRow);
-    $('suggestions-list').addEventListener('click', event => {
-        if (event.target.id === 'suggestions-average') return startFromAverage();
-        addFromRow(event);
-    });
-    $('suggestions-owned').addEventListener('change', loadSuggestions);
-    $('suggestions-free').addEventListener('change', loadSuggestions);
-    $('popular-list').addEventListener('click', copyDeckClicked);
-    $('popular-import').addEventListener('click', () => {
-        const url = $('popular-url').value.trim();
-        if (url) createDeck({url}, 'Deck copied');
-    });
+    bindValueDialog();
 }
 
 // Topmost first
@@ -2178,10 +1169,7 @@ const OVERLAYS = [
     ['value-modal', () => closeValueDialog(null)],
     ['capture-modal', closeCaptures],
     ['edit-card-modal', closeEditCard],
-    ['printing-modal', () => closeModal('printing-modal')],
-    ['precon-modal', () => closeModal('precon-modal')],
     ['settings-drawer', closeSettings],
-    ['deck-modal', () => closeModal('deck-modal')],
 ];
 
 function bindEvents() {
@@ -2194,14 +1182,8 @@ function bindEvents() {
         statsMeasure = button.dataset.measure;
         renderStats();
     });
-    bindDeckHomeEvents();
-    bindBuilderEvents();
     bindTradeEvents();
-
-    // Card image preview (devices with a mouse)
-    if (window.matchMedia('(hover: hover)').matches) {
-        document.addEventListener('mouseover', event => showPreview(event.target.closest('[data-image]')));
-    }
+    bindCardPreview();
 
     // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
     $('settings-close').addEventListener('click', closeSettings);
@@ -2221,15 +1203,7 @@ function bindEvents() {
     if (window.location.hash === '#settings') openSettings();
 
     // Overlays: Escape closes the topmost one open, a click outside the one clicked
-    document.addEventListener('keydown', event => {
-        if (event.key !== 'Escape') return;
-        const overlay = OVERLAYS.find(([id]) => $(id).classList.contains('show'));
-        if (overlay) overlay[1]();
-    });
-    window.addEventListener('click', event => {
-        const overlay = OVERLAYS.find(([id]) => event.target === $(id));
-        if (overlay) overlay[1]();
-    });
+    bindOverlays(OVERLAYS);
 }
 
 // The inventory changes while scanning on another tab or device
@@ -2238,20 +1212,12 @@ function bindEvents() {
     socket.on(name, debounce(() => {
         loadInventory();
         if (currentTab === 'trades') loadTrades();
-        if (deck) api(`/api/decks/${deck.id}`).then(data => { if (data && deck) { deck = data.deck; renderDeck(); } });
     }, 500)));
 socket.on('game_changed', () => window.location.reload());
-socket.on('database_update_progress', data => { $('deck-data-progress').textContent = data.message; });
 socket.on('database_update_complete', () => {
-    $('deck-data-progress').textContent = '';
     notify('Card database updated', 'success');
     loadInventory();
-    loadDecks();
-});
-socket.on('database_update_error', data => {
-    $('deck-data-progress').textContent = '';
-    $('deck-data-update').disabled = false;
-    notify(`Card database update failed: ${data.message}`, 'error');
+    loadDeckList();
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2259,12 +1225,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!data) return;
     gameInfo = data.games.find(game => game.id === data.active);
     $('game-label').textContent = data.games.length > 1 ? gameInfo.label : '';
-    $('tab-button-decks').hidden = !gameInfo.deck_formats.length;
+    // "Decks" in the header is a link to the deck pages; a game without decks has none
+    $('page-link-decks').hidden = !gameInfo.deck_formats.length;
     renderExportMenu();
     bindEvents();
     await loadInventory();
-    loadDecks();  // the location filter lists the decks' locations apart
+    loadDeckList();  // the location filter lists the decks' locations apart
     loadTrades();  // "Set aside for trade" offers the open ones
+    // The tab last used. 'decks' was one of this page's tabs until 2026-10-13: a browser
+    // that remembers it gets the inventory (the decks are a click away, in the header)
     const tab = recall('collectionTab', 'inventory');
-    showTab(tab === 'decks' && !gameInfo.deck_formats.length ? 'inventory' : tab);
+    showTab(['inventory', 'stats', 'trades'].includes(tab) ? tab : 'inventory');
 });
