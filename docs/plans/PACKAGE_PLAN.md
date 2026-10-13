@@ -2,8 +2,7 @@
 
 Date: 2026-10-12
 
-**The move itself was done on 2026-10-13** (phases 0, 1 and 3; a real camera and the machines
-are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+**Done on 2026-10-13**, all phases - see *How it went* at the end. What follows is the plan as it was written.
 
 A plan for the step that [SRC_MOVE_PLAN.md](SRC_MOVE_PLAN.md) left for later (its decision
 1): the modules that lie flat in `src/` become one package with a name, sorted into folders
@@ -285,9 +284,8 @@ systemd container makes `deploy.sh` testable this time before anyone is told how
 
 ## How it went (2026-10-13)
 
-Phases 0, 1 and 3 are done, on the branch `package`. **Not done: phase 2 (the Pi 4's camera on
-a test image) and phase 4 (the machines)** - every machine still runs the layout of
-2026-10-12, which goes on working.
+All phases are done and merged into `main` (both repositories): the server and the three
+stations run the package.
 
 Done as planned. What differed or was added:
 
@@ -331,8 +329,42 @@ Not checked:
   the script writes and asks for. The command a unit runs was started by hand in that
   container (`station.py`: setup page up, looking for its server; `app.py`: imports, 62
   routes);
-- the `client-pi` image and any real camera on the new layout; a server with a GPU;
-- the machines.
+- a card *read* through a camera on the new layout (the Pi 4's test was at night: a dark
+  box; both Pis' cameras open and send their live view).
+
+**Phase 2, the Pi 4's camera** (00:25-00:31). The `client-pi` image built on the Pi 5 from
+the new layout (3 min 24 s) under a test name, carried to the Pi 4 and run there in place
+of the real station for about a minute - a volume of its own with only the camera kind and
+the crop - against a server on the laptop on copied data: connected, the camera opened, 18
+frames of live view in 4 s (26 after the restart), a manual capture taken, uploaded, sent
+to OCR and the AI (a dark box: nothing to read), a restart from the setup page that ran
+`station.py` again in the same container. Then the test container, volume and images
+removed and the real station started: connected, its crop and server address as before.
+
+**Phase 4, the machines** (00:30-00:37), all idle, nothing waiting to be sent.
+
+- **The server**: a full backup (`scanner-backup-20261013_003055.tar.gz`, 524 MB). Its
+  folder compared with the new tree before deleting: 68 files under `src/` that are no
+  longer in the tree (the flat modules, `server/`, `games/`), nothing unexpected; deleted,
+  the tree copied, `config` showing `~/scanner-server/data` as before. The image built
+  while the old container served, and looked into: `config` from
+  `/app/src/card_scanner`, pages and OCR reader found, only the two launchers in `/app`.
+  After `up`: answering in 4 seconds; the collection's numbers and the scanned cards' the
+  same (5,407 cards, 2,151 entries, 2 scanned), 15 decks, `light-ocr ready (webgpu)`, the
+  three pages and their files answered, no error in the log, both stations back with
+  their cameras. The image from before is kept on the server this time.
+- **The Pi 5** (USB webcam) and **the Pi 4** (camera module): the same comparison (the 68
+  files, and the Pi 5's `.env`, which stays), the image built there and looked into - it
+  holds the launcher, the four shared modules and `station/`, nothing of the server -
+  then the container replaced. Both connected with their cameras; the Pi 4's crop and
+  password in its volume as before.
+- **The laptop**: its image rebuilt and the stopped container created again with its
+  settings; left not started.
+
+Not done with a browser this time: the pages on the real server were asked for by address
+(the three pages, the scripts, the style, the font, Socket.IO's client: all answered),
+not opened in headless Chromium - that helper was lost with the temporary folder. It was
+run against the same code on the laptop before the crash.
 
 **What went wrong on the way, and is not the change's doing:** to try `deploy.sh --service`
 with a real systemd I started a *privileged* container running systemd on the laptop, as
