@@ -255,8 +255,9 @@ a phone too; the deck pages are made for a screen with a pointer.
   shown as a card, its **cover**: the commander (with two, a button turns to the other), or
   for a deck without one its most valuable card - or any card of the deck you choose with
   its **Cover** button. **Arena** shows the deck as a list for MTG Arena's Import button -
-  only the cards that exist on Arena, and which ones were left out (never tried in Arena
-  itself). **Add cards** opens a
+  only the cards that exist on Arena, and which ones were left out. A deck copied out of
+  Arena can be pasted into **New deck**. (The list's layout was compared with a deck Arena
+  exported; pasting one into Arena has not been tried.) **Add cards** opens a
   panel that searches the whole card database: click to add. Every card shows whether you own it, are missing
   it, or need it in another deck too; the deck shows what is not legal or unfinished, its mana
   curve, its price and what completing it costs, and **Buy list** downloads the missing cards.

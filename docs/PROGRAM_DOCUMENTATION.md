@@ -1693,8 +1693,16 @@ cards and double-faced cards by their front), decided from the type line. Of the
 test decks, paper Commander precons, 66 to 75 of 100 cards are on Arena - Arena has no
 Commander, and such a list imports as a Brawl deck at best. The window's Copy works on plain
 http too (`copyArena`: `navigator.clipboard` exists only over https or on the machine
-itself). **Never tried in Arena**: whether it accepts the list, every name and the
-`Commander` section included, is not known.
+itself). **Compared with a deck Arena exported** (2026-10-13, a 60-card deck the user copied
+out of Arena): Arena writes the heading `Deck` and lines `1 Llanowar Elves (M19) 314` - the
+same heading, and its three adventure cards by their front name, as `arena_name` does. Pasted
+into "New deck", that text was read whole by the deck import (60 cards, none unknown, the
+adventure cards found by their front name); written back with the Arena button it gave the
+same cards and counts, and every card was judged to be on Arena (27 of 27 the card data
+knew by name; the three others it has under their two-part names). **Still not tried**:
+pasting a list from here into Arena - whether it takes lines without `(SET) number`, which
+Arena itself always writes - and the `Commander` and `Sideboard` sections, which that deck
+did not have.
 
 **A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
 that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of
