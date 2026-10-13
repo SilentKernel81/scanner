@@ -246,5 +246,60 @@ class DecksOfTwoKinds(Temporary):
         self.assertEqual([(d['deck'], d['quantity']) for d in decks.needed_by_name('mtg', kind='arena')[key]], [('Digital', 4)])
 
 
+class BackingUpTheDigitalCollection(Temporary):
+    """The digital collection as a fourth part of a backup (core/backups.py)"""
+
+    def setUp(self):
+        super().setUp()
+        from card_scanner.core import backups, inventory as inventory_module
+        self.backups = backups
+        # The backups and the capture thumbnails go to the temporary folder, as in test_ownership.py
+        for module, name, value in ((backups, 'BACKUPS_DIR', self.path / 'backups'), (backups, 'CAPTURES_DIR', self.path / 'captures'),
+                                    (inventory_module, 'CAPTURES_DIR', self.path / 'captures')):
+            self.addCleanup(setattr, module, name, getattr(module, name))
+            setattr(module, name, value)
+        self.collection = InventoryManager(db_file=self.path / 'cards.db')
+        self.scan = InventoryManager(db_file=self.path / 'scan.db')
+        self.digital = InventoryManager(db_file=self.path / 'arena.db')
+        self.decks = DeckManager(self.path / 'cards.db')
+        arena.prepare(self.digital)
+        for manager in (self.collection, self.scan, self.digital, self.decks):
+            self.addCleanup(manager.conn.close)
+
+    def fill(self, name, quantity, exported):
+        with self.digital._lock:
+            arena.save_account(self.digital, {'exported': exported, 'wildcards': {'rare': quantity}})
+            self.digital.replace_all('mtg', [{'fields': fields(name), 'finish': 'regular', 'quantity': quantity}])
+
+    def digital_now(self):
+        return ([(row['card_name'], row['quantity']) for row in self.digital.conn.execute('SELECT card_name, quantity FROM inventory')],
+                arena.account(self.digital).get('exported'))
+
+    def test_a_backup_brings_the_digital_collection_back(self):
+        self.fill('Opt', 3, 'monday')
+        made = self.backups.create(self.collection, self.scan, self.decks, arena_inventory=self.digital)
+        self.assertEqual(made['arena'], 3)
+        self.fill('Forest', 9, 'tuesday')
+        self.backups.restore(made['id'], self.collection, self.scan, self.decks, arena_inventory=self.digital)
+        self.assertEqual(self.digital_now(), ([('Opt', 3)], 'monday'))
+
+    def test_a_backup_without_it_leaves_the_digital_collection_alone(self):
+        # as every backup made before 2026-10-13 is
+        self.collection.replace_all('mtg', [{'fields': fields('Paper card'), 'finish': 'regular', 'quantity': 1}])
+        old = self.backups.create(self.collection, self.scan, self.decks)
+        self.fill('Forest', 9, 'tuesday')
+        self.backups.restore(old['id'], self.collection, self.scan, self.decks, arena_inventory=self.digital)
+        self.assertEqual(self.digital_now(), ([('Forest', 9)], 'tuesday'))
+
+    def test_a_new_import_is_a_change_the_schedule_sees(self):
+        self.fill('Opt', 3, 'monday')
+        first = self.backups.create_scheduled(self.collection, self.scan, self.decks, 24, 7, arena_inventory=self.digital)
+        self.assertIsNotNone(first)   # only the digital collection has anything: still worth a backup
+        fingerprint = lambda: self.backups._fingerprint(self.collection, self.scan, self.decks, self.digital)
+        before = fingerprint()
+        self.fill('Opt', 4, 'tuesday')
+        self.assertNotEqual(before, fingerprint())
+
+
 if __name__ == '__main__':
     unittest.main()

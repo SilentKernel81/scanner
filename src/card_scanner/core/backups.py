@@ -35,6 +35,10 @@ BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 # collection; the scanned cards' file has the tables too, empty)
 INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_sources', 'trades', 'trade_cards')
 DECK_TABLES = ('decks', 'deck_cards')
+# The digital collection (MTG Arena; core/arena.py): its cards and what is known of the
+# account. It has no captures, stations or trades. It could be imported again - but only
+# from a machine with Arena on it, and the Arena decks in a backup are counted against it
+ARENA_TABLES = ('inventory', 'arena_account')
 CAPTURE_NAME = re.compile(r'^[A-Za-z0-9_-]+\.(jpg|jpeg|png)$')  # a capture inside an uploaded backup
 UPLOAD_MAX_BYTES = 2 * 1024 ** 3  # an uploaded backup, unpacked (a 4,600-card one is ~100 MB)
 UPLOAD_MAX_FILES = 200_000
@@ -48,6 +52,7 @@ RESTORABLE = {
     'trades': '1',
     'trade_cards': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades) AND (inventory_id IS NULL '
                    'OR inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0))',
+    'arena_account': '1',
     'decks': '1',
     'deck_cards': "quantity > 0 AND board IN ('commander', 'main', 'side') AND deck_id IN (SELECT id FROM decks)",
 }
@@ -65,11 +70,22 @@ class BackupError(Exception):
     pass
 
 
-def _parts(inventory, scan_inventory, deck_store):
+def _parts(inventory, scan_inventory, deck_store, arena_inventory=None):
     """(prefix of the tables in backup.db, manager, its tables) - also the order of the locks
-    (collection before scanned cards, as InventoryManager.take_from)"""
+    (collection before scanned cards, as InventoryManager.take_from). arena_inventory: the
+    digital collection, a fourth part where there is one (the server; not every caller)"""
     return (('collection_', inventory, INVENTORY_TABLES), ('scanned_', scan_inventory, INVENTORY_TABLES),
+            *((('arena_', arena_inventory, ARENA_TABLES),) if arena_inventory is not None else ()),
             ('', deck_store, DECK_TABLES))
+
+
+@contextlib.contextmanager
+def _locked(parts):
+    """Every part's lock, taken in the parts' order"""
+    with contextlib.ExitStack() as stack:
+        for _prefix, manager, _tables in parts:
+            stack.enter_context(manager._lock)
+        yield
 
 
 def _columns(conn, table):
@@ -95,10 +111,10 @@ def _link(source, target):
         shutil.copyfile(source, target)
 
 
-def _fingerprint(inventory, scan_inventory, deck_store):
-    """A hash of every row a backup would hold (call it under the three locks)"""
+def _fingerprint(inventory, scan_inventory, deck_store, arena_inventory=None):
+    """A hash of every row a backup would hold (call it under the parts' locks)"""
     digest = hashlib.sha1()
-    for prefix, manager, tables in _parts(inventory, scan_inventory, deck_store):
+    for prefix, manager, tables in _parts(inventory, scan_inventory, deck_store, arena_inventory):
         for table in tables:
             columns = _columns(manager.conn, table)
             digest.update(repr((prefix + table, columns)).encode())
@@ -108,9 +124,10 @@ def _fingerprint(inventory, scan_inventory, deck_store):
 
 
 def create(inventory, scan_inventory, deck_store, note='', automatic=False, daily=False, keep=None,
-           keep_daily=KEEP_DAILY):
+           keep_daily=KEEP_DAILY, arena_inventory=None):
     """
-    Back up the collection, the scanned cards and the decks as they are now; returns its info.
+    Back up the collection, the scanned cards and the decks as they are now - and the digital
+    collection, when it is given; returns its info.
     keep: the id of a backup that must not be cleared away to make room for this one (the one
     about to be restored - it may be the oldest automatic backup itself). keep_daily: how many
     of the scheduled backups stay, when this is one (daily).
@@ -126,9 +143,9 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
     (work / 'captures').mkdir(parents=True)
     try:
         target = sqlite3.connect(str(work / 'backup.db'))
-        parts = _parts(inventory, scan_inventory, deck_store)
-        with inventory._lock, scan_inventory._lock, deck_store._lock:
-            fingerprint = _fingerprint(inventory, scan_inventory, deck_store)
+        parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
+        with _locked(parts):
+            fingerprint = _fingerprint(inventory, scan_inventory, deck_store, arena_inventory)
             for prefix, manager, tables in parts:
                 for table in tables:
                     columns = _columns(manager.conn, table)
@@ -147,6 +164,8 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
             'entries': count('SELECT COUNT(*) FROM collection_inventory'),
             'scanned': count('SELECT COALESCE(SUM(quantity), 0) FROM scanned_inventory'),
             'decks': count('SELECT COUNT(*) FROM decks'),
+            # The digital collection's cards (a backup without that part: 0)
+            'arena': count('SELECT COALESCE(SUM(quantity), 0) FROM arena_inventory') if arena_inventory is not None else 0,
             'fingerprint': fingerprint,  # create_scheduled: nothing changed since, no new backup
         }
         target.execute('CREATE TABLE info (value TEXT)')
@@ -168,7 +187,7 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
 
 
 def create_scheduled(inventory, scan_inventory, deck_store, every_hours=EVERY_HOURS, keep_count=KEEP_DAILY,
-                     note='Automatic'):
+                     note='Automatic', arena_inventory=None):
     """
     The backup made on a schedule (asked for when the app starts and every few minutes after):
     one when the last scheduled backup is every_hours old or older - and none while every_hours
@@ -186,14 +205,15 @@ def create_scheduled(inventory, scan_inventory, deck_store, every_hours=EVERY_HO
     # Decided and made under the locks, so what is judged is what is saved. Nothing to keep is
     # decided before create: an empty backup once pushed out the last one with cards in it
     # (create clears older ones away) and was then deleted itself
-    with inventory._lock, scan_inventory._lock, deck_store._lock:
+    with _locked(_parts(inventory, scan_inventory, deck_store, arena_inventory)):
         if not any(manager.conn.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone()
-                   for manager, table in ((inventory, 'inventory'), (scan_inventory, 'inventory'), (deck_store, 'decks'))):
+                   for manager, table in ((inventory, 'inventory'), (scan_inventory, 'inventory'), (deck_store, 'decks'),
+                                          *(((arena_inventory, 'inventory'),) if arena_inventory is not None else ()))):
             return None
-        if existing and existing[0].get('fingerprint') == _fingerprint(inventory, scan_inventory, deck_store):
+        if existing and existing[0].get('fingerprint') == _fingerprint(inventory, scan_inventory, deck_store, arena_inventory):
             return None
         return create(inventory, scan_inventory, deck_store, note=note, daily=True,
-                      keep_daily=max(1, min(KEEP_MAX, int(keep_count))))
+                      keep_daily=max(1, min(KEEP_MAX, int(keep_count))), arena_inventory=arena_inventory)
 
 
 def parse_schedule(data):
@@ -236,25 +256,31 @@ def list_backups():
     return found
 
 
-def restore(backup_id, inventory, scan_inventory, deck_store):
+def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=None):
     """
     Put the collection, the scanned cards and the decks back as they were in a backup (what
-    is there now is backed up first, so a restore can be taken back). Returns
+    is there now is backed up first, so a restore can be taken back) - and the digital
+    collection, if the backup has it: one made before there was a digital collection leaves
+    it as it is. Returns
     {'restored': the backup's info, 'previous': the backup made of the state replaced}.
     """
     folder = _folder(backup_id)
     # keep: the backup made here must not push out the one being restored (restoring the oldest
     # of the automatic backups once deleted it before it was read)
     previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
-                      automatic=True, keep=backup_id)
+                      automatic=True, keep=backup_id, arena_inventory=arena_inventory)
     source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
-    parts = _parts(inventory, scan_inventory, deck_store)
+    parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
     try:
-        with inventory._lock, scan_inventory._lock, deck_store._lock:
+        with _locked(parts):
             # One part at a time: the collection and the decks are two connections to one
             # file, which cannot both hold a write. If a part fails the ones before it are
             # restored already - the backup just made has the state from before
             for prefix, manager, tables in parts:
+                if prefix == 'arena_' and not _columns(source, prefix + tables[0]):
+                    # A backup from before the digital collection (or made without it): there
+                    # is nothing to put back, and emptying what is there would lose it
+                    continue
                 try:
                     # Emptied from the last table to the first: an entry that a trade holds
                     # cannot be deleted while the trade's rows are there (TRADE_TRIGGERS)
