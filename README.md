@@ -382,53 +382,65 @@ after a capture); correct them there and search again, or pick the printing from
 
 ## Project structure
 
-All the code is in `src/`; the top folder keeps what you start, set and own.
+All the code is one package, `src/card_scanner/`, sorted by which program it belongs to;
+the top folder keeps what you start, set and own.
 
 ```
-app.py               Starts the server (python app.py) - the only Python file in the top folder
-config.yaml          Settings (loaded by src/config.py / config_loader.py)
+app.py               Starts the server (python app.py)
+station.py           Starts a camera station (python station.py --server http://<server>:5000)
+config.yaml          Settings (loaded by card_scanner/config.py / config_loader.py)
 pyproject.toml       What the project is and which Python it needs (the libraries are in requirements*.txt)
 compose.yaml         `docker compose up` in this folder starts the server (it points into deploy/)
 data/                Card data, collection, settings, backups, logs (created at runtime)
 scanned_cards/       Capture images the server received (created at runtime)
 station_captures/    A camera station's captures that are not on the server yet (created at runtime)
 
-src/                 The code - every name below is in here
-paths.py             Where the two folders are: the top folder (data, settings) and src/ (code)
-server/              The server: web pages, routes, events, one desk per camera, station captures -
+src/card_scanner/    The code
+  paths.py             Where the two folders are: the top folder (data, settings) and the code
+  config.py, config_loader.py, settings.py
+                       Reading config.yaml and the saved settings - used by both programs
+
+  station/           A camera station: all of it, and nothing else
+    station_client.py    The program: runs next to the camera, talks to the server
+    station_setup.py     ... its setup page (server, name, camera), station_setup.html
+    station_login.py     ... and that page's password
+    scanner.py           Camera capture thread, detection, stability, auto-capture, focus
+    object_detector.py   Card outline detection + perspective correction
+
+  core/              Reading cards, card data, the collection - no web app, no camera
+    identification.py    Reading a card: OCR queue, AI queue, shared by every camera
+    card_ocr.py          light-ocr reader's process and the parser for what it reads
+    card_identifier.py   Vision AI providers, card identification, foil marker check
+    prompts.py           AI prompts: built-in ones and those edited in Settings
+    api_keys.py          API keys entered in Settings
+    database.py          Scryfall card data: download, schema, search, printings
+    card_search.py       Magic search helpers; setup_database.py downloads the card data
+    inventory.py         Inventory: add, merge, undo, edit, locations, tags, cameras, import / export
+    decks.py             Decks (lists of cards; the inventory says what is owned)
+    trades.py            Cards set aside until a trade is confirmed
+    backups.py           Backups of the collection, scanned cards and decks; full backups
+    storage.py           Database connections and migrations
+    pending.py           Captures in the queues, kept across a restart
+    review.py            The review queue; cleanup.py removes old capture pictures
+    stations.py          The stations and each one's settings (data/stations.json)
+    remote_scanner.py    The server's stand-in for a station's camera; the stations' connection
+    recommendations.py   Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield (cached)
+
+  server/            The web app: pages, routes, events, one desk per camera, station captures -
                      one module per area (server/__init__.py lists them)
-server/templates/, server/static/
-                     Web interface: the cameras, a camera's page, the collection. The font and
-                     Socket.IO's client are in static/ too: the pages load nothing from the internet
-identification.py    Reading a card: OCR queue, AI queue, shared by every camera
-card_ocr.py, ocr/    light-ocr reader (Node.js) and the parser for what it reads
-card_identifier.py   Vision AI providers, card identification, foil marker check
-prompts.py           AI prompts: built-in ones and those edited in Settings
-stations.py          The stations and each one's settings (data/stations.json)
-remote_scanner.py    The server's stand-in for a station's camera; the stations' connection
-pending.py           Captures in the queues, kept across a restart
-review.py            The review queue
-database.py          Scryfall card data: download, schema, search, printings
-games/               Card games: base.py (interface), mtg.py (Magic), mtg_decks.py
-inventory.py         Inventory: add, merge, undo, edit, locations, tags, cameras, import / export
-decks.py             Decks (lists of cards; the inventory says what is owned)
-recommendations.py   Deck ideas from EDHREC, MTGJSON, Archidekt and Moxfield (cached)
-backups.py           Backups of the collection, scanned cards and decks; full backups
-storage.py           Database connections and migrations
-station_client.py    Camera station: runs next to the camera, talks to the server
-station_setup.py     ... its setup page (server, name, camera), station_setup.html
-station_login.py     ... and that page's password
-scanner.py           Camera capture thread, detection, stability, auto-capture, focus
-object_detector.py   Card outline detection + perspective correction
-config.py, config_loader.py, settings.py
-                     Reading config.yaml and the saved settings
+    templates/, static/  The pages: the cameras, a camera's page, the collection. The font and
+                         Socket.IO's client are in static/ too: the pages load nothing from the internet
+  games/             Card games: base.py (interface), mtg.py (Magic), mtg_decks.py
+
+src/ocr/             The light-ocr reader itself (Node.js)
 
 tests/               Automated tests (camera ownership, backups, database, a station's setup page and uploads,
-                     where the programs look for their folders)
+                     where the programs look for their folders, which module may import which)
 deploy/              Everything about Docker: the Dockerfile (images server, client, client-pi) and
                      the compose files - server, server with GPU, camera station, station with a Pi camera
 docs/                How it works, installation, the Docker guide, the manual test list; docs/plans/
 scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker;
+                     setup_database.py (the card data), cleanup.py (old capture pictures);
                      benchmark_db.py, benchmark_station.py
 ```
 

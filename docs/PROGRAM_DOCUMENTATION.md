@@ -67,7 +67,7 @@ Design choices:
 | Program | Runs on | What it does |
 |---|---|---|
 | `app.py` - the server (the package `server/`) | One machine; a Docker image (`deploy/Dockerfile` target `server`) | Web pages, reading (OCR + AI), matching, card data, scanned cards, collection, decks, backups; holds every station's settings |
-| `station_client.py` - a camera station | The machine a USB webcam is plugged into; a Docker image (target `client`, x86-64 and ARM64) | Camera, outline detection, stillness, new-card rules, focus; uploads each capture; shows nothing itself |
+| `station.py` - a camera station (the package `card_scanner/station/`) | The machine a USB webcam is plugged into; a Docker image (target `client`, x86-64 and ARM64) | Camera, outline detection, stillness, new-card rules, focus; uploads each capture; shows nothing itself |
 | The Android app ([mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android)) in client mode | A phone over the box | The same job with the phone's camera (a Kotlin port of the detection); uploads each capture. It can also work on its own, without a server |
 
 The server opens no camera itself. Until 2026-10-12 it could (`camera.type` other than
@@ -80,11 +80,20 @@ Everything below about detection, auto-capture and focus is `CardScanner`, which
 
 ### Modules
 
-All the code is in `src/`: the modules below, the server's pages (`src/server/templates/`,
-`src/server/static/` - written `templates/...` and `static/...` in this document) and the OCR
-reader (`src/ocr/`). The top folder holds `app.py`, `config.yaml` and the data (`data/`,
-`scanned_cards/`, `station_captures/`); `paths.py` says where the two folders are (`TOP`,
-`SRC`), and nothing else builds a path from where its own file lies.
+All the code is one package, `src/card_scanner/`, sorted by which program a module belongs
+to: `station/` (a camera station: `station_client.py`, `station_setup.py`, `station_login.py`,
+`scanner.py`, `object_detector.py`), `core/` (reading cards, card data, the collection - no
+web app, no camera), `server/` (the web app, with its pages in `server/templates/` and
+`server/static/` - written `templates/...` and `static/...` in this document), `games/`, and
+at the package's top what both programs use (`paths.py`, `config.py`, `config_loader.py`,
+`settings.py`). Modules are named by their file below (`inventory.py` is
+`src/card_scanner/core/inventory.py`). The OCR reader (Node.js) is beside the package, in
+`src/ocr/`. The top folder holds the two launchers - `app.py` starts the server, `station.py`
+a station - `config.yaml` and the data (`data/`, `scanned_cards/`, `station_captures/`);
+`paths.py` says where the two folders are (`TOP`, `CODE`), and nothing else builds a path
+from where its own file lies. Which part may import which is a test (`tests/test_layout.py`):
+a station imports nothing of `core/` or `server/`, and `core/` nothing of `server/` or
+`station/`.
 
 | Module | Runs in | Responsibility |
 |---|---|---|
