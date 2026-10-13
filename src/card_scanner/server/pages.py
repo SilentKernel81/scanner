@@ -48,8 +48,21 @@ def page_links():
 
 @app.route('/collection')
 def collection():
-    """Inventory management and deck building"""
+    """Inventory management, trades, statistics, backups"""
     return render_template('collection.html')
+
+
+@app.route('/decks')
+@app.route('/decks/<int:deck_id>')
+def decks(deck_id=None):
+    """
+    The decks: the list (with what the collection can build, and the preconstructed decks)
+    at /decks, one deck at /decks/<id>. Both addresses give the same page - its script shows
+    what the address says (static/js/decks.js: showWhatTheAddressSays) - so that opening a
+    deck from the list, or going back, does not load the page again. A deck that does not
+    exist is the script's to report: it shows the list and says so.
+    """
+    return render_template('decks.html')
 
 
 def generate_frames(camera):

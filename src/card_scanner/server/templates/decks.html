@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>Decks - Card Scanner</title>
+    {% include '_favicon.html' %}
+    {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
+       without the internet. The version is in the file's name, so a new one needs no ?v= #}
+    <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
+    {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
+</head>
+<body>
+    {% include '_icons.html' %}
+
+    {# One page for two addresses: /decks shows the list (#deck-home), /decks/<id> one deck
+       (#deck-builder). decks.js shows the one the address says and keeps the address in step
+       when a deck is opened or closed, without loading the page again. #}
+    {% set page = 'decks' %}
+    {% include '_topbar.html' %}
+
+    <main class="container collection">
+        <div class="callout warning" id="deck-data-notice" hidden>
+            The card data is from before deck building: mana values, color identity and format legality are missing.
+            <button class="btn btn-small btn-primary" id="deck-data-update">Update card database</button>
+            <span id="deck-data-progress"></span>
+        </div>
+
+        <!-- Deck list -->
+        <div id="deck-home">
+            <div class="section-head">
+                <h2>Decks</h2>
+                <button class="btn btn-primary" id="deck-new"><svg class="icon"><use href="#i-plus"/></svg> New deck</button>
+            </div>
+            <div class="filter-row deck-filters" id="deck-filters" hidden>
+                <input type="search" id="deck-filter-text" class="text-input filter-text" placeholder="Deck or commander...">
+                <select id="deck-filter-format" class="select" title="Format"></select>
+                <span class="spacer"></span>
+                <select id="deck-sort" class="select" title="Sort">
+                    <option value="changed">Last changed</option>
+                    <option value="name">Name A–Z</option>
+                    <option value="format">Format</option>
+                    <option value="owned">Most owned first</option>
+                    <option value="missing">Fewest cards missing</option>
+                    <option value="cards">Most cards first</option>
+                </select>
+            </div>
+            <div id="deck-list" class="deck-list"></div>
+
+            <div class="section-head">
+                <h2><svg class="icon"><use href="#i-spark"/></svg> What can I build?</h2>
+            </div>
+            <div class="ideas">
+                <div class="panel idea-panel idea-wide">
+                    <div class="panel-header">
+                        <h3 class="section-title">Build around a card</h3>
+                    </div>
+                    <div class="hint">Choose a format, click one of your cards that is legal in it to see it, then <strong>Find decks</strong>: public decks that play it (Archidekt), ranked by how much of each deck you already own.</div>
+                    <div class="filter-row">
+                        <select id="around-format" class="select" title="Format"></select>
+                        <input type="search" id="around-search" class="text-input filter-text" placeholder="One of your cards...">
+                        <input type="search" id="around-type" class="text-input" placeholder="Type (creature elf)">
+                        <label class="chip-toggle" title="Hide the cards that a deck already uses"><input type="checkbox" id="around-free"><span>Not in a deck</span></label>
+                        <label class="chip-toggle" id="around-commanders-label" title="Only the cards that can be a commander: legendary creatures (and the few cards that say they can be your commander)"><input type="checkbox" id="around-commanders"><span>Commanders only</span></label>
+                    </div>
+                    <div class="around">
+                        <div>
+                            <div class="category-title" id="around-cards-title">Your cards</div>
+                            <div id="around-cards" class="idea-list"></div>
+                        </div>
+                        <div>
+                            <div class="category-title" id="around-decks-title">Decks</div>
+                            <div id="around-progress"></div>
+                            <div id="around-decks" class="idea-list"><div class="hint">Click one of your cards to see it, then Find decks to look for decks that play it.</div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel idea-panel">
+                    <div class="panel-header">
+                        <h3 class="section-title">Commanders you own</h3>
+                        <button class="btn btn-small" data-ideas="commanders">Find</button>
+                    </div>
+                    <div class="hint">Your legendary creatures, by how many of the cards played with them (EDHREC) you already own.</div>
+                    <div id="ideas-commanders" class="idea-list"></div>
+                </div>
+                <div class="panel idea-panel">
+                    <div class="panel-header">
+                        <h3 class="section-title">Preconstructed decks</h3>
+                        <button class="btn btn-small" data-ideas="precons" title="Reads every list of the kind chosen below the first time: about a minute for the Commander decks, several for all kinds">Rank by what I own</button>
+                    </div>
+                    <div class="hint">Printed decks (MTGJSON): Commander, Challenger, theme and intro decks, starter kits, duel decks, and Jumpstart packs - 20 cards each, as in the Beginner Box. <strong>View cards</strong> shows the list - nothing is saved until you choose <strong>Create deck</strong> there; <strong>I own it</strong> also adds its cards to your inventory.</div>
+                    <div class="filter-row">
+                        <input type="search" id="precon-search" class="text-input filter-text" placeholder="Deck name, set code or year">
+                        <select id="precon-type" class="select" title="Kind of deck"></select>
+                    </div>
+                    <div id="precon-progress"></div>
+                    <div id="ideas-precons" class="idea-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deck builder -->
+        <div id="deck-builder" hidden>
+            <div class="builder-head">
+                <button class="btn btn-small btn-ghost" id="deck-back"><svg class="icon"><use href="#i-back"/></svg> Decks</button>
+                <input type="text" id="deck-name" class="text-input deck-name" maxlength="80">
+                <select id="deck-format" class="select"></select>
+                <span class="spacer"></span>
+                <button class="btn btn-small" id="deck-import">Import cards</button>
+                <button class="btn btn-small" id="deck-export">Export</button>
+                <button class="btn btn-small" id="deck-buylist" title="Download the cards you don't own">Buy list</button>
+                <button class="btn btn-small" id="deck-duplicate">Duplicate</button>
+                <button class="btn btn-small btn-danger" id="deck-delete">Delete</button>
+            </div>
+
+            <div class="builder">
+                <div class="panel builder-side">
+                    <div class="segmented wide" id="side-switch">
+                        <button data-side="search" class="is-active">Search</button>
+                        <button data-side="suggestions" id="side-suggestions">Suggestions</button>
+                        <button data-side="popular">Popular decks</button>
+                    </div>
+
+                    <div id="side-search">
+                        <div class="filter-row">
+                            <input type="search" id="search-text" class="text-input filter-text" placeholder="Card name">
+                            <input type="search" id="search-type" class="text-input" placeholder="Type (creature elf)">
+                        </div>
+                        <div class="filter-row">
+                            <input type="search" id="search-oracle" class="text-input filter-text" placeholder="Rules text contains...">
+                            <select id="search-cmc" class="select" title="Mana value">
+                                <option value="">Any cost</option>
+                                <option>0</option><option>1</option><option>2</option><option>3</option>
+                                <option>4</option><option>5</option><option>6</option><option value="7">7+</option>
+                            </select>
+                            <select id="search-rarity" class="select" title="Rarity">
+                                <option value="">Any rarity</option>
+                                <option value="common">Common</option><option value="uncommon">Uncommon</option>
+                                <option value="rare">Rare</option><option value="mythic">Mythic</option>
+                            </select>
+                        </div>
+                        <div class="filter-row">
+                            <div class="color-chips" id="search-colors" title="Color identity includes"></div>
+                            <label class="chip-toggle"><input type="checkbox" id="search-owned"><span>Owned</span></label>
+                            <label class="chip-toggle" title="Hide the cards your other decks already use"><input type="checkbox" id="search-free"><span>Not in other decks</span></label>
+                            <label class="chip-toggle" title="Only cards legal in the deck's format"><input type="checkbox" id="search-legal" checked><span>Legal</span></label>
+                            <label class="chip-toggle" id="search-identity-label" title="Only cards within the commander's color identity"><input type="checkbox" id="search-identity" checked><span>Commander's colors</span></label>
+                        </div>
+                        <div id="search-results" class="result-list"></div>
+                        <div class="more-row"><button class="btn btn-small" id="search-more" hidden>More results</button></div>
+                    </div>
+
+                    <div id="side-suggestions-panel" hidden>
+                        <div class="filter-row">
+                            <span class="hint" id="suggestions-source"></span>
+                            <span class="spacer"></span>
+                            <label class="chip-toggle"><input type="checkbox" id="suggestions-owned"><span>Owned</span></label>
+                            <label class="chip-toggle" title="Hide the cards your other decks already use"><input type="checkbox" id="suggestions-free"><span>Not in other decks</span></label>
+                        </div>
+                        <div id="suggestions-list" class="result-list"></div>
+                    </div>
+
+                    <div id="side-popular-panel" hidden>
+                        <div class="hint" id="popular-source"></div>
+                        <div class="url-row">
+                            <input type="url" id="popular-url" class="text-input" placeholder="Paste a Moxfield or Archidekt deck address">
+                            <button class="btn btn-small" id="popular-import">Open as new deck</button>
+                        </div>
+                        <div id="popular-list" class="result-list"></div>
+                    </div>
+                </div>
+
+                <div class="panel builder-deck">
+                    <div class="deck-totals" id="deck-totals"></div>
+                    <div id="deck-issues" class="deck-issues"></div>
+                    <div class="deck-charts" id="deck-charts"></div>
+                    <div id="deck-cards" class="deck-cards"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- New deck -->
+    <div id="deck-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <h2 id="deck-modal-title">New deck</h2>
+                <span class="close" onclick="closeModal('deck-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="input-group" id="deck-modal-name-group">
+                    <label for="new-deck-name">Name</label>
+                    <input type="text" id="new-deck-name" maxlength="80" placeholder="New deck">
+                </div>
+                <div class="input-group" id="deck-modal-format-group">
+                    <label for="new-deck-format">Format</label>
+                    <select id="new-deck-format"></select>
+                </div>
+                <div class="input-group">
+                    <label for="new-deck-url">From another site (optional)</label>
+                    <input type="url" id="new-deck-url" placeholder="moxfield.com/decks/... or archidekt.com/decks/...">
+                </div>
+                <div class="input-group">
+                    <label for="new-deck-text">Or paste a decklist (optional)</label>
+                    <textarea id="new-deck-text" class="text-input" rows="7" spellcheck="false" placeholder="1 Sol Ring&#10;4 Lightning Bolt&#10;&#10;Sideboard&#10;2 Pyroblast"></textarea>
+                </div>
+                <label class="switch-row" id="deck-modal-replace" hidden>
+                    <span class="switch-text"><span class="switch-title">Replace the deck's cards</span></span>
+                    <input type="checkbox" class="switch" id="new-deck-replace">
+                </label>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" id="deck-modal-save">Create</button>
+                    <button class="btn" onclick="closeModal('deck-modal')">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Printing of a deck card -->
+    <div id="printing-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="printing-title">Printing</h2>
+                    <div class="modal-subtitle">The printing this deck shows for the card. Any printing you own counts as owned.</div>
+                </div>
+                <span class="close" onclick="closeModal('printing-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="printing-grid" class="printing-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- A preconstructed deck's cards, to look at; a deck is only made with the button -->
+    <div id="precon-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="precon-title">Preconstructed deck</h2>
+                    <div class="modal-subtitle" id="precon-subtitle"></div>
+                </div>
+                <span class="close" onclick="closeModal('precon-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="precon-cards" class="precon-cards"></div>
+                <div class="modal-actions">
+                    <button class="btn" onclick="closeModal('precon-modal')">Close</button>
+                    <button class="btn" id="precon-own" title="Add its cards to your inventory and open it as a deck">I own it</button>
+                    <button class="btn btn-primary" id="precon-create" title="Save a copy of this list in your decks, to change as you like - your inventory is not changed">Create deck</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include '_value_dialog.html' %}
+
+    <!-- Card image beside the row under the mouse -->
+    <img id="card-preview" class="card-preview" alt="" hidden>
+
+    {% include '_dialogs.html' %}
+
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=1"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=1"></script>
+</body>
+</html>
