@@ -83,8 +83,12 @@ def get_inventory():
             # What the collection page shows and filters with beyond the stored columns
             details = game.card_details([card['card_id'] for card in cards])
             # The decks that use each card (not for the scanned cards)
-            in_decks = deck_store.needed_by_name(game.id, commander_formats(game)) \
-                if game.deck_formats and inventory_area() is inventory else {}
+            # - and of the digital collection's cards, the Arena decks: each kind of deck uses
+            # the copies of its own collection
+            in_decks = {}
+            if game.deck_formats and inventory_area() is not scan_inventory:
+                in_decks = deck_store.needed_by_name(game.id, commander_formats(game),
+                                                     'arena' if inventory_area() is arena_inventory else 'paper')
             placed = copies_by_location(cards)
             # The open trades that hold copies of each entry (the collection only)
             in_trades = trade_store.by_entry(game.id) if inventory_area() is inventory else {}

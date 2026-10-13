@@ -159,12 +159,21 @@ def deck_payload(deck):
     first = {card['name']: card for card in played}
     missing = {name: max(0, count - first[name]['owned']) for name, count in wanted.items()}
     wildcards = None
+    issues = game.check_deck(deck['format'], checked)
     if kind == 'arena':
+        # A card Arena does not have cannot be in an Arena deck, whatever the format allows
+        # (a list pasted from a paper deck brings them): a problem of the deck - and no
+        # wildcard crafts it, so it is not counted below
+        _text, absent = game.arena_decklist(deck['cards'], deck['format'])
+        absent = [name for name in absent if name in wanted]
+        if absent:
+            issues = [{'level': 'error', 'message': 'Not on Arena', 'cards': sorted(absent)}] + issues
         # What the missing cards cost in Arena: a wildcard of the card's rarity each (the
         # card data's rarity - of one paper printing, which Arena shares for nearly every
         # card), beside the wildcards the account had at the last import
         wildcards = {'needed': arena.wildcards_needed(
-                         [((first[name]['card'] or {}).get('rarity'), count) for name, count in missing.items() if count]),
+                         [((first[name]['card'] or {}).get('rarity'), count)
+                          for name, count in missing.items() if count and name not in absent]),
                      'have': arena.account(arena_inventory).get('wildcards') or {}}
     return {
         'id': deck['id'], 'name': deck['name'], 'format': deck['format'], 'notes': deck['notes'],
@@ -178,7 +187,7 @@ def deck_payload(deck):
         'cover': deck.get('cover') if any(card['name'] == deck.get('cover') for card in cards) else '',
         'covers': deck_covers(deck, [{'name': card['name'], 'board': card['board'], **{
             key: (card['card'] or {}).get(key) for key in ('image_uri', 'price', 'type_line')}} for card in cards]),
-        'issues': game.check_deck(deck['format'], checked),
+        'issues': issues,
         'totals': {
             'cards': sum(card['quantity'] for card in played if card['board'] != 'side'),
             'side': sum(card['quantity'] for card in cards if card['board'] == 'side'),

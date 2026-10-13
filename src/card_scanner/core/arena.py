@@ -170,6 +170,14 @@ def resolve(game, database, entries, skip_rebalanced=True):
 
 # -- The account: beside the cards, in the digital collection's own file ------------
 
+def prepare(manager):
+    """The account's table in the digital collection's file - once, when the server starts,
+    so that reading the account (which every Arena deck shown does) never writes"""
+    with manager._lock:
+        manager.conn.execute(ACCOUNT_TABLE)
+        manager.conn.commit()
+
+
 def save_account(manager, account):
     """
     What is known of the Arena account at the last import - {'exported', 'imported',
@@ -177,7 +185,6 @@ def save_account(manager, account):
     committed here: the caller writes the cards in the same transaction, so that the cards
     and the date they are from cannot disagree.
     """
-    manager.conn.execute(ACCOUNT_TABLE)
     manager.conn.execute('DELETE FROM arena_account')
     manager.conn.executemany('INSERT INTO arena_account (key, value) VALUES (?, ?)',
                              [(key, json.dumps(value)) for key, value in account.items()])
@@ -186,7 +193,6 @@ def save_account(manager, account):
 def account(manager):
     """The account as save_account wrote it, or {} when nothing was imported yet"""
     with manager._lock:
-        manager.conn.execute(ACCOUNT_TABLE)
         return {row['key']: json.loads(row['value']) for row in manager.conn.execute('SELECT key, value FROM arena_account')}
 
 

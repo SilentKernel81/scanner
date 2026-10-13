@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 
+from card_scanner.core import arena
 from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
 from card_scanner.config import Config
 from card_scanner.core.database import CardDatabase
@@ -83,6 +84,7 @@ def initialize_components():
     # The digital collection (MTG Arena) in its own file: empty until an export is imported.
     # No log_callback: nothing a camera does reaches it, and its imports report themselves
     services.arena_inventory = InventoryManager(db_file=ARENA_INVENTORY_FILE)
+    arena.prepare(services.arena_inventory)   # the table for the wildcards and the import's date
     services.trade_store = Trades(services.inventory)
     services.review = ReviewQueue()
     services.pending = PendingCaptures()

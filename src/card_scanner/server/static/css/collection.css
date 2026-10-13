@@ -17,6 +17,37 @@ a.btn {
     display: none !important;
 }
 
+/* Arena view (collection.js: showCollection): the digital collection is a copy of what MTG
+   Arena has, so everything that would change it is taken off the page here, in one place -
+   ticking, editing, deleting, trades, the paper import - and with it what only cards on a
+   shelf have: a location, tags, EDHREC's ideas for paper decks. (collection.js refuses the
+   same actions, and so does the server.) */
+body.arena-view .row-check,
+body.arena-view .btn-trade,
+body.arena-view .btn-edit,
+body.arena-view .btn-delete,
+body.arena-view #select-all-label,
+body.arena-view #bulk-bar,
+body.arena-view #import-button,
+body.arena-view #batch-remove,
+body.arena-view #filter-location,
+body.arena-view #filter-tag,
+body.arena-view #filter-spare-label,
+body.arena-view .tab[data-tab="trades"] {
+    display: none !important;
+}
+
+.arena-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* The Physical | Arena switch stands before the page's tabs, a little apart from them */
+.collection-kind {
+    margin-right: 14px;
+}
+
 .spacer {
     flex: 1;
 }

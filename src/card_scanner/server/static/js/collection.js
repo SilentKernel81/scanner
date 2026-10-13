@@ -13,6 +13,72 @@ const socket = io();
 
 let currentTab = 'inventory';
 
+// -- Which collection: the cards on the shelf, or what the user has in MTG Arena ---------
+// The page was written for the first. In Arena view it shows the digital collection - the
+// same list, filters and statistics, read from another file on the server (?area=arena) -
+// and nothing that changes it: that collection is a copy of what Arena has, replaced as a
+// whole by each import. inventoryArea is what common.js's areaQuery() adds to a request.
+
+let inventoryArea;                 // undefined: the collection; 'arena': the digital one
+let arenaInfo = null;              // {imported, exported, cards, entries, wildcards, ...} (GET /api/arena)
+
+function inArena() {
+    return inventoryArea === 'arena';
+}
+
+async function showCollection(kind) {
+    // A delete that still waits for its undo time was made in the collection shown until
+    // now: it is sent before the area changes, or its ids would go to the other collection
+    await sendPending();
+    inventoryArea = kind === 'arena' ? 'arena' : undefined;
+    remember('collectionKind', inArena() ? 'arena' : 'paper');
+    markSwitch('collection-kind', 'collection', inArena() ? 'arena' : 'paper');
+    // The class switches off, in one place, everything that would change the collection
+    // (collection.css: body.arena-view): ticking, editing, deleting, trades, the paper import
+    document.body.classList.toggle('arena-view', inArena());
+    $('arena-bar').hidden = !inArena();
+    selected.clear();
+    if (inArena()) $('filter-spare').checked = false;   // EDHREC's ideas are for the paper decks
+    if (inArena() && currentTab === 'trades') showTab('inventory');   // trades are of paper cards
+    await loadArenaInfo();
+    await loadInventory();
+    if (currentTab === 'stats') renderStats();
+}
+
+async function loadArenaInfo() {
+    if (!inArena()) return;
+    const data = await api('/api/arena');
+    arenaInfo = data ? data.arena : null;
+    const info = arenaInfo;
+    const wild = info && info.wildcards ? ['common', 'uncommon', 'rare', 'mythic'].map(rarity => `${info.wildcards[rarity] || 0} ${rarity}`).join(', ') : '';
+    $('arena-text').innerHTML = !info || !info.imported
+        ? 'Nothing imported yet. Run the Arena exporter, then choose its <strong>mtga_collection.json</strong> here (and <strong>mtga_decks.json</strong> with it for your Arena decks).'
+        : `<strong>Your Arena collection</strong> as exported ${escapeHtml((info.exported || '').slice(0, 16).replace('T', ' '))}: `
+          + `${plural(info.cards, 'card')} · wildcards: ${escapeHtml(wild)}`
+          + (info.summary && info.summary.unknown && info.summary.unknown.length
+              ? ` · <span title="${escapeHtml(info.summary.unknown.join(', '))}">${plural(info.summary.unknown.length, 'card')} not in the card data</span>` : '');
+}
+
+async function importArena(files) {
+    // The exporter's files, as they are: the server tells the collection from the decks
+    const form = new FormData();
+    [...files].forEach(file => form.append('files', file));
+    $('arena-import').disabled = true;
+    $('arena-text').textContent = 'Importing...';
+    const data = await api('/api/arena/import', {method: 'POST', body: form});
+    $('arena-import').disabled = false;
+    if (data) {
+        const unknown = (data.arena.summary.unknown || []).length;
+        notify(`Arena collection imported: ${plural(data.arena.cards, 'card')}`
+               + (data.decks !== null ? `, ${plural(data.decks, 'deck')}` : ' (no deck file: the Arena decks were left as they are)')
+               + (unknown ? ` - ${plural(unknown, 'card')} not in the card data` : ''), 'success');
+        if (data.warning) notify(data.warning, 'warning');
+    }
+    await loadArenaInfo();
+    await loadInventory();
+    loadDeckList();
+}
+
 function showTab(tab) {
     currentTab = tab;
     document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
@@ -137,8 +203,9 @@ async function addScanned() {
 }
 
 async function loadInventory() {
-    loadScanned();
-    const data = await api('/api/inventory');
+    // Cards waiting on the scanner page are for the paper collection; Arena has no scanner
+    if (inArena()) $('scanned-notice').hidden = true; else loadScanned();
+    const data = await api('/api/inventory' + areaQuery());
     if (!data) {
         $('inventory-list').innerHTML = '<div class="empty-state is-error">Failed to load the inventory</div>';
         return;
@@ -486,6 +553,9 @@ function rowCard(row) {
 }
 
 function toggleSelected(id, on) {
+    // Nothing can be ticked in Arena view - and so nothing reaches the bulk bar, the Del
+    // key or "Set aside for trade", which all work on what is ticked
+    if (inArena()) return;
     if (on) selected.add(id); else selected.delete(id);
     const row = document.querySelector(`#inventory-list [data-id="${id}"]`);
     if (row) {
@@ -498,6 +568,7 @@ function toggleSelected(id, on) {
 function pick(id, on, range) {
     // A tick; with Shift held, every entry from the one ticked before to this one (in the
     // order shown, also across pages) is ticked or unticked like it
+    if (inArena()) return;
     const from = range ? shown.findIndex(card => card.id === lastPicked) : -1;
     const to = shown.findIndex(card => card.id === id);
     lastPicked = id;
@@ -525,7 +596,7 @@ function inventoryKey(event) {
     } else if (event.key === 'Escape' && selected.size) {
         selected.clear();
         renderInventory();
-    } else if (command && event.key.toLowerCase() === 'a' && shown.length) {
+    } else if (command && event.key.toLowerCase() === 'a' && shown.length && !inArena()) {
         event.preventDefault();
         shown.forEach(card => selected.add(card.id));
         renderInventory();
@@ -590,6 +661,9 @@ window.fetch = async (input, options) => {
 };
 
 function changeLater(ids, text, body) {
+    // The Arena collection is not changed here. Every delete and bulk change of the page
+    // comes through this function: the one place that says no (the server refuses too)
+    if (inArena()) return;
     // A delete or a bulk change: its rows are greyed and the server hears of it when the time
     // to undo is over - or at once when something else is changed or the page is left.
     // One call at a time: two asked for while an earlier change was on its way both waited
@@ -621,7 +695,7 @@ function sendPending() {
             // keepalive: the request is finished also when the page is left while it is on
             // its way (browsers take up to 64 KB that way - some 8,000 entries)
             const body = JSON.stringify(change.body);
-            const response = await plainFetch('/api/inventory/bulk', {method: 'POST', headers: {'Content-Type': 'application/json'},
+            const response = await plainFetch('/api/inventory/bulk' + areaQuery(), {method: 'POST', headers: {'Content-Type': 'application/json'},
                                                                       body, keepalive: body.length < 60000});
             const data = await response.json();
             if (data.success === false) notify(data.error || 'Request failed', 'error');
@@ -654,7 +728,7 @@ async function removeBatch() {
             + (kept ? ` ${entriesText(kept)} had copies before and keep${kept === 1 ? 's' : ''} those.` : '')
             + " This can't be undone."});
     if (!ok) return;
-    const data = await api('/api/inventory/remove_batch', {method: 'POST', body: {added_at: added}});
+    const data = await api('/api/inventory/remove_batch' + areaQuery(), {method: 'POST', body: {added_at: added}});
     if (!data) return;
     notify(`${plural(data.cards, 'card')} removed`, 'success');
     $('filter-added').value = '';
@@ -714,13 +788,13 @@ async function exportInventory() {
     }
     const link = document.createElement('a');
     if (part === 'all') {
-        link.href = `/api/export_inventory/${encodeURIComponent(format)}`;
+        link.href = `/api/export_inventory/${encodeURIComponent(format)}${areaQuery()}`;
         link.download = '';
     } else {
         const ids = part === 'selected' ? [...selected] : shown.map(card => card.id);
         let response;
         try {
-            response = await plainFetch(`/api/export_inventory/${encodeURIComponent(format)}`, {
+            response = await plainFetch(`/api/export_inventory/${encodeURIComponent(format)}${areaQuery()}`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ids})});
         } catch (error) {
             return notify(`Export failed: ${error.message}`, 'error');
@@ -755,7 +829,7 @@ async function importInventory() {
         const form = new FormData();
         form.append('file', file);
         form.append('replace_existing', mode === 'replace' ? 'true' : 'false');
-        const data = await api('/api/import_inventory', {method: 'POST', body: form});
+        const data = await api('/api/import_inventory' + areaQuery(), {method: 'POST', body: form});
         if (data) {
             const stats = data.stats;
             const missing = stats.not_found.length
@@ -983,6 +1057,7 @@ function renderTrades() {
 async function setAsideForTrade(card = null) {
     // Every free copy of the selected entries - or of one row's, from its own button; how many
     // of each is changed on the Trades tab
+    if (inArena()) return;   // a trade is of paper cards: an Arena entry's id means another card there
     const ids = card ? [card.id] : [...selected];
     const open = trades.filter(trade => trade.status === 'open').map(trade => trade.name);
     const name = await valueDialog({title: `Set ${card ? card.name : entriesText(ids.length)} aside for a trade`,
@@ -1113,6 +1188,7 @@ function bindInventoryEvents() {
         const card = rowCard(row);
         if (!card) return;
         if (event.target.closest('.btn-trade')) return setAsideForTrade(card);
+        if (inArena()) return;   // Arena view: a row has nothing to click (its buttons are hidden, too)
         if (event.target.closest('.btn-edit')) return editCard(card, knownLocations(), () => shown);
         // No question first: it can be undone
         if (event.target.closest('.btn-delete')) return changeLater([card.id], `Deleting ${card.name}`, {ids: [card.id], action: 'delete', value: ''});
@@ -1127,7 +1203,7 @@ function bindInventoryEvents() {
     });
     $('inventory-list').addEventListener('dblclick', event => {
         const row = event.target.closest('.grid-card');
-        const card = rowCard(row);
+        const card = inArena() ? null : rowCard(row);   // no editing in Arena view
         if (card) {
             toggleSelected(card.id, false);
             editCard(card, knownLocations(), () => shown);
@@ -1183,6 +1259,12 @@ function bindEvents() {
         renderStats();
     });
     bindTradeEvents();
+    bindSwitch('collection-kind', button => showCollection(button.dataset.collection));
+    $('arena-import').addEventListener('click', () => $('arena-file-input').click());
+    $('arena-file-input').addEventListener('change', event => {
+        if (event.target.files.length) importArena(event.target.files);
+        event.target.value = '';   // the same files can be chosen again after the next export
+    });
     bindCardPreview();
 
     // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
@@ -1214,6 +1296,8 @@ function bindEvents() {
         if (currentTab === 'trades') loadTrades();
     }, 500)));
 socket.on('game_changed', () => window.location.reload());
+// An Arena export was imported (on this page or another): the Arena view shows the new state
+socket.on('arena_updated', () => { if (inArena()) { loadArenaInfo(); loadInventory(); } });
 socket.on('database_update_complete', () => {
     notify('Card database updated', 'success');
     loadInventory();
@@ -1229,7 +1313,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('page-link-decks').hidden = !gameInfo.deck_formats.length;
     renderExportMenu();
     bindEvents();
-    await loadInventory();
+    // The Physical | Arena switch, for a game that has a digital collection; the one last looked at
+    $('collection-kind').hidden = !gameInfo.arena;
+    if (gameInfo.arena && recall('collectionKind', 'paper') === 'arena') await showCollection('arena');
+    else await loadInventory();
     loadDeckList();  // the location filter lists the decks' locations apart
     loadTrades();  // "Set aside for trade" offers the open ones
     // The tab last used. 'decks' was one of this page's tabs until 2026-10-13: a browser
