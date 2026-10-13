@@ -1699,10 +1699,14 @@ same heading, and its three adventure cards by their front name, as `arena_name`
 into "New deck", that text was read whole by the deck import (60 cards, none unknown, the
 adventure cards found by their front name); written back with the Arena button it gave the
 same cards and counts, and every card was judged to be on Arena (27 of 27 the card data
-knew by name; the three others it has under their two-part names). **Still not tried**:
-pasting a list from here into Arena - whether it takes lines without `(SET) number`, which
-Arena itself always writes - and the `Commander` and `Sideboard` sections, which that deck
-did not have.
+knew by name; the three others it has under their two-part names). **Tried in Arena by the user the
+same day**: a list of four lines without set and number (`4 Llanowar Elves`, `2 The
+Arkenstone`, `1 Beorn, Reluctant Host`, `7 Forest` under `Deck`) was imported; exported
+again, Arena had chosen the printings itself (the four Llanowar Elves as one of one
+printing and three of another). So names alone are enough, and an adventure card is found
+by its front name. **Still not tried**: a whole deck written by the Arena button, the
+`Commander` and `Sideboard` sections, a split card, and what Arena says about a card it
+does not have.
 
 **A deck's cover** is the card whose picture stands for it: the deck list shows every deck as
 that card, and the deck's banner has its art behind the name. `decks.cover` holds the name of
