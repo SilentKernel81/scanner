@@ -2,7 +2,8 @@
 
 Date: 2026-10-12
 
-**The move itself was done the same day** (phases 0 to 3; the machines are still to do) - see *How it went* at the end. What follows is the plan as it was written.
+**The move itself was done the same day** (phases 0 to 3, and the server of phase 4; the three
+stations are still to do) - see *How it went* at the end. What follows is the plan as it was written.
 
 A plan for the last step of the folder reorganisation: the Python code out of the top folder
 into `src/`, and a `pyproject.toml`. Nothing here is implemented. The numbers below were
@@ -395,8 +396,9 @@ the documents of two repositories and four machines to update. Smaller than the 
 code, larger in machines: the split touched only the server, this rebuilds every station.
 ## How it went (2026-10-12)
 
-Phases 0 to 3 are done, on the branch `src-move`. **Not done: phase 4 (the machines).** Until
-then every machine runs the code from before the move.
+Phases 0 to 3 are done and merged into `main` (both repositories). Of phase 4 the server is
+done; **the three stations still run their images from before the move**, which work with
+the new server as before.
 
 Done as planned, with these differences:
 
@@ -460,6 +462,32 @@ Afterwards: the test container, its volume and the test images removed on both P
 real container started again - connected to the real server with its camera, its crop and
 its server address as before, nothing waiting to be sent. Nothing was written to the real
 server.
+
+**Phase 4, the server (192.168.1.23), 22:25-22:30.** Idle at the time: no station
+scanning, nothing in the scanned list or the review queue.
+
+1. A full backup (`scripts/backup.sh`: the running server's own snapshot,
+   `scanner-backup-20261012_222526.tar.gz`, 523 MB).
+2. The list of files that left the top folder (70, from `git diff --no-renames
+   --diff-filter=D --name-only`) compared with the server's folder *before* deleting: every
+   one was there, and nothing else lay in `server/`, `games/`, `templates/`, `static/`,
+   `ocr/` or as a `.py` in the top folder. Then deleted, the five folders with them.
+3. The new tree copied; `docker compose ... config` showed `~/scanner-server/data` and
+   `~/scanner-server/scanned_cards` as before.
+4. The image built while the old container served (19 s), and looked into before it was
+   started: `config` from `/app/src`, the pages and the OCR reader found, no `.py` in
+   `/app` but `app.py`, none of the old folders.
+5. `up -d`: the server answered again after 5 seconds.
+
+Afterwards: `/api/stats` for the collection and for the scanned cards the same as before
+(5,407 cards, 2,151 entries), 15 decks, `light-ocr ready (webgpu)` in `ai.log`, both
+connected stations back by themselves with their cameras, the three pages in headless
+Chromium without a script error or a missing file, no error in the container's log.
+
+Not seen yet on the real server: a card scanned through it since. And one thing done that
+was not in the plan: after the start, Docker's untagged images were pruned there (15.8 GB)
+- among them the server's image from before the move, so going back would mean building
+it again from commit 71df153, not starting the old image.
 
 Found on the way, not the move's doing: `scripts/start.sh` and `scripts/backup.sh` are not
 marked executable in Git, though the documents run them as `./scripts/start.sh`.
