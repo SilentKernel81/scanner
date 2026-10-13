@@ -227,13 +227,24 @@ class DeckManager:
             deleted = self.conn.execute('DELETE FROM decks WHERE id = ?', (deck_id,)).rowcount
         return bool(deleted)
 
-    def duplicate(self, deck_id):
+    def duplicate(self, deck_id, kind=None):
+        """
+        A copy of a deck; returns its id (None: no such deck). kind: the copy's kind - the
+        deck's own when not given. A copy of the other kind is the same list counted against
+        the other collection: an Arena deck copied as a paper deck shows which of its cards
+        are on the shelf and what the rest would cost to buy. It is named after its kind
+        ("... (Physical)", "... (Arena)") rather than "(copy)", to tell the two apart.
+        """
+        if kind is not None and kind not in KINDS:
+            raise ValueError(f"Unknown kind of deck: {kind}")
         with self._writing():  # the copy with its cards, or no copy
             deck = self.get(deck_id)
             if not deck:
                 return None
-            # The copy is of the same kind; it is made here, so it is not one of Arena's (no arena_id)
-            new_id = self.create(deck['game'], f"{deck['name']} (copy)", deck['format'], deck['notes'], kind=deck['kind'])
+            kind = kind or deck['kind']
+            label = 'copy' if kind == deck['kind'] else 'Arena' if kind == 'arena' else 'Physical'
+            # Made here, so it is not one of Arena's (no arena_id): no import replaces it
+            new_id = self.create(deck['game'], f"{deck['name']} ({label})"[:80], deck['format'], deck['notes'], kind=kind)
             self.import_cards(new_id, deck['cards'])
             if deck['cover']:  # the copy looks like the deck it was made from
                 self.conn.execute('UPDATE decks SET cover = ? WHERE id = ?', (deck['cover'], new_id))

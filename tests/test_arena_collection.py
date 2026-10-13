@@ -208,6 +208,14 @@ class DecksOfTwoKinds(Temporary):
         arena_deck = decks.create('mtg', 'Digital', 'historic', kind='arena')
         self.assertEqual(decks.get(arena_deck)['kind'], 'arena')
         self.assertEqual(decks.get(decks.duplicate(arena_deck))['kind'], 'arena')
+        # ... or of the other kind, named after it: the same list against the other collection
+        decks.add_card(arena_deck, 'Opt', 'main', 4)
+        physical = decks.get(decks.duplicate(arena_deck, kind='paper'))
+        self.assertEqual((physical['kind'], physical['name'], physical['arena_id']), ('paper', 'Digital (Physical)', ''))
+        self.assertEqual([(card['name'], card['quantity']) for card in physical['cards']], [('Opt', 4)])
+        self.assertEqual(decks.get(decks.duplicate(physical['id'], kind='arena'))['name'], 'Digital (Physical) (Arena)')
+        with self.assertRaises(ValueError):
+            decks.duplicate(arena_deck, kind='cardboard')
         with self.assertRaises(ValueError):
             decks.create('mtg', 'Nope', 'standard', kind='cardboard')
 

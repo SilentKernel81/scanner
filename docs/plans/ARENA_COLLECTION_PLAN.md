@@ -194,7 +194,9 @@ Arena, and the deck comes back with the next import.
 
 - No link to Arena: the files are made by the exporter and uploaded by hand.
 - No history between imports (the exporter keeps its own "new since last time").
-- A deck's kind cannot be changed afterwards (duplicate keeps it; a new deck asks).
+- A deck's kind cannot be changed afterwards - but Duplicate asks for the copy's kind
+  (added after the first deploy, at the user's wish: an Arena deck as a Physical one, to
+  see what to buy).
 - Changes made here to a deck that came from Arena are lost at the next import with a
   deck file - the deck's badge says so on pointing; nothing stops the change.
 

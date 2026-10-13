@@ -291,6 +291,9 @@ def main():
         b.settle(2.0)
         check("the browser's Back returns to the deck", b.js('location.pathname') == f'/decks/{deck_id}' and b.js("!document.getElementById('deck-builder').hidden"))
         b.js("document.getElementById('deck-duplicate').click()")
+        b.settle(0.8)
+        # A game with a digital collection asks of which kind the copy is to be (Physical | Arena)
+        b.js("(() => { const x = [...document.querySelectorAll('#dialog-modal.show #dialog-buttons button')].find(x => x.textContent.trim() === 'Physical'); if (x) x.click(); })()")
         b.settle(2.0)
         copy_path = b.js('location.pathname')
         copy_id = int(copy_path[7:]) if copy_path[7:].isdigit() else 0
