@@ -3,12 +3,14 @@
 # the card database is downloaded (~150 MB, a few minutes) before the web app comes up.
 set -e
 
+# The code is in src/ (the image sets PYTHONPATH=/app/src, which the line below relies on)
+
 if ! python -c "
 import sys
 from config import Config
 f = Config.DATABASE_FILE
 sys.exit(0 if f.exists() and f.stat().st_size > 0 else 1)"; then
-    python setup_database.py
+    python src/setup_database.py
 fi
 
 exec python app.py

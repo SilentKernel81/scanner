@@ -22,7 +22,9 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+TOP = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(TOP))          # app.py, the launcher, which is imported below
+sys.path.insert(0, str(TOP / 'src'))  # the code, ahead of the top folder
 
 RECORDED = Path(__file__).with_name('app_surface.json')
 

@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # test_ownership: the temporary data
 
 import inventory as inv  # noqa: E402

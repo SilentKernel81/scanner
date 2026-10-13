@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
 import station_login  # noqa: E402
 import station_setup  # noqa: E402

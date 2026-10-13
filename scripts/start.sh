@@ -172,7 +172,7 @@ if [ -f "$PROJECT_DIR/data/cards_database.db" ]; then
     echo -e "${GREEN}✓ Card database:${NC} $DB_SIZE"
 else
     echo -e "${YELLOW}⚠ Card database not found${NC}"
-    echo -e "  Run: python3 setup_database.py"
+    echo -e "  Run: python3 src/setup_database.py"
 fi
 
 # Check YAML config
@@ -194,6 +194,9 @@ echo -e "Press Ctrl+C to stop"
 echo ""
 
 cd "$PROJECT_DIR"
+# The code is in src/: for the `python3 -c "from config import ..."` lines below (app.py and
+# src/station_client.py find it by themselves)
+export PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # The server has no camera of its own: this machine's camera is read by a camera station,
 # a second program that sends its cards to the server. It is started here in the background
@@ -208,7 +211,7 @@ if [ "$(python3 -c "from config import Config; print(str(Config.CAMERA_TYPE).low
     echo "No camera on this machine (camera.type: remote): starting the server only"
 fi
 if [ "$NO_STATION" != 1 ]; then
-    python3 station_client.py --server "http://localhost:${PORT}" &
+    python3 src/station_client.py --server "http://localhost:${PORT}" &
     STATION_PID=$!
     # When this script ends - Ctrl+C or the server stopping - the station is asked to stop
     # too (it then lets go of the camera), and given 10 seconds to do so. A station that has
