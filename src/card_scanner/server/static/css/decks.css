@@ -596,3 +596,9 @@
 .deck-columns .deck-row:focus-within .own-mark {
     display: none;
 }
+
+/* A deck without a commander has no name and no colours to show in the banner's second
+   line: the empty places must not hold a gap open before the format */
+.deck-hero-sub > span:empty {
+    display: none;
+}

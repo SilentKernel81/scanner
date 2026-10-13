@@ -2,7 +2,7 @@
 
 Date: 2026-10-13
 
-**Built the same day** (not deployed) - see *How it went* at the end. What follows is the plan
+**Built and deployed to the server the same day** - see *How it went* at the end. What follows is the plan
 as it was written.
 
 A plan for taking the decks out of the collection page and giving them a new layout. Nothing
@@ -268,8 +268,7 @@ mockups show about a dozen of the 50 things.
 ## How it went (2026-10-13)
 
 Built on the branch `decks-page`, in two commits: the move (1475877), then the redesign
-(bee4924). **Not deployed**; the real server still has the decks as a tab of the collection
-page.
+(bee4924); merged into `main` and deployed to the server at the user's word (below).
 
 Differently from the plan:
 
@@ -308,6 +307,22 @@ preconstructed decks (list, view, create, "I own it", ranking), a deck from anot
 address - whose code was moved unchanged but not run; the notice about old card data and
 its update button; a deck with two commanders, without a commander, with missing or shared
 cards (the test decks are all owned); a game without deck formats; a real person using it.
+
+**Deployed to the server** (192.168.1.23) at 01:50, idle at the time. A backup first
+(`scanner-backup-20261013_014950.tar.gz`); the folder compared with the tree (nothing left
+over); the image built while the old container served and looked into (the two deck
+routes, the new template and files); then the switch - answering after 4 seconds. The
+collection's numbers the same (5,407 cards, 2,151 entries), the same 15 decks, OCR on the
+GPU, both stations back, no error in the log; the new pages and their files answer, the
+collection page has no deck tab and a Decks link.
+Then looked at in headless Chromium, reading only (the check script is never run against
+real data - it makes and deletes decks): the list shows 15 tiles, 10 with a commander's
+picture; a Standard deck - five of the real decks have no commander, a case the test data
+did not have - shows its plain banner, its charts and its cards in columns; the collection
+page lists the inventory under its three tabs. No script error, no missing file.
+One thing seen there and corrected afterwards (in the repository, not yet on the server):
+a deck without a commander left a small gap before its format in the banner.
+The stations were not touched: they have no part in this.
 
 Still open: the fourth tab the user asked for ("to keep the build stuff we currently
 have") - which parts that means is to be asked; and the mockups folder, which is not in
