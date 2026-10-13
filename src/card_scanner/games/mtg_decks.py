@@ -214,6 +214,9 @@ def format_decklist(entries, format_id=None):
 # Arena here to paste into. The layout is the one Arena's own export and the sites that
 # write for it use (sections "Commander" / "Deck" / "Sideboard", lines "4 Card Name");
 # what is uncertain is said where it is decided.
+# Compared on 2026-10-13 with a deck exported from Arena: its heading is "Deck", its lines
+# "1 Llanowar Elves (M19) 314" (always with set and number - here they are left away, see
+# format_arena), and an adventure card goes by its front name, as arena_name writes it.
 
 # A card exists on Arena when it has a say in one of the formats only Arena has. Scryfall's
 # data has no simpler sign that our card table keeps (its "games" list is not stored), and
