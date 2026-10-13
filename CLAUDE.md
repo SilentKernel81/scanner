@@ -71,7 +71,9 @@ events against the recorded list (`tests/app_surface.json`); `tests/test_station
 page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts;
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
-the two routes, through Flask's test client). Nothing else is
+the two routes, through Flask's test client); `tests/test_paths.py` that the data, `config.yaml`,
+the pages and the OCR reader are where the programs look for them (it must pass before and
+after any move of files - see docs/plans/SRC_MOVE_PLAN.md). Nothing else is
 automated: verify changes
 by running the programs, and for scanner logic by feeding recorded / synthetic frames through
 `CardScanner` with a fake camera (patch `detect_camera_type` / `_initialize_usb_camera`).
