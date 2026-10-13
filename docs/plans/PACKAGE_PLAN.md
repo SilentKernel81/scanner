@@ -352,7 +352,10 @@ removed and the real station started: connected, its crop and server address as 
   After `up`: answering in 4 seconds; the collection's numbers and the scanned cards' the
   same (5,407 cards, 2,151 entries, 2 scanned), 15 decks, `light-ocr ready (webgpu)`, the
   three pages and their files answered, no error in the log, both stations back with
-  their cameras. The image from before is kept on the server this time.
+  their cameras. (I wrote here at first that the image from before was kept on the server
+  as the way back. Looked at afterwards, it is not there: on that machine a rebuild of
+  the same name leaves no untagged old image behind. The way back is the backup and a
+  build of the commit before, 5e52197.)
 - **The Pi 5** (USB webcam) and **the Pi 4** (camera module): the same comparison (the 68
   files, and the Pi 5's `.env`, which stays), the image built there and looked into - it
   holds the launcher, the four shared modules and `station/`, nothing of the server -

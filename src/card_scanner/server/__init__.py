@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 from card_scanner.paths import TOP
 
 # The project's top folder: app.py, config.yaml, .env, data/ (paths.py says where it is).
-# The server's own files - this package, its templates/ and static/ - are in src/server.
+# The server's own files - this package, its templates/ and static/ - are in src/card_scanner/server.
 ROOT = TOP
 
 # Nothing here touches Python's path. The project's modules (config, inventory, ...) are in
