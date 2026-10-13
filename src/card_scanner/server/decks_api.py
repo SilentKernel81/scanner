@@ -165,15 +165,31 @@ def decks_collection():
     if request.method == 'GET':
         owned = inventory.owned_by_name(game.id)
         considering = commander_formats(game)
-        listed = []
+        listed, faces = [], {}   # faces: deck id -> its commander entries, for the list's pictures
         for deck in deck_store.list_decks(game.id):
             wanted = {}
             for card in deck_store.get(deck['id'])['cards']:
                 if not (card['board'] == 'side' and deck['format'] in considering):
                     wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
+                if card['board'] == 'commander':
+                    faces.setdefault(deck['id'], []).append(card)
             have = sum(min(count, owned.get(search_key(name), 0)) for name, count in wanted.items())
             total = sum(wanted.values())
             listed.append({**deck, 'owned': have, 'owned_percent': round(100 * have / total) if total else 0})
+        # What a deck's tile shows of its commanders: the picture of the printing the deck
+        # has (as the deck's own page shows it) and the colours. Asked for all decks at once -
+        # two look-ups, not two per deck.
+        entries = [entry for cards in faces.values() for entry in cards]
+        printings = game.card_details([entry['card_id'] for entry in entries]) if entries else {}
+        by_name = game.cards_by_names([entry['name'] for entry in entries]) if entries else {}
+        for deck in listed:
+            deck['commander_cards'] = []
+            for entry in faces.get(deck['id'], []):
+                card = by_name.get(search_key(entry['name']))
+                deck['commander_cards'].append({
+                    'name': entry['name'],
+                    'image_uri': (printings.get(entry['card_id']) or {}).get('image_uri') or '',
+                    'identity': (game.deck_card_payload(card) or {}).get('identity', []) if card else []})
         return jsonify({'success': True, 'decks': listed, 'has_deck_data': bool(game.has_deck_data())})
 
     data = request.get_json(silent=True) or {}

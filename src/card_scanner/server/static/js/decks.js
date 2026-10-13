@@ -64,14 +64,49 @@ function renderDeckList() {
     }).sort(DECK_SORTS[$('deck-sort').value] || DECK_SORTS.changed);
     $('deck-list').innerHTML = !shown.length && deckList.length
         ? '<div class="empty-state">No deck matches.</div>'
-        : deckList.length ? shown.map(item => `
-        <button class="deck-tile" data-deck="${item.id}">
-            <span class="deck-tile-name">${escapeHtml(item.name)}</span>
-            <span class="deck-tile-meta">${escapeHtml(formatLabel(item.format))} · ${plural(item.cards, 'card')}${item.commanders.length ? ' · ' + escapeHtml(item.commanders.join(' + ')) : ''}</span>
-            <span class="meter" title="${item.owned} of ${item.cards} owned"><span style="width: ${item.owned_percent}%"></span></span>
-            <span class="deck-tile-meta">${item.owned_percent}% owned · changed ${escapeHtml(item.updated_at.slice(0, 10))}</span>
-        </button>`).join('')
-        : '<div class="empty-state">No decks yet. Create one, or see below what your collection can build.</div>';
+        : deckList.length ? shown.map(deckTileHtml).join('')
+        : '<div class="empty-state">No decks yet. Create one, or see under "What can I build?" what your collection has the cards for.</div>';
+}
+
+function artOf(image) {
+    // The picture inside a card's frame, from the address of the whole card's picture
+    // (Scryfall keeps both under the same name: .../normal/... and .../art_crop/...).
+    // Any other address is used as it is: the whole card, cut to fit
+    return (image || '').replace('/normal/', '/art_crop/');
+}
+
+function identityHtml(letters) {
+    // A deck's colours as the round symbols a mana cost is shown with, in the usual order
+    return manaHtml([...'WUBRG'].filter(letter => letters.includes(letter)).map(letter => `{${letter}}`).join(''));
+}
+
+function deckTileHtml(item) {
+    // A deck in the list: recognised by its commander's picture before its name is read.
+    // A link, so that it can be opened in a new tab; a plain click stays on this page
+    // (bindDeckHomeEvents). A deck without a commander has no picture, only its colour band.
+    const faces = (item.commander_cards || []).filter(card => card.image_uri);
+    const colours = [...new Set((item.commander_cards || []).flatMap(card => card.identity || []))];
+    return `
+        <a class="deck-tile" data-deck="${item.id}" href="/decks/${item.id}">
+            <span class="deck-tile-art">${faces.map(card =>
+                `<span style="background-image: url('${escapeHtml(artOf(card.image_uri))}')"></span>`).join('')}</span>
+            <span class="deck-tile-body">
+                <span class="deck-tile-head"><span class="deck-tile-name">${escapeHtml(item.name)}</span><span>${identityHtml(colours)}</span></span>
+                <span class="deck-tile-meta" title="${escapeHtml(formatLabel(item.format))}">${escapeHtml(item.commanders.length ? item.commanders.join(' + ') : formatLabel(item.format))}</span>
+                <span class="meter" title="${item.owned} of ${item.cards} owned"><span style="width: ${item.owned_percent}%"></span></span>
+                <span class="deck-tile-foot"><span>${plural(item.cards, 'card')} · ${item.owned_percent}% owned</span><span title="Last changed">${escapeHtml(item.updated_at.slice(0, 10))}</span></span>
+            </span>
+        </a>`;
+}
+
+// -- The deck list's three tabs (in the header: #deck-tabs) --------------------------
+
+function showDeckTab(tab) {
+    // 'mine' (the decks), 'build' (what the collection can build), 'precons'
+    if (!['mine', 'build', 'precons'].includes(tab)) tab = 'mine';
+    remember('deckTab', tab);
+    document.querySelectorAll('#deck-tabs .tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
+    document.querySelectorAll('.deck-tab').forEach(panel => { panel.hidden = panel.id !== `deck-tab-${tab}`; });
 }
 
 function openDeckModal({text = '', importInto = null} = {}) {
@@ -384,17 +419,22 @@ function openDeck(payload) {
     suggestions = null;
     $('deck-home').hidden = true;
     $('deck-builder').hidden = false;
+    $('deck-tabs').hidden = true;   // the list's tabs: not while one deck is shown
     $('deck-format').innerHTML = optionsHtml(gameInfo.deck_formats);
     renderDeck();
     showSide(hasCommander(deck.format) && commanders().length && deck.totals.cards < 30 ? 'suggestions' : 'search');
+    // An empty deck wants cards: the panel for adding them is open from the start
+    showAdding(deck.cards.length === 0);
     window.scrollTo(0, 0);
     showAddress(`/decks/${deck.id}`, `${deck.name} - Decks`);
 }
 
 function closeDeck() {
     deck = null;
+    showAdding(false);
     $('deck-builder').hidden = true;
     $('deck-home').hidden = false;
+    $('deck-tabs').hidden = false;
     loadDecks();
     showAddress('/decks', 'Decks');
 }
@@ -426,36 +466,120 @@ function typeGroup(entry) {
     return found ? found[1] : 'Other';
 }
 
-function ownHtml(entry, wanted) {
-    // wanted: copies of the card this deck plays over all its boards
+function ownState(entry, wanted) {
+    // What you have of a card this deck wants `wanted` copies of (over all its boards):
+    // [kind, short mark, the explanation shown on pointing at it]
     const elsewhere = totalQuantity(entry.elsewhere);
     const others = entry.elsewhere.map(other => `${other.quantity} in ${other.deck}`).join(', ');
-    if (entry.owned >= wanted + elsewhere) return `<span class="own have" title="You own ${entry.owned}${others ? ' - also ' + others : ''}">✓ owned</span>`;
-    if (entry.owned >= wanted) return `<span class="own shared" title="You own ${entry.owned}, but other decks want it too: ${escapeHtml(others)}">⇄ shared</span>`;
-    if (entry.owned > 0) return `<span class="own partly" title="You own ${entry.owned} of ${wanted}">${entry.owned} of ${wanted}</span>`;
-    return '<span class="own none" title="Not in your inventory">✕ missing</span>';
+    if (entry.owned >= wanted + elsewhere) return ['have', '✓', `You own ${entry.owned}${others ? ' - also ' + others : ''}`];
+    if (entry.owned >= wanted) return ['shared', '⇄', `You own ${entry.owned}, but other decks want it too: ${others}`];
+    if (entry.owned > 0) return ['partly', `${entry.owned}/${wanted}`, `You own ${entry.owned} of ${wanted}`];
+    return ['none', '✕', 'Not in your inventory'];
 }
 
-function deckRowHtml(entry, wanted) {
+function ownHtml(entry, wanted) {
+    const [kind, mark, title] = ownState(entry, wanted);
+    return `<span class="own-mark ${kind}" title="${escapeHtml(title)}">${mark}</span>`;
+}
+
+function entryActionsHtml(entry) {
+    // What can be done with a card of the deck, the same buttons in both views: one copy
+    // less / more, the printing shown, and where it can move (bindBuilderEvents answers them
+    // by their data- attributes)
+    const card = entry.card;
     const moves = [];
     if (entry.board !== 'main') moves.push(['main', 'Main', 'Move to the main deck']);
     if (entry.board !== 'side') moves.push(['side', hasCommander(deck.format) ? 'Maybe' : 'Side', `Move to: ${sideTitle()}`]);
-    const card = entry.card;
     if (canCommand(card) && entry.board !== 'commander') moves.push(['commander', 'Cmdr', 'Make it the commander']);
+    return `<button class="mini-btn" data-change="-1" title="One less"><svg class="icon"><use href="#i-minus"/></svg></button>
+            <button class="mini-btn" data-change="1" title="One more"><svg class="icon"><use href="#i-plus"/></svg></button>
+            ${card ? `<button class="mini-btn printing-btn" data-printing title="Choose the printing shown">${
+                escapeHtml(entry.printing.set_code ? `${entry.printing.set_code} ${entry.printing.number}` : 'Printing')}</button>` : ''}${moves.map(([board, label, title]) =>
+                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}`;
+}
+
+function deckRowHtml(entry, wanted) {
+    // Columns view: one card as a line of a decklist - how many, its name, its cost, whether
+    // you own it, its price. Pointing at the line shows the card's picture beside it
+    // (data-image, library.js) and puts the buttons where the price was.
+    const card = entry.card;
     return `
         <div class="deck-row" data-name="${escapeHtml(entry.name)}" data-board="${entry.board}" data-image="${escapeHtml((card && card.image_uri) || '')}">
-            <span class="qty">
-                <button class="mini-btn" data-change="-1" title="One less"><svg class="icon"><use href="#i-minus"/></svg></button>
-                <strong>${entry.quantity}</strong>
-                <button class="mini-btn" data-change="1" title="One more"><svg class="icon"><use href="#i-plus"/></svg></button>
-            </span>
-            <span class="result-main"><span class="result-name ${card ? '' : 'unknown'}">${escapeHtml(entry.name)}</span> ${card ? manaHtml(card.mana_cost) : '<span class="hint">not in the card data</span>'}</span>
+            <span class="deck-row-qty">${entry.quantity}</span>
+            <span class="deck-row-name ${card ? '' : 'unknown'}" title="${card ? '' : 'Not in the card data'}">${escapeHtml(entry.name)}</span>
+            <span class="deck-row-cost">${card ? manaHtml(card.mana_cost) : ''}</span>
             ${ownHtml(entry, wanted)}
-            <span class="result-numbers">${card ? money(card.price * entry.quantity) : ''}</span>
-            <span class="result-actions">${card ? `<button class="mini-btn printing-btn" data-printing title="Choose the printing shown">${
-                escapeHtml(entry.printing.set_code ? `${entry.printing.set_code} ${entry.printing.number}` : 'Printing')}</button>` : ''}${moves.map(([board, label, title]) =>
-                `<button class="mini-btn" data-move="${board}" title="${escapeHtml(title)}">${label}</button>`).join('')}</span>
+            <span class="deck-row-price">${card ? money(card.price * entry.quantity) : ''}</span>
+            <span class="deck-row-actions">${entryActionsHtml(entry)}</span>
         </div>`;
+}
+
+function deckCardHtml(entry, wanted) {
+    // Stacks view: the card itself. Its picture is asked for only when it comes into view
+    // (loading="lazy": a deck is a hundred pictures); a card without one - not in the card
+    // data, or the picture did not arrive - is a card-shaped box with its name and cost.
+    // No data-image here: the card is the picture, nothing has to be shown beside it.
+    const card = entry.card;
+    const [kind, mark, title] = ownState(entry, wanted);
+    return `
+        <div class="deck-row stack-card" data-name="${escapeHtml(entry.name)}" data-board="${entry.board}" tabindex="0">
+            <span class="stack-card-name">${escapeHtml(entry.name)} ${card ? manaHtml(card.mana_cost) : ''}</span>
+            ${card && card.image_uri ? `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(entry.name)}" loading="lazy" onerror="this.remove()">` : ''}
+            ${entry.quantity > 1 ? `<span class="stack-card-qty">×${entry.quantity}</span>` : ''}
+            ${kind === 'have' ? '' : `<span class="stack-card-own own-mark ${kind}" title="${escapeHtml(title)}">${mark}</span>`}
+            <span class="stack-card-foot"><span>${card ? money(card.price * entry.quantity) : 'not in the card data'}</span><span class="deck-row-actions">${entryActionsHtml(entry)}</span></span>
+        </div>`;
+}
+
+// -- How the deck is shown: as columns of text or as stacks of cards, grouped three ways --
+
+let deckView = recall('deckView', 'columns');        // 'columns' | 'stacks'
+let deckGrouping = recall('deckGrouping', 'type');   // 'type' | 'cost' | 'colour'
+
+const COLOUR_GROUPS = [['W', 'White'], ['U', 'Blue'], ['B', 'Black'], ['R', 'Red'], ['G', 'Green']];
+
+function groupOf(entry) {
+    // The heading a main-deck card is filed under, for the grouping chosen. Lands are a
+    // group of their own in every grouping (they have no cost, and no colour to speak of);
+    // a card the data does not know is "Other".
+    const group = typeGroup(entry);
+    if (deckGrouping === 'type' || group === 'Lands' || !entry.card) return group;
+    if (deckGrouping === 'cost') {
+        const cost = Math.min(7, Math.floor(entry.card.cmc || 0));
+        return cost === 7 ? 'Cost 7 or more' : `Cost ${cost}`;
+    }
+    const colours = entry.card.colors || entry.card.identity || [];
+    if (colours.length > 1) return 'Multicolour';
+    const found = COLOUR_GROUPS.find(([letter]) => colours.includes(letter));
+    return found ? found[1] : 'Colourless';
+}
+
+function groupTitles() {
+    // The headings in the order they are shown
+    if (deckGrouping === 'cost') return [...Array(7).keys()].map(cost => `Cost ${cost}`).concat(['Cost 7 or more', 'Lands', 'Other']);
+    if (deckGrouping === 'colour') return [...COLOUR_GROUPS.map(([, title]) => title), 'Multicolour', 'Colourless', 'Lands', 'Other'];
+    return [...TYPE_GROUPS.map(([, title]) => title), 'Other'];
+}
+
+function deckGroups() {
+    // [[title, entries]]: the commander first, the main deck by the grouping chosen, then
+    // what is only considered (the sideboard, where the format has one)
+    const byName = (a, b) => byText(a.name, b.name);
+    const groups = [[BOARD_TITLES.commander, commanders()]];
+    const main = deck.cards.filter(entry => entry.board === 'main');
+    groupTitles().forEach(title => groups.push([title, main.filter(entry => groupOf(entry) === title).sort(byName)]));
+    groups.push([sideTitle(), deck.cards.filter(entry => entry.board === 'side').sort(byName)]);
+    return groups.filter(([, entries]) => entries.length);
+}
+
+function showDeckView(view = deckView, grouping = deckGrouping) {
+    deckView = view === 'stacks' ? 'stacks' : 'columns';
+    deckGrouping = ['type', 'cost', 'colour'].includes(grouping) ? grouping : 'type';
+    remember('deckView', deckView);
+    remember('deckGrouping', deckGrouping);
+    markSwitch('deck-view', 'view', deckView);
+    markSwitch('deck-grouping', 'grouping', deckGrouping);
+    if (deck) renderDeck();
 }
 
 function renderDeck() {
@@ -463,14 +587,29 @@ function renderDeck() {
     $('deck-format').value = deck.format;
     const totals = deck.totals;
     const considering = hasCommander(deck.format);
+
+    // The banner: the commander's picture behind the deck's name, colours and numbers
+    const leaders = commanders();
+    const face = leaders.find(entry => entry.card && entry.card.image_uri);
+    $('deck-hero').style.backgroundImage = face ? `url('${artOf(face.card.image_uri)}')` : '';
+    $('deck-hero').classList.toggle('no-art', !face);
+    $('deck-commanders').textContent = leaders.map(entry => entry.name).join(' + ');
+    $('deck-identity').innerHTML = identityHtml([...new Set(leaders.flatMap(entry => (entry.card && entry.card.identity) || []))]);
+    const problems = deck.issues.filter(issue => issue.level === 'error').length;
+    $('deck-legal').innerHTML = !totals.cards ? ''
+        : deck.issues.length ? `<span class="deck-chip ${problems ? 'bad' : 'warn'}">${problems ? '✕' : '!'} ${plural(deck.issues.length, 'problem')}</span>`
+        : `<span class="deck-chip ok">✓ Legal in ${escapeHtml(formatLabel(deck.format))}</span>`;
+    const owned = totals.cards ? Math.round(100 * (totals.cards - totals.missing) / totals.cards) : 0;
     $('deck-totals').innerHTML = `
-        <span><strong>${totals.cards}</strong> cards${totals.side ? ` + ${totals.side} ${considering ? 'considered' : 'sideboard'}` : ''}</span>
-        <span>Price <strong>${money(totals.price)}</strong></span>
-        <span>${totals.missing ? `Missing <strong>${totals.missing}</strong> cards (${money(totals.missing_price)})` : totals.cards ? '<strong>You own every card</strong>' : ''}</span>`;
-    $('deck-issues').innerHTML = deck.issues.length ? deck.issues.map(issue => `
+        <span><strong>${totals.cards}</strong> cards${totals.side ? ` <small>+ ${totals.side} ${considering ? 'considered' : 'sideboard'}</small>` : ''}</span>
+        <span><strong>${money(totals.price)}</strong> value</span>
+        <span title="${totals.missing ? `${plural(totals.missing, 'card')} missing` : 'You own every card'}"><strong>${owned}%</strong> owned${
+            totals.missing ? ` <small>${totals.missing} missing, ${money(totals.missing_price)}</small>` : ''}</span>`;
+    // The problems themselves, under the banner (a legal deck has its chip above and nothing here)
+    $('deck-issues').innerHTML = deck.issues.map(issue => `
         <div class="issue ${issue.level}">${issue.level === 'error' ? '✕' : '!'} ${escapeHtml(issue.message)}${issue.cards.length
             ? `<span class="issue-cards">: ${escapeHtml(issue.cards.slice(0, 12).join(', '))}${issue.cards.length > 12 ? ` and ${issue.cards.length - 12} more` : ''}</span>` : ''}</div>`).join('')
-        : (totals.cards ? `<div class="issue ok">✓ Legal ${escapeHtml(formatLabel(deck.format))} deck</div>` : '');
+        || (totals.cards ? `<div class="issue ok">✓ Legal ${escapeHtml(formatLabel(deck.format))} deck</div>` : '');
 
     // Copies of each card over the boards that are played
     const played = deck.cards.filter(entry => !(considering && entry.board === 'side'));
@@ -478,20 +617,15 @@ function renderDeck() {
     played.forEach(entry => { wanted[entry.name] = (wanted[entry.name] || 0) + entry.quantity; });
     renderDeckCharts(played.filter(entry => entry.board !== 'side' && entry.card));
 
-    const sections = [];
-    const section = (title, entries) => {
-        if (!entries.length) return;
-        const count = totalQuantity(entries);
-        sections.push(`<div class="category-title">${escapeHtml(title)} (${count})</div>`
-            + entries.map(entry => deckRowHtml(entry, wanted[entry.name] || entry.quantity)).join(''));
-    };
-    section(BOARD_TITLES.commander, commanders());
-    const main = deck.cards.filter(entry => entry.board === 'main');
-    [...TYPE_GROUPS.map(([, title]) => title), 'Other'].forEach(title =>
-        section(title, main.filter(entry => typeGroup(entry) === title)));
-    section(sideTitle(), deck.cards.filter(entry => entry.board === 'side'));
-    $('deck-cards').innerHTML = sections.join('')
-        || '<div class="empty-state">No cards yet. Search on the left and click a card to add it.</div>';
+    const one = deckView === 'stacks' ? deckCardHtml : deckRowHtml;
+    const list = $('deck-cards');
+    list.className = `deck-cards deck-${deckView}`;
+    list.innerHTML = deckGroups().map(([title, entries]) => `
+        <section class="deck-group">
+            <div class="deck-group-title"><span>${escapeHtml(title)}</span><span>${totalQuantity(entries)}</span></div>
+            ${entries.map(entry => one(entry, wanted[entry.name] || entry.quantity)).join('')}
+        </section>`).join('')
+        || '<div class="empty-state">No cards yet. Add some with the panel on the right, or import a list.</div>';
 
     $('side-suggestions').hidden = !considering;
     $('search-identity-label').hidden = !considering;
@@ -565,7 +699,19 @@ async function saveDeckInfo(body) {
     updateDeck(data.deck);
 }
 
-// -- Left side: search, suggestions, popular decks -----------------------------
+// -- Adding cards: a panel that slides in from the right, with search, suggestions and
+// -- popular decks as its three parts ---------------------------------------------
+
+function showAdding(open) {
+    // The class on <body> also makes room for the panel beside the deck (decks.css)
+    $('add-drawer').classList.toggle('show', open);
+    document.body.classList.toggle('adding', open);
+    if (open && sidePanel === 'search') $('search-text').focus();
+}
+
+function showDeckMenu(open) {
+    $('deck-more-list').hidden = !open;
+}
 
 function showSide(panel) {
     sidePanel = panel;
@@ -717,9 +863,19 @@ function bindDeckHomeEvents() {
     $('deck-list').addEventListener('click', async event => {
         const tile = event.target.closest('[data-deck]');
         if (!tile) return;
+        // A tile is a link (/decks/<id>). With Ctrl, Shift or the middle button it is left to
+        // the browser - a new tab; a plain click opens the deck here, without loading the page
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
+        event.preventDefault();
         const data = await api(`/api/decks/${tile.dataset.deck}`);
         if (data) openDeck(data.deck);
     });
+    // The list's tabs, in the header
+    $('deck-tabs').addEventListener('click', event => {
+        const tab = event.target.closest('.tab');
+        if (tab) showDeckTab(tab.dataset.tab);
+    });
+    showDeckTab(recall('deckTab', 'mine'));
     document.querySelectorAll('[data-ideas]').forEach(button => button.addEventListener('click', () =>
         button.dataset.running ? stopIdeas(button.dataset.ideas)
             // The precon ranking reads only the kind of deck that is chosen
@@ -783,7 +939,24 @@ function bindDeckHomeEvents() {
 
 function bindBuilderEvents() {
     // Header
-    $('deck-back').addEventListener('click', closeDeck);
+    $('deck-back').addEventListener('click', event => {
+        // A link to /decks for a new tab; a plain click goes back without loading the page
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
+        event.preventDefault();
+        closeDeck();
+    });
+    // The panel for adding cards, and the menu of the things done seldom
+    $('deck-add').addEventListener('click', () => showAdding(!$('add-drawer').classList.contains('show')));
+    $('add-close').addEventListener('click', () => showAdding(false));
+    $('deck-more').addEventListener('click', event => {
+        event.stopPropagation();
+        showDeckMenu($('deck-more-list').hidden);
+    });
+    document.addEventListener('click', () => showDeckMenu(false));   // a click anywhere else, or on one of its entries
+    // How the deck is shown
+    bindSwitch('deck-view', button => showDeckView(button.dataset.view, deckGrouping));
+    bindSwitch('deck-grouping', button => showDeckView(deckView, button.dataset.grouping));
+    showDeckView();
     $('deck-name').addEventListener('change', event => saveDeckInfo({name: event.target.value}));
     $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
     $('deck-import').addEventListener('click', () => openDeckModal({importInto: deck}));
@@ -939,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ['printing-modal', () => closeModal('printing-modal')],
         ['precon-modal', () => closeModal('precon-modal')],
         ['deck-modal', () => closeModal('deck-modal')],
+        ['add-drawer', () => showAdding(false)],   // Escape closes the panel for adding cards
     ]);
     window.addEventListener('popstate', showWhatTheAddressSays);
     await loadDecks();

@@ -130,6 +130,12 @@ def main():
         names = b.js("[...document.querySelectorAll('#deck-list [data-deck] .deck-tile-name, #deck-list [data-deck] h3')].map(e => e.textContent.trim())")
         check('sorting by name orders the tiles', names == sorted(names, key=str.lower) or names == sorted(names), str(names)[:120])
         check('"What can I build?" lists your cards', b.js("document.querySelectorAll('#around-cards .result-row').length") > 0)
+        check('a tile shows its commander and is a link to the deck',
+              b.js("(() => { const t = document.querySelector('#deck-list [data-deck]'); return /^\\/decks\\/\\d+$/.test(t.getAttribute('href')) && !!t.querySelector('.deck-tile-art'); })()"))
+        for tab in ('build', 'precons', 'mine'):
+            b.js(f"document.querySelector('#deck-tabs [data-tab=\"{tab}\"]').click()")
+            check(f'the list\'s tab "{tab}" opens',
+                  b.js(f"!document.getElementById('deck-tab-{tab}').hidden && document.querySelectorAll('.deck-tab:not([hidden])').length === 1"))
 
         print('A new deck from a pasted list')
         b.js("document.getElementById('deck-new').click()")
@@ -176,6 +182,30 @@ def main():
               b.js("document.body.innerText.includes('4')"))
         check('the charts are drawn', b.js("document.getElementById('deck-charts').children.length") > 0)
         check('legality or problems are shown', b.js("document.getElementById('deck-issues').children.length") > 0)
+
+        print('The two views of a deck')
+        rows = b.js("document.querySelectorAll('#deck-cards .deck-row').length")
+        b.js("document.querySelector('#deck-view [data-view=\"stacks\"]').click()")
+        b.settle(0.8)
+        check('Stacks shows every card as a card', b.js("document.querySelectorAll('#deck-cards .stack-card').length") == rows and rows > 0, f'{rows} rows')
+        check('... with the same buttons', b.js("!!document.querySelector('#deck-cards .stack-card [data-change=\"1\"]') && !!document.querySelector('#deck-cards .stack-card [data-printing]')"))
+        b.js("document.querySelector('#deck-grouping [data-grouping=\"cost\"]').click()")
+        b.settle(0.6)
+        titles = b.js("[...document.querySelectorAll('#deck-cards .deck-group-title span:first-child')].map(e => e.textContent)")
+        check('grouping by cost', any(title.startswith('Cost ') for title in titles or []), str(titles))
+        b.js("document.querySelector('#deck-grouping [data-grouping=\"colour\"]').click()")
+        b.settle(0.6)
+        titles = b.js("[...document.querySelectorAll('#deck-cards .deck-group-title span:first-child')].map(e => e.textContent)")
+        check('grouping by colour', any(title in ('Colourless', 'Blue', 'Red', 'White', 'Black', 'Green', 'Multicolour') for title in titles or []), str(titles))
+        b.js("document.querySelector('#deck-grouping [data-grouping=\"type\"]').click(); document.querySelector('#deck-view [data-view=\"columns\"]').click()")
+        b.settle(0.6)
+        check('back to Columns', b.js("document.getElementById('deck-cards').classList.contains('deck-columns')"))
+        b.js("document.getElementById('deck-add').click()")
+        check('"Add cards" opens its panel', b.js("document.getElementById('add-drawer').classList.contains('show')"))
+        b.js("document.getElementById('deck-more').click()")
+        check('the menu opens', b.js("!document.getElementById('deck-more-list').hidden"))
+        b.js("document.body.click()")
+        check('... and closes on a click elsewhere', b.js("document.getElementById('deck-more-list').hidden"))
 
         print('Adding cards by search')
         b.js("(() => { const f = document.getElementById('search-text'); f.value = 'Lightning Bolt'; f.dispatchEvent(new Event('input')); })()")
