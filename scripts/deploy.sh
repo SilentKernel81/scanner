@@ -349,6 +349,19 @@ install_unit() {  # install_unit <name>: /etc/systemd/system/<name>.service from
     rm -f "$tmp"
 }
 
+remove_station_service() {  # this machine has no camera (camera.type: remote), yet a station's service is installed
+    # How that comes about: the update that brought the package card_scanner (2026-10-13) was
+    # carried out by the script from before it, which asks config.py about the camera under
+    # the module's old name, gets no answer, and takes that for "there is a camera" - so a
+    # machine that only runs the server was given a station's service (tried: it was).
+    # A station is only wanted where camera.type is not 'remote'; where it is, the service goes.
+    warn "No camera on this machine (camera.type: remote), but a camera station's service is installed: removing it"
+    sudo_cmd systemctl disable --now "$STATION_SERVICE_NAME" 2>/dev/null || true
+    sudo_cmd rm -f "$STATION_SERVICE_FILE"
+    sudo_cmd systemctl daemon-reload
+    ok "Removed ${STATION_SERVICE_NAME}"
+}
+
 start_station_service() {  # install (or refresh), enable and start the camera's service, and say how it went
     mkdir -p data scanned_cards station_captures   # the unit names them as writable: they must exist
     install_unit "$STATION_SERVICE_NAME"
@@ -400,9 +413,11 @@ elif service_installed; then
         sudo_cmd systemctl daemon-reload
         sudo_cmd systemctl restart "$SERVICE_NAME"
         ok "Restarted ${SERVICE_NAME}"
-        if [ -f "$STATION_SERVICE_FILE" ]; then
+        if ! wants_station; then
+            if [ -f "$STATION_SERVICE_FILE" ]; then remove_station_service; fi
+        elif [ -f "$STATION_SERVICE_FILE" ]; then
             start_station_service
-        elif wants_station; then
+        else
             # A machine installed before 2026-10-12: its one service, the server, read the
             # camera itself. The server no longer does, so an update that only restarted it
             # would leave a scanner that worked an hour ago unable to scan, also after the
