@@ -59,6 +59,11 @@ DECK_CARDS_TABLE = '''
 # "the cards of a deck" as fast (measured 2026-10-09, scripts/benchmark_db.py: 0.05 ms / 0.08 ms)
 DECK_CARDS_INDEXES = ()
 CONSTRAINTS_MIGRATION = 'deck_constraints_1'
+# What the standalone program (until 2026-10-14) kept these rules as: triggers on tables without
+# CHECK or REFERENCES. One that names `decks` makes the rename of a rebuilt `decks` fail, so they
+# go in the migration that gives the tables the rules themselves
+LEGACY_TRIGGERS = ('DROP TRIGGER IF EXISTS deck_cards_valid_insert', 'DROP TRIGGER IF EXISTS deck_cards_valid_update',
+                   'DROP TRIGGER IF EXISTS decks_take_cards')
 
 
 class DeckManager(storage.Transactional):
@@ -89,7 +94,8 @@ class DeckManager(storage.Transactional):
                  DECK_CARDS_INDEXES)],
                 lambda conn: tuple(conn.execute(
                     f'SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0), COALESCE(MAX(id), 0) '
-                    f'FROM deck_cards WHERE {valid}').fetchone()))
+                    f'FROM deck_cards WHERE {valid}').fetchone()),
+                prepare=LEGACY_TRIGGERS)
             # Files from before a deck could have a cover (2026-10-13): the decks table gets the
             # column, every deck as it was and without a cover chosen. A named migration like
             # the one above - a backup of the file first, one transaction, and the decks counted

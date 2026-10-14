@@ -49,7 +49,7 @@ STATION = {'station_client', 'station_setup', 'station_login', 'scanner', 'objec
 CORE = {'identification', 'card_ocr', 'card_identifier', 'prompts', 'api_keys',
         'database', 'card_search', 'setup_database',
         'inventory', 'decks', 'trades', 'backups', 'storage', 'pending', 'review', 'cleanup',
-        'stations', 'remote_scanner', 'recommendations', 'arena'}
+        'stations', 'remote_scanner', 'recommendations', 'arena', 'frames'}
 # What an import began with before the package existed: any of these at the start of an
 # import now is one the move forgot
 OLD_NAMES = SHARED | STATION | CORE | {'server', 'games'}

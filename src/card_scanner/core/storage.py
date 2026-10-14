@@ -142,7 +142,7 @@ def backup_file(path, label):
     return target
 
 
-def rebuild(path, name, tables, facts):
+def rebuild(path, name, tables, facts, prepare=()):
     """
     Rebuild tables of a database file with a new definition (SQLite cannot add a constraint to
     a table), as one migration: a backup first, then one transaction - every table copied into
@@ -152,7 +152,10 @@ def rebuild(path, name, tables, facts):
 
     tables: [(table, "CREATE TABLE {table} (...)", "SELECT <columns> FROM <table> WHERE ...",
               [index statements])] - parents before the tables that refer to them;
-    facts(conn): what must be the same afterwards (counts, totals) - of the rows the SELECTs keep.
+    facts(conn): what must be the same afterwards (counts, totals) - of the rows the SELECTs keep;
+    prepare: statements run first in the same transaction (DROP TRIGGER IF EXISTS ... of an older
+    program that kept these rules as triggers: one that names a table dropped here makes the
+    rename fail, and the new tables keep the rules themselves).
     Returns True when it was applied now, False when it had been before.
     """
     check = sqlite3.connect(str(path), timeout=30.0)
@@ -171,6 +174,8 @@ def rebuild(path, name, tables, facts):
         if applied(conn, name):  # another process was faster
             conn.execute('ROLLBACK')
             return False
+        for statement in prepare:
+            conn.execute(statement)
         before = facts(conn)
         notes = []
         for table, create, select, indexes in tables:

@@ -101,7 +101,7 @@ SOURCES_TABLE = '''
 # quantity; copies no row accounts for were there before the oldest batch known ("old:..."
 # batches are what the single added_at / added_quantity of an entry said before this table).
 BATCHES_TABLE = '''
-    CREATE TABLE IF NOT EXISTS inventory_batches (
+    CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch TEXT NOT NULL,
         inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
@@ -111,6 +111,16 @@ BATCHES_TABLE = '''
     )
 '''
 BATCHES_INDEX = 'CREATE INDEX IF NOT EXISTS idx_batches_entry ON inventory_batches(inventory_id)'
+BATCHES_INDEXES = (BATCHES_INDEX,)
+# The standalone program (until 2026-10-14) kept the rules above as triggers on tables without
+# CHECK or REFERENCES. A file it made has them: they are dropped in the migration that gives
+# the tables the rules themselves - one that names `inventory` makes the rename of the new
+# table fail, which left the file unchanged and the server unable to start on it
+LEGACY_TRIGGERS = tuple(f'DROP TRIGGER IF EXISTS {name}' for name in (
+    'inventory_quantity_insert', 'inventory_quantity_update',
+    'inventory_captures_entry_insert', 'inventory_captures_entry_update', 'inventory_takes_inventory_captures',
+    'inventory_batches_entry_insert', 'inventory_batches_entry_update',
+    'inventory_batches_quantity_insert', 'inventory_batches_quantity_update', 'inventory_takes_inventory_batches'))
 BATCHES_MIGRATION = 'inventory_batches_1'
 BACKFILL_BATCHES = '''
     INSERT INTO inventory_batches (batch, inventory_id, added_at, quantity)
@@ -372,7 +382,8 @@ class InventoryManager(storage.Transactional):
             # Batches (2026-10-14): a table beside the entries, filled once with the one batch
             # each entry knew of (added_at / added_quantity). Nothing existing is changed, so
             # no backup or rebuild - the table is new and everything else stays as it is
-            self.conn.execute(BATCHES_TABLE)
+            if 'inventory_batches' not in tables:
+                self.conn.execute(BATCHES_TABLE.format(table='inventory_batches'))
             self.conn.execute(BATCHES_INDEX)
             if not storage.applied(self.conn, BATCHES_MIGRATION):
                 # Not filled again where the table has rows already: the standalone program had
@@ -418,6 +429,8 @@ class InventoryManager(storage.Transactional):
                                            'FROM inventory WHERE CAST(quantity AS INTEGER) > 0').fetchone()),
                         tuple(conn.execute(f'SELECT COUNT(*), COALESCE(MAX(id), 0) FROM inventory_captures WHERE {valid}').fetchone()),
                         tuple(conn.execute('SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0) FROM inventory_sources '
+                                           f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0').fetchone()),
+                        tuple(conn.execute('SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0) FROM inventory_batches '
                                            f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0').fetchone()))
             columns = [row['name'] for row in self.conn.execute('PRAGMA table_info(inventory)')]
             entry = ', '.join('CAST(quantity AS INTEGER)' if column == 'quantity'
@@ -432,7 +445,11 @@ class InventoryManager(storage.Transactional):
                 ('inventory_sources', SOURCES_TABLE,
                  'SELECT inventory_id, station, CAST(quantity AS INTEGER) FROM inventory_sources '
                  f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0', ()),
-            ], facts)
+                # Made by the standalone program without the rules (this program makes it with them)
+                ('inventory_batches', BATCHES_TABLE,
+                 'SELECT id, batch, inventory_id, added_at, CAST(quantity AS INTEGER) FROM inventory_batches '
+                 f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0', BATCHES_INDEXES),
+            ], facts, prepare=LEGACY_TRIGGERS)
 
     def _backup_table(self, label):
         """Copy the inventory table to data/backups/ before rebuilding it; returns the file and
