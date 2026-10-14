@@ -241,6 +241,10 @@ a phone too; the deck pages are made for a screen with a pointer.
   move them to a **location**, tag them (*trade*, *keep*), change their condition, add them to
   a deck or delete them in one step. Copies of the same printing can be in two locations -
   moving part of a stack splits it.
+- **Cards to trade or sell** (Trades tab, **Find cards to trade or sell**) - the cards no deck
+  uses and that EDHREC does not list for the commander of any of your decks, most valuable first;
+  narrow it to one location (a binder, a box) or all, tick some and **Set aside for a trade**. It asks EDHREC about each deck with a commander, so
+  it needs the internet (the first time takes a moment).
 - **Export / import** - the **Export…** menu writes the collection for Moxfield (the same file
   imports into Archidekt: choose its **Moxfield** preset and **Set columns** - tried
   2026-10-14), or as
