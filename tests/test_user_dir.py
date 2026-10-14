@@ -57,6 +57,25 @@ class UserDir(unittest.TestCase):
         self.assertTrue(out.split()[0].endswith('/sh'))
 
 
+class FirstRun(unittest.TestCase):
+    """A fresh user folder - also one whose parents do not exist (~/.local/share/mtg-scanner on
+    a first packaged start) - must not stop the server's or a station's start-up"""
+
+    def test_a_station_and_the_stores_create_their_folders_inside_a_missing_one(self):
+        with tempfile.TemporaryDirectory() as parent:
+            home = str(Path(parent) / 'share' / 'mtg-scanner')  # neither level exists
+            out = python("""
+from card_scanner.config import Config
+Config.create_directories()                      # what the station and the server do first
+Config.STATION_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+from card_scanner.settings import Settings
+Settings().set('sound', False)               # data/settings.json
+print(Config.DATA_DIR.is_dir(), Config.IMAGES_DIR.is_dir())
+""", MTG_SCANNER_HOME=home)
+            self.assertEqual(out.split()[-2:], ['True', 'True'])
+            self.assertTrue((Path(home) / 'data' / 'settings.json').is_file())
+
+
 class InstanceLock(unittest.TestCase):
     def test_a_second_copy_on_the_same_data_folder_is_refused(self):
         with tempfile.TemporaryDirectory() as home:
