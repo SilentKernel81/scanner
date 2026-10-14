@@ -33,19 +33,22 @@ MOXFIELD_CONDITIONS = {
 
 def write_moxfield(rows, file):
     """
-    Moxfield collection import: Count,Name,Edition,Condition,Language,Foil,Collector Number,...
+    Moxfield collection import, in the columns of Moxfield's own export (Count, Tradelist Count,
+    Name, Edition, Condition, Language, Foil, Tags, Last Modified, Collector Number, Alter, Proxy,
+    Purchase Price): Archidekt's "Moxfield" preset reads those 13 by position, so a shorter or
+    reordered file fails there ("Row columns do not match header columns").
     Edition is the set code: Moxfield matches it against its sets and, for a value it doesn't
     know (the set name used to be written), takes the alphabetically first set of the card.
     Rows without a set code (old CSV imports) fall back to the set name.
     """
     writer = csv.writer(file)
-    writer.writerow(['Count', 'Name', 'Edition', 'Condition', 'Language', 'Foil',
-                     'Collector Number', 'Purchase Price', 'Tag'])
+    writer.writerow(['Count', 'Tradelist Count', 'Name', 'Edition', 'Condition', 'Language', 'Foil',
+                     'Tags', 'Last Modified', 'Collector Number', 'Alter', 'Proxy', 'Purchase Price'])
     for row in rows:
         # A surge foil is the foil finish of a surge foil printing (Moxfield's finishes: foil, etched)
         foil = 'foil' if row['finish'] in ('foil', 'surge') else ''
-        writer.writerow([row['quantity'], row['name'], (row.get('set_code') or '').lower() or row['set_name'],
-                         row['condition'], 'English', foil, row['number'], '0', ''])
+        writer.writerow([row['quantity'], 0, row['name'], (row.get('set_code') or '').lower() or row['set_name'],
+                         row['condition'], 'English', foil, '', '', row['number'], 'False', 'False', '0'])
 
 
 class Magic(Game):
