@@ -39,10 +39,10 @@ class UserDir(unittest.TestCase):
             self.assertEqual(out, f"{Path(home).absolute() / 'data'} {Path(home).absolute() / 'scanned_cards'}")
 
     def test_packaged_code_writes_in_the_users_data_home_not_beside_itself(self):
-        with tempfile.TemporaryDirectory() as data_home:
+        with tempfile.TemporaryDirectory() as home:
             out = python("from card_scanner.paths import USER_DIR; print(USER_DIR)",
-                         APPDIR=str(TOP.parent), XDG_DATA_HOME=data_home, MTG_SCANNER_HOME='')
-            self.assertEqual(out, str(Path(data_home) / 'mtg-scanner'))
+                         APPDIR=str(TOP.parent), HOME=home, XDG_DATA_HOME='', MTG_SCANNER_HOME='')
+            self.assertEqual(out, str(Path(home) / '.mtg-scanner'))
 
     def test_the_users_config_is_laid_over_the_shipped_one(self):
         with tempfile.TemporaryDirectory() as home:
@@ -58,7 +58,7 @@ class UserDir(unittest.TestCase):
 
 
 class FirstRun(unittest.TestCase):
-    """A fresh user folder - also one whose parents do not exist (~/.local/share/mtg-scanner on
+    """A fresh user folder - also one whose parents do not exist (~/.mtg-scanner is made on
     a first packaged start) - must not stop the server's or a station's start-up"""
 
     def test_a_station_and_the_stores_create_their_folders_inside_a_missing_one(self):

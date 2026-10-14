@@ -171,7 +171,7 @@ class Config:
     def shown(*parts):
         """
         A file or folder in data/ as messages name it: data/logs/app.log in a checkout, the
-        whole path (~/.local/share/...) when the data lives elsewhere
+        whole path (~/.mtg-scanner/...) when the data lives elsewhere
         """
         if Config.USER_DIR == Config.BASE_DIR:
             return '/'.join(('data',) + parts)

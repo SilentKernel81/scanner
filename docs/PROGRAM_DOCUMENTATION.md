@@ -91,7 +91,7 @@ at the package's top what both programs use (`paths.py`, `config.py`, `config_lo
 `src/ocr/`. The top folder holds the two launchers - `app.py` starts the server, `station.py`
 a station - `config.yaml` and the data (`data/`, `scanned_cards/`, `station_captures/`);
 `paths.py` says where the folders are (`TOP`: what ships; `USER_DIR`: the person's data,
-`.env` and own `config.yaml` - the same folder in a checkout, `~/.local/share/mtg-scanner` when
+`.env` and own `config.yaml` - the same folder in a checkout, `~/.mtg-scanner` when
 packaged, `MTG_SCANNER_HOME`; `CODE`), and nothing else builds a path
 from where its own file lies. One server runs per data folder (`data/app.lock`). Which part may import which is a test (`tests/test_layout.py`):
 a station imports nothing of `core/` or `server/`, and `core/` nothing of `server/` or
@@ -1992,7 +1992,7 @@ It is the same server, and differs from one on a server only here:
   are released by it); the page reloads when the server answers again.
 - **One copy per data folder** (`data/app.lock`): a second start shows the running one;
   `--app` opens its page.
-- **Where its files are**: `paths.USER_DIR` (`~/.local/share/mtg-scanner`), see *Configuration
+- **Where its files are**: `paths.USER_DIR` (`~/.mtg-scanner`), see *Configuration
   and files*. With no card data the program starts and downloads it in the background - the
   **first download is tried again** after a failure (1, 5, 15, then every 30 minutes, for as long
   as the program runs: `card_data.start_card_data_update(retry=True)`; an update of data that is
