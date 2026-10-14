@@ -653,6 +653,7 @@ class CardScanner:
             self.disturbed_during_focus = False
             self.awaiting_new_card = False
             self.stable_frames = 0
+            self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
             if self.auto_capture_enabled:
                 self.log("New card detected (dropped while focusing)")
         elif self.awaiting_new_card and not focus_moving:
@@ -661,6 +662,11 @@ class CardScanner:
             if self.area_big_changes >= 2 or (settled and different):
                 self.awaiting_new_card = False
                 self.stable_frames = 0
+                # The fixed area's own measure - not the outline mode's jump / image change,
+                # whose last values would otherwise be recorded here
+                self.last_new_card = {'kind': 'area_change', 'area_change': round(float(change), 2),
+                                      'big_changes': int(self.area_big_changes),
+                                      'differs_from_captured': bool(different), 'at': time.time()}
                 if self.auto_capture_enabled:
                     self.log(f"New card detected (area change {change:.1f})")
 
