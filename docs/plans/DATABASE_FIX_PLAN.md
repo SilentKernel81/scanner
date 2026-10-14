@@ -2,7 +2,27 @@
 
 Date: 2026-10-09
 
-This document translates [DATABASE_REVIEW.md](DATABASE_REVIEW.md) into implementation tasks. The changes below are proposed fixes; this document does not indicate that they have been implemented.
+This document translates [DATABASE_REVIEW.md](DATABASE_REVIEW.md) into implementation tasks. It was written as a plan and is now a **record**: the status table below says what became of each task (2026-10-14). The task texts further down are the plan as written and say "should"; they are kept for the reasoning.
+
+## Status (2026-10-14)
+
+| # | Task | Status | Where, and what shows it |
+|---|---|---|---|
+| 1 | No writes in station-filtered reads | Done | `InventoryManager._station_rows` only reads; ownership cleanup moved into the edits that remove entries (`_delete_entries`, `_trim_sources`). `tests/test_ownership.py`, `tests/test_database.py` |
+| 2 | Atomic catalog replacement | Done | `CardDatabase.replace_table` (`BEGIN IMMEDIATE`, drop, rename, indexes, `card_data_info`), imports on a connection of their own, refused when empty / missing / under `MIN_SHARE`; one refresh at a time. `tests/test_database.py` (`CardDataImport`) |
+| 3 | Transaction ownership for manager writes | Done | `storage.Transactional`: `InventoryManager` (`@_writes`) and `DeckManager` (`_transaction`) - the outermost method commits, a failure rolls back everything, files are deleted after the commit (`_committed`); bulk edits are all or none. `tests/test_inventory_edits.py`, `tests/test_storage.py` |
+| 4 | Quantity and station ownership reconciled | Done | `_trim_sources`, `_move_sources`, `_take_copies`; the same for batches (`inventory_batches`: `_take_from_batches`, `_trim_batches`). `tests/test_ownership.py`, `tests/test_batches.py` |
+| 5 | Durable capture identity, idempotent settlement | Done | `capture_key` on `inventory_captures`, `applied_captures` written in the commit that adds the card, `unfollowed_captures`, `pending.py`. `tests/test_capture_sync.py`, `tests/test_station_uploads.py` |
+| 6 | One connection setup, versioned migrations | Done | `storage.connect` (WAL, row factory, foreign keys), named migrations (`applied`, `record`), `storage.rebuild` (backup, one transaction, checked, `prepare`), `storage.upgrade` for numbered steps. `tests/test_storage.py`, `tests/test_database.py` |
+| 7 | Relationship and value constraints | Done | CHECK / `REFERENCES ... ON DELETE CASCADE` on the inventory, captures, sources, batches and deck tables; a file made by the standalone program (triggers) is given them too. `tests/test_constraints.py` |
+| 8 | External-response cache moved and bounded | Done | `data/web_cache.db`, bounded by age and size, out of `scripts/backup.sh` (`recommendations.py`). `tests/test_database.py` |
+| 9 | Benchmarks and search indexes | Done, measured | `scripts/benchmark_db.py`; `idx_deck_cards_deck` removed. The other candidate indexes and FTS5 are **not** adopted, on purpose - the reasons and numbers are in PROGRAM_DOCUMENTATION.md, *Database* |
+| 10 | Coordinated full backups and cleanup | Done | `maintenance_barrier` (capture settlement, "Add to collection", Arena import, cleanup) and `backups.create_full`; a restore is one critical section with its recovery backup (2026-10-14). `tests/test_database.py` (`FullBackup`), `tests/test_restore_locking.py` |
+
+Found after the plan, and not in it: the batches model (`inventory_batches`, one row per batch and entry, replacing the single `added_at` / `added_quantity` of an entry), and the standalone program's files (rules kept as triggers) failing the constraints migration. Both have tests (`tests/test_batches.py`, `tests/test_constraints.py`).
+
+Not done from "Delivery sequence and completion criteria": subprocess termination at commit boundaries (only injected exceptions were used), and a restore of a full backup checked in an isolated directory by a script (the tests do it on temporary folders).
+
 
 ## 1. Remove writes from station-filtered reads
 
