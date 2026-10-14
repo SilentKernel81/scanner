@@ -58,6 +58,7 @@ scanned_cards/*.upload.json
 # API keys entered in the web interface
 data/api_keys.env
 data/secret_key
+data/app.lock
 *_api_key.txt
 secrets.txt
 

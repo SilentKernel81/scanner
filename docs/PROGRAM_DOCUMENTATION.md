@@ -90,8 +90,10 @@ at the package's top what both programs use (`paths.py`, `config.py`, `config_lo
 `src/card_scanner/core/inventory.py`). The OCR reader (Node.js) is beside the package, in
 `src/ocr/`. The top folder holds the two launchers - `app.py` starts the server, `station.py`
 a station - `config.yaml` and the data (`data/`, `scanned_cards/`, `station_captures/`);
-`paths.py` says where the two folders are (`TOP`, `CODE`), and nothing else builds a path
-from where its own file lies. Which part may import which is a test (`tests/test_layout.py`):
+`paths.py` says where the folders are (`TOP`: what ships; `USER_DIR`: the person's data,
+`.env` and own `config.yaml` - the same folder in a checkout, `~/.local/share/mtg-scanner` when
+packaged, `MTG_SCANNER_HOME`; `CODE`), and nothing else builds a path
+from where its own file lies. One server runs per data folder (`data/app.lock`). Which part may import which is a test (`tests/test_layout.py`):
 a station imports nothing of `core/` or `server/`, and `core/` nothing of `server/` or
 `station/`.
 

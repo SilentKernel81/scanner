@@ -171,12 +171,20 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   that change (`debug_mode_running`, `daily_backup_status`, `default_desk`) are always
   written and read as `services.x`.
 - **Paths come from `paths.py`, not from `__file__`** (the one exception: a file that names
-  another lying beside it, as `station_setup.py` does its page). `paths.TOP` is the top folder: data,
-  `config.yaml`, `.env` (`Config.BASE_DIR` and `server.ROOT` are that folder). `paths.CODE` is
+  another lying beside it, as `station_setup.py` does its page). `paths.TOP` is the top folder:
+  what ships (`config.yaml` as shipped, `src/ocr`, `bin/`; `Config.BASE_DIR`). `paths.USER_DIR` is
+  the person's folder - data, `scanned_cards/`, `.env`, their `config.yaml` laid over the shipped
+  one (`Config.USER_DIR`, `Config.DATA_DIR`, `server.ROOT`): the same folder as TOP in a checkout
+  and the images, `~/.local/share/mtg-scanner` when packaged, `MTG_SCANNER_HOME` chooses. Never
+  write under TOP; name a file of `data/` in a message with `Config.shown('logs', 'app.log')`;
+  find `node` / `v4l2-ctl` with `paths.tool()` (a missing `v4l2-ctl` means no focus control, said
+  once). `paths.CODE` is
   the package's folder: use it for what belongs to the code (the pages). A path built from a
   file's own location means another folder as soon as the file moves - and a server whose
   data folder is a new, empty one starts without complaint. `tests/test_paths.py` checks
   every such path; a new one belongs in it.
+- **One server per data folder**: `startup.lock_instance()` holds `data/app.lock` (flock, gone
+  with the process); a second server on the same `USER_DIR` says so and exits.
 - **Only the two launchers in the top folder, and `src/` first on Python's path.** `app.py`
   and `station.py` put it there, the images and the scripts set `PYTHONPATH`, tests and
   `scripts/*.py` have their own first line; nothing inside the package touches the path. A

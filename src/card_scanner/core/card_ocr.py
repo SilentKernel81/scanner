@@ -14,7 +14,6 @@ import json
 import logging
 import queue
 import re
-import shutil
 import subprocess
 import threading
 import time
@@ -22,7 +21,7 @@ import time
 import cv2
 
 from card_scanner.config import Config
-from card_scanner.paths import TOP
+from card_scanner.paths import TOP, tool
 
 # OCR is logged with the AI: both are "what was read from the card"
 logger = logging.getLogger('ai')
@@ -124,7 +123,7 @@ class CardOcr:
     @staticmethod
     def installed():
         """Whether Node.js and the light-ocr package (npm install in src/ocr/) are present"""
-        return bool(shutil.which('node')) and (OCR_DIR / 'node_modules' / '@arcships' / 'light-ocr').is_dir()
+        return bool(tool('node')) and (OCR_DIR / 'node_modules' / '@arcships' / 'light-ocr').is_dir()
 
     def supports(self, game_id):
         return game_id in PARSERS
@@ -152,7 +151,7 @@ class CardOcr:
         try:
             with open(log_dir / 'ocr.log', 'ab') as errors:
                 self.process = subprocess.Popen(
-                    ['node', 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR),
+                    [tool('node'), 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR),
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True)
         except OSError as e:
             return self._failed(f"light-ocr could not be started: {e}")
@@ -164,7 +163,7 @@ class CardOcr:
         except queue.Empty:
             ready = None
         if not ready or not ready.get('ready'):
-            return self._failed("light-ocr did not start (needs Node.js 22 or newer; see data/logs/ocr.log)")
+            return self._failed(f"light-ocr did not start (needs Node.js 22 or newer; see {Config.shown('logs', 'ocr.log')})")
         self.provider = ready.get('provider')
         self._failed_at = None
         self.log(f"light-ocr ready ({self.provider or 'unknown provider'})")
@@ -217,7 +216,7 @@ class CardOcr:
                 while True:
                     answer = self._answers.get(timeout=max(0.1, deadline - time.time()))
                     if answer is None:
-                        return self._failed("light-ocr stopped (see data/logs/ocr.log)") or None
+                        return self._failed(f"light-ocr stopped (see {Config.shown('logs', 'ocr.log')})") or None
                     if answer.get('id') == self._next_id:
                         break
             except (OSError, ValueError, queue.Empty) as e:

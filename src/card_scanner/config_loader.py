@@ -7,15 +7,17 @@ Loads configuration from YAML file with environment variable overrides
 import os
 import yaml
 import re
-from card_scanner.paths import TOP
+from card_scanner.paths import TOP, USER_DIR
 
 
 class ConfigLoader:
     """Load and manage configuration from YAML file"""
 
     def __init__(self, config_file='config.yaml'):
-        # config.yaml is a person's settings file: in the project's top folder, not beside the code
+        # The shipped config.yaml (top folder, maybe read-only); a person's own, in their folder
+        # (the same file in a checkout), only needs the settings they change
         self.config_file = TOP / config_file
+        self.user_config_file = USER_DIR / config_file
         self.config = self._load_config()
 
     def _load_config(self):
@@ -24,12 +26,26 @@ class ConfigLoader:
             raise FileNotFoundError(f"Configuration file not found: {self.config_file}")
 
         with open(self.config_file, 'r') as f:
-            config = yaml.safe_load(f)
+            config = yaml.safe_load(f) or {}
+
+        if self.user_config_file != self.config_file and self.user_config_file.exists():
+            with open(self.user_config_file, 'r') as f:
+                config = self._merge(config, yaml.safe_load(f) or {})
 
         # Process environment variable substitutions
         config = self._substitute_env_vars(config)
 
         return config
+
+    def _merge(self, defaults, changes):
+        """The defaults with the user's settings on top (sections are merged key by key)"""
+        merged = dict(defaults)
+        for key, value in changes.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = self._merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     def _substitute_env_vars(self, obj):
         """Recursively substitute ${VAR_NAME} with environment variables"""

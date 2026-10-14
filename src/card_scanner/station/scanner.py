@@ -23,6 +23,7 @@ from collections import deque
 import logging
 import re
 from card_scanner.config import Config, camera_index_or_none
+from card_scanner.paths import tool
 from card_scanner.station.object_detector import ObjectDetector, warp_card
 from card_scanner.settings import Settings
 
@@ -1429,11 +1430,28 @@ class CardScanner:
         self.log(f"Card captured: {image_path.name}")
         return image_path, card_image, foil_image
 
+    _v4l2_missing_logged = False
+
+    def _v4l2_ctl(self):
+        """
+        Path of v4l2-ctl, or None: the camera then works with the settings it has - no focus
+        lock, sweeps or refocus (focus_range stays None). Said once, not per command.
+        """
+        program = tool('v4l2-ctl')
+        if not program and not self._v4l2_missing_logged:
+            self._v4l2_missing_logged = True
+            self.log("v4l2-ctl not found (package v4l-utils): the camera's focus and other "
+                     "controls cannot be set", level="warning")
+        return program
+
     def _run_v4l2_command(self, *args):
         """Run a v4l2-ctl command"""
+        program = self._v4l2_ctl()
+        if not program:
+            return False
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
-            cmd = ['v4l2-ctl', '-d', video_device] + list(args)
+            cmd = [program, '-d', video_device] + list(args)
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if result.returncode != 0:
                 self.log(f"v4l2-ctl error: {result.stderr}", level="warning")
@@ -1448,9 +1466,12 @@ class CardScanner:
 
     def _query_focus_range(self):
         """(min, max) of the camera's manual focus control, or None if it has none"""
+        program = self._v4l2_ctl()
+        if not program:
+            return None
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
-            output = subprocess.run(['v4l2-ctl', '-d', video_device, '--list-ctrls'],
+            output = subprocess.run([program, '-d', video_device, '--list-ctrls'],
                                     capture_output=True, text=True, timeout=2).stdout
         except Exception:
             return None
