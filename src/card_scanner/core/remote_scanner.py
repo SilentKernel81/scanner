@@ -274,6 +274,7 @@ class CameraHub:
         self.make_scanner = make_scanner  # make_scanner(station id) -> RemoteScanner
         self._scanners = {}               # station id -> RemoteScanner (made when first asked for)
         self._by_sid = {}
+        self._setup_pages = {}            # station id -> {'address', 'port'} of its setup page, as it connected
         self._lock = threading.Lock()
         self._register()
 
@@ -290,6 +291,11 @@ class CameraHub:
     def forget(self, station_id):
         with self._lock:
             self._scanners.pop(station_id, None)
+            self._setup_pages.pop(station_id, None)
+
+    def setup_page(self, station_id):
+        """Where the station's setup page is: {'address': the address it connected from, 'port'}, or None"""
+        return self._setup_pages.get(station_id)
 
     def _client(self):
         return self._by_sid.get(request.sid)
@@ -307,6 +313,12 @@ class CameraHub:
             if not self.stations.valid_id(station_id):
                 return False
             station = self.stations.seen(station_id, auth.get('name'))
+            try:
+                port = int(auth.get('setup_port') or 0)
+            except (TypeError, ValueError):
+                port = 0
+            if 0 < port < 65536:
+                self._setup_pages[station_id] = {'address': request.remote_addr, 'port': port}
             scanner = self.scanner(station_id)
             previous = scanner.sid
             if previous:

@@ -22,10 +22,18 @@ from card_scanner.core.pending import APPLIED_CAPTURES_TABLE, prune_applied
 
 logger = logging.getLogger('database')
 
-# Small copies of the captures behind inventory entries, shown when hovering an entry. Kept
-# apart from scanned_cards/ (cleaned after cleanup.days) until their entry is deleted
+# Small copies of the captures behind inventory entries, shown on the lists and when hovering
+# an entry. Kept apart from scanned_cards/ (cleaned after cleanup.days) until their entry is
+# deleted.
 CAPTURES_DIR = Config.DATA_DIR / 'captures'
 CAPTURE_HEIGHT = 400  # px - ~25 KB per card
+# A large copy beside each of them (same file name, other folder): the only full picture of a
+# card that outlives the clean-up - 400 px is too coarse to train a reader or detector on later.
+# The pages never load these (a list row would 6x its size); they are in the data folder, hence
+# in scripts/backup.sh's archive, but not in the collection backups (data/backups/).
+FULL_CAPTURES_DIR = Config.DATA_DIR / 'captures_full'
+FULL_CAPTURE_HEIGHT = 1200  # px - pictures taller than this are shrunk; ~100-150 KB per card
+FULL_CAPTURE_QUALITY = 85  # JPEG quality
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
@@ -304,6 +312,7 @@ class InventoryManager(storage.Transactional):
         doomed, self._doomed = self._doomed, []
         for file in doomed:
             (CAPTURES_DIR / file).unlink(missing_ok=True)
+            (FULL_CAPTURES_DIR / file).unlink(missing_ok=True)
 
     def _rollback(self):
         self.conn.rollback()
@@ -521,18 +530,29 @@ class InventoryManager(storage.Transactional):
 
     @staticmethod
     def _make_thumbnail(image_path):
-        """Small JPEG copy of a capture in CAPTURES_DIR; its file name, or None"""
+        """JPEG copies of a capture: the small one in CAPTURES_DIR and a large one in
+        FULL_CAPTURES_DIR under the same name; that name, or None (no small copy, no capture)"""
         try:
             import cv2
             image = cv2.imread(str(image_path))
             if image is None:
                 return None
+            name = f"{uuid.uuid4().hex}.jpg"
+            # The large copy first and without failing the capture: it is the extra one
+            try:
+                FULL_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+                large = image
+                if large.shape[0] > FULL_CAPTURE_HEIGHT:
+                    large = cv2.resize(large, (round(large.shape[1] * FULL_CAPTURE_HEIGHT / large.shape[0]),
+                                               FULL_CAPTURE_HEIGHT), interpolation=cv2.INTER_AREA)
+                cv2.imwrite(str(FULL_CAPTURES_DIR / name), large, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY])
+            except Exception as e:
+                logger.warning(f"Could not keep the large copy of {image_path}: {e}")
             height, width = image.shape[:2]
             if height > CAPTURE_HEIGHT:
                 image = cv2.resize(image, (round(width * CAPTURE_HEIGHT / height), CAPTURE_HEIGHT),
                                    interpolation=cv2.INTER_AREA)
             CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
-            name = f"{uuid.uuid4().hex}.jpg"
             cv2.imwrite(str(CAPTURES_DIR / name), image, [cv2.IMWRITE_JPEG_QUALITY, 80])
             return name
         except Exception as e:
