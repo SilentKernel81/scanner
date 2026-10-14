@@ -1235,7 +1235,12 @@ are.
 `deck_constraints_1`): `inventory.quantity` is an integer above 0, `inventory_batches` follows an entry (`REFERENCES inventory ON DELETE CASCADE`) with a quantity above 0, `added_quantity` NULL or not
 negative; `inventory_captures` and `inventory_sources` belong to an entry (`REFERENCES
 inventory(id) ON DELETE CASCADE`), a station's `quantity` is above 0; `deck_cards` belong to a
-deck (cascade), `quantity` above 0, `board` one of commander / main / side. So an entry or a
+deck (cascade), `quantity` above 0, `board` one of commander / main / side. The standalone program (until
+2026-10-14) kept these rules as triggers on tables without CHECK or REFERENCES; a file it made is
+given the rules themselves by the same migrations - they drop its triggers (`LEGACY_TRIGGERS`,
+`storage.rebuild(prepare=...)`: one that names a rebuilt table made the rename fail and the server
+unable to start on the file) and rebuild `inventory_batches` too. One case per rule:
+`tests/test_constraints.py`, with a file in the standalone's form. So an entry or a
 station's row is deleted, never kept at 0 (`_delete_entries`, `_take_copies`, `_set_source` in
 `inventory.py`) - and `_delete_entries` removes the captures itself first, because the cascade
 takes rows, not thumbnail files. There is no foreign key from an entry's `card_id` to `cards`:
