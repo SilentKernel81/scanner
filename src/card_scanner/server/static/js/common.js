@@ -475,6 +475,42 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// The first download of the card data: until a game has cards nothing can be identified or
+// found, so every page says so - and says why when the download failed and is tried again
+
+function watchCardData() {
+    const banner = document.getElementById('data-banner');
+    if (!banner) return;
+    let shown = false;
+    const check = async () => {
+        let next = 5000;
+        try {
+            const response = await fetch('/api/stats', {cache: 'no-store'});
+            const database = response.ok ? (await response.json()).database : null;
+            if (database && database.total_cards === 0) {
+                shown = true;
+                banner.textContent = database.error
+                    ? `The card data could not be downloaded: ${database.error}`
+                    : database.updating
+                        ? 'The card data is being downloaded for the first time (a few minutes). The pages work meanwhile, but no card can be found or identified yet.'
+                        : 'There is no card data yet. It is downloaded from Settings -> Card database.';
+                banner.classList.toggle('is-error', Boolean(database.error));
+                banner.hidden = false;
+            } else {
+                banner.hidden = true;
+                if (shown) notify('Card data ready', 'success');
+                if (shown) setTimeout(() => location.reload(), 1500);  // the pages were drawn without it
+                return;
+            }
+        } catch (error) {
+            next = 15000;  // the server is away: try again later
+        }
+        setTimeout(check, next);
+    };
+    check();
+}
+document.addEventListener('DOMContentLoaded', watchCardData);
+
 // Settings -> Program: restart, quit (only there when started as a desktop program), and who
 // may open the pages
 

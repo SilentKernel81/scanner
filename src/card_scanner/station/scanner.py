@@ -141,6 +141,11 @@ class CardScanner:
         # outline detector works on) are saved to data/debug_frames/ when a card waits > 2 s
         # or a "new card" shows up < 2 s after a capture
         self.debug_frames = deque(maxlen=60)
+        # What the last capture was cut from, kept with debug trace on (see _frame_snapshot):
+        # {'jpeg': bytes, 'meta': dict} for the station to send beside the card's picture
+        self.last_capture_frame = None
+        self.last_new_card = None  # why the card now on the pile counts as new: {'kind', 'at', ...}
+        self._previous_capture_at = None
         self.debug_dump = None  # (folder, frames still to save after the trigger)
 
         # Card size detection - keep box visible longer for card-sized objects
@@ -1144,11 +1149,15 @@ class CardScanner:
                                 self.awaiting_new_card = False
                                 self.tracked_outline = None
                                 self.stable_frames = 0
+                                self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
                                 if self.auto_capture_enabled:
                                     self.log("New card detected (dropped while focusing)")
                             elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
                                 self.awaiting_new_card = False
                                 self.stable_frames = 0  # the new card must settle first
+                                jump, change = getattr(self, 'last_frame_change', (0.0, 0.0))
+                                self.last_new_card = {'kind': 'jump_or_image_change', 'jump': round(float(jump), 4),
+                                                      'image_change': round(float(change), 3), 'at': time.time()}
                                 # Find the new card afresh: following the old outline could latch
                                 # onto edges of the new card that happen to lie where the old one's
                                 # were (a foil's inner frame - the photo then cut off its set line)
@@ -1184,6 +1193,7 @@ class CardScanner:
                         self.missing_frames = 0 if self._focus_moving() else self.missing_frames + 1
                         if self.awaiting_new_card and self.missing_frames >= self._frames(self.missing_frames_for_new_card):
                             self.awaiting_new_card = False
+                            self.last_new_card = {'kind': 'card_gone', 'at': time.time()}
                             if self.auto_capture_enabled:
                                 self.log("Card gone - ready for the next card")
                                 # A foil Gwen Stacy vanished right after its capture and came back
@@ -1340,9 +1350,12 @@ class CardScanner:
             self._stream_cache = (frame_id, jpeg)
         return frame_id, jpeg
     
-    def get_detected_card(self):
+    def get_detected_card(self, snapshot=None):
         """
         Get the currently detected card image
+
+        snapshot: a dict the frame this card was cut from is put into (see _frame_snapshot),
+        taken from the same detection as the card, not from a later one
 
         Returns:
             tuple: (image, card_name, foil_image) - foil_image is the perspective-corrected card
@@ -1366,12 +1379,31 @@ class CardScanner:
             if corners is not None:
                 corners = corners * np.array([scale_x, scale_y], dtype=np.float32)
             bbox = (int(bbox[0] * scale_x), int(bbox[1] * scale_y), int(bbox[2] * scale_x), int(bbox[3] * scale_y))
+        if snapshot is not None:
+            snapshot.update(self._frame_snapshot(frame, raw, corners))
         warped = warp_card(frame, corners) if corners is not None else None
         if warped is not None and not self._fixed_area_active():
             return warped, card_name, warped
         x1, y1, x2, y2 = bbox
         return frame[y1:y2, x1:x2].copy(), card_name, warped
     
+    def _frame_snapshot(self, frame, raw, corners):
+        """
+        The whole camera frame a capture was cut from and the outline found in it, for training
+        data later (the capture itself is the warped card: no frame, no outline). The frame is
+        the camera's own JPEG when it is not rotated (no second encoding), else encoded here.
+        corners are in the pixels of this frame - at full size, not the half-size detection's.
+        """
+        height, width = frame.shape[:2]
+        jpeg = None
+        if raw is not None and self.ROTATIONS.get((self.rotation - self.camera_rotation) % 360) is None:
+            jpeg = np.asarray(raw, dtype=np.uint8).tobytes()
+        else:
+            ok, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
+            jpeg = buffer.tobytes() if ok else None
+        return {'jpeg': jpeg, 'width': int(width), 'height': int(height),
+                'corners': None if corners is None else [[round(float(x), 1), round(float(y), 1)] for x, y in corners]}
+
     def is_card_detected(self):
         """Check if a card is currently detected"""
         with self.frame_lock:
@@ -1403,7 +1435,11 @@ class CardScanner:
         if settle:
             time.sleep(settle)  # Let the image steady (manual captures)
 
-        card_image, card_name, foil_image = self.get_detected_card()
+        # With debug trace on, the frame and outline behind the capture are kept (training data)
+        snapshot = {} if self.debug_trace_enabled else None
+        self.last_capture_frame = None
+        decision = {'stable_frames': self.stable_frames, 'required_stable_frames': self.required_stable_frames}
+        card_image, card_name, foil_image = self.get_detected_card(snapshot)
         self._mark_captured()  # don't auto-capture this card again
         if card_image is not None:
             self._count_capture()
@@ -1415,6 +1451,8 @@ class CardScanner:
             if frame is None:
                 self.log("Failed to capture frame", level="error")
                 return None, None, None
+            if snapshot is not None:
+                snapshot.update(self._frame_snapshot(frame, None, None))
             card_image = frame
         else:
             self.log(f"Using detected card crop ({card_image.shape[1]}x{card_image.shape[0]}px)", level="info")
@@ -1428,6 +1466,22 @@ class CardScanner:
         cv2.imwrite(str(image_path), card_bgr)
 
         self.log(f"Card captured: {image_path.name}")
+        now = time.time()
+        if snapshot and snapshot.get('jpeg'):
+            trigger = dict(self.last_new_card) if self.last_new_card else None
+            if trigger:
+                trigger['seconds_before'] = round(now - trigger.pop('at'), 2)
+            self.last_capture_frame = {'jpeg': snapshot['jpeg'], 'meta': {
+                'taken': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'frame_width': snapshot['width'], 'frame_height': snapshot['height'],
+                'corners': snapshot['corners'],  # None: no outline (the capture is the whole frame)
+                'card_size': [int(card_image.shape[1]), int(card_image.shape[0])],
+                'rotation': self.rotation, 'camera_rotation': self.camera_rotation,
+                'fixed_area': bool(self._fixed_area_active()), **decision,
+                'new_card': trigger,  # what made this card count as new (jump / image change ...)
+                'seconds_since_previous_capture':
+                    None if self._previous_capture_at is None else round(now - self._previous_capture_at, 2)}}
+        self._previous_capture_at = now
         return image_path, card_image, foil_image
 
     _v4l2_missing_logged = False

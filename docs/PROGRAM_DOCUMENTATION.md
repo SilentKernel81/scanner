@@ -1968,7 +1968,12 @@ It is the same server, and differs from one on a server only here:
 - **One copy per data folder** (`data/app.lock`): a second start shows the running one;
   `--app` opens its page.
 - **Where its files are**: `paths.USER_DIR` (`~/.local/share/mtg-scanner`), see *Configuration
-  and files*. With no card data the program starts and downloads it in the background.
+  and files*. With no card data the program starts and downloads it in the background - the
+  **first download is tried again** after a failure (1, 5, 15, then every 30 minutes, for as long
+  as the program runs: `card_data.start_card_data_update(retry=True)`; an update of data that is
+  there is asked for again by the person, not repeated), and every page shows a banner while a
+  game has no cards (`common.js: watchCardData`, from `database.total_cards`, `updating` and
+  `error` of `GET /api/stats`; the page reloads when the data arrives).
 - **The AppImage** holds `app.py`, `station.py`, `config.yaml` and `src/` (OCR reader
   included) under `usr/app/`, the Python under `usr/python/`, Node.js as `usr/app/bin/node`
   (`paths.tool`). Never tried: another architecture than x86_64, a system without FUSE for

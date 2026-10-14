@@ -10,7 +10,7 @@ from card_scanner import games
 from card_scanner.server.state import app, database, inventory, review, stations
 from card_scanner.server.desks import desk, desk_for
 from card_scanner.server.captures import scan_stats
-from card_scanner.server.card_data import data_update_notices, data_updates_running
+from card_scanner.server.card_data import data_update_errors, data_update_notices, data_updates_running
 
 
 @app.route('/favicon.ico')
@@ -100,7 +100,7 @@ def get_stats():
         game = games.active()
         return jsonify({
             'database': {'total_cards': game.card_count(), 'update': data_update_notices.get(game.id),
-                         'updating': game.id in data_updates_running},
+                         'updating': game.id in data_updates_running, 'error': data_update_errors.get(game.id)},
             'review': review.count(game.id, desk().review_filter) if review else 0,
             # The scanner page's counters: what was scanned and not moved to the collection yet
             'inventory': scan_stats(game.id),
