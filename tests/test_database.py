@@ -600,21 +600,21 @@ class Constraints(TemporaryData):
 
 
 class Batches(TemporaryData):
-    def batch(self, added_at):
-        """Copies of the collection that came with one "Add to collection\""""
-        return sum(inv.batch_quantity(row) for row in self.collection.conn.execute(
-            'SELECT * FROM inventory WHERE added_at = ?', (added_at,)))
+    def batch(self, batch):
+        """Copies of the collection that came with one batch"""
+        return sum(row['quantity'] for row in self.collection.conn.execute(
+            'SELECT quantity FROM inventory_batches WHERE batch = ?', (batch,)))
 
     def test_a_split_takes_only_its_share_of_the_batch(self):
         self.collection.add_card(CARD, GAME, 'regular', quantity=3, quiet=True, when='2026-01-01 10:00:00')   # there before
         self.add('desk-a', copies=2)
         self.collection.take_from(self.scan, GAME)                                    # the batch: 2 of the 5
         row = self.collection.conn.execute('SELECT * FROM inventory').fetchone()
-        added_at = row['added_at']
-        self.assertEqual(self.batch(added_at), 2)
+        batch = self.collection.get_all_cards(GAME)[0]['batches'][0]['batch']
+        self.assertEqual(self.batch(batch), 2)
         self.collection.update_card(row['id'], location='Box', split_quantity=3, quiet=True)   # 3 move, 2 stay
-        self.assertEqual(self.batch(added_at), 2)                                     # used to be 5: 3 + 2
-        removed = self.collection.remove_batch(GAME, added_at)
+        self.assertEqual(self.batch(batch), 2)                                        # used to be 5: 3 + 2
+        removed = self.collection.remove_batch(GAME, batch)
         self.assertEqual(removed['cards'], 2)
         self.assertEqual(self.collection.get_stats(GAME)['total_cards'], 3)
 

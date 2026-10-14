@@ -29,11 +29,9 @@ CAPTURE_HEIGHT = 400  # px - ~25 KB per card
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
-# the card was scanned; added_at: when it came into this inventory - the same for every entry
-# of one "Add to collection", so a batch can be found again - and added_quantity: how many of the
-# entry's copies came with it (the others were there before), so it can be taken back out.
-# NULL: all of them (entries older than the column); 0: none - its batch was removed, what is
-# left was there before
+# the card was scanned; added_at: when copies last came into this inventory. Which copies came
+# with which "Add to collection" (an import, a scan) is kept in inventory_batches - added_quantity
+# held that for the latest one only, until that table (it is still written, not read)
 INVENTORY_TABLE = '''
     CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +86,30 @@ SOURCES_TABLE = '''
         quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity > 0),
         PRIMARY KEY (inventory_id, station)
     )
+'''
+# Which copies of an entry came together: one row per batch (an "Add to collection", an import, a
+# scanned card) and entry. `batch` is unique for each time cards came in - two in the same
+# second are still two - and added_at is when. An entry's rows never add up to more than its
+# quantity; copies no row accounts for were there before the oldest batch known ("old:..."
+# batches are what the single added_at / added_quantity of an entry said before this table).
+BATCHES_TABLE = '''
+    CREATE TABLE IF NOT EXISTS inventory_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch TEXT NOT NULL,
+        inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+        added_at TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity > 0),
+        UNIQUE(batch, inventory_id)
+    )
+'''
+BATCHES_INDEX = 'CREATE INDEX IF NOT EXISTS idx_batches_entry ON inventory_batches(inventory_id)'
+BATCHES_MIGRATION = 'inventory_batches_1'
+BACKFILL_BATCHES = '''
+    INSERT INTO inventory_batches (batch, inventory_id, added_at, quantity)
+    SELECT 'old:' || COALESCE(added_at, timestamp), id, COALESCE(added_at, timestamp),
+           MIN(COALESCE(CAST(added_quantity AS INTEGER), CAST(quantity AS INTEGER)), CAST(quantity AS INTEGER))
+    FROM inventory
+    WHERE MIN(COALESCE(CAST(added_quantity AS INTEGER), CAST(quantity AS INTEGER)), CAST(quantity AS INTEGER)) > 0
 '''
 # Trades (trades.py; used in the collection only): cards set aside for one stay in the
 # collection until it is confirmed. An open trade's rows name the entry and how many of its
@@ -184,8 +206,15 @@ def clean_tags(tags):
     return result
 
 
-def _row_dict(row):
-    """Inventory row as sent to the web page and the exporters"""
+def _row_dict(row, batches=()):
+    """
+    Inventory row as sent to the web page and the exporters. batches: the entry's
+    inventory_batches rows, newest first - 'batches' lists them ([{'batch', 'added_at',
+    'quantity'}]); 'added_at' / 'added_quantity' are the newest one's (0 copies: what the
+    entry holds was there before every batch known)
+    """
+    batches = [{'batch': part['batch'], 'added_at': part['added_at'], 'quantity': part['quantity']}
+               for part in batches]
     return {
         'id': row['id'],
         'game': row['game'],
@@ -206,15 +235,10 @@ def _row_dict(row):
         'timestamp': row['timestamp'],
         'location': row['location'],
         'tags': clean_tags(row['tags']),
-        'added_at': row['added_at'] or row['timestamp'],
-        'added_quantity': batch_quantity(row),
+        'added_at': batches[0]['added_at'] if batches else row['added_at'] or row['timestamp'],
+        'added_quantity': batches[0]['quantity'] if batches else 0,
+        'batches': batches,
     }
-
-
-def batch_quantity(row):
-    """How many of an entry's copies came with its added_at (see INVENTORY_TABLE)"""
-    added = row['added_quantity']
-    return row['quantity'] if added is None else max(0, min(added, row['quantity']))
 
 
 class _Columns(dict):
@@ -336,6 +360,17 @@ class InventoryManager(storage.Transactional):
             if new_file:
                 # A new file is made with the constraints: nothing to migrate
                 storage.record(self.conn, CONSTRAINTS_MIGRATION, 'new file')
+            # Batches (2026-10-14): a table beside the entries, filled once with the one batch
+            # each entry knew of (added_at / added_quantity). Nothing existing is changed, so
+            # no backup or rebuild - the table is new and everything else stays as it is
+            self.conn.execute(BATCHES_TABLE)
+            self.conn.execute(BATCHES_INDEX)
+            if not storage.applied(self.conn, BATCHES_MIGRATION):
+                # Not filled again where the table has rows already: the standalone program had
+                # it (made by the same rule) before the two were one code base
+                if not new_file and not self.conn.execute('SELECT 1 FROM inventory_batches LIMIT 1').fetchone():
+                    self.conn.execute(BACKFILL_BATCHES)
+                storage.record(self.conn, BATCHES_MIGRATION, 'new file' if new_file else 'from added_at / added_quantity')
             self.conn.execute(TRADES_TABLE)
             self.conn.execute(TRADE_CARDS_TABLE)
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_trade_cards_entry ON trade_cards(inventory_id)')
@@ -523,17 +558,16 @@ class InventoryManager(storage.Transactional):
         return self.conn.execute(f'DELETE FROM inventory WHERE {where}', params).rowcount
 
     def _take_copies(self, row_id, copies):
-        """An entry loses copies (also the ones its latest batch brought): deleted when none
-        are left - a row is never kept at 0"""
+        """An entry loses copies (the newest batch's first): deleted when none are left - a
+        row is never kept at 0"""
         row = self._get_row(row_id)
         if not row:
             return
         if copies >= row['quantity']:
             self._delete_entries('id = ?', (row_id,))
         else:
-            self.conn.execute('UPDATE inventory SET quantity = quantity - ?, '
-                              'added_quantity = MAX(0, COALESCE(added_quantity, quantity) - ?) WHERE id = ?',
-                              (copies, copies, row_id))
+            self.conn.execute('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', (copies, row_id))
+            self._trim_batches(row_id, row['quantity'] - copies)
 
     def _set_source(self, row_id, station, quantity):
         """How many of an entry's copies a station added - no row for none"""
@@ -566,6 +600,76 @@ class InventoryManager(storage.Transactional):
                        JOIN inventory i ON i.id = s.inventory_id WHERE i.game = ? AND s.quantity > 0''', (game,)):
                 result.setdefault(row['inventory_id'], {})[row['station']] = row['copies']
         return result
+
+    # ------------------------------------------------------------------------
+    # Batches (which copies came in together): inventory_batches
+    # ------------------------------------------------------------------------
+
+    @staticmethod
+    def new_batch():
+        """(batch id, added_at) for cards that come in together: add_card(batch=...)"""
+        return uuid.uuid4().hex, now()
+
+    def _note_batch(self, row_id, batch, added_at, quantity):
+        """`quantity` copies of an entry came with a batch"""
+        self.conn.execute('''
+            INSERT INTO inventory_batches (batch, inventory_id, added_at, quantity) VALUES (?, ?, ?, ?)
+            ON CONFLICT(batch, inventory_id) DO UPDATE SET quantity = quantity + excluded.quantity''',
+                          (batch, row_id, added_at, int(quantity)))
+
+    def _take_from_batches(self, row_id, count, to_id=None):
+        """
+        `count` copies leave an entry's batches, the newest batch first (as the newest captures
+        go first) - to another entry's when to_id is given, where they stay part of the batch
+        they came with. Copies beyond what the batches account for belonged to none.
+        """
+        for row in self.conn.execute('SELECT id, batch, added_at, quantity FROM inventory_batches '
+                                     'WHERE inventory_id = ? ORDER BY added_at DESC, id DESC', (row_id,)).fetchall():
+            if count <= 0:
+                break
+            taken = min(count, row['quantity'])
+            count -= taken
+            if taken == row['quantity']:
+                self.conn.execute('DELETE FROM inventory_batches WHERE id = ?', (row['id'],))
+            else:
+                self.conn.execute('UPDATE inventory_batches SET quantity = quantity - ? WHERE id = ?', (taken, row['id']))
+            if to_id is not None:
+                self._note_batch(to_id, row['batch'], row['added_at'], taken)
+
+    def _trim_batches(self, row_id, quantity):
+        """An entry's batches never account for more copies than it has"""
+        known = self.conn.execute('SELECT COALESCE(SUM(quantity), 0) FROM inventory_batches WHERE inventory_id = ?',
+                                  (row_id,)).fetchone()[0]
+        if known > quantity:
+            self._take_from_batches(row_id, known - quantity)
+
+    def batches_by_entry(self, game=None):
+        """{inventory id: its inventory_batches rows, newest first}"""
+        where, params = ('WHERE i.game = ?', (game,)) if game else ('', ())
+        result = {}
+        with self._lock:
+            for row in self.conn.execute(f'''
+                    SELECT b.inventory_id, b.batch, b.added_at, b.quantity FROM inventory_batches b
+                    JOIN inventory i ON i.id = b.inventory_id {where} ORDER BY b.added_at DESC, b.id DESC''', params):
+                result.setdefault(row['inventory_id'], []).append(row)
+        return result
+
+    def rebuild_batches(self):
+        """Inside an edit that put entries in place without their batches (a backup made
+        before inventory_batches): the one batch each entry itself knows of"""
+        self.conn.execute('DELETE FROM inventory_batches')
+        self.conn.execute(BACKFILL_BATCHES)
+
+    def _upsert(self, values, batch=None, added_at=None):
+        """Put copies in (merged with the entry that has their key); with a batch, noted as
+        part of it. Returns the entry's id"""
+        self.conn.execute(UPSERT, values)
+        row_id = self.conn.execute(
+            f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+            [values[c] for c in KEY_COLUMNS]).fetchone()['id']
+        if batch:
+            self._note_batch(row_id, batch, added_at, values['quantity'])
+        return row_id
 
     def _move_captures(self, from_id, to_id, count=None):
         """Move the newest `count` captures (all if None) of one entry to another"""
@@ -664,7 +768,7 @@ class InventoryManager(storage.Transactional):
 
     @_writes
     def add_card(self, fields, game, finish, condition='Near Mint', quantity=1, capture=None, location='',
-                 quiet=False, when=None, source=None, capture_key=None):
+                 quiet=False, when=None, source=None, capture_key=None, batch=None):
         """
         Add copies of a printing (fields from Game.inventory_fields) - merged with an existing
         entry for the same card, set, number, condition, finish and location. capture: the
@@ -674,6 +778,8 @@ class InventoryManager(storage.Transactional):
         who adds it, for undo_last_add (a station's id; None: the scanner page). capture_key:
         the uid of the capture this card comes from (pending.py) - noted in the same commit, and
         a capture that is in here already is not added again (its entry's id is returned).
+        batch: from new_batch(), when several cards come in together (they can then be taken
+        back out together); a card on its own is a batch of its own.
         """
         if capture_key:
             applied = self.conn.execute('SELECT target FROM applied_captures WHERE key = ?', (capture_key,)).fetchone()
@@ -691,13 +797,15 @@ class InventoryManager(storage.Transactional):
             'condition': condition or 'Near Mint', 'finish': finish, 'timestamp': when or now(),
             'location': (location or '').strip(), 'tags': '',
         }
-        values['added_at'] = values['timestamp']
+        batch, added_at = batch or (self.new_batch()[0], values['timestamp'])
+        values['added_at'] = added_at
         thumbnail = self._make_thumbnail(capture) if capture else None
         with self._lock:
             self.conn.execute(UPSERT, values)
             row = self.conn.execute(
                 f"SELECT id, quantity FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                 [values[c] for c in KEY_COLUMNS]).fetchone()
+            self._note_batch(row['id'], batch, added_at, quantity)
             capture_id = None
             if thumbnail:
                 # capture_key: this row is the capture's copy from here on - it moves with the
@@ -720,7 +828,7 @@ class InventoryManager(storage.Transactional):
                 self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                   (capture_key, f"inventory:{row['id']}", now()))
             self._commit()
-            self.last_added[source] = (row['id'], quantity, capture_id)
+            self.last_added[source] = (row['id'], quantity, capture_id, batch)
         if not quiet:
             self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
                      f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
@@ -740,11 +848,11 @@ class InventoryManager(storage.Transactional):
         Not for the collection or the scanned cards: it asks nobody, keeps no undo, and
         takes captures and stations' counts with it.
         """
-        moment = now()
+        batch, moment = self.new_batch()
         self._delete_entries('game = ?', (game,))
         for entry in entries:
             fields = entry['fields']
-            self.conn.execute(UPSERT, {
+            self._upsert({
                 'game': game, 'card_id': fields.get('card_id'), 'card_name': fields['name'],
                 'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
                 'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
@@ -752,7 +860,7 @@ class InventoryManager(storage.Transactional):
                 'colors': fields.get('colors'), 'color_identity': fields.get('color_identity'),
                 'price_usd': float(fields.get('price') or 0), 'quantity': max(1, int(entry.get('quantity') or 1)),
                 'condition': 'Near Mint', 'finish': entry['finish'], 'timestamp': moment, 'added_at': moment,
-                'location': '', 'tags': ''})
+                'location': '', 'tags': ''}, batch, moment)
         self._commit()
         self.last_added = {}
         return self.conn.execute('SELECT COUNT(*) FROM inventory WHERE game = ?', (game,)).fetchone()[0]
@@ -772,7 +880,7 @@ class InventoryManager(storage.Transactional):
         with self._lock:
             if source not in self.last_added:
                 return None
-            row_id, quantity, capture_id = self.last_added.pop(source)
+            row_id, quantity, capture_id, batch = self.last_added.pop(source)
             row = self.conn.execute('SELECT card_name FROM inventory WHERE id = ?', (row_id,)).fetchone()
             if not row:
                 return None
@@ -782,6 +890,11 @@ class InventoryManager(storage.Transactional):
                 self._set_source(row_id, source, (had['quantity'] if had else 0) - quantity)
             if capture_id:
                 self._delete_captures('id = ?', (capture_id,))
+            # What the add brought leaves its own batch first, then the newest ones (_take_copies)
+            self.conn.execute('UPDATE inventory_batches SET quantity = quantity - ? '
+                              'WHERE inventory_id = ? AND batch = ? AND quantity > ?', (quantity, row_id, batch, quantity))
+            if not self.conn.execute('SELECT changes()').fetchone()[0]:
+                self.conn.execute('DELETE FROM inventory_batches WHERE inventory_id = ? AND batch = ?', (row_id, batch))
             self._take_copies(row_id, quantity)
             self._commit()
         self.log(f"Undid add: {quantity}x {row['card_name']}")
@@ -855,14 +968,16 @@ class InventoryManager(storage.Transactional):
             captures = self.captures_by_entry(game, station)
             # 'shared': another camera (or a manual add) has copies in the same entry - the page
             # then offers no edit / delete, which would act on the whole entry
-            return [{**_row_dict(row), 'quantity': copies, 'entry_quantity': row['quantity'],
+            batches = self.batches_by_entry(game)
+            return [{**_row_dict(row, batches.get(row['id'], ())), 'quantity': copies, 'entry_quantity': row['quantity'],
                      'shared': copies != row['quantity'], 'captures': captures.get(row['id'], [])}
                     for row, copies in rows]
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
         with self._lock:
             rows = self.conn.execute(f'SELECT * FROM inventory {where} ORDER BY timestamp DESC, id DESC', params).fetchall()
         captures = self.captures_by_entry(game)
-        return [{**_row_dict(row), 'captures': captures.get(row['id'], [])} for row in rows]
+        batches = self.batches_by_entry(game)
+        return [{**_row_dict(row, batches.get(row['id'], ())), 'captures': captures.get(row['id'], [])} for row in rows]
 
     def owned_by_name(self, game):
         """{search_key(card name): copies owned} over every printing, finish and location"""
@@ -971,35 +1086,15 @@ class InventoryManager(storage.Transactional):
         if price is not None:
             values['price_usd'] = price
         values.pop('id')
-        key = (f"SELECT * FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}", [values[c] for c in KEY_COLUMNS])
-        there = self.conn.execute(*key).fetchone()
         self.conn.execute(UPSERT, values)
-        target = self.conn.execute(*key).fetchone()['id']
-        self._move_batch(row, target, there, quantity)
+        target = self.conn.execute(
+            f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
+            [values[c] for c in KEY_COLUMNS]).fetchone()['id']
+        self._take_from_batches(row['id'], quantity, to_id=target)
         self._add_tags(target, values['tags'])
         self._move_sources(row['id'], target, quantity)
         self._move_captures(row['id'], target, quantity)
         return target
-
-    def _move_batch(self, row, target, there, quantity):
-        """
-        `quantity` copies of an entry (`row`, as it was) went to another one (`target`; `there`:
-        that entry before, None when it is new): which of them belong to the entry's latest
-        "Add to collection" goes along, so taking that batch back removes what it brought and
-        no more. The copies that move are the newest, so they are the batch's first. An entry
-        knows one batch only: where the target has one of its own, the newer of the two stays.
-        """
-        of_batch = min(quantity, batch_quantity(row))
-        self.conn.execute('UPDATE inventory SET added_quantity = ? WHERE id = ?', (batch_quantity(row) - of_batch, row['id']))
-        if there is None:
-            added = (row['added_at'], of_batch)
-        elif there['added_at'] == row['added_at']:
-            added = (row['added_at'], batch_quantity(there) + of_batch)
-        elif (row['added_at'] or '') > (there['added_at'] or ''):
-            added = (row['added_at'], of_batch)
-        else:
-            added = (there['added_at'], batch_quantity(there))
-        self.conn.execute('UPDATE inventory SET added_at = ?, added_quantity = ? WHERE id = ?', (*added, target))
 
     @_writes
     def update_card(self, row_id, quantity=None, condition=None, finish=None, split_quantity=None,
@@ -1044,6 +1139,7 @@ class InventoryManager(storage.Transactional):
                 if remaining:
                     self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (remaining, row_id))
                     self._trim_captures(row_id, remaining)
+                    self._trim_batches(row_id, remaining)
                 else:
                     self._delete_entries('id = ?', (row_id,))
                 self._commit()
@@ -1064,9 +1160,9 @@ class InventoryManager(storage.Transactional):
                 self._move_sources(row_id, twin['id'], new_quantity if new_quantity < row['quantity'] else None)
                 self._trim_captures(row_id, new_quantity)
                 self._move_captures(row_id, twin['id'])
-                there = self._get_row(twin['id'])
                 self.conn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', (new_quantity, twin['id']))
-                self._move_batch(row, twin['id'], there, new_quantity)
+                self._trim_batches(row_id, new_quantity)
+                self._take_from_batches(row_id, new_quantity, to_id=twin['id'])
                 self._add_tags(twin['id'], new_tags)
                 self._delete_entries('id = ?', (row_id,))  # its captures and stations went to the twin
             else:
@@ -1078,6 +1174,7 @@ class InventoryManager(storage.Transactional):
                                       (*(printing[c] for c in self.PRINTING_COLUMNS), row_id))
                 self._trim_sources(row_id, new_quantity)
                 self._trim_captures(row_id, new_quantity)
+                self._trim_batches(row_id, new_quantity)
             self._commit()
         if not quiet:
             self.log(f"Updated {row['card_name']}: {new_quantity}x {new_condition}, {new_finish}"
@@ -1137,7 +1234,7 @@ class InventoryManager(storage.Transactional):
         the copies that station scanned move (and its captures); the rest stays. Returns
         {'entries', 'cards'} moved.
         """
-        added_at = now()  # one time for the whole batch (the collection page can filter by it)
+        batch, added_at = self.new_batch()  # one for the whole move (the collection page can filter by it)
         with self._lock, source._lock:
             if station:
                 moving = source._station_rows(game, station)
@@ -1168,6 +1265,7 @@ class InventoryManager(storage.Transactional):
                         f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                         [values[c] for c in KEY_COLUMNS]).fetchone()['id']
                     self._add_tags(target, values['tags'])
+                    self._note_batch(target, batch, added_at, copies)
                     captures = ('SELECT file, captured_at FROM inventory_captures WHERE inventory_id = ? '
                                 + ('AND station = ? ' if station else '') + 'ORDER BY id')
                     for capture in source.conn.execute(captures, (row['id'], station) if station else (row['id'],)):
@@ -1239,35 +1337,34 @@ class InventoryManager(storage.Transactional):
         return finished
 
     @_writes
-    def remove_batch(self, game, added_at):
+    def remove_batch(self, game, batch):
         """
-        Take back what came into the inventory at one time (an "Add to collection"): each entry
-        loses the copies that came with it, with their captures (the newest); entries that had
-        no other copies are deleted. Returns {'entries', 'cards'} removed.
+        Take back what came into the inventory together (an "Add to collection", an import):
+        each entry loses the copies that came with that batch, with their captures (the
+        newest); entries left with no copies are deleted. Returns {'entries', 'cards'} removed.
         """
         with self._lock:
-            rows = self.conn.execute('SELECT * FROM inventory WHERE game = ? AND added_at = ?', (game, added_at)).fetchall()
-            cards = 0
-            entries = 0
+            rows = self.conn.execute('''
+                SELECT b.id AS batch_row, b.quantity AS added, b.added_at, i.id, i.quantity
+                FROM inventory_batches b JOIN inventory i ON i.id = b.inventory_id
+                WHERE i.game = ? AND b.batch = ?''', (game, batch)).fetchall()
             for row in rows:
-                added = batch_quantity(row)
-                if not added:
-                    continue  # its batch was removed before: these copies are older
-                cards += added
-                entries += 1
-                if added >= row['quantity']:
+                if row['added'] >= row['quantity']:
                     self._delete_entries('id = ?', (row['id'],))
                 else:
-                    # What is left was there before: part of no batch (when it came is not
-                    # known any more), so removing a batch again never takes it
-                    self.conn.execute('UPDATE inventory SET quantity = quantity - ?, added_quantity = 0 '
-                                      'WHERE id = ?', (added, row['id']))
-                    self._trim_sources(row['id'], row['quantity'] - added)
-                    self._trim_captures(row['id'], row['quantity'] - added)
+                    left = row['quantity'] - row['added']
+                    self.conn.execute('UPDATE inventory SET quantity = ? WHERE id = ?', (left, row['id']))
+                    self.conn.execute('DELETE FROM inventory_batches WHERE id = ?', (row['batch_row'],))
+                    self._trim_sources(row['id'], left)
+                    self._trim_captures(row['id'], left)
+                    self._trim_batches(row['id'], left)
             self._commit()
             self.last_added = {}
-        self.log(f"Removed the cards added {added_at}: {cards} cards ({entries} entries)", level="success")
-        return {'entries': entries, 'cards': cards}
+        removed = {'entries': len(rows), 'cards': sum(row['added'] for row in rows)}
+        if rows:
+            self.log(f"Removed the cards added {rows[0]['added_at']}: {removed['cards']} cards "
+                     f"({removed['entries']} entries)", level="success")
+        return removed
 
     def clear_inventory(self, game=None, station=None):
         """
@@ -1327,7 +1424,7 @@ class InventoryManager(storage.Transactional):
             dict: success, added (new entries), updated (copies added to an existing entry)
         """
         stats = {'success': True, 'added': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
-        timestamp = now()
+        batch, timestamp = self.new_batch()  # the whole file is one batch
         if replace_existing and not entries:
             # Nothing to put in its place: the inventory is not emptied for a file without cards
             return {**stats, 'success': False, 'error': 'No card of the file could be imported - the inventory was not replaced'}
@@ -1351,7 +1448,7 @@ class InventoryManager(storage.Transactional):
                 exists = self.conn.execute(
                     f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                     [values[c] for c in KEY_COLUMNS]).fetchone()
-                self.conn.execute(UPSERT, values)
+                self._upsert(values, batch, timestamp)
                 stats['updated' if exists else 'added'] += 1
             self._commit()
         self.log(f"Import complete: {stats['added']} added, {stats['updated']} updated", level="success")
@@ -1379,7 +1476,7 @@ class InventoryManager(storage.Transactional):
 
         # The whole file is read before anything is changed: replacing the inventory with a
         # file none of whose rows can be used once left it empty
-        imported_at = now()
+        batch, imported_at = self.new_batch()  # the whole file is one batch
         accepted = []
         with open(csv_file_path, newline='') as f:
             for row_number, row in enumerate(csv.DictReader(f), start=2):
@@ -1445,7 +1542,7 @@ class InventoryManager(storage.Transactional):
                 exists = self.conn.execute(
                     f"SELECT 1 FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                     [values[c] for c in KEY_COLUMNS]).fetchone()
-                self.conn.execute(UPSERT, values)
+                self._upsert(values, batch, imported_at)
                 stats['updated' if exists else 'added'] += 1
             self._commit()
 

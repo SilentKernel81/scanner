@@ -175,6 +175,7 @@ def precon_own(file_name):
     by_id = database.cards_by_ids([entry['scryfall_id'] for entry in entries])
     by_name = game.cards_by_names([entry['name'] for entry in entries])
     deck_entries, unknown, added = [], [], 0
+    batch = inventory.new_batch()  # the deck's cards came in together
     for entry in entries:
         card = by_id.get(entry['scryfall_id']) \
             or (database.get_card_by_set_number(entry['set'], entry['number']) if entry['set'] and entry['number'] else None) \
@@ -184,7 +185,7 @@ def precon_own(file_name):
             continue
         finish = game.suggested_finish(card, 'foil' if entry['foil'] else 'non-foil')
         inventory.add_card(game.inventory_fields(card, finish), game.id, finish, 'Near Mint', entry['quantity'],
-                           location=location, quiet=True)
+                           location=location, quiet=True, batch=batch)
         added += entry['quantity']
         deck_entries.append({'name': card['name'], 'card_id': card['id'], 'quantity': entry['quantity'],
                              'board': entry['board']})
