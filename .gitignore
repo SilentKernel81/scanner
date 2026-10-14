@@ -82,3 +82,7 @@ Thumbs.db
 .claude/settings.local.json
 # Review notes, not part of the project
 CODE_REVIEW.md
+
+# AppImage build (scripts/build-appimage.sh)
+build/
+dist/

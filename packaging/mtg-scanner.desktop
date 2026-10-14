@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Card Scanner
+Comment=Scan Magic: The Gathering cards with a camera and manage the collection
+Exec=mtg-scanner
+Icon=mtg-scanner
+Categories=Utility;
+Terminal=false

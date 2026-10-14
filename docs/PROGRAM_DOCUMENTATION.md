@@ -1924,6 +1924,42 @@ whether it is foil, so the entries get the right set, finish (`Game.suggested_fi
 price; they are Near Mint at the location given (the deck's name by default), which is also how
 to find them again - filter by that location to move or delete them. Undo does not cover it.
 
+## The desktop program (AppImage)
+
+`app.py --app` is the server as a program on one person's computer (`server/program.py`; the
+launchers `packaging/AppRun`, `scripts/build-appimage.sh`, `.github/workflows/appimage.yml`).
+It is the same server, and differs from one on a server only here:
+
+- **The camera station is started beside it** (`program.start_station`: `station.py --server
+  http://localhost:<port>`, the same file `scripts/start.sh` starts) and ended with it
+  (`stop_station`: SIGINT, ten seconds, then killed - the server never hangs there; what the
+  station has not sent is on disk). `--no-station`, or `camera.type: remote`, starts none.
+- **Who can reach it**: `flask.host: auto` means the whole network on a server and
+  `127.0.0.1` as a desktop program; the switch "Reachable from other devices" (Settings ->
+  Program, `POST /api/network_access`, `data/settings.json: network_access`) overrides it and
+  applies after a restart (`program.network_access`, `listen_host`).
+- **Where it reaches itself**: the station, the browser and `--quit` use `program.local_url`
+  - `localhost` for a server that listens on loopback or on every address, the address itself
+  for one that listens on an address of its own (`flask.host: 192.168.1.5` answers there, not
+  on loopback). Before the saved settings are read (`--quit`, a second start) both are tried
+  (`candidate_urls`).
+- **Quit** (`POST /api/quit`): only as a desktop program and only from the computer it runs
+  on (a server is stopped with its service or container). `--quit` calls it.
+- **Shutdown happens once**: however often it is asked (two tabs, a repeated SIGTERM) one stop
+  is scheduled and a second SIGTERM during the cleanup is ignored; a quit asked before the stop
+  began cancels a restart.
+- **Restart** (`POST /api/restart`, in every mode): the program shuts down - the station
+  first - and runs the same command in the same process (`os.execv`; the lock and the port
+  are released by it); the page reloads when the server answers again.
+- **One copy per data folder** (`data/app.lock`): a second start shows the running one;
+  `--app` opens its page.
+- **Where its files are**: `paths.USER_DIR` (`~/.local/share/mtg-scanner`), see *Configuration
+  and files*. With no card data the program starts and downloads it in the background.
+- **The AppImage** holds `app.py`, `station.py`, `config.yaml` and `src/` (OCR reader
+  included) under `usr/app/`, the Python under `usr/python/`, Node.js as `usr/app/bin/node`
+  (`paths.tool`). Never tried: another architecture than x86_64, a system without FUSE for
+  anything but `--appimage-extract-and-run`, a real camera under it.
+
 ## Web interface
 
 Three pages, all served by the server (`server/pages.py`), with one header (`templates/_topbar.html`)

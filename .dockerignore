@@ -16,3 +16,8 @@ src/ocr/node_modules/
 
 .git/
 .claude/
+
+# The AppImage build (scripts/build-appimage.sh) and its result
+build/
+dist/
+packaging/
