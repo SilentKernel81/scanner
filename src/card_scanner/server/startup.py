@@ -6,6 +6,11 @@ import sys
 import threading
 import time
 
+try:
+    import fcntl
+except ImportError:  # not on Linux or macOS: no lock, as before
+    fcntl = None
+
 from card_scanner.core import arena
 from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
 from card_scanner.config import Config
@@ -148,12 +153,39 @@ def run_cleanup_background():
     logger.info("Background cleanup thread started")
 
 
+instance_lock = None  # the open data/app.lock, held while this copy runs
+
+
+def lock_instance():
+    """
+    False when another copy runs on this data folder - also one that is still starting and
+    does not answer on its port yet. Two servers on one folder would write the same databases
+    and settings; the lock goes with the process, so a crash leaves nothing to clean up.
+    """
+    global instance_lock
+    if fcntl is None:
+        return True
+    Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    handle = open(Config.DATA_DIR / 'app.lock', 'w')
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False
+    instance_lock = handle  # kept open: the lock is gone when this process is
+    return True
+
+
 def main():
     """Start the web server"""
     # Use print for important startup messages that should always be visible
     print("="*60)
     print("Card Scanner Web Interface")
     print("="*60)
+
+    if not lock_instance():
+        print(f"\n⚠ Another Card Scanner is running on this data folder ({Config.shown()}): not starting a second one.")
+        return
 
     # Check if database exists
     if not Config.DATABASE_FILE.exists() or Config.DATABASE_FILE.stat().st_size == 0:
@@ -194,7 +226,9 @@ def main():
         enable_request_log()
     logger.info(f"Debug trace: {'on' if scanner.debug_trace_enabled else 'off'}, debug mode: {'on' if services.debug_mode_running else 'off'} (Settings)")
     print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {'on - frames go to data/debug_frames' if scanner.debug_trace_enabled else 'off'}")
-    print(f"{'✓' if services.debug_mode_running else '-'} Debug mode: {'on - requests go to data/logs/requests.log' if services.debug_mode_running else 'off'}")
+    requests_log = Config.shown('logs', 'requests.log')
+    print(f"{'✓' if services.debug_mode_running else '-'} Debug mode: "
+          f"{'on - requests go to ' + requests_log if services.debug_mode_running else 'off'}")
 
     print("\n" + "="*60)
     print("Web Interface Starting...")
@@ -202,7 +236,7 @@ def main():
     print("\n✓ Access the scanner at:")
     print(f"  • Local:   http://localhost:{Config.PORT}")
     print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
-    print("\n✓ Logs are being written to: data/logs/app.log")
+    print(f"\n✓ Logs are being written to: {Config.shown('logs', 'app.log')}")
     print("\nPress Ctrl+C to stop")
     print("="*60 + "\n")
 

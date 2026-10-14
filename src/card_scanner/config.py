@@ -7,7 +7,7 @@
 # ============================================================================
 import os
 from card_scanner.config_loader import get_config_loader
-from card_scanner.paths import TOP
+from card_scanner.paths import TOP, USER_DIR
 
 # Load YAML configuration
 config = get_config_loader()
@@ -62,13 +62,14 @@ class Config:
     """Application configuration - All values loaded from config.yaml"""
 
     # Paths
-    BASE_DIR = TOP  # the project's top folder (paths.py) - not this file's folder
-    DATA_DIR = BASE_DIR / 'data'
-    IMAGES_DIR = BASE_DIR / 'scanned_cards'  # the server's: every capture it received
+    BASE_DIR = TOP  # what ships with the program (paths.py) - not this file's folder
+    USER_DIR = USER_DIR  # what is the person's: data/, scanned_cards/, .env, their config.yaml
+    DATA_DIR = USER_DIR / 'data'
+    IMAGES_DIR = USER_DIR / 'scanned_cards'  # the server's: every capture it received
     # A camera station's own: captures it has taken that are not on the server yet. Not the
     # folder above, also when both programs run from one checkout: the server deletes old
     # pictures from scanned_cards/ (cleanup.days), and must never reach these
-    STATION_CAPTURES_DIR = BASE_DIR / 'station_captures'
+    STATION_CAPTURES_DIR = USER_DIR / 'station_captures'
 
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')
@@ -133,6 +134,18 @@ class Config:
     # Cleanup settings
     CLEANUP_ENABLED = config.get('cleanup', 'enabled', default=True)
     CLEANUP_DAYS = config.get('cleanup', 'days', default=7)
+
+    @staticmethod
+    def shown(*parts):
+        """
+        A file or folder in data/ as messages name it: data/logs/app.log in a checkout, the
+        whole path (~/.local/share/...) when the data lives elsewhere
+        """
+        if Config.USER_DIR == Config.BASE_DIR:
+            return '/'.join(('data',) + parts)
+        path = str(Config.DATA_DIR.joinpath(*parts))
+        home = os.path.expanduser('~')
+        return '~' + path[len(home):] if path.startswith(home + os.sep) else path
 
     @staticmethod
     def create_directories():

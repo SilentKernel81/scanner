@@ -5,6 +5,7 @@
 from flask import jsonify, request
 import threading
 
+from card_scanner.config import Config
 from card_scanner.core.database import search_key
 from card_scanner import games
 from card_scanner.core.recommendations import Unavailable
@@ -278,7 +279,7 @@ def run_deck_ideas(kind, game, state):
         state['error'] = str(e)
     except Exception as e:
         logger.exception(f"Deck ideas ({kind}) failed: {e}")
-        state['error'] = 'Something went wrong - see data/logs/app.log'
+        state['error'] = f"Something went wrong - see {Config.shown('logs', 'app.log')}"
     finally:
         state['running'] = False
 

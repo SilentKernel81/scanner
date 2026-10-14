@@ -33,11 +33,12 @@ because config.py reads the environment when it is imported.
 """
 from dotenv import load_dotenv
 
-from card_scanner.paths import TOP
+from card_scanner.paths import USER_DIR
 
-# The project's top folder: app.py, config.yaml, .env, data/ (paths.py says where it is).
-# The server's own files - this package, its templates/ and static/ - are in src/card_scanner/server.
-ROOT = TOP
+# The person's folder: .env, data/, scanned_cards/ (paths.py says where it is; the project's
+# top folder in a checkout). The server's own files - this package, its templates/ and static/ -
+# are in src/card_scanner/server.
+ROOT = USER_DIR
 
 # Nothing here touches Python's path. The project's modules (config, inventory, ...) are in
 # src/, beside this package, and whatever starts a program puts src/ first on the path:
