@@ -7,7 +7,6 @@ and editing a deck never changes the inventory.
     deck_id = decks.create('mtg', 'Elves', 'commander')
     decks.add_card(deck_id, 'Llanowar Elves', 'main', 1)
 """
-import contextlib
 import threading
 
 from card_scanner.core import storage
@@ -62,10 +61,11 @@ DECK_CARDS_INDEXES = ()
 CONSTRAINTS_MIGRATION = 'deck_constraints_1'
 
 
-class DeckManager:
+class DeckManager(storage.Transactional):
+    """Decks and their cards. Every edit is one transaction (storage.Transactional): all of it or, when it fails, none"""
+
     def __init__(self, db_file=None):
         self._lock = threading.RLock()
-        self._writes = 0  # _writing blocks open (they nest)
         self.db_file = db_file or Config.DATABASE_FILE
         self.conn = storage.connect(self.db_file)
         with self._lock:
@@ -121,26 +121,6 @@ class DeckManager:
                 lambda conn: (decks_as_they_are(conn),
                               [tuple(row) for row in conn.execute('SELECT id, cover FROM decks ORDER BY id')]))
 
-    @contextlib.contextmanager
-    def _writing(self):
-        """
-        One change, whole or not at all: committed when the outermost block ends, rolled back
-        when anything in it fails - a change that failed half way used to stay in the
-        connection and went in with the next commit of something else.
-        """
-        with self._lock:
-            self._writes += 1
-            try:
-                yield
-                if self._writes == 1:
-                    self.conn.commit()
-            except BaseException:
-                if self._writes == 1:
-                    self.conn.rollback()
-                raise
-            finally:
-                self._writes -= 1
-
     def _require(self, deck_id):
         if not self.conn.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
             raise ValueError(f"Unknown deck: {deck_id}")
@@ -176,7 +156,7 @@ class DeckManager:
     def create(self, game, name, deck_format, notes='', kind='paper', arena_id=''):
         if kind not in KINDS:
             raise ValueError(f"Unknown kind of deck: {kind}")
-        with self._writing():
+        with self._transaction():
             deck_id = self.conn.execute(
                 'INSERT INTO decks (game, name, format, notes, created_at, updated_at, kind, arena_id) '
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -194,7 +174,7 @@ class DeckManager:
         decks: [{'arena_id', 'name', 'format', 'cards': [{'name', 'card_id', 'quantity',
         'board'}]}]. Returns the new decks' ids.
         """
-        with self._writing():
+        with self._transaction():
             covers = {row['arena_id']: row['cover'] for row in self.conn.execute(
                 "SELECT arena_id, cover FROM decks WHERE game = ? AND arena_id != ''", (game,))}
             for row in self.conn.execute("SELECT id FROM decks WHERE game = ? AND arena_id != ''", (game,)).fetchall():
@@ -211,7 +191,7 @@ class DeckManager:
 
     def update(self, deck_id, name=None, deck_format=None, notes=None, cover=None):
         """Change what is given (None: as it is). cover: a card's name, or '' for none chosen"""
-        with self._writing():
+        with self._transaction():
             deck = self.conn.execute('SELECT * FROM decks WHERE id = ?', (deck_id,)).fetchone()
             if not deck:
                 return False
@@ -222,7 +202,7 @@ class DeckManager:
         return True
 
     def delete(self, deck_id):
-        with self._writing():
+        with self._transaction():
             self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ?', (deck_id,))
             deleted = self.conn.execute('DELETE FROM decks WHERE id = ?', (deck_id,)).rowcount
         return bool(deleted)
@@ -237,7 +217,7 @@ class DeckManager:
         """
         if kind is not None and kind not in KINDS:
             raise ValueError(f"Unknown kind of deck: {kind}")
-        with self._writing():  # the copy with its cards, or no copy
+        with self._transaction():  # the copy with its cards, or no copy
             deck = self.get(deck_id)
             if not deck:
                 return None
@@ -264,7 +244,7 @@ class DeckManager:
         """Set how many copies of a card a board has (0 removes it)"""
         if board not in BOARDS:
             raise ValueError(f"Unknown board: {board}")
-        with self._writing():
+        with self._transaction():
             self._require(deck_id)
             if quantity <= 0:
                 self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ? AND card_name = ? AND board = ?',
@@ -279,14 +259,14 @@ class DeckManager:
 
     def set_printing(self, deck_id, name, board, card_id):
         """Choose the printing an entry is shown in"""
-        with self._writing():
+        with self._transaction():
             self.conn.execute('UPDATE deck_cards SET card_id = ? WHERE deck_id = ? AND card_name = ? AND board = ?',
                               (card_id, deck_id, name, board))
             self._touch(deck_id)
 
     def add_card(self, deck_id, name, board, change=1, card_id=None):
         """Add (or, with a negative change, take out) copies; returns the new count"""
-        with self._writing():
+        with self._transaction():
             quantity = max(0, self._quantity(deck_id, name, board) + int(change))
             self.set_card(deck_id, name, board, quantity, card_id)
         return quantity
@@ -294,7 +274,7 @@ class DeckManager:
     def move_card(self, deck_id, name, from_board, to_board):
         """Move every copy of a card to another board (added to the copies already there) -
         in one commit: there and gone from here, or neither"""
-        with self._writing():
+        with self._transaction():
             quantity = self._quantity(deck_id, name, from_board)
             if not quantity or from_board == to_board:
                 return
@@ -321,7 +301,7 @@ class DeckManager:
         if replace and not rows:
             raise ValueError('No cards to replace the deck with')  # emptying a deck is not an import
         added = 0
-        with self._writing():
+        with self._transaction():
             self._require(deck_id)
             if replace:
                 self.conn.execute('DELETE FROM deck_cards WHERE deck_id = ?', (deck_id,))
