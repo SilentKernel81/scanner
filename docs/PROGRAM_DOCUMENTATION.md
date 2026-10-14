@@ -1530,7 +1530,7 @@ single card is changed where it is and stays in its trade), "Remove this batch",
 the inventory, an import that replaces it. The page shows "These copies are set aside for a
 trade: take them out of the trade first" (`TRADE_HELD`; `server/trades_api.py`: `write_refused`). Copies the
 trade does not hold can be changed as always, and so can condition, tags and price. Bulk
-delete and bulk move, which commit entry by entry, are refused before anything changes when
+delete and bulk move, (one edit since 2026-10-14: all entries or none) are refused before anything changes when
 one of the entries is held. Trades are in every backup (`backups.INVENTORY_TABLES`): a restore
 brings back the trades of that moment with their entries - a trade confirmed since is open
 again, its cards back - and a backup from before trades restores with none.

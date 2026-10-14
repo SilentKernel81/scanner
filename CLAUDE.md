@@ -261,9 +261,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   the server's clean-up deletes old pictures there, and server and station can share one
   checkout. A station must end on SIGINT and SIGTERM however it was started (`main` takes
   both signals back: a program a shell starts in the background ignores SIGINT).
-- **A change is whole or not at all.** Inventory methods that write are `@_writes` (rolled back
-  when they fail) and commit through `_commit()` (thumbnails of deleted captures go only then);
-  deck changes are inside `with self._writing()`. **Reads never write**: no DELETE / UPDATE in a
+- **A change is whole or not at all.** Inventory methods that write are `@_writes` (one
+  transaction, the outermost commits and a failure rolls everything back; thumbnails of
+  deleted captures go only after the commit - `_committed`);
+  deck changes are inside `with self._transaction()` (`storage.Transactional`). **Reads never write**: no DELETE / UPDATE in a
   method that only returns rows - it leaves a write transaction open and other connections get
   "database is locked". A quantity is lowered together with `_trim_sources()` (before
   `_trim_captures`).

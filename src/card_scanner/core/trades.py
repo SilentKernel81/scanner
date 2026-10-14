@@ -28,15 +28,9 @@ class Trades:
         self._lock = inventory._lock
 
     def _writing(self, change):
-        """Run a change under the collection's lock: committed whole, or rolled back"""
-        with self._lock:
-            try:
-                result = change()
-                self.inventory._commit()
-                return result
-            except BaseException:
-                self.inventory._rollback()
-                raise
+        """Run a change as one edit of the collection: committed whole, or rolled back"""
+        with self.inventory._transaction():
+            return change()
 
     def _trade(self, trade_id, status='open'):
         row = self.conn.execute('SELECT * FROM trades WHERE id = ?', (trade_id,)).fetchone()

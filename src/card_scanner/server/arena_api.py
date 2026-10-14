@@ -101,8 +101,8 @@ def arena_import():
                        'wildcards': collection['wildcards'], 'gold': collection['gold'], 'gems': collection['gems'],
                        'summary': {**summary, 'unknown': summary['unknown'][:200]}}
             try:
-                with arena_inventory._lock:
-                    # The account first and uncommitted: replace_all commits both, or rolls both back
+                with arena_inventory._transaction():
+                    # The account and the cards are one edit: both go in, or neither does
                     arena.save_account(arena_inventory, account)
                     arena_inventory.replace_all(game.id, entries)
             except Exception as e:
