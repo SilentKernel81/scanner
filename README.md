@@ -243,7 +243,7 @@ a phone too; the deck pages are made for a screen with a pointer.
   move them to a **location**, tag them (*trade*, *keep*), change their condition, add them to
   a deck or delete them in one step. Copies of the same printing can be in two locations -
   moving part of a stack splits it.
-- **Export / import** - the **Export…** menu writes the collection for Moxfield or Archidekt, or as
+- **Export / import** - the **Export…** menu writes the collection for Moxfield, or as
   **Card Scanner (everything)**: the app's own CSV with every entry's location, tags, finish
   and printing, which **Import** reads back exactly as it was (the Android app writes the same
   file). **Import** also takes a Moxfield collection CSV - each row is matched to its printing
@@ -505,7 +505,7 @@ those to one camera.
 | `POST /api/clear_inventory` | Delete the active game's entries; with `?area=scan&camera=<id>` one camera's scanned cards and review items |
 | `GET` / `POST /api/scan_inventory/to_collection` | Cards waiting and locations in use; move the scanned cards into the collection (JSON: `location`, `camera` - both optional) |
 | `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
-| `GET /api/export_inventory/<format>` | Download the inventory: `moxfield` / `archidekt` (Magic), `csv` (the app's own, every column) |
+| `GET /api/export_inventory/<format>` | Download the inventory: `moxfield` (Magic), `csv` (the app's own, every column) |
 | `POST /api/import_inventory` | Import a collection CSV (multipart `file`, `replace_existing`): Moxfield, or the app's own columns |
 | `GET /api/backups`, `POST /api/backups`, `POST /api/backups/schedule` | List the backups (and the automatic backups' settings); make one (JSON: `note`); set how often automatic backups are made and how many are kept (JSON: `every_hours`, `keep`) |
 | `GET /api/backups/full`, `POST /api/backups/full` | The full backups; make one: every database file and the pictures they point at, taken at one moment, in `data/backups/full/` (what `scripts/backup.sh` archives) |
