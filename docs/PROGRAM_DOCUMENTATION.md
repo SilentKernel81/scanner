@@ -1186,7 +1186,10 @@ migration checks that the card count is unchanged, and it runs in one transactio
 Exports and imports are on the collection page only, per game and per site / app, so more can
 be added: `Game.export_formats` fills the **Export…** menu (Magic: Moxfield CSV - `Edition` is
 the set code, which Moxfield matches; with the set name it took the alphabetically first set of
-the card; surge foils go out as `foil`; every game: "Card Scanner (everything)",
+the card; surge foils go out as `foil`; the file has the 13 columns of Moxfield's own export, in
+its order, because Archidekt's **Moxfield** preset (+ **Set columns**) reads them by position - a
+9-column file failed there with "Row columns do not match header columns"; the 13-column one
+imported there on 2026-10-14 (Moxfield's own import: not tried); every game: "Card Scanner (everything)",
 `games.base.write_collection_csv` - all the columns of an entry, with `Card ID`, `Set Code` and
 `Timestamp`, so `import_csv` puts each entry back as it was), `Game.import_rows`
 reads another app's file (`import_formats` names them). `POST /api/import_inventory` picks by
