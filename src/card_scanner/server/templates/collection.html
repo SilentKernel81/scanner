@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>Collection - Card Scanner</title>
+    {% include '_favicon.html' %}
+    {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
+       without the internet. The version is in the file's name, so a new one needs no ?v= #}
+    <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=25">
+</head>
+<body>
+    {% include '_icons.html' %}
+
+    {% set page = 'collection' %}
+    {% include '_topbar.html' %}
+
+    <main class="container collection">
+        <!-- ================= Inventory ================= -->
+        <section id="tab-inventory" class="tab-panel">
+            <!-- Arena view: when the digital collection is from, the wildcards, and the import -->
+            <div class="callout arena-bar" id="arena-bar" hidden>
+                <span id="arena-text"></span>
+                <span class="spacer"></span>
+                <button class="btn btn-small btn-primary" id="arena-import" title="Choose the Arena exporter's mtga_collection.json (your cards) and mtga_decks.json (your Arena decks) - both at once, or one at a time. What the last import brought of each is replaced.">Import from Arena</button>
+                <input type="file" id="arena-file-input" accept=".json,application/json" multiple style="display: none;">
+            </div>
+            <div class="callout" id="scanned-notice" hidden>
+                <span id="scanned-text"></span>
+                <button class="btn btn-small btn-primary" id="scanned-add">Add to collection</button>
+            </div>
+            <div class="panel filter-panel">
+                <div class="filter-row">
+                    <input type="search" id="filter-text" class="text-input filter-text" placeholder="Search, or set:HOB" title='Looks in name, set, type, rarity, location and tags. To look in one place only: set:HOB (the set code, whole), name:ring, type:elf, rarity:rare, tag:trade, loc:"Binder 2", finish:foil, number:14, qty:>4 (more than four copies), trade:jo (set aside for that trade). A minus in front leaves those out: -set:HOB'>
+                    <label class="chip-toggle" title="Turn the search around: show the cards that do NOT match what is typed (type set:HOB to see everything that is not from that set)"><input type="checkbox" id="filter-text-not"><span>Not</span></label>
+                    <div class="color-chips" id="filter-colors" title="Color identity"></div>
+                    <select id="filter-type" class="select" title="Type"></select>
+                    <select id="filter-rarity" class="select" title="Rarity"></select>
+                    <select id="filter-set" class="select" title="Set"></select>
+                    <select id="filter-finish" class="select" title="Finish"></select>
+                    <select id="filter-location" class="select" title="Location"></select>
+                    <select id="filter-tag" class="select" title="Tag"></select>
+                    <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
+                    <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
+                    <span class="price-range" title="Price of one copy (USD)">
+                        $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
+                        – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
+                    </span>
+                    <button class="btn btn-small btn-danger" id="batch-remove" hidden title="Take these cards back out of the collection">Remove this batch</button>
+                    <button class="btn btn-small btn-ghost" id="filter-clear">Clear filters</button>
+                </div>
+                <div class="filter-row filter-chips" id="filter-chips" hidden></div>
+                <div class="filter-row">
+                    <label class="chip-toggle" id="select-all-label" title="Select every card the filters show, to move, tag or delete them together. For a few in a row: tick the first, then hold Shift and tick the last"><input type="checkbox" id="select-all"><span>Select all</span></label>
+                    <span class="summary" id="inventory-summary"></span>
+                    <span class="spacer"></span>
+                    <select id="inventory-sort" class="select" title="Sort">
+                        <option value="added">Last added to the collection</option>
+                        <option value="newest">Scanned: newest first</option>
+                        <option value="oldest">Scanned: oldest first</option>
+                        <option value="name">Name A–Z</option>
+                        <option value="price_desc">Price: high to low</option>
+                        <option value="price_asc">Price: low to high</option>
+                        <option value="value_desc">Total value (price × qty)</option>
+                        <option value="quantity_desc">Quantity: most first</option>
+                        <option value="rarity">Rarity: mythic first</option>
+                        <option value="set">Set and number</option>
+                    </select>
+                    <select id="inventory-page-size" class="select" title="How many cards a page shows"></select>
+                    <div class="segmented" id="view-switch">
+                        <button data-view="list" class="is-active" title="List"><svg class="icon"><use href="#i-list"/></svg></button>
+                        <button data-view="grid" title="Card images"><svg class="icon"><use href="#i-grid"/></svg></button>
+                    </div>
+                    <select id="export-select" class="select" title="Download your collection as a file for another site or app - with cards ticked or the list filtered, it asks which of them"></select>
+                    <button class="btn btn-small" id="import-button" onclick="document.getElementById('import-file-input').click()">Import</button>
+                    <input type="file" id="import-file-input" accept=".csv" style="display: none;">
+                </div>
+            </div>
+
+            <!-- Shown while entries are selected -->
+            <div class="bulk-bar" id="bulk-bar" hidden>
+                <strong id="bulk-count"></strong>
+                <button class="btn btn-small" data-bulk="location">Move to location</button>
+                <button class="btn btn-small" data-bulk="add_tag">Add tag</button>
+                <button class="btn btn-small" data-bulk="remove_tag">Remove tag</button>
+                <button class="btn btn-small" data-bulk="condition">Set condition</button>
+                <button class="btn btn-small" data-bulk="deck" id="bulk-deck">Add to deck</button>
+                <button class="btn btn-small" data-bulk="trade" title="Keep these cards for a trade: they stay in your collection until you confirm it on the Trades tab">Set aside for trade</button>
+                <button class="btn btn-small btn-danger" data-bulk="delete">Delete</button>
+                <span class="spacer"></span>
+                <button class="btn btn-small btn-ghost" id="bulk-all">Select all shown</button>
+                <button class="btn btn-small btn-ghost" id="bulk-none">Clear selection</button>
+            </div>
+
+            <div id="inventory-list" class="inventory-list collection-list">
+                <div class="empty-state">Loading inventory...</div>
+            </div>
+            <div class="more-row pager" id="inventory-pager" hidden>
+                <button class="btn btn-small" id="page-first" title="First page">«</button>
+                <button class="btn btn-small" id="page-prev">‹ Previous</button>
+                <span class="summary" id="page-text"></span>
+                <button class="btn btn-small" id="page-next">Next ›</button>
+                <button class="btn btn-small" id="page-last" title="Last page">»</button>
+            </div>
+        </section>
+
+
+        <!-- A delete or a bulk change waits here for a few seconds (collection.js: changeLater) -->
+        <div class="undo-bar" id="undo-bar" hidden>
+            <span id="undo-text"></span>
+            <button class="btn btn-small" id="undo-button" title="Ctrl+Z">Undo</button>
+            <span class="undo-time" id="undo-time"></span>
+        </div>
+
+        <!-- ================= Trades ================= -->
+        <section id="tab-trades" class="tab-panel" hidden>
+            <div class="panel">
+                <div class="section-head">
+                    <h2>Trades</h2>
+                </div>
+                <p class="hint">Cards set aside for a trade stay in your collection, marked, until you confirm the trade - only then are they removed. To start one, tick cards on the Inventory tab and press <strong>Set aside for trade</strong>.</p>
+            </div>
+            <!-- Cards no deck uses and EDHREC does not suggest for a commander (collection.js: findSpareCards) -->
+            <details class="panel spare-panel" id="spare-panel">
+                <summary class="spare-title">Find cards to trade or sell</summary>
+                <p class="hint">Lists the cards that none of your decks uses and that EDHREC does not list for the commander of any of your decks. <strong>Needs the internet:</strong> it asks EDHREC about each deck with a commander (a moment the first time, then from a 7-day cache). Cards that a trade already holds are not counted.</p>
+                <div class="filter-row">
+                    <button class="btn btn-small btn-primary" id="spare-find">Find cards</button>
+                    <select id="spare-location" class="select" title="Only the cards in one place - a binder, a box - or all"></select>
+                    <label class="chip-toggle"><input type="checkbox" id="spare-all"><span>Select all</span></label>
+                    <span class="summary" id="spare-summary"></span>
+                    <span class="spacer"></span>
+                    <button class="btn btn-small" id="spare-aside" disabled>Set aside for a trade</button>
+                </div>
+                <div class="trade-cards" id="spare-list"></div>
+            </details>
+            <div id="trades-open"></div>
+            <h3 class="section-title" id="trades-done-title" hidden>Confirmed trades</h3>
+            <div id="trades-done"></div>
+        </section>
+
+        <!-- ================= Statistics ================= -->
+        <section id="tab-stats" class="tab-panel" hidden>
+            <div class="inventory-stats" id="stats-tiles"></div>
+            <div class="filter-row stats-controls">
+                <span class="hint">Bars show</span>
+                <div class="segmented" id="stats-measure">
+                    <button data-measure="value" class="is-active">Value</button>
+                    <button data-measure="cards">Cards</button>
+                </div>
+            </div>
+            <div class="stats-grid" id="stats-grid"></div>
+        </section>
+    </main>
+
+    {% include '_value_dialog.html' %}
+
+    <!-- Settings drawer: backups here; camera, AI and sound are set on the scanner page -->
+    <div id="settings-drawer" class="drawer">
+        <aside class="drawer-panel">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="close" id="settings-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Backups</h3>
+                    <div class="hint">Your collection, the scanned cards and your decks as they are now. Make one yourself before a big load (adding scanned cards, importing a file) - restoring it puts all three back.</div>
+                    <div class="backup-schedule">
+                        <label for="backup-every">Automatic backup</label>
+                        <select id="backup-every" class="text-input">
+                            <option value="0">Off</option>
+                            <option value="1">Every hour</option>
+                            <option value="6">Every 6 hours</option>
+                            <option value="12">Every 12 hours</option>
+                            <option value="24">Every day</option>
+                            <option value="168">Every week</option>
+                        </select>
+                        <label for="backup-keep">keep the last</label>
+                        <input type="number" id="backup-keep" class="text-input" min="1" max="60" value="7">
+                    </div>
+                    <div class="hint">Made while the app runs, and only when something changed since the last backup. Older automatic ones are cleared away when a new one is made; the ones you make stay until you delete them. Backups are kept on the server's own disk: download one (the arrow beside it) to have a copy elsewhere.</div>
+                    <div class="model-row backup-new">
+                        <input type="text" id="backup-note" class="text-input" maxlength="80" placeholder="Note (optional)" autocomplete="off">
+                        <button class="btn btn-primary" id="backup-create">Back up now</button>
+                    </div>
+                    <div class="backup-upload">
+                        <button class="btn btn-small" id="backup-upload">Upload a backup file</button>
+                        <input type="file" id="backup-upload-input" accept=".zip,application/zip" style="display: none;">
+                        <span class="hint">A zip downloaded here: it joins the list, to be restored when you choose</span>
+                    </div>
+                    <div id="backup-list" class="backup-list"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Scanner</h3>
+                    <a class="btn btn-block" href="{{ settings_url }}">Camera, AI, sound and card database</a>
+                    <div class="hint">These settings are on the scanner page</div>
+                </div>
+                {% include '_program.html' %}
+            </div>
+        </aside>
+    </div>
+
+    <!-- Card image beside the row under the mouse -->
+    <img id="card-preview" class="card-preview" alt="" hidden>
+
+    {% include '_dialogs.html' %}
+
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=52"></script>
+</body>
+</html>

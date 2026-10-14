@@ -1,0 +1,23 @@
+{# The dialog that asks for one value - a location, a tag, a deck (library.js: valueDialog).
+   On the collection page and on the deck pages. #}
+    <!-- One value for a bulk action (location, tag, condition, deck) -->
+    <div id="value-modal" class="modal">
+        <div class="modal-content narrow">
+            <div class="modal-header">
+                <h2 id="value-title"></h2>
+                <span class="close" onclick="closeValueDialog(null)">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="value-input" id="value-label"></label>
+                    <input type="text" id="value-input" list="value-options" maxlength="60" autocomplete="off">
+                    <select id="value-select" hidden></select>
+                    <datalist id="value-options"></datalist>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" id="value-ok">OK</button>
+                    <button class="btn" onclick="closeValueDialog(null)">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>

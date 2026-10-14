@@ -1,0 +1,85 @@
+{# The header of every page (page: 'scanner', 'stations' - the cameras' overview - 'collection' or 'decks'): two rows. Brand, game and the settings
+   button above, the page links below them: all in the same place from page to page; only the part right of the
+   links (.topbar-page) is the page's own. The upper row scrolls away, the lower one stays (style.css: .topbar) #}
+<header class="topbar">
+    <div class="topbar-top">
+        <div class="topbar-inner">
+            <div class="brand">
+                <span class="brand-mark"><svg class="icon"><use href="#i-card"/></svg></span>
+                Card Scanner
+            </div>
+            {% if page == 'scanner' %}
+            <!-- Shown only when more than one game is supported -->
+            <select id="game-select" class="select game-select" title="Card game being scanned" hidden></select>
+            {% elif page in ('collection', 'decks') %}
+            <span class="game-label" id="game-label"></span>
+            {% endif %}
+            <button class="icon-btn topbar-settings" id="settings-open" onclick="openSettings()" title="Settings{{ ' and backups' if page == 'collection' }}"><svg class="icon"><use href="#i-settings"/></svg></button>
+        </div>
+    </div>
+    <div class="topbar-nav">
+        <div class="topbar-inner">
+            <nav class="page-nav">
+                <a class="page-link {{ 'is-active' if page in ('scanner', 'stations') }}" href="{{ url_for('index') }}" title="Scan cards">
+                    <svg class="icon"><use href="#i-camera"/></svg> Scanner
+                </a>
+                <a class="page-link {{ 'is-active' if page == 'collection' }}" href="{{ url_for('collection') }}" title="Manage the inventory, trades and backups">
+                    <svg class="icon"><use href="#i-list"/></svg> Collection
+                </a>
+                {# Hidden by the page's script for a game that has no deck formats #}
+                <a class="page-link {{ 'is-active' if page == 'decks' }}" id="page-link-decks" href="{{ url_for('decks') }}" title="Build decks, and see what your collection can build">
+                    <svg class="icon"><use href="#i-layers"/></svg> Decks
+                </a>
+            </nav>
+            {% if page == 'scanner' %}
+            <div class="stats topbar-page">
+                <!-- The one that opens something: an outline button -->
+                <button type="button" class="stat-box stat-button" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
+                    <span class="stat-label">Scanned</span>
+                    <span class="stat-value" id="inv-cards">0</span>
+                </button>
+                <!-- Counters to read: small tags -->
+                <div class="stat-group">
+                <div class="stat-box" id="db-stat" onclick="offerDataUpdate()">
+                    <span class="stat-label">Database</span>
+                    <span class="stat-value" id="db-cards">0</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Value</span>
+                    <span class="stat-value" id="total-value">$0.00</span>
+                </div>
+                <div class="stat-box" id="processing-queue-box" title="Cards waiting to be identified">
+                    <span class="stat-label">Processing</span>
+                    <span class="stat-value" id="processing-queue">0</span>
+                </div>
+                <div class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
+                    <span class="stat-label">Review</span>
+                    <span class="stat-value" id="review-count">0</span>
+                </div>
+                </div>
+            </div>
+            {% elif page == 'stations' %}
+            <div class="topbar-page"></div>
+            {% elif page == 'decks' %}
+            {# The deck list's three tabs; hidden while one deck is open (decks.js) #}
+            <nav class="tabs topbar-page" id="deck-tabs">
+                <button class="tab is-active" data-tab="mine"><svg class="icon"><use href="#i-layers"/></svg> My decks</button>
+                <button class="tab" data-tab="build"><svg class="icon"><use href="#i-spark"/></svg> What can I build?</button>
+                <button class="tab" data-tab="precons"><svg class="icon"><use href="#i-card"/></svg> Preconstructed decks</button>
+            </nav>
+            {% else %}
+            <nav class="tabs topbar-page" id="tabs">
+                {# Which collection the page shows: the cards on the shelf, or what the user has in
+                   MTG Arena (collection.js: showCollection). Hidden for a game without a digital client #}
+                <div class="segmented collection-kind" id="collection-kind" hidden>
+                    <button data-collection="paper" class="is-active" title="The cards you own on paper">Physical</button>
+                    <button data-collection="arena" title="The cards you have in MTG Arena, as the last import said">Arena</button>
+                </div>
+                <button class="tab is-active" data-tab="inventory"><svg class="icon"><use href="#i-list"/></svg> Inventory</button>
+                <button class="tab" data-tab="stats"><svg class="icon"><use href="#i-chart"/></svg> Statistics</button>
+                <button class="tab" data-tab="trades"><svg class="icon"><use href="#i-swap"/></svg> Trades</button>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</header>

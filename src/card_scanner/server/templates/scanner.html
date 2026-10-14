@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>{{ station.name + ' - ' if station }}Card Scanner</title>
+    {% include '_favicon.html' %}
+    {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
+       without the internet. The version is in the file's name, so a new one needs no ?v= #}
+    <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
+</head>
+<body>
+    {% include '_icons.html' %}
+
+    {% set page = 'scanner' %}
+    {% include '_topbar.html' %}
+    <!-- The station this page shows (none: the camera plugged into the server itself) -->
+    <script>window.STATION = {{ ({'id': station.id, 'name': station.name, 'camera': station.camera|default(false)} if station else none)|tojson }};</script>
+
+    <main class="container">
+        <div class="main-content">
+            <div class="column">
+                <section class="panel search-panel">
+                    <div class="search-row">
+                        <div class="input-group search-name">
+                            <label for="card-name">Card name</label>
+                            <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
+                        </div>
+                        <div class="input-group search-set">
+                            <label for="set-code">Set</label>
+                            <input type="text" id="set-code" placeholder="e.g. HOB" maxlength="5" autocapitalize="characters">
+                        </div>
+                        <div class="input-group">
+                            <label for="collector-number">Number</label>
+                            <input type="text" id="collector-number" placeholder="e.g. 123">
+                        </div>
+                        <div class="input-group search-treatment">
+                            <label for="card-treatment">Treatment</label>
+                            <select id="card-treatment">
+                                <option value="">Any</option>
+                                <option value="regular">Regular frame</option>
+                                <option value="borderless">Borderless</option>
+                                <option value="showcase">Showcase</option>
+                                <option value="extendedart">Extended Art</option>
+                                <option value="fullart">Full Art</option>
+                                <option value="retro">Retro Frame</option>
+                                <option value="etched">Etched</option>
+                                <option value="surgefoil">Surge Foil</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="searchCard()" id="search-btn" disabled>
+                            <svg class="icon"><use href="#i-search"/></svg> Search
+                        </button>
+                    </div>
+                </section>
+
+                {% if station and not station.camera %}
+                <!-- A station that only sends captured cards (a phone): no live view to show or control -->
+                <section class="panel">
+                    <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> {{ station.name }}</h2>
+                    <div class="hint">This station captures cards itself and sends them here - there is no live view. Its cards, its review queue and its activity are on this page.</div>
+                </section>
+                {% endif %}
+                <section class="panel video-section" {{ 'style="display: none"'|safe if station and not station.camera }}>
+                    <div class="panel-header">
+                        <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> {{ station.name if station else 'Camera' }}</h2>
+                        <div class="panel-actions">
+                            <label class="chip-toggle" title="Sleeved cards: judge cards by a fixed area of the image instead of their outline">
+                                <input type="checkbox" id="fixed-area-toggle">
+                                <span>Fixed area</span>
+                            </label>
+                            <button class="btn btn-small btn-ghost" onclick="startDrawArea()" id="draw-area-btn" title="Draw the capture area on the video">
+                                <svg class="icon"><use href="#i-area"/></svg> Area
+                            </button>
+                            <button class="btn btn-small btn-ghost" onclick="resetFocus()" id="reset-focus-btn" title="Find the sharpest focus and lock it (~7 s)">
+                                <svg class="icon"><use href="#i-focus"/></svg> Refocus
+                            </button>
+                        </div>
+                    </div>
+                    <div class="video-container">
+                        <img src="{{ url_for('video_feed', station=station.id) if station else url_for('video_feed') }}" alt="Camera Feed" id="video-feed">
+                        <!-- Drawing the fixed capture area (positioned over the image, see placeAreaLayer) -->
+                        <div class="area-layer" id="area-layer">
+                            <div class="area-rect" id="area-rect" hidden></div>
+                        </div>
+                        <div class="camera-missing" id="camera-missing" hidden>
+                            <strong>No camera</strong>
+                            <span id="camera-missing-reason"></span>
+                            <span class="camera-missing-hint">Connect it and the image appears here - no restart needed. The <a href="{{ url_for('collection') }}">collection</a> works without a camera.</span>
+                        </div>
+                        <div class="detection-status" id="detection-status">
+                            <div class="status-indicator" id="status-indicator">
+                                <span class="status-icon">⚪</span>
+                                <span class="status-text">Waiting for card...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Shown while drawing the fixed area - below the video, so all of it can be drawn on -->
+                    <div class="area-hint" id="area-hint" hidden>
+                        <span>Drag on the video around the card to draw the capture area</span>
+                        <button class="btn btn-small" onclick="useDetectedArea()">Use detected card</button>
+                        <button class="btn btn-small btn-ghost" onclick="cancelDrawArea()">Cancel</button>
+                    </div>
+
+                    <div class="controls">
+                        <button class="btn btn-primary" onclick="captureCard()" id="capture-btn">
+                            <svg class="icon"><use href="#i-camera"/></svg> Capture card
+                        </button>
+                        <button class="btn btn-autoscan" id="toggle-auto-scanning-btn" onclick="toggleAutoScanning()">
+                            <svg class="icon"><use href="#i-play"/></svg> Start auto scanning
+                        </button>
+                    </div>
+                    <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
+                </section>
+            </div>
+
+            <section class="panel card-info">
+                <div class="panel-header">
+                    <h2 class="section-title"><svg class="icon"><use href="#i-card"/></svg> Card</h2>
+                </div>
+                <!-- Review queue item: the capture, what the AI read, a manual search (renderReview) -->
+                <div id="review-panel" class="review-panel" hidden></div>
+                <div id="card-display">
+                    <div class="empty-state">
+                        <svg class="icon"><use href="#i-card"/></svg>
+                        No card scanned yet.<br>
+                        Capture or search for a card to begin.
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel log-section-bottom">
+            <div class="panel-header">
+                <h2 class="section-title"><svg class="icon"><use href="#i-list"/></svg> Activity</h2>
+                <button class="btn btn-small btn-ghost" onclick="document.getElementById('log-container').innerHTML = ''">Clear</button>
+            </div>
+            <div class="log-container" id="log-container"></div>
+        </section>
+    </main>
+
+    <!-- Settings Drawer -->
+    <div id="settings-drawer" class="drawer">
+        <aside class="drawer-panel">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="close" onclick="closeSettings()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Scanning</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Auto-detection</span>
+                            <span class="switch-desc">Find the card in the camera image by its outline</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-detection" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Add cards automatically</span>
+                            <span class="switch-desc">Auto-scanned cards go straight to the inventory (uncertain matches pause for review). Off: confirm each card.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-fast-scan" checked>
+                    </label>
+                    <div class="input-group">
+                        <label for="scan-location">Scan into location</label>
+                        <input type="text" id="scan-location" class="text-input" list="scan-location-options" maxlength="60"
+                               placeholder="None" autocomplete="off" onchange="setScanLocation(this.value)">
+                        <datalist id="scan-location-options"></datalist>
+                        <div class="hint">Cards added while scanning get this inventory location (a binder, a box) - change it when you start another pile</div>
+                    </div>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Camera autofocus</span>
+                            <span class="switch-desc">Off: the sharpest focus is found once and locked - no hunting when cards are dropped quickly. Refocus finds it again.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-autofocus" checked>
+                    </label>
+                    <div class="input-group">
+                        <label for="refocus-every">Check the focus every (captures)</label>
+                        <input type="number" id="refocus-every" class="text-input" min="0" max="100" step="1" inputmode="numeric">
+                        <div class="hint">With the focus locked: after this many captures the scanner tries a focus one step away and keeps the sharper one. Each check holds the next card back about a second. 0 = never</div>
+                    </div>
+                    <div class="input-group">
+                        <label for="camera-rotation">Camera rotation</label>
+                        <select id="camera-rotation" class="select">
+                            <option value="0">None</option>
+                            <option value="90">90° clockwise</option>
+                            <option value="270">90° counter-clockwise</option>
+                            <option value="180">180°</option>
+                        </select>
+                        <div class="hint">A camera mounted sideways puts the card's long side along the image's long side: more detail per card and room for a taller pile</div>
+                    </div>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Debug trace</span>
+                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-debug-trace">
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Debug mode</span>
+                            <span class="switch-desc" id="debug-mode-desc">The web server's debugger, and a request log in data/logs/requests.log; applies after a restart</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-debug-mode">
+                    </label>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Stations</h3>
+                    <div id="stations-list"></div>
+                    <div class="hint" id="stations-hint"></div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Sound</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Sound effects</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-audio" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Capture beep</span>
+                            <span class="switch-desc">When a card's picture is taken: the signal to drop the next card</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-sound-capture" checked>
+                    </label>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Card added</span>
+                            <span class="switch-desc">When a card goes into the scanned cards</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-sound-added" checked>
+                    </label>
+                    <div class="volume-row">
+                        <label for="audio-volume">Volume</label>
+                        <input type="range" id="audio-volume" min="0" max="100" value="30">
+                        <span id="volume-value">30%</span>
+                        <button onclick="testAudio()" class="btn btn-small">Test</button>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Vision AI</h3>
+                    <label class="switch-row">
+                        <span class="switch-text">
+                            <span class="switch-title">Read with OCR first</span>
+                            <span class="switch-desc" id="ocr-desc">Faster: light-ocr reads each card on this computer; the AI is asked only when that isn't a certain match</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="toggle-ocr">
+                    </label>
+                    <div class="input-group">
+                        <label for="ai-provider">Provider</label>
+                        <select id="ai-provider">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic Claude</option>
+                            <option value="local">Local (self-hosted)</option>
+                        </select>
+                    </div>
+                    <div class="input-group" id="ai-credential-group">
+                        <label for="ai-credential" id="ai-credential-label">API key</label>
+                        <div class="model-row">
+                            <input type="password" id="ai-credential" class="text-input" autocomplete="off" spellcheck="false">
+                            <button class="btn btn-small" id="save-credential-btn" onclick="saveCredential()">Save</button>
+                        </div>
+                        <div class="hint" id="ai-credential-hint"></div>
+                    </div>
+                    <div class="input-group">
+                        <label for="ai-model">Model</label>
+                        <div class="model-row">
+                            <select id="ai-model" class="select">
+                                <option value="">Loading models...</option>
+                            </select>
+                            <button id="refresh-models-btn" onclick="refreshAIModels()" class="icon-btn" title="Refresh available models">
+                                <svg class="icon"><use href="#i-refresh"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <span class="field-label">Prompts</span>
+                        <button class="btn btn-block" onclick="openPromptEditor()">Edit prompts</button>
+                        <div class="hint" id="prompt-summary">What the AI is asked to read on each card - adjustable per model</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Card database</h3>
+                    <button id="update-database-btn" onclick="updateDatabase()" class="btn btn-block">Update card database</button>
+                    <div class="hint" id="database-source-hint">Downloads the latest card data and prices from Scryfall (a few minutes)</div>
+                    <button id="rebuild-database-btn" onclick="rebuildDatabase()" class="btn btn-block">Rebuild database schema</button>
+                    <div class="hint">Reorders columns and rebuilds indexes (~30 sec)</div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Backups</h3>
+                    <a class="btn btn-block" href="{{ url_for('collection') }}#settings">Back up or restore your cards</a>
+                    <div class="hint">The collection, the scanned cards and the decks - on the collection page</div>
+                </div>
+                {% include '_program.html' %}
+            </div>
+        </aside>
+    </div>
+
+    <!-- Inventory Modal -->
+    <div id="inventory-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2>Scanned cards</h2>
+                    <div class="modal-subtitle">Not in the collection yet - check them, then add them</div>
+                </div>
+                <span class="close" onclick="closeInventory()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="inventory-controls">
+                    <input type="text" id="inventory-search" placeholder="Filter by name, set, or rarity..." oninput="filterInventory()">
+                    <!-- Whose scanned cards: every camera's, or one's (shown when there are stations) -->
+                    <select id="inventory-camera" class="select" onchange="loadInventory()" title="Camera" hidden></select>
+                    <select id="inventory-sort" class="select" onchange="setInventorySort(this.value)" title="Sort">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="name">Name A–Z</option>
+                        <option value="price_desc">Price: high to low</option>
+                        <option value="price_asc">Price: low to high</option>
+                        <option value="value_desc">Total value (price × qty)</option>
+                        <option value="quantity_desc">Quantity: most first</option>
+                        <option value="rarity">Rarity: mythic first</option>
+                        <option value="set">Set and number</option>
+                    </select>
+                    <button class="btn btn-small btn-primary" onclick="addToCollection()" title="Move these cards to your collection">Add to collection</button>
+                    <button class="btn btn-small" onclick="refreshInventory()">Refresh</button>
+                    <button class="btn btn-small btn-danger" id="inventory-clear-btn" onclick="clearInventory()" title="Delete the scanned cards shown: one camera's, or everyone's">Clear all</button>
+                </div>
+                <div id="inventory-stats" class="inventory-stats"></div>
+                <div id="inventory-list" class="inventory-list">
+                    <div class="empty-state">Loading inventory...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt editor -->
+    <div id="prompt-modal" class="modal">
+        <div class="modal-content prompt-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>AI prompts</h2>
+                    <div class="modal-subtitle" id="prompt-model"></div>
+                </div>
+                <span class="close" onclick="closePromptEditor()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="radio-group" id="prompt-kinds"></div>
+
+                <div class="prompt-source" id="prompt-source"></div>
+                <textarea id="prompt-text" class="text-input prompt-text" spellcheck="false" rows="16"></textarea>
+                <details class="prompt-format">
+                    <summary>Added automatically after your text (answer format)</summary>
+                    <pre id="prompt-format"></pre>
+                </details>
+
+                <div class="prompt-actions">
+                    <button class="btn" id="prompt-test-btn" onclick="testPrompt()" title="Runs the AI on the last captured card with the text above, without saving">Test on last capture</button>
+                    <span class="spacer"></span>
+                    <button class="btn btn-ghost" id="prompt-reset-btn" onclick="resetPrompt()">Restore default</button>
+                    <button class="btn" onclick="savePrompt('all')">Save for all models</button>
+                    <button class="btn btn-primary" id="prompt-save-model-btn" onclick="savePrompt('model')">Save for this model</button>
+                </div>
+
+                <div class="prompt-test" id="prompt-test" hidden></div>
+            </div>
+        </div>
+    </div>
+
+    {% include '_dialogs.html' %}
+
+    <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=57"></script>
+</body>
+</html>

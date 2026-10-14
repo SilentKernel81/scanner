@@ -1,0 +1,10 @@
+{# The pages' icon in a browser tab: a card's outline on the brand colour, like the header's
+   brand mark. Included in the <head> of every page, so that it is said once.
+   - favicon.svg is what current browsers use (sharp at any size);
+   - favicon.ico (16 to 64 pixels) is for the rest, and is also what a browser asks for at
+     /favicon.ico when it opens an address that is not one of these pages (server/pages.py
+     answers that address with the same file).
+   Both are in static/, like everything the pages load: nothing comes from the internet.
+   A changed icon needs a new ?v= here, as a changed script does. #}
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}?v=1" sizes="any">
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v=1" type="image/svg+xml">

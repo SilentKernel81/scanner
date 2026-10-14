@@ -1,7 +1,8 @@
 #!/bin/bash
 # ============================================================================
-# Builds dist/Card_Scanner-<arch>.AppImage: the app with its own Python, Python packages,
-# Node.js and the light-ocr reader - nothing to install on the computer that runs it
+# Builds dist/Card_Scanner-<arch>.AppImage: the server and the camera station with their own
+# Python, Python packages, Node.js and the light-ocr reader - nothing to install on the
+# computer that runs it
 # (v4l2-ctl from v4l-utils is still used when present: focus lock and sweeps).
 #
 # Needs uv, curl and tar; downloads Node.js and appimagetool into build/appimage/cache once.
@@ -51,13 +52,15 @@ rm -rf "$APPDIR/usr/python/include" "$APPDIR/usr/python/share" \
 "$PYTHON" --version
 
 step "Python packages"
+# The server's, and the camera station's that runs beside it (requirements-client.txt)
 uv pip install --python "$PYTHON" --break-system-packages --link-mode copy --compile-bytecode \
-    -r "$ROOT/requirements.txt"
+    -r "$ROOT/requirements.txt" -r "$ROOT/requirements-client.txt"
 
 step "The app"
-# What git knows or would add (not data/, venv/, node_modules/), without docs and scripts
+# What git knows or would add (not data/, venv/, node_modules/): the launchers, config.yaml and
+# the package in src/ (with the OCR reader's package.json) - without docs, scripts and tests
 (cd "$ROOT" && git ls-files --cached --others --exclude-standard -- \
-    '*.py' config.yaml LICENSE templates static games ocr \
+    app.py station.py config.yaml LICENSE src \
     | while read -r file; do [ -f "$file" ] && cp --parents "$file" "$APP/"; done)
 "$PYTHON" -m compileall -q "$APP"
 
@@ -70,7 +73,7 @@ echo "${line%% *}  $CACHE/$node_file" | sha256sum -c -
 rm -rf "$BUILD/node" && mkdir "$BUILD/node"
 tar -xJf "$CACHE/$node_file" -C "$BUILD/node" --strip-components=1
 cp "$BUILD/node/bin/node" "$APP/bin/node"
-(cd "$APP/ocr" && PATH="$BUILD/node/bin:$PATH" npm ci --omit=dev --no-audit --no-fund)
+(cd "$APP/src/ocr" && PATH="$BUILD/node/bin:$PATH" npm ci --omit=dev --no-audit --no-fund)
 "$APP/bin/node" --version
 
 step "AppImage"

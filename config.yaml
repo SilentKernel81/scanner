@@ -4,9 +4,13 @@
 
 # Camera Settings
 camera:
-  type: auto  # Options: 'auto', 'picamera', 'usb'
-  # USB camera: auto (the first one that is not a laptop's own), or N for /dev/videoN.
-  # Choosing a camera in Settings overrides this
+  # A camera station's camera (station_client.py; the server has none): 'auto' - a USB camera
+  # if there is one, else a Raspberry Pi camera - or 'usb' / 'picamera'. Also SCANNER_CAMERA,
+  # and the station's setup page. 'remote': this machine has no camera - scripts/start.sh and
+  # scripts/deploy.sh then start and install only the server
+  type: auto
+  # auto: the first USB camera that is not a laptop's own. Or /dev/videoN's number (check with
+  # v4l2-ctl --list-devices); the station's setup page and SCANNER_CAMERA_INDEX choose another
   usb_index: auto
   resolution: [2560, 1440]
   preview_resolution: [640, 480]
@@ -15,6 +19,10 @@ camera:
   # card's long side runs along the frame's long side: more pixels per card and more room for
   # the pile to grow. Also settable in Settings (saved in data/settings.json)
   rotate: 0
+  # Raspberry Pi camera module only: read out just this part of the sensor's image, pixel for
+  # pixel (fractions of the full image: x1, y1, x2, y2) - e.g. the box under a wide lens.
+  # Without it the whole image is scaled to `resolution`
+  # crop: [0.33, 0.08, 0.67, 0.75]
 
 # Detection Settings
 detection:
@@ -47,25 +55,36 @@ vision_ai:
   # Longest side (px) of the card image sent for identification. 1024 was as accurate as
   # 2048 and ~35% faster with qwen3.5 (fewer image tokens); 768 lost accuracy
   image_size: 1024
+  # Cards the vision AI works on at the same time (those OCR could not confirm). More only
+  # helps as far as the provider answers requests in parallel (Ollama: OLLAMA_NUM_PARALLEL)
+  workers: 3
 
   # API keys are read from environment variables (GEMINI_API_KEY, OPENAI_API_KEY,
   # ANTHROPIC_API_KEY) - put them in .env (see .env.example)
 
   # Local AI Settings (self-hosted models)
   local:
-    endpoint: http://localhost:11434/v1/chat/completions  # or enter it in Settings -> Vision AI
+    # Ollama on this machine. Elsewhere: Settings -> Vision AI, or LOCAL_AI_ENDPOINT
+    # (the Docker image sets it to host.docker.internal)
+    endpoint: http://localhost:11434/v1/chat/completions
     model: qwen3.5:9b  # default until a model is chosen in Settings
+
+# Stations: phones / computers with a camera that capture cards and send them here
+stations:
+  # When set, a station must send this token with each capture (header X-Station-Token).
+  # Also from the environment: SCANNER_STATION_TOKEN
+  token: ""
 
 # Flask Settings
 flask:
-  # auto: the whole network (0.0.0.0; there is no login), but this computer only (127.0.0.1)
-  # when started as a desktop program (the AppImage, --app). Or an address to listen on.
-  # The switch in Settings overrides this
+  # auto: the whole network (0.0.0.0; there is no login), but this computer only (127.0.0.1) when
+  # started as a desktop program (the AppImage, --app). Or an address to listen on. The switch
+  # "Reachable from other devices" in Settings overrides this
   host: auto
   port: 5000
-  # Names the pages may be opened under, besides localhost, IP addresses and this computer's
-  # own name (alone or with .local, .lan, .home, .home.arpa, .internal, .localdomain) -
-  # e.g. behind a reverse proxy: [cards.example.org]
+  # Names the pages and stations may reach the server under, besides localhost, IP addresses
+  # and this computer's own name (alone or with .local, .lan, .home, .home.arpa, .internal,
+  # .localdomain) - e.g. behind a reverse proxy or a Docker service name: [cards.example.org]
   allowed_hosts: []
   debug: false
   # secret_key: signs Flask's cookies; by default a random one is made in data/secret_key
@@ -73,11 +92,6 @@ flask:
 # API URLs
 api:
   scryfall_bulk: https://api.scryfall.com/bulk-data/default-cards
-
-# Deck ideas from other sites (EDHREC, MTGJSON, ...): their answers are kept in
-# data/web_cache.db up to this size (MiB), the oldest going first
-deck_ideas:
-  cache_mb: 200
 
 # Database
 database:

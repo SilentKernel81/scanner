@@ -1,0 +1,23 @@
+# Runtime data and secrets stay out of the image (data/ and scanned_cards/ are volumes)
+data/
+scanned_cards/
+station_captures/
+.env
+.env.*
+!.env.example
+
+# Built inside the image
+venv/
+src/ocr/node_modules/
+# ("**/": in every folder - a pattern without it only matches in the top folder, and the
+# station images copy src/card_scanner/station as a folder, the laptop's compiled files with it)
+**/__pycache__/
+**/*.pyc
+
+.git/
+.claude/
+
+# The AppImage build (scripts/build-appimage.sh) and its result
+build/
+dist/
+packaging/

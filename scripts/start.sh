@@ -26,6 +26,7 @@ echo ""
 PROVIDER=""
 MODEL=""
 SHOW_HELP=false
+NO_STATION=0   # --no-station: don't start this machine's camera station beside the server
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
         -m|--model)
             MODEL="$2"
             shift 2
+            ;;
+        --no-station)
+            NO_STATION=1
+            shift
             ;;
         -h|--help)
             SHOW_HELP=true
@@ -56,6 +61,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Options:"
     echo "  -p, --provider PROVIDER   Set AI provider (gemini, openai, anthropic, local)"
     echo "  -m, --model MODEL         Set specific model to use"
+    echo "  --no-station              Only the server: no camera on this machine"
     echo "  -h, --help                Show this help message"
     echo ""
     echo "Examples:"
@@ -165,7 +171,8 @@ if [ -f "$PROJECT_DIR/data/cards_database.db" ]; then
     DB_SIZE=$(du -h "$PROJECT_DIR/data/cards_database.db" | cut -f1)
     echo -e "${GREEN}✓ Card database:${NC} $DB_SIZE"
 else
-    echo -e "${YELLOW}⚠ Card database not found${NC} - the app downloads it when it starts (a few minutes)"
+    echo -e "${YELLOW}⚠ Card database not found${NC}"
+    echo -e "  Run: python3 scripts/setup_database.py"
 fi
 
 # Check YAML config
@@ -182,8 +189,45 @@ echo -e "${GREEN}Starting Card Scanner...${NC}"
 echo -e "${BLUE}================================${NC}"
 echo ""
 echo -e "Web interface: ${GREEN}http://0.0.0.0:5000${NC}"
+echo -e "Camera setup:  ${GREEN}http://0.0.0.0:8080${NC}"
 echo -e "Press Ctrl+C to stop"
 echo ""
 
 cd "$PROJECT_DIR"
+# The code is in src/: for the `python3 -c "from card_scanner.config import ..."` lines below
+# (app.py and station.py find it by themselves)
+export PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+
+# The server has no camera of its own: this machine's camera is read by a camera station,
+# a second program that sends its cards to the server. It is started here in the background
+# and stopped again when the server ends. It keeps trying until the server answers, so it
+# does not matter that it is started first.
+# --no-station: only the server (the cameras are on other machines)
+PORT=$(python3 -c "from card_scanner.config import Config; print(Config.PORT)" 2>/dev/null || echo 5000)
+# camera.type: remote in config.yaml used to tell the server "no camera on this machine":
+# it still means that here - only the server is started
+if [ "$(python3 -c "from card_scanner.config import Config; print(str(Config.CAMERA_TYPE).lower())" 2>/dev/null)" = "remote" ]; then
+    NO_STATION=1
+    echo "No camera on this machine (camera.type: remote): starting the server only"
+fi
+if [ "$NO_STATION" != 1 ]; then
+    python3 station.py --server "http://localhost:${PORT}" &
+    STATION_PID=$!
+    # When this script ends - Ctrl+C or the server stopping - the station is asked to stop
+    # too (it then lets go of the camera), and given 10 seconds to do so. A station that has
+    # not ended by then is killed: this script must never hang, and nothing is lost by it -
+    # captures that are not on the server yet are on disk and sent at the next start.
+    stop_station() {
+        kill -INT "$STATION_PID" 2>/dev/null || return 0
+        for _ in $(seq 1 50); do
+            kill -0 "$STATION_PID" 2>/dev/null || { wait "$STATION_PID" 2>/dev/null; return 0; }
+            sleep 0.2
+        done
+        echo "The camera station did not stop by itself - ending it"
+        kill -KILL "$STATION_PID" 2>/dev/null
+        wait "$STATION_PID" 2>/dev/null
+    }
+    trap stop_station EXIT
+fi
+
 python3 app.py

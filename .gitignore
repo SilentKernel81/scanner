@@ -1,261 +1,88 @@
-# MTG Card Scanner - Git Ignore File
+# What Git leaves alone in this project. Everything a running scanner writes is in data/,
+# scanned_cards/ and station_captures/ (see data/README.txt): none of it belongs in Git.
 
-# ============================================================================
-# Python
-# ============================================================================
-
-# Byte-compiled / optimized / DLL files
+# --- Python ---
 __pycache__/
 *.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Virtual environments
 venv/
-env/
-ENV/
-env.bak/
-venv.bak/
 
-# ============================================================================
-# Application Data
-# ============================================================================
-
-# Database
+# --- The server's data (data/README.txt stays in Git, the rest does not) ---
+# Card data and, in the same file, the collection, decks and review queue
 data/cards_database.db
-data/cards_database.db-journal
-
-# Inventory (user data - don't commit)
+# Scanned cards, captures waiting to be read, pictures, backups, uploads
+data/scan_inventory.db*
+data/pending_captures.db*
 data/captures/
 data/review/
 data/backups/
-data/scan_inventory.db*
 data/uploads/
+data/debug_frames/
+# Exports written here by older versions
 data/card_inventory.csv
 data/card_inventory_export_*.csv
 data/moxfield_export_*.csv
-
-# User settings (preferences - don't commit)
+# Everyone's choices, each station's settings, edited prompts
 data/settings.json
+data/stations.json
 data/prompts.json
-data/debug_frames/
-
+# Answers of other sites, cached: disposable, rebuilt as needed
+data/web_cache.db*
+# SQLite's files beside a database in use
+*.db-journal
+*.db-wal
+*.db-shm
 # Logs
 data/logs/
 *.log
 
-# Scanned card images
+# --- A camera station's own files ---
+# Its saved settings (can hold the server's token) and its setup page's password hash
+data/station.json
+data/station_login.json
+# Captures that are not on the server yet
+station_captures/
+
+# --- Capture pictures the server received ---
 scanned_cards/*.jpg
-scanned_cards/*.png
 scanned_cards/*.jpeg
-!scanned_cards/.gitkeep
+scanned_cards/*.png
+scanned_cards/*.upload.json
 
-# Models
-models/*.pt
-models/*.pth
-models/*.onnx
-!models/.gitkeep
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# ============================================================================
-# Environment & Secrets
-# ============================================================================
-
-# Environment variables (contains API keys!)
+# --- Secrets ---
+# API keys and station settings for Docker (see .env.example, .env.station.example)
 .env
 .env.local
 .env.*.local
-
-# API keys
-*_api_key.txt
-secrets.txt
-
-# ============================================================================
-# IDE & Editor
-# ============================================================================
-
-# Visual Studio Code
-.vscode/
-*.code-workspace
-
-# PyCharm
-.idea/
-*.iml
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# Vim
-*.swp
-*.swo
-*~
-.vim/
-
-# Emacs
-*~
-\#*\#
-.\#*
-
-# ============================================================================
-# Operating System
-# ============================================================================
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-
-# Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-.directory
-.Trash-*
-
-# ============================================================================
-# Packaging & Distribution
-# ============================================================================
-
-# Package archives
-scanner-v*.tar.gz
-scanner-v*.zip
-scanner-backup-*.tar.gz
-mtg-scanner-docker.tar.gz
-
-# Backup files
-*.backup
-*.bak
-*.old
-
-# ============================================================================
-# Docker
-# ============================================================================
-
-# Docker volumes
-docker-volumes/
-
-# ============================================================================
-# Development
-# ============================================================================
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath
-*.sage.py
-
-# Spyder
-.spyderproject
-.spyproject
-
-# Rope
-.ropeproject
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# ============================================================================
-# Project Specific
-# ============================================================================
-
-# Test output
-test_output/
-test_images/
-
-# Temporary development files
-scratch/
-experiments/
-
-# Process ID files
-*.pid
-gunicorn.pid
-
-# SQLite databases (except the main one if you want to include it)
-*.db-journal
-*.db-wal
-*.db-shm
-
+# ... but not this link to it: Docker Compose looks for .env beside the compose files
+!deploy/.env
 # API keys entered in the web interface
 data/api_keys.env
 data/secret_key
 data/app.lock
+*_api_key.txt
+secrets.txt
 
-# Claude Code local settings (allowed commands can contain API keys)
-.claude/settings.local.json
-
-# light-ocr reader (npm install in ocr/)
+# --- The OCR reader's packages (npm install in src/ocr/) ---
 node_modules/
+
+# --- Archives made here ---
+# scripts/backup.sh writes to ~/scanner-backups, but a copy may be put here
+scanner-backup-*.tar.gz
+
+# --- Editors, operating systems ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Kept on this machine only ---
+# Claude Code's local settings (allowed commands can contain API keys)
+.claude/settings.local.json
+# Review notes, not part of the project
+CODE_REVIEW.md
+
+# AppImage build (scripts/build-appimage.sh)
+build/
+dist/
