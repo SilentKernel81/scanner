@@ -400,7 +400,7 @@ chmod +x Card_Scanner-x86_64.AppImage
 ```
 
 - **Your files** (collection, settings, keys, backups, logs, captures) are in
-  `~/.local/share/mtg-scanner`; `MTG_SCANNER_HOME=/some/folder` chooses another. A
+  `~/.mtg-scanner`; `MTG_SCANNER_HOME=/some/folder` chooses another. A
   `config.yaml` there is laid over the shipped one - it only needs the settings you change.
 - **Only this computer can open the pages** until "Reachable from other devices" is switched
   on in Settings -> Program (applies after a restart). The station's setup page

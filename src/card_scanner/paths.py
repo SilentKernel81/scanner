@@ -7,7 +7,7 @@
 #         units and every backup name these folders there (/app in the images).
 #   USER_DIR  what belongs to the person who runs it: data/, scanned_cards/, station_captures/,
 #         .env and an optional config.yaml laid over the shipped one. TOP in a checkout and in
-#         the Docker images; the folder ~/.local/share/mtg-scanner when the program is
+#         the Docker images; the dotfolder ~/.mtg-scanner when the program is
 #         packaged (an AppImage cannot write beside its code), MTG_SCANNER_HOME chooses it.
 #   CODE  the code: this folder, the package card_scanner. Also what only the code uses -
 #         the server's pages (server/templates, server/static), the station's setup page.
@@ -50,8 +50,7 @@ def _user_dir():
         return Path(override).expanduser().absolute()
     if not _packaged():
         return TOP
-    data_home = os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share'
-    return Path(data_home) / APP_NAME
+    return Path.home() / f'.{APP_NAME}'  # a dotfolder of its own: easy to find, to back up, to delete
 
 
 USER_DIR = _user_dir()
