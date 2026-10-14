@@ -229,23 +229,22 @@ class _Columns(dict):
 
 def _writes(method):
     """
-    A method that changes the inventory: under the lock, and what it had changed when it fails
-    is rolled back - left in the connection it went in with the next commit of something else.
-    (The methods commit themselves; nested calls commit as they always did.)
+    A method that changes the inventory: one transaction (Transactional) - all of it, or when it
+    fails none of it, whatever other writing methods it calls on the way.
     """
     @functools.wraps(method)
     def wrapped(self, *args, **kwargs):
-        with self._lock:
-            try:
-                return method(self, *args, **kwargs)
-            except BaseException:
-                self._rollback()
-                raise
+        with self._transaction():
+            return method(self, *args, **kwargs)
     return wrapped
 
 
-class InventoryManager:
-    """Card inventory (table `inventory` in the card database file), for every game"""
+class InventoryManager(storage.Transactional):
+    """
+    Card inventory (table `inventory` in the card database file), for every game. A method that
+    changes it is `@_writes`: one transaction, committed by the outermost one - where one calls
+    another, the whole is one edit.
+    """
 
     def __init__(self, db_file=None, log_callback=None):
         self.db_file = db_file or Config.DATABASE_FILE
@@ -264,15 +263,29 @@ class InventoryManager:
             self._commit()
 
     def _commit(self):
-        """Commit, and only then delete the thumbnails of the captures that went with it: rolled
-        back, their rows are there again and still need the files"""
+        """
+        Commit - unless inside an edit (`_writes`, `_transaction`), whose outermost block does
+        it: a nested method that commits would make the first half of an edit permanent. The
+        `_commit()` calls in the methods are for the code that runs outside one (start-up,
+        take_from's two files).
+        """
+        if self._transaction_depth:
+            return
         self.conn.commit()
+        self._committed()
+
+    def _committed(self):
+        """Only after a commit the thumbnails of the captures that went with it are deleted:
+        rolled back, their rows are there again and still need the files"""
         doomed, self._doomed = self._doomed, []
         for file in doomed:
             (CAPTURES_DIR / file).unlink(missing_ok=True)
 
     def _rollback(self):
         self.conn.rollback()
+        self._rolled_back()
+
+    def _rolled_back(self):
         self._doomed = []
 
     def log(self, message, level="info"):
@@ -1088,8 +1101,9 @@ class InventoryManager:
             raise ValueError(f"{action} needs a value")
         changed = 0
         with self._lock:
-            # Each entry is committed on its own: what would stop part way is refused before
-            # anything changes - whole stacks that go or move while a trade holds copies of them
+            # One edit: all the entries or none. What the database would refuse part way is
+            # refused before anything changes - whole stacks that go or move while a trade holds
+            # copies of them - so the user gets the message instead of a rolled-back error
             if action in ('delete', 'location') and row_ids and self.conn.execute(
                     f"SELECT 1 FROM trade_cards WHERE inventory_id IN ({', '.join('?' * len(row_ids))})",
                     tuple(row_ids)).fetchone():
