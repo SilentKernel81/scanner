@@ -1678,8 +1678,12 @@ location - every entry of the card counts. The deck builder has the same idea as
 builder goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
 There used to be a second tick, **No use in my decks**, that also hid the cards EDHREC lists for
 the commander of one of the decks; it was taken off the filters on 2026-10-14 because it needs the
-internet (the page waited for EDHREC). The route is kept, no page calls it now, for a version
-on the Trades tab (`GET /api/inventory/suggested` →
+internet (the page waited for EDHREC) and became **Find cards to trade or sell** on the Trades
+tab (`collection.js`: `findSpareCards`, `spareCards`, `renderSpare`): asked by its button, never
+on page load; the list is the entries with no deck and no EDHREC suggestion, with the copies no
+trade holds, most valuable first, for one location or all (`spare-location`: before the search every location
+of the collection, after it those with spare cards and how many); its ticks go to `setAsideForTrade(null, ids)` like the
+Inventory's (`GET /api/inventory/suggested` →
 `Recommendations.commander_cards` per deck with a commander, matched to the owned names by front
 face; asked when the tick is set, one request per deck the first time, then from the 7-day
 cache). Decks EDHREC has no answer for come back in `unknown` and are named in a notification.

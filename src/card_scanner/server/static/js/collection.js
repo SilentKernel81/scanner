@@ -43,6 +43,7 @@ async function showCollection(kind) {
     document.body.classList.toggle('arena-view', inArena());
     $('arena-bar').hidden = !inArena();
     selected.clear();
+    suggested = null;   // the spare cards were worked out for the other view's cards
     if (inArena() && currentTab === 'trades') showTab('inventory');   // trades are of paper cards
     await loadArenaInfo();
     await loadInventory();
@@ -223,6 +224,7 @@ async function loadInventory() {
     fillFilterOptions();
     if (savedFilters) restoreFilters();
     applyFilters();
+    renderSpare();
     if (currentTab === 'stats') renderStats();
 }
 
@@ -1055,11 +1057,121 @@ function renderTrades() {
     document.querySelectorAll('#trades-done details').forEach(item => { item.open = unfolded.has(item.dataset.trade); });
 }
 
-async function setAsideForTrade(card = null) {
+// -- Cards to trade or sell: no deck uses them, and EDHREC does not list them for a commander ----
+
+let suggested = null;        // {card name: [decks whose commander it is played with]}, once EDHREC was asked
+let spareUnknown = [];       // decks EDHREC had no answer for: their cards are not counted
+let spareTicked = new Set(); // entry ids ticked in the list
+
+function spareBase() {
+    // The entries no deck uses and EDHREC does not suggest, with the copies that no trade holds
+    if (!suggested) return [];
+    return inventory.map(card => ({...card, free: card.quantity - (card.trades || []).reduce((sum, trade) => sum + trade.quantity, 0)}))
+        .filter(card => card.free > 0 && !card.decks.length && !suggested[card.name])
+        .sort((a, b) => b.price * b.free - a.price * a.free || a.name.localeCompare(b.name));
+}
+
+function spareCards() {
+    // ... of the place chosen above the list ('' = every place, '(none)' = no location)
+    const location = $('spare-location').value;
+    return spareBase().filter(card => !location || card.location === (location === '(none)' ? '' : location));
+}
+
+function renderSpareLocations() {
+    // The places to choose from, always there: with the spare cards found, those that have
+    // some (with how many entries); before that, every place of the collection. The choice
+    // stays while it is on the list
+    const select = $('spare-location');
+    const chosen = select.value;
+    let options;
+    if (suggested) {
+        const places = new Map();
+        for (const card of spareBase()) places.set(card.location, (places.get(card.location) || 0) + 1);
+        options = [['', `All locations (${[...places.values()].reduce((sum, count) => sum + count, 0)})`],
+            ...(places.has('') ? [['(none)', `(none) (${places.get('')})`]] : []),
+            ...[...places].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`])];
+    } else {
+        options = [['', 'All locations'], ['(none)', '(none)'], ...knownLocations().map(place => [place, place])];
+    }
+    select.innerHTML = optionsHtml(options);
+    select.value = options.some(([value]) => value === chosen) ? chosen : '';
+}
+
+function renderSpare() {
+    const list = $('spare-list');
+    renderSpareLocations();
+    if (!suggested) {
+        list.innerHTML = '';
+        $('spare-summary').textContent = '';
+        $('spare-aside').disabled = true;
+        return;
+    }
+    const cards = spareCards();
+    // Cards that are gone (set aside, sold) leave the ticks
+    spareTicked = new Set([...spareTicked].filter(id => cards.some(card => card.id === id)));
+    const value = cards.reduce((sum, card) => sum + card.price * card.free, 0);
+    $('spare-summary').innerHTML = `${plural(cards.length, 'entry', 'entries')} · ${plural(cards.reduce((sum, card) => sum + card.free, 0), 'free copy', 'free copies')} · <strong>${money(value)}</strong>`
+        + (spareUnknown.length ? ` · <span class="hint">no EDHREC data for ${escapeHtml(spareUnknown.join(', '))} - their cards are not counted</span>` : '');
+    list.innerHTML = cards.map(card => {
+        const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+                       card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+        return `
+        <label class="trade-row spare-row" data-id="${card.id}">
+            <span class="trade-qty"><strong>${card.free}×</strong>${card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : ''}</span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span></span>
+            <span class="summary">${money(card.price * card.free)}</span>
+            <input type="checkbox" class="spare-check" ${spareTicked.has(card.id) ? 'checked' : ''}>
+        </label>`;
+    }).join('') || '<div class="empty-state">Every card is in a deck, suggested for one, or already set aside.</div>';
+    $('spare-all').checked = !!cards.length && spareTicked.size === cards.length;
+    $('spare-aside').disabled = !spareTicked.size;
+    $('spare-aside').textContent = spareTicked.size ? `Set ${plural(spareTicked.size, 'entry', 'entries')} aside for a trade` : 'Set aside for a trade';
+}
+
+async function findSpareCards() {
+    // Slow the first time: one request per deck with a commander (then from the 7-day cache)
+    $('spare-find').disabled = true;
+    $('spare-list').innerHTML = '<div class="hint">Asking EDHREC about your commanders...</div>';
+    const data = await api('/api/inventory/suggested');
+    $('spare-find').disabled = false;
+    if (!data) return renderSpare();
+    suggested = data.cards;
+    spareUnknown = data.unknown;
+    spareTicked.clear();
+    $('spare-find').textContent = 'Ask EDHREC again';
+    renderSpare();
+}
+
+function bindSpareEvents() {
+    $('spare-find').addEventListener('click', findSpareCards);
+    $('spare-list').addEventListener('change', event => {
+        const row = event.target.closest('.spare-row');
+        if (!row || !event.target.classList.contains('spare-check')) return;
+        const id = parseInt(row.dataset.id);
+        if (event.target.checked) spareTicked.add(id); else spareTicked.delete(id);
+        renderSpare();
+    });
+    $('spare-location').addEventListener('change', () => {
+        spareTicked.clear();   // what is ticked stays to the place that was shown
+        renderSpare();
+    });
+    $('spare-all').addEventListener('change', event => {
+        spareTicked = new Set(event.target.checked ? spareCards().map(card => card.id) : []);
+        renderSpare();
+    });
+    $('spare-aside').addEventListener('click', () => {
+        const ids = [...spareTicked];
+        spareTicked.clear();
+        setAsideForTrade(null, ids);
+    });
+}
+
+async function setAsideForTrade(card = null, chosen = null) {
     // Every free copy of the selected entries - or of one row's, from its own button; how many
     // of each is changed on the Trades tab
     if (inArena()) return;   // a trade is of paper cards: an Arena entry's id means another card there
-    const ids = card ? [card.id] : [...selected];
+    // chosen: the ids ticked in the Trades tab's list of spare cards (it leaves the Inventory's ticks alone)
+    const ids = chosen || (card ? [card.id] : [...selected]);
     const open = trades.filter(trade => trade.status === 'open').map(trade => trade.name);
     const name = await valueDialog({title: `Set ${card ? card.name : entriesText(ids.length)} aside for a trade`,
         label: open.length ? 'Trade (one of the open ones, or a new name)' : 'Name of the trade (who it is with)',
@@ -1069,7 +1181,7 @@ async function setAsideForTrade(card = null) {
     if (!data) return;
     notify(`${plural(data.cards, 'card')} set aside for "${data.name}"`
         + (data.skipped ? ` - ${entriesText(data.skipped)} had no copy left to give` : ''), data.cards ? 'success' : 'warning');
-    if (!card) selected.clear();  // a row's button leaves what is ticked alone
+    if (!card && !chosen) selected.clear();  // a row's button leaves what is ticked alone
     loadInventory();
     loadTrades();
 }
@@ -1253,6 +1365,7 @@ function bindEvents() {
         if (tab) showTab(tab.dataset.tab);
     });
     bindInventoryEvents();
+    bindSpareEvents();
     bindSwitch('stats-measure', button => {
         statsMeasure = button.dataset.measure;
         renderStats();

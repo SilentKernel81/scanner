@@ -187,6 +187,7 @@ For data-changing tests compare database rows, summed quantities, per-finish pri
 | TRD-06 | P1 E | **Export…** an open and a confirmed trade in each format; import the Moxfield file at Moxfield. | The file holds the trade's cards with the copies in the trade. Importing at Moxfield was never tried. |
 | TRD-07 | P0 U | Back up with an open trade, confirm it, restore; restore a backup from before trades over an open trade. | The trade is open again with its cards; the old backup restores with no trades. |
 | TRD-08 | P2 E | Search `trade:name` and `trade:""`; watch a second browser while a trade changes. | Only the cards set aside are listed; the other browser's list and badges follow. |
+| TRD-09 | P2 E/I | Trades tab → Find cards to trade or sell → Find cards; choose a location; tick some; Set aside for a trade. Try with the internet off. | The list holds only cards in no deck and not suggested by EDHREC (copies a trade holds not counted), most valuable first; the ticked ones go into the trade and leave the list; with no internet a message, no list. |
 
 ## 8. CSV import and exports
 

@@ -123,6 +123,20 @@
                 </div>
                 <p class="hint">Cards set aside for a trade stay in your collection, marked, until you confirm the trade - only then are they removed. To start one, tick cards on the Inventory tab and press <strong>Set aside for trade</strong>.</p>
             </div>
+            <!-- Cards no deck uses and EDHREC does not suggest for a commander (collection.js: findSpareCards) -->
+            <details class="panel spare-panel" id="spare-panel">
+                <summary class="spare-title">Find cards to trade or sell</summary>
+                <p class="hint">Lists the cards that none of your decks uses and that EDHREC does not list for the commander of any of your decks. <strong>Needs the internet:</strong> it asks EDHREC about each deck with a commander (a moment the first time, then from a 7-day cache). Cards that a trade already holds are not counted.</p>
+                <div class="filter-row">
+                    <button class="btn btn-small btn-primary" id="spare-find">Find cards</button>
+                    <select id="spare-location" class="select" title="Only the cards in one place - a binder, a box - or all"></select>
+                    <label class="chip-toggle"><input type="checkbox" id="spare-all"><span>Select all</span></label>
+                    <span class="summary" id="spare-summary"></span>
+                    <span class="spacer"></span>
+                    <button class="btn btn-small" id="spare-aside" disabled>Set aside for a trade</button>
+                </div>
+                <div class="trade-cards" id="spare-list"></div>
+            </details>
             <div id="trades-open"></div>
             <h3 class="section-title" id="trades-done-title" hidden>Confirmed trades</h3>
             <div id="trades-done"></div>
@@ -196,6 +210,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=17"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=46"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=50"></script>
 </body>
 </html>
