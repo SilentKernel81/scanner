@@ -43,7 +43,6 @@ async function showCollection(kind) {
     document.body.classList.toggle('arena-view', inArena());
     $('arena-bar').hidden = !inArena();
     selected.clear();
-    if (inArena()) $('filter-spare').checked = false;   // EDHREC's ideas are for the paper decks
     if (inArena() && currentTab === 'trades') showTab('inventory');   // trades are of paper cards
     await loadArenaInfo();
     await loadInventory();
@@ -106,7 +105,7 @@ const MTG_TYPES = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Artifact',
 const CONDITIONS = ['Mint', 'Near Mint', 'Excellent', 'Good', 'Played', 'Poor'];
 const PAGE_SIZES = [25, 50, 100, 200];
 // The filters kept for the next visit. Not the "Added" batch (it comes with "Remove this
-// batch") and not "No use in my decks" (it asks EDHREC before the list can show)
+// batch")
 const FILTER_FIELDS = ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location',
                        'filter-tag', 'filter-price-min', 'filter-price-max'];
 const FILTER_TICKS = ['filter-text-not', 'filter-free'];
@@ -124,7 +123,6 @@ let selected = new Set();   // entry ids
 let lastPicked = null;      // the entry ticked or unticked last: a shift-click reaches from it to the clicked one
 let savedFilters = recallFilters();   // until the first load has filled the lists to choose from
 let filterColors = new Set(savedFilters.colors);
-let suggested = null;       // {card name: [decks whose commander it is played with]}, while "No use in my decks" is ticked
 let inventoryView = recall('collectionView', 'list');
 
 function recallFilters() {
@@ -224,26 +222,8 @@ async function loadInventory() {
     selected = new Set([...selected].filter(id => inventory.some(card => card.id === id)));
     fillFilterOptions();
     if (savedFilters) restoreFilters();
-    if ($('filter-spare').checked) await loadSuggested();
     applyFilters();
     if (currentTab === 'stats') renderStats();
-}
-
-async function loadSuggested() {
-    // The owned cards EDHREC lists for the decks' commanders (slow the first time: one request per deck)
-    $('inventory-list').innerHTML = '<div class="hint">Asking EDHREC about your commanders...</div>';
-    $('filter-spare').disabled = true;
-    const data = await api('/api/inventory/suggested');
-    $('filter-spare').disabled = false;
-    suggested = data ? data.cards : null;
-    if (!data) $('filter-spare').checked = false;
-    else if (data.unknown.length) notify(`No EDHREC data for ${data.unknown.join(', ')} - not counted`, 'warning');
-}
-
-async function spareChanged() {
-    if ($('filter-spare').checked) await loadSuggested();
-    page = 0;
-    applyFilters();
 }
 
 function fillSelect(id, label, values, labels = {}) {
@@ -273,7 +253,6 @@ function fillFilterOptions() {
                Object.fromEntries(times.map(time => [time, `Added ${time.slice(0, 16)} (${plural(batches.get(time), 'card')})`])));
     // Color chips only where the card data has color identities (Magic)
     $('filter-free-label').hidden = !gameInfo.deck_formats.length;
-    $('filter-spare-label').hidden = !gameInfo.deck_formats.some(([, , commander]) => commander);
     const hasColors = inventory.some(card => identityOf(card));
     $('filter-colors').innerHTML = hasColors ? colorChipsHtml(filterColors) : '';
 }
@@ -371,7 +350,6 @@ function activeFilters() {
     if (!digital) chosen('filter-tag', 'Tag');
     if ($('filter-added').value) chips.push({text: $('filter-added').selectedOptions[0].textContent, clear: () => { $('filter-added').value = ''; }});
     if ($('filter-free').checked) chips.push({text: 'Not in a deck', clear: () => { $('filter-free').checked = false; }});
-    if ($('filter-spare').checked) chips.push({text: 'No use in my decks', clear: () => { $('filter-spare').checked = false; }});
     const min = $('filter-price-min').value, max = $('filter-price-max').value;
     if ((min || max) && !digital) {
         chips.push({text: 'Price: ' + (min && max ? `$${min} – $${max}` : min ? `from $${min}` : `up to $${max}`),
@@ -414,7 +392,6 @@ function applyFilters() {
     const location = digital ? '' : $('filter-location').value, tag = digital ? '' : $('filter-tag').value;
     const added = $('filter-added').value;
     const free = $('filter-free').checked;
-    const spare = $('filter-spare').checked && suggested;
     const min = digital ? NaN : parseFloat($('filter-price-min').value), max = digital ? NaN : parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         // "Not" turns the text search around: the cards that don't have the text anywhere
@@ -427,7 +404,6 @@ function applyFilters() {
         if (tag && !card.tags.includes(tag)) return false;
         if (added && (card.added_at !== added || !card.added_quantity)) return false;
         if (free && card.decks.length) return false;
-        if (spare && (card.decks.length || suggested[card.name])) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
         if (filterColors.size) {
@@ -1164,7 +1140,6 @@ function bindInventoryEvents() {
     // Filters
     ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
      'filter-free', 'filter-text-not'].forEach(id => $(id).addEventListener('change', filtersChanged));
-    $('filter-spare').addEventListener('change', spareChanged);
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(filtersChanged, 150)));
     bindColorChips('filter-colors', filterColors, filtersChanged);
     $('filter-clear').addEventListener('click', () => {
@@ -1172,7 +1147,6 @@ function bindInventoryEvents() {
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         $('filter-free').checked = false;
         $('filter-text-not').checked = false;
-        $('filter-spare').checked = false;
         filterColors.clear();
         fillFilterOptions();
         filtersChanged();

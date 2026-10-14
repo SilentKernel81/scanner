@@ -237,9 +237,7 @@ a phone too; the deck pages are made for a screen with a pointer.
   seconds with an **Undo** button (Ctrl+Z) before it happens. **Export** asks whether you want
   everything, the cards shown or the cards ticked. Keys: `/` search, ← → pages, Ctrl+A select
   all shown, Del delete the selection, Esc clear it. Tick **Not in a deck** to see only
-  the cards no deck uses yet, or **No use in my decks** to also leave out the cards EDHREC
-  lists for your decks' commanders - what remains
-  can be sold or given away; switch between the list and a grid of card images; tick entries to
+  the cards no deck uses yet; switch between the list and a grid of card images; tick entries to
   move them to a **location**, tag them (*trade*, *keep*), change their condition, add them to
   a deck or delete them in one step. Copies of the same printing can be in two locations -
   moving part of a stack splits it.
@@ -522,7 +520,7 @@ those to one camera.
 | `GET /api/decks/<id>/suggestions`, `GET /api/decks/popular` | EDHREC cards for the deck's commander; public decks on Archidekt / Moxfield |
 | `GET` / `POST /api/decks/ideas/<commanders\|precons\|card>` | "What can I build?" searches: state / start a run / stop it |
 | `GET /api/precons`, `GET /api/precons/covers?files=`, `GET /api/precons/<file>`, `POST /api/precons/<file>/own` | Preconstructed decks; the card that stands for each of up to 8 of them; one's cards with their pictures and how many of each are owned (nothing saved); add one's cards to the inventory and open it as a deck |
-| `GET /api/inventory/suggested` | The owned cards EDHREC lists for the decks' commanders |
+| `GET /api/inventory/suggested` | The owned cards EDHREC lists for the decks' commanders (no page asks for it at the moment) |
 | `GET /api/ai_provider`, `/api/ai_models`, `/api/local_ai_models`, `/api/ai_credentials`, `/api/prompts` | The AI in use, model lists, masked keys, prompts |
 
 Scanning, searching and settings on a camera's page go through Socket.IO events
