@@ -79,7 +79,7 @@ def _load():
 
 
 def _write():
-    Config.DATA_DIR.mkdir(exist_ok=True)
+    Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = PROMPTS_FILE.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(_overrides, indent=2, ensure_ascii=False) + '\n')
     os.replace(tmp, PROMPTS_FILE)

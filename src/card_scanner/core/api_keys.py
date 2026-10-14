@@ -80,7 +80,7 @@ def save_credential(provider, value):
     if value:
         entries.append(f"{variable}={value}")
 
-    Config.DATA_DIR.mkdir(exist_ok=True)
+    Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     # Create with owner-only permissions before writing the secret
     fd = os.open(KEYS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as f:

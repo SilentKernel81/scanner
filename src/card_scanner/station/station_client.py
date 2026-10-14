@@ -379,7 +379,7 @@ class Station:
         them - so nothing of the server's is touched. It runs at every start and finds
         nothing after the first.
         """
-        Config.STATION_CAPTURES_DIR.mkdir(exist_ok=True)
+        Config.STATION_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
         for note_path in sorted(Config.IMAGES_DIR.glob('*' + NOTE_SUFFIX)):
             try:
                 note = json.loads(note_path.read_text())

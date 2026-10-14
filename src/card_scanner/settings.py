@@ -64,7 +64,7 @@ class Settings:
         """Save settings to JSON file"""
         try:
             # Ensure data directory exists
-            Config.DATA_DIR.mkdir(exist_ok=True)
+            Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
 
             # Written beside the file and moved into place: a crash while writing must not
             # leave a cut-off file (which would load as the defaults)

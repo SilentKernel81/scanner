@@ -150,5 +150,5 @@ class Config:
     @staticmethod
     def create_directories():
         """Create required directories if they don't exist"""
-        Config.DATA_DIR.mkdir(exist_ok=True)
-        Config.IMAGES_DIR.mkdir(exist_ok=True)
+        Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        Config.IMAGES_DIR.mkdir(parents=True, exist_ok=True)
