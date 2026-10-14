@@ -402,6 +402,8 @@ chmod +x Card_Scanner-x86_64.AppImage
 - **Your files** (collection, settings, keys, backups, logs, captures) are in
   `~/.mtg-scanner`; `MTG_SCANNER_HOME=/some/folder` chooses another. A
   `config.yaml` there is laid over the shipped one - it only needs the settings you change.
+  A checkout of the project keeps its own `data/` and does not see these files: to run a
+  checkout on the AppImage's collection, start it with `MTG_SCANNER_HOME=~/.mtg-scanner`.
 - **Only this computer can open the pages** until "Reachable from other devices" is switched
   on in Settings -> Program (applies after a restart). The station's setup page
   (`http://localhost:8080`: which camera, its name) follows the same rule.
