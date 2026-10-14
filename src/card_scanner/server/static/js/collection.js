@@ -831,6 +831,7 @@ async function exportInventory() {
     link.remove();
     notify(`${label} export started - check your downloads folder`
         + (format === 'moxfield' ? '. Import it at moxfield.com/account/collection'
+            : format === 'archidekt' ? '. Import it from your collection page on archidekt.com'
             : format === 'csv' ? '. Every entry with its location and tags; Import reads it back' : ''), 'success');
 }
 
