@@ -243,7 +243,9 @@ a phone too; the deck pages are made for a screen with a pointer.
   move them to a **location**, tag them (*trade*, *keep*), change their condition, add them to
   a deck or delete them in one step. Copies of the same printing can be in two locations -
   moving part of a stack splits it.
-- **Export / import** - the **Export…** menu writes the collection for Moxfield, or as
+- **Export / import** - the **Export…** menu writes the collection for Moxfield (the same file
+  imports into Archidekt: choose its **Moxfield** preset and **Set columns** - tried
+  2026-10-14), or as
   **Card Scanner (everything)**: the app's own CSV with every entry's location, tags, finish
   and printing, which **Import** reads back exactly as it was (the Android app writes the same
   file). **Import** also takes a Moxfield collection CSV - each row is matched to its printing
