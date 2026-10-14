@@ -27,6 +27,10 @@ data/stations.json
 data/prompts.json
 # Answers of other sites, cached: disposable, rebuilt as needed
 data/web_cache.db*
+# The digital collection (MTG Arena import) and what Debug trace keeps as training data
+data/arena_inventory.db*
+data/frames/
+data/captures_full/
 # SQLite's files beside a database in use
 *.db-journal
 *.db-wal
