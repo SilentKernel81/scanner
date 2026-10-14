@@ -85,7 +85,7 @@ def handle_set_game(data):
     if not card_count:
         # First time: fetch its card data right away
         log_to_client(f"Downloading the {game.label} card data from {game.source}...")
-        start_card_data_update(game)
+        start_card_data_update(game, retry=True)  # no data yet: a failure is tried again
 
 
 @socketio.on('toggle_auto_capture')

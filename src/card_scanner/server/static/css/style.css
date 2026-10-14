@@ -2318,3 +2318,15 @@ input[type="radio"] {
         width: min(240px, 100%);
     }
 }
+
+/* The first download of the card data (common.js: watchCardData) */
+.data-banner {
+    margin: 0;
+    padding: 10px 16px;
+    background: var(--surface-2, #eef2f7);
+    border-bottom: 1px solid var(--border, #d6dce5);
+    font-size: 0.9rem;
+    text-align: center;
+}
+.data-banner.is-error { background: #fdecea; color: #8a1f17; border-bottom-color: #f2b8b2; }
+.data-banner[hidden] { display: none; }

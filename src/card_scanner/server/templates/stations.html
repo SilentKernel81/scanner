@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Cameras - Card Scanner</title>
     {% include '_favicon.html' %}
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=47">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -33,7 +33,7 @@
     </main>
 
     {% include '_dialogs.html' %}
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script>
         // Each page defines these two (common.js / _topbar.html)
         function openSettings() { window.location.href = {{ settings_url|tojson }}; }
