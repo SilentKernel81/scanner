@@ -155,6 +155,7 @@ blocked by its firewall from inside a container.
 | `SCANNER_STATION_NAME` | Shown on the server (it can be renamed there) |
 | `SCANNER_STATION_TOKEN` | The server's station token, when it has one |
 | `SCANNER_SETUP_PORT` | The setup page's port on the machine (default 8080) |
+| `SCANNER_SETUP_HOST` | The address the setup page listens on (default: every address; the server's desktop program sets `127.0.0.1` unless "Reachable from other devices" is on) |
 | `SCANNER_SETUP_PASSWORD` | The setup page's password (default: chosen on the page at its first visit) |
 
 - The container gets the host's `/dev` with access to video devices only, so the camera can
@@ -403,7 +404,7 @@ chmod +x Card_Scanner-x86_64.AppImage
   `config.yaml` there is laid over the shipped one - it only needs the settings you change.
 - **Only this computer can open the pages** until "Reachable from other devices" is switched
   on in Settings -> Program (applies after a restart). The station's setup page
-  is at `http://localhost:8080` (which camera, its name).
+  (`http://localhost:8080`: which camera, its name) follows the same rule.
 - **Settings -> Program** has Restart and Quit. A second start shows the program that runs.
 - **First start**: the card data (~150 MB) is downloaded in the background; the pages work
   meanwhile.
