@@ -267,7 +267,7 @@ def main():
         # First start: the pages work meanwhile and show the progress
         logger.info(f"No {game.label} card data yet - downloading it from {game.source}")
         print(f"⚠ {game.label}: no card data yet - downloading it from {game.source} (a few minutes)")
-        start_card_data_update(game)
+        start_card_data_update(game, retry=True)  # no data to fall back on: a failure is tried again
 
     # Check Vision AI status
     if identification.card_identifier:

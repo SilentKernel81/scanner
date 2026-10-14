@@ -5,12 +5,14 @@
 import cv2
 from flask import jsonify, request
 import hmac
+import json
 import numpy as np
 import threading
 import time
 
 from card_scanner.config import Config
 from card_scanner import games
+from card_scanner.core import frames
 from card_scanner.core.stations import Stations
 
 from card_scanner.server.state import (
@@ -36,6 +38,25 @@ def station_token_ok():
     """Whether a station's request carries the token (when one is set: stations.token)"""
     return not Config.STATION_TOKEN or hmac.compare_digest(request.headers.get('X-Station-Token', ''),
                                                            Config.STATION_TOKEN)
+
+
+def keep_camera_frame(station_id, number, capture_id, image_name):
+    """
+    The camera frame behind a capture, when the station sent one (Debug trace on): training data
+    for a better detector (core/frames.py). Only ever called for a capture that is new here, so
+    a retry of an upload adds no second frame - and it never fails the capture.
+    """
+    upload = request.files.get('frame')
+    if upload is None:
+        return
+    try:
+        try:
+            meta = json.loads(request.form.get('frame_meta') or '{}')
+        except ValueError:
+            meta = {}
+        frames.save(upload.read(), meta, station_id, number, capture_id, image_name)
+    except Exception as e:
+        logger.warning(f"Could not keep the camera frame of capture {number} of {station_id}: {e}")
 
 
 def save_upload(path, data, image):
@@ -67,6 +88,8 @@ def station_list():
         status = camera_hub.scanner(station['id']).get_detection_status() if connected else {}
         listed.append({**station, 'connected': connected, 'camera_error': status.get('camera_error'),
                        'detected': bool(status.get('detected')),
+                       # Where its setup page is (the camera, its name, its server): the page links to it
+                       'setup': camera_hub.setup_page(station['id']),
                        'scanning': bool(connected and camera_hub.scanner(station['id']).auto_capture_enabled),
                        'scanned': scan_inventory.get_stats(games.active_id(), station['id'])['total_cards'],
                        'review': review.count(games.active_id(), station['id'])})
@@ -160,6 +183,7 @@ def station_capture(station_id):
         return jsonify({'success': outcome.get('status') != 'error', 'capture': settled[1], **outcome})
     image_path = Config.IMAGES_DIR / f"{station_id}_{number}_{int(time.time())}.jpg"
     save_upload(image_path, data, image)
+    keep_camera_frame(station_id, number, capture_id, image_path.name)
     game_id = games.active_id()
 
     # From here on desk() is this station's (the URL names it, and it exists now).

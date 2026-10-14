@@ -432,6 +432,11 @@ settings are read from the saved values, so the page still shows them.
   `auto_capture_enabled`: a connection that drops and comes back goes on scanning; a client
   that restarts has it off, and its pages are told (`auto_capture_toggled`).
 - **The same id connecting again** replaces its earlier connection.
+- **Its setup page is linked from the server**: a station tells its setup page's port when it
+  connects (`auth.setup_port`), the server keeps it with the address it connected from
+  (`CameraHub.setup_page`, `setup` in `GET /api/stations`) and the scanner page's Stations list
+  offers **Camera setup** (`stationSetupUrl`) - a station on this computer connects from a
+  loopback address, and the link then uses the host the page was opened on.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml` (`auto`, the default: the
   first USB camera that is not a laptop's own - `integrated`, `built-in`, `facetime` or `IR` in
   its name - else the first one, read from /sys, `config.auto_camera_index`), or
@@ -813,6 +818,26 @@ a foil Gwen Stacy lost its outline right after its capture and was captured agai
 look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 20 dumps
 are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
+**Camera frames as training data (debug trace on; since 2026-10-14, never tested on a Pi).** A
+capture is the card cut out and straightened: the frame it came from and the outline found in it
+are gone, and those are what a better detector would be trained and scored on. With debug trace
+on, each capture is also sent with its whole camera frame (`CardScanner._frame_snapshot`: the
+camera's own JPEG, encoded again only when the camera is rotated) and a note
+(`station_client.queue_upload`, form fields `frame` and `frame_meta`): `corners` of the outline in
+that frame's pixels (full size, also when detection ran at half size; `null` when no outline was
+found and the capture is the whole frame), `frame_width` / `frame_height`, `card_size`, `rotation`,
+`fixed_area`, `stable_frames` / `required_stable_frames`, `new_card` (what made the card count as
+new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `dropped_while_focusing` or
+`card_gone`, and `seconds_before` the capture), `seconds_since_previous_capture`, `capture_id` and
+`previous_capture_id` (a double capture shows as a pair that follow each other within seconds).
+The pair waits on the station like the capture does (`<image>_frame.jpg`, in the upload note) and
+goes with it; an older server ignores the two fields. The server keeps it as
+`data/frames/<capture_id>.jpg` + `.json` (`core/frames.py`, `stations_api.keep_camera_frame`): once per
+capture (a retried upload adds nothing), never failing the capture, capped at 3 GB (oldest first),
+outside the collection backups. The note also has `station`, `number` and `image` (the capture's
+file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
+stations' own `debug_frames/` dumps are what show those).
+
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that
 capture is done (`scanner.capture_pending` / status `capturing` until then): a station sends
@@ -1152,7 +1177,11 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 
 **`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
-`scanned_cards/` are deleted after `cleanup.days`), `captured_at`, `station` (which station's
+`scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
+name, at most 1200 px tall (~100-150 KB), is kept in `data/captures_full/` for training data later:
+the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
+`scripts/backup.sh`'s archive but not in the collection backups, and captures from before
+have none), `captured_at`, `station` (which station's
 capture it is) and `capture_key` (the uid of the capture the copy came from, unique; empty in
 the collection and for copies from before 2026-10-12 - see
 [Capture synchronization](#capture-synchronization)). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card
@@ -1226,7 +1255,12 @@ are.
 `deck_constraints_1`): `inventory.quantity` is an integer above 0, `inventory_batches` follows an entry (`REFERENCES inventory ON DELETE CASCADE`) with a quantity above 0, `added_quantity` NULL or not
 negative; `inventory_captures` and `inventory_sources` belong to an entry (`REFERENCES
 inventory(id) ON DELETE CASCADE`), a station's `quantity` is above 0; `deck_cards` belong to a
-deck (cascade), `quantity` above 0, `board` one of commander / main / side. So an entry or a
+deck (cascade), `quantity` above 0, `board` one of commander / main / side. The standalone program (until
+2026-10-14) kept these rules as triggers on tables without CHECK or REFERENCES; a file it made is
+given the rules themselves by the same migrations - they drop its triggers (`LEGACY_TRIGGERS`,
+`storage.rebuild(prepare=...)`: one that names a rebuilt table made the rename fail and the server
+unable to start on the file) and rebuild `inventory_batches` too. One case per rule:
+`tests/test_constraints.py`, with a file in the standalone's form. So an entry or a
 station's row is deleted, never kept at 0 (`_delete_entries`, `_take_copies`, `_set_source` in
 `inventory.py`) - and `_delete_entries` removes the captures itself first, because the cascade
 takes rows, not thumbnail files. There is no foreign key from an entry's `card_id` to `cards`:
@@ -1959,7 +1993,12 @@ It is the same server, and differs from one on a server only here:
 - **One copy per data folder** (`data/app.lock`): a second start shows the running one;
   `--app` opens its page.
 - **Where its files are**: `paths.USER_DIR` (`~/.local/share/mtg-scanner`), see *Configuration
-  and files*. With no card data the program starts and downloads it in the background.
+  and files*. With no card data the program starts and downloads it in the background - the
+  **first download is tried again** after a failure (1, 5, 15, then every 30 minutes, for as long
+  as the program runs: `card_data.start_card_data_update(retry=True)`; an update of data that is
+  there is asked for again by the person, not repeated), and every page shows a banner while a
+  game has no cards (`common.js: watchCardData`, from `database.total_cards`, `updating` and
+  `error` of `GET /api/stats`; the page reloads when the data arrives).
 - **The AppImage** holds `app.py`, `station.py`, `config.yaml` and `src/` (OCR reader
   included) under `usr/app/`, the Python under `usr/python/`, Node.js as `usr/app/bin/node`
   (`paths.tool`). Never tried: another architecture than x86_64, a system without FUSE for
@@ -2065,7 +2104,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 |---|---|
 | `config.yaml` | The camera (`camera.usb_index`, `resolution`, `fps`), detection and auto-capture thresholds |
 | Environment, or `.env` beside `deploy/docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
-| `station_captures/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
+| `station_captures/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on; on the server `data/frames/` (the camera frames behind captures, debug trace on) and `data/captures_full/` (large copies of the collection's capture thumbnails) |
 
 ## Performance
 

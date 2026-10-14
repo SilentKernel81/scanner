@@ -1,6 +1,6 @@
 # Database investigation
 
-Reviewed: 2026-10-09. Database inspection used read-only SQLite connections. Failure reproductions used temporary databases; application data and schemas were not modified.
+Reviewed: 2026-10-09. What became of each finding: the status table in [DATABASE_FIX_PLAN.md](DATABASE_FIX_PLAN.md) (2026-10-14). The text below is the review as it was. Database inspection used read-only SQLite connections. Failure reproductions used temporary databases; application data and schemas were not modified.
 
 ## Current storage and usage
 

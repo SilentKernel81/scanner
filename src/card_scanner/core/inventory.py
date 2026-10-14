@@ -22,10 +22,18 @@ from card_scanner.core.pending import APPLIED_CAPTURES_TABLE, prune_applied
 
 logger = logging.getLogger('database')
 
-# Small copies of the captures behind inventory entries, shown when hovering an entry. Kept
-# apart from scanned_cards/ (cleaned after cleanup.days) until their entry is deleted
+# Small copies of the captures behind inventory entries, shown on the lists and when hovering
+# an entry. Kept apart from scanned_cards/ (cleaned after cleanup.days) until their entry is
+# deleted.
 CAPTURES_DIR = Config.DATA_DIR / 'captures'
 CAPTURE_HEIGHT = 400  # px - ~25 KB per card
+# A large copy beside each of them (same file name, other folder): the only full picture of a
+# card that outlives the clean-up - 400 px is too coarse to train a reader or detector on later.
+# The pages never load these (a list row would 6x its size); they are in the data folder, hence
+# in scripts/backup.sh's archive, but not in the collection backups (data/backups/).
+FULL_CAPTURES_DIR = Config.DATA_DIR / 'captures_full'
+FULL_CAPTURE_HEIGHT = 1200  # px - pictures taller than this are shrunk; ~100-150 KB per card
+FULL_CAPTURE_QUALITY = 85  # JPEG quality
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
@@ -93,7 +101,7 @@ SOURCES_TABLE = '''
 # quantity; copies no row accounts for were there before the oldest batch known ("old:..."
 # batches are what the single added_at / added_quantity of an entry said before this table).
 BATCHES_TABLE = '''
-    CREATE TABLE IF NOT EXISTS inventory_batches (
+    CREATE TABLE {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch TEXT NOT NULL,
         inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
@@ -103,6 +111,16 @@ BATCHES_TABLE = '''
     )
 '''
 BATCHES_INDEX = 'CREATE INDEX IF NOT EXISTS idx_batches_entry ON inventory_batches(inventory_id)'
+BATCHES_INDEXES = (BATCHES_INDEX,)
+# The standalone program (until 2026-10-14) kept the rules above as triggers on tables without
+# CHECK or REFERENCES. A file it made has them: they are dropped in the migration that gives
+# the tables the rules themselves - one that names `inventory` makes the rename of the new
+# table fail, which left the file unchanged and the server unable to start on it
+LEGACY_TRIGGERS = tuple(f'DROP TRIGGER IF EXISTS {name}' for name in (
+    'inventory_quantity_insert', 'inventory_quantity_update',
+    'inventory_captures_entry_insert', 'inventory_captures_entry_update', 'inventory_takes_inventory_captures',
+    'inventory_batches_entry_insert', 'inventory_batches_entry_update',
+    'inventory_batches_quantity_insert', 'inventory_batches_quantity_update', 'inventory_takes_inventory_batches'))
 BATCHES_MIGRATION = 'inventory_batches_1'
 BACKFILL_BATCHES = '''
     INSERT INTO inventory_batches (batch, inventory_id, added_at, quantity)
@@ -304,6 +322,7 @@ class InventoryManager(storage.Transactional):
         doomed, self._doomed = self._doomed, []
         for file in doomed:
             (CAPTURES_DIR / file).unlink(missing_ok=True)
+            (FULL_CAPTURES_DIR / file).unlink(missing_ok=True)
 
     def _rollback(self):
         self.conn.rollback()
@@ -363,7 +382,8 @@ class InventoryManager(storage.Transactional):
             # Batches (2026-10-14): a table beside the entries, filled once with the one batch
             # each entry knew of (added_at / added_quantity). Nothing existing is changed, so
             # no backup or rebuild - the table is new and everything else stays as it is
-            self.conn.execute(BATCHES_TABLE)
+            if 'inventory_batches' not in tables:
+                self.conn.execute(BATCHES_TABLE.format(table='inventory_batches'))
             self.conn.execute(BATCHES_INDEX)
             if not storage.applied(self.conn, BATCHES_MIGRATION):
                 # Not filled again where the table has rows already: the standalone program had
@@ -409,6 +429,8 @@ class InventoryManager(storage.Transactional):
                                            'FROM inventory WHERE CAST(quantity AS INTEGER) > 0').fetchone()),
                         tuple(conn.execute(f'SELECT COUNT(*), COALESCE(MAX(id), 0) FROM inventory_captures WHERE {valid}').fetchone()),
                         tuple(conn.execute('SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0) FROM inventory_sources '
+                                           f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0').fetchone()),
+                        tuple(conn.execute('SELECT COUNT(*), COALESCE(SUM(CAST(quantity AS INTEGER)), 0) FROM inventory_batches '
                                            f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0').fetchone()))
             columns = [row['name'] for row in self.conn.execute('PRAGMA table_info(inventory)')]
             entry = ', '.join('CAST(quantity AS INTEGER)' if column == 'quantity'
@@ -423,7 +445,11 @@ class InventoryManager(storage.Transactional):
                 ('inventory_sources', SOURCES_TABLE,
                  'SELECT inventory_id, station, CAST(quantity AS INTEGER) FROM inventory_sources '
                  f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0', ()),
-            ], facts)
+                # Made by the standalone program without the rules (this program makes it with them)
+                ('inventory_batches', BATCHES_TABLE,
+                 'SELECT id, batch, inventory_id, added_at, CAST(quantity AS INTEGER) FROM inventory_batches '
+                 f'WHERE {valid} AND CAST(quantity AS INTEGER) > 0', BATCHES_INDEXES),
+            ], facts, prepare=LEGACY_TRIGGERS)
 
     def _backup_table(self, label):
         """Copy the inventory table to data/backups/ before rebuilding it; returns the file and
@@ -521,18 +547,29 @@ class InventoryManager(storage.Transactional):
 
     @staticmethod
     def _make_thumbnail(image_path):
-        """Small JPEG copy of a capture in CAPTURES_DIR; its file name, or None"""
+        """JPEG copies of a capture: the small one in CAPTURES_DIR and a large one in
+        FULL_CAPTURES_DIR under the same name; that name, or None (no small copy, no capture)"""
         try:
             import cv2
             image = cv2.imread(str(image_path))
             if image is None:
                 return None
+            name = f"{uuid.uuid4().hex}.jpg"
+            # The large copy first and without failing the capture: it is the extra one
+            try:
+                FULL_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+                large = image
+                if large.shape[0] > FULL_CAPTURE_HEIGHT:
+                    large = cv2.resize(large, (round(large.shape[1] * FULL_CAPTURE_HEIGHT / large.shape[0]),
+                                               FULL_CAPTURE_HEIGHT), interpolation=cv2.INTER_AREA)
+                cv2.imwrite(str(FULL_CAPTURES_DIR / name), large, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY])
+            except Exception as e:
+                logger.warning(f"Could not keep the large copy of {image_path}: {e}")
             height, width = image.shape[:2]
             if height > CAPTURE_HEIGHT:
                 image = cv2.resize(image, (round(width * CAPTURE_HEIGHT / height), CAPTURE_HEIGHT),
                                    interpolation=cv2.INTER_AREA)
             CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
-            name = f"{uuid.uuid4().hex}.jpg"
             cv2.imwrite(str(CAPTURES_DIR / name), image, [cv2.IMWRITE_JPEG_QUALITY, 80])
             return name
         except Exception as e:

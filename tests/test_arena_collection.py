@@ -263,7 +263,8 @@ class BackingUpTheDigitalCollection(Temporary):
         self.backups = backups
         # The backups and the capture thumbnails go to the temporary folder, as in test_ownership.py
         for module, name, value in ((backups, 'BACKUPS_DIR', self.path / 'backups'), (backups, 'CAPTURES_DIR', self.path / 'captures'),
-                                    (inventory_module, 'CAPTURES_DIR', self.path / 'captures')):
+                                    (inventory_module, 'CAPTURES_DIR', self.path / 'captures'),
+                                    (inventory_module, 'FULL_CAPTURES_DIR', self.path / 'captures_full')):
             self.addCleanup(setattr, module, name, getattr(module, name))
             setattr(module, name, value)
         self.collection = InventoryManager(db_file=self.path / 'cards.db')

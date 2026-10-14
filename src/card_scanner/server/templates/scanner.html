@@ -9,7 +9,7 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=46">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=47">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -198,7 +198,7 @@
                     <label class="switch-row">
                         <span class="switch-text">
                             <span class="switch-title">Debug trace</span>
-                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames</span>
+                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames; send each capture's whole camera frame and outline to the server (data/frames) as training data</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-debug-trace">
                     </label>
@@ -383,7 +383,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=18"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=57"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=59"></script>
 </body>
 </html>

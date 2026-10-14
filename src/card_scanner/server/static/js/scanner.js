@@ -1714,9 +1714,18 @@ function loadStations() {
         .catch(error => console.error('Error loading stations:', error));
 }
 
+function stationSetupUrl(station) {
+    // The station's own page (which camera, its name, its server). A station on this computer
+    // connects from a loopback address: that is this page's host
+    if (!station.setup || !station.setup.port) return '';
+    const loopback = !station.setup.address || ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(station.setup.address);
+    const host = loopback ? window.location.hostname : station.setup.address;
+    return `http://${host.includes(':') ? '[' + host + ']' : host}:${station.setup.port}`;
+}
+
 function renderStations(stations, tokenRequired) {
     $('stations-hint').textContent =
-        `Each camera has its own page. A camera station connects with station_client.py --server ${window.location.origin}`
+        `Each camera has its own page. A camera station connects with station.py --server ${window.location.origin}`
         + (tokenRequired ? ' and the station token set on this server.' : '; it appears here when it first connects or sends a card.');
     $('stations-list').innerHTML = stations.length ? stations.map(station => {
         const id = escapeHtml(station.id);
@@ -1732,6 +1741,7 @@ function renderStations(stations, tokenRequired) {
             </div>
             <div class="station-meta">
                 <span class="hint">${station.scanned} scanned card${station.scanned === 1 ? '' : 's'} · ${station.captures} captured in all · last ${escapeHtml(station.last_seen || 'never')}</span>
+                ${stationSetupUrl(station) ? `<a class="btn btn-small" href="${escapeHtml(stationSetupUrl(station))}" target="_blank" rel="noopener" title="Which camera it uses, its name and the server it sends to - on the station">Camera setup</a>` : ''}
                 <button class="btn btn-small" onclick="undoStationAdd('${id}')" title="Take back the last card this station added">Undo last</button>
                 <button class="btn btn-small btn-danger" onclick="forgetStation('${id}')" title="Remove it from this list, with its scanned cards and review cards">Forget</button>
             </div>

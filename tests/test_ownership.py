@@ -28,8 +28,9 @@ OTHER = dict(CARD, name='Other Card', number='2')
 class TemporaryData(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.saved = (inv.CAPTURES_DIR, backups.CAPTURES_DIR, backups.BACKUPS_DIR)
+        self.saved = (inv.CAPTURES_DIR, backups.CAPTURES_DIR, backups.BACKUPS_DIR, inv.FULL_CAPTURES_DIR)
         inv.CAPTURES_DIR = backups.CAPTURES_DIR = self.tmp / 'captures'
+        inv.FULL_CAPTURES_DIR = self.tmp / 'captures_full'  # the large copies beside the thumbnails
         backups.BACKUPS_DIR = self.tmp / 'backups'
         inv.CAPTURES_DIR.mkdir()
         backups.BACKUPS_DIR.mkdir()
@@ -43,7 +44,7 @@ class TemporaryData(unittest.TestCase):
     def tearDown(self):
         for manager in (self.collection, self.scan, self.decks):
             manager.conn.close()
-        inv.CAPTURES_DIR, backups.CAPTURES_DIR, backups.BACKUPS_DIR = self.saved
+        inv.CAPTURES_DIR, backups.CAPTURES_DIR, backups.BACKUPS_DIR, inv.FULL_CAPTURES_DIR = self.saved
         shutil.rmtree(self.tmp)
 
     def add(self, station, card=CARD, copies=1, **kwargs):

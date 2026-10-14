@@ -15,10 +15,21 @@ from card_scanner.server.logs import logger
 # Newer card data found by the update check: game id -> message (shown on the page)
 data_update_notices = {}
 data_updates_running = set()
+# The last failure of a download that is being tried again (game id -> message); the pages say it
+data_update_errors = {}
+# Seconds to wait after each failure of the first download (the last is repeated): without card
+# data nothing can be identified, so it is not given up - a network that is not there yet at
+# start-up (a laptop, a Pi booting) is the usual reason
+FIRST_DOWNLOAD_RETRIES = (60, 300, 900, 1800)
 
 
-def start_card_data_update(game):
-    """Download a game's card data in the background (progress/complete/error events)"""
+def start_card_data_update(game, retry=False):
+    """
+    Download a game's card data in the background (progress/complete/error events). retry: the
+    first download, with no data to fall back on - a failure is tried again after a pause,
+    for as long as the program runs (an update of data that is there is asked for again by the
+    person, not repeated).
+    """
     if game.id in data_updates_running:
         return False
     data_updates_running.add(game.id)
@@ -28,16 +39,29 @@ def start_card_data_update(game):
         logger.info(f"Database update: {message}")
 
     def update_task():
+        failures = 0
         try:
-            logger.info(f"Updating {game.label} card data from {game.source}")
-            game.download(progress_callback)
-            total = game.card_count()
-            data_update_notices.pop(game.id, None)
-            socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
-            logger.info(f"{game.label} card data updated: {total} cards")
-        except Exception as e:
-            logger.exception(f"Database update failed: {e}")
-            socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
+            while True:
+                try:
+                    logger.info(f"Updating {game.label} card data from {game.source}")
+                    game.download(progress_callback)
+                    total = game.card_count()
+                    data_update_notices.pop(game.id, None)
+                    data_update_errors.pop(game.id, None)
+                    socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
+                    logger.info(f"{game.label} card data updated: {total} cards")
+                    return
+                except Exception as e:
+                    logger.exception(f"Database update failed: {e}")
+                    socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
+                    if not retry or game.card_count():
+                        data_update_errors.pop(game.id, None)
+                        return
+                    pause = FIRST_DOWNLOAD_RETRIES[min(failures, len(FIRST_DOWNLOAD_RETRIES) - 1)]
+                    failures += 1
+                    data_update_errors[game.id] = f"{e} - trying again in {pause // 60} min"
+                    logger.warning(f"{game.label} card data: trying again in {pause} s")
+                    time.sleep(pause)
         finally:
             data_updates_running.discard(game.id)
 

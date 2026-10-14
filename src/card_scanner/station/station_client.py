@@ -84,8 +84,10 @@ class Station:
         self.id = station_id
         self.name = name
         self.token = token
+        self.setup_port = 0  # the port of this station's setup page (0: none): told to the server, which links to it
         self.scanner = None
         self.capture_number = 0
+        self.last_capture_id = None  # of the capture before the one being queued
         self.preview_wanted = False
         self.stopping = False  # Set to leave run(): the setup page saved new settings (request_restart)
         self.uploads = queue.Queue()
@@ -111,7 +113,8 @@ class Station:
         while not self.stopping:
             try:
                 self.sio.connect(self.server, namespaces=[NAMESPACE], wait_timeout=10,
-                                 auth={'id': self.id, 'name': self.name, 'token': self.token})
+                                 auth={'id': self.id, 'name': self.name, 'token': self.token,
+                                       'setup_port': self.setup_port})
                 break
             except socketio.exceptions.ConnectionError as e:
                 logger.warning(f"Server {self.server} not reachable ({e}) - trying again in 3 s")
@@ -262,7 +265,8 @@ class Station:
         self.emit('captured', {'number': number})
         if fast:
             scanner.card_under_review = False  # ready for the next drop; else until Add / Skip on the page
-        self.queue_upload(image_path, card_image, foil_image, 'auto' if fast else 'review')
+        self.queue_upload(image_path, card_image, foil_image, 'auto' if fast else 'review',
+                          getattr(scanner, 'last_capture_frame', None))
 
     def manual_capture(self):
         """The page's Capture button: whatever is in view, shown on the page for Add / Skip"""
@@ -270,18 +274,34 @@ class Station:
         self.capture_number += 1
         image_path, card_image, foil_image = scanner.capture_card_image_only(self.capture_number)
         if image_path:
-            self.queue_upload(image_path, card_image, foil_image, 'review')
+            self.queue_upload(image_path, card_image, foil_image, 'review', getattr(scanner, 'last_capture_frame', None))
         else:
             self.send_log("Failed to capture image", level="error")
 
-    def queue_upload(self, image_path, card_image, foil_image, mode):
+    def queue_upload(self, image_path, card_image, foil_image, mode, frame=None):
+        """
+        frame: {'jpeg', 'meta'} - the camera frame the card was cut from (debug trace on, see
+        CardScanner._frame_snapshot): kept beside the picture and sent with it as training data
+        """
         foil_path = None
         if foil_image is not None and foil_image is not card_image:
             # Fixed area: the capture is the area, the foil check uses the outlined card
             foil_path = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
             cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
         item = {'image': Path(image_path), 'foil': foil_path, 'mode': mode,
-                'foil_is_image': foil_image is card_image, 'capture_id': uuid.uuid4().hex}
+                'foil_is_image': foil_image is card_image, 'capture_id': uuid.uuid4().hex,
+                'frame': None, 'frame_meta': None}
+        if frame and frame.get('jpeg'):
+            frame_path = Path(image_path).with_name(f"{Path(image_path).stem}_frame.jpg")
+            try:
+                frame_path.write_bytes(frame['jpeg'])
+                # previous_capture_id: with the seconds between, a double capture is found as a pair
+                item['frame'] = frame_path
+                item['frame_meta'] = {**frame['meta'], 'station': self.id, 'capture_id': item['capture_id'],
+                                      'previous_capture_id': self.last_capture_id}
+            except OSError as e:
+                logger.warning(f"Could not keep the camera frame of {Path(image_path).name} ({e}) - sent without it")
+        self.last_capture_id = item['capture_id']
         # The note first, then the queue: from here on the capture is on record on disk,
         # whatever happens to this program
         self.write_note(item)
@@ -316,6 +336,7 @@ class Station:
         """Put a capture on record on disk (written whole or not at all, as station_setup.save)"""
         note = {'capture_id': item['capture_id'], 'mode': item['mode'], 'foil_is_image': bool(item['foil_is_image']),
                 'image': item['image'].name, 'foil': item['foil'].name if item['foil'] else None,
+                'frame': item['frame'].name if item.get('frame') else None, 'frame_meta': item.get('frame_meta'),
                 'server': self.server, 'station': self.id, 'taken': time.strftime('%Y-%m-%d %H:%M:%S')}
         path = self.note_path(item['image'])
         temporary = path.with_suffix('.tmp')
@@ -327,7 +348,7 @@ class Station:
         """A capture is settled: its note goes, and its pictures unless they are to be kept"""
         Station.note_path(item['image']).unlink(missing_ok=True)
         if not keep_pictures:
-            for path in (item['image'], item['foil']):
+            for path in (item['image'], item['foil'], item.get('frame')):
                 if path:
                     path.unlink(missing_ok=True)
 
@@ -344,6 +365,8 @@ class Station:
                 note = json.loads(path.read_text())
                 item = {'image': path.with_name(note['image']),
                         'foil': path.with_name(note['foil']) if note.get('foil') else None,
+                        'frame': path.with_name(note['frame']) if note.get('frame') else None,
+                        'frame_meta': note.get('frame_meta'),
                         'mode': note['mode'], 'foil_is_image': bool(note.get('foil_is_image')),
                         'capture_id': note['capture_id'],
                         'server': note.get('server'), 'station': note.get('station'), 'taken': note.get('taken')}
@@ -474,12 +497,17 @@ class Station:
             files = {'image': (item['image'].name, item['image'].read_bytes(), 'image/jpeg')}
             if item['foil']:
                 files['foil_image'] = (item['foil'].name, item['foil'].read_bytes(), 'image/jpeg')
+            frame = item.get('frame')
+            if frame and frame.is_file():
+                # Training data, not the capture: the server may ignore it (an older one does)
+                files['frame'] = (frame.name, frame.read_bytes(), 'image/jpeg')
             response = session.post(
                 f"{self.server}/api/stations/{self.id}/captures", files=files, headers=headers, timeout=90,
                 # wait 0: the outcome is shown on the station's page, nobody waits for it here.
                 # capture_id: this same capture sent again (no answer came) is still one card
                 data={'name': self.name, 'camera': '1', 'mode': item['mode'], 'wait': '0',
-                      'capture_id': item['capture_id'], 'foil_is_image': '1' if item['foil_is_image'] else '0'})
+                      'capture_id': item['capture_id'], 'foil_is_image': '1' if item['foil_is_image'] else '0',
+                      **({'frame_meta': json.dumps(item['frame_meta'])} if item.get('frame_meta') else {})})
         except FileNotFoundError:
             logger.error(f"{item['image'].name} is gone - nothing to send")
             return 'refused'  # settled in the only way left: its note is removed
@@ -553,6 +581,8 @@ def main():
 
     # Without a server address there is nothing to connect to yet: only the setup page runs
     station = Station(values['server'], values['id'], values['name'], values['token']) if values['server'] else None
+    if station:
+        station.setup_port = args.setup_port
 
     # A restart is asked for from the setup page's thread, but must happen in this main
     # thread (it replaces the whole program): the page only raises a flag, and the loops
