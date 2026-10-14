@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   build:
+    # The AppImage is the standalone program's way of running; the two repositories have this same
+    # file (the standalone mirrors the server's tree), and only the standalone releases it
+    if: github.repository == 'SilentKernel81/scanner'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
