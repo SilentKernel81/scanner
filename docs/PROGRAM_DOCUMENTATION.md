@@ -432,6 +432,11 @@ settings are read from the saved values, so the page still shows them.
   `auto_capture_enabled`: a connection that drops and comes back goes on scanning; a client
   that restarts has it off, and its pages are told (`auto_capture_toggled`).
 - **The same id connecting again** replaces its earlier connection.
+- **Its setup page is linked from the server**: a station tells its setup page's port when it
+  connects (`auth.setup_port`), the server keeps it with the address it connected from
+  (`CameraHub.setup_page`, `setup` in `GET /api/stations`) and the scanner page's Stations list
+  offers **Camera setup** (`stationSetupUrl`) - a station on this computer connects from a
+  loopback address, and the link then uses the host the page was opened on.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml` (`auto`, the default: the
   first USB camera that is not a laptop's own - `integrated`, `built-in`, `facetime` or `IR` in
   its name - else the first one, read from /sys, `config.auto_camera_index`), or
@@ -1152,7 +1157,11 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 
 **`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
-`scanned_cards/` are deleted after `cleanup.days`), `captured_at`, `station` (which station's
+`scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
+name, at most 1200 px tall (~100-150 KB), is kept in `data/captures_full/` for training data later:
+the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
+`scripts/backup.sh`'s archive but not in the collection backups, and captures from before
+have none), `captured_at`, `station` (which station's
 capture it is) and `capture_key` (the uid of the capture the copy came from, unique; empty in
 the collection and for copies from before 2026-10-12 - see
 [Capture synchronization](#capture-synchronization)). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card

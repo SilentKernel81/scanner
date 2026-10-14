@@ -67,6 +67,8 @@ def station_list():
         status = camera_hub.scanner(station['id']).get_detection_status() if connected else {}
         listed.append({**station, 'connected': connected, 'camera_error': status.get('camera_error'),
                        'detected': bool(status.get('detected')),
+                       # Where its setup page is (the camera, its name, its server): the page links to it
+                       'setup': camera_hub.setup_page(station['id']),
                        'scanning': bool(connected and camera_hub.scanner(station['id']).auto_capture_enabled),
                        'scanned': scan_inventory.get_stats(games.active_id(), station['id'])['total_cards'],
                        'review': review.count(games.active_id(), station['id'])})

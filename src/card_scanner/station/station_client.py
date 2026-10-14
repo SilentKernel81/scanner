@@ -84,6 +84,7 @@ class Station:
         self.id = station_id
         self.name = name
         self.token = token
+        self.setup_port = 0  # the port of this station's setup page (0: none): told to the server, which links to it
         self.scanner = None
         self.capture_number = 0
         self.preview_wanted = False
@@ -111,7 +112,8 @@ class Station:
         while not self.stopping:
             try:
                 self.sio.connect(self.server, namespaces=[NAMESPACE], wait_timeout=10,
-                                 auth={'id': self.id, 'name': self.name, 'token': self.token})
+                                 auth={'id': self.id, 'name': self.name, 'token': self.token,
+                                       'setup_port': self.setup_port})
                 break
             except socketio.exceptions.ConnectionError as e:
                 logger.warning(f"Server {self.server} not reachable ({e}) - trying again in 3 s")
@@ -553,6 +555,8 @@ def main():
 
     # Without a server address there is nothing to connect to yet: only the setup page runs
     station = Station(values['server'], values['id'], values['name'], values['token']) if values['server'] else None
+    if station:
+        station.setup_port = args.setup_port
 
     # A restart is asked for from the setup page's thread, but must happen in this main
     # thread (it replaces the whole program): the page only raises a flag, and the loops
