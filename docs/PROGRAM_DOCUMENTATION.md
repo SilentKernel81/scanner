@@ -818,6 +818,26 @@ a foil Gwen Stacy lost its outline right after its capture and was captured agai
 look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 20 dumps
 are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
+**Camera frames as training data (debug trace on; since 2026-10-14, never tested on a Pi).** A
+capture is the card cut out and straightened: the frame it came from and the outline found in it
+are gone, and those are what a better detector would be trained and scored on. With debug trace
+on, each capture is also sent with its whole camera frame (`CardScanner._frame_snapshot`: the
+camera's own JPEG, encoded again only when the camera is rotated) and a note
+(`station_client.queue_upload`, form fields `frame` and `frame_meta`): `corners` of the outline in
+that frame's pixels (full size, also when detection ran at half size; `null` when no outline was
+found and the capture is the whole frame), `frame_width` / `frame_height`, `card_size`, `rotation`,
+`fixed_area`, `stable_frames` / `required_stable_frames`, `new_card` (what made the card count as
+new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `dropped_while_focusing` or
+`card_gone`, and `seconds_before` the capture), `seconds_since_previous_capture`, `capture_id` and
+`previous_capture_id` (a double capture shows as a pair that follow each other within seconds).
+The pair waits on the station like the capture does (`<image>_frame.jpg`, in the upload note) and
+goes with it; an older server ignores the two fields. The server keeps it as
+`data/frames/<capture_id>.jpg` + `.json` (`core/frames.py`, `stations_api.keep_camera_frame`): once per
+capture (a retried upload adds nothing), never failing the capture, capped at 3 GB (oldest first),
+outside the collection backups. The note also has `station`, `number` and `image` (the capture's
+file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
+stations' own `debug_frames/` dumps are what show those).
+
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that
 capture is done (`scanner.capture_pending` / status `capturing` until then): a station sends
@@ -2084,7 +2104,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 |---|---|
 | `config.yaml` | The camera (`camera.usb_index`, `resolution`, `fps`), detection and auto-capture thresholds |
 | Environment, or `.env` beside `deploy/docker-compose.client.yml` | `SCANNER_SERVER` (needed), `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_ID` (default: the machine's name), `SCANNER_STATION_NAME`, `SCANNER_STATION_TOKEN` - or the same as `--server`, `--id`, `--name`, `--token` |
-| `station_captures/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on |
+| `station_captures/` | Captures not sent yet, each with its note `<image>.upload.json` (deleted once the server has them); `data/debug_frames/` with debug trace on; on the server `data/frames/` (the camera frames behind captures, debug trace on) and `data/captures_full/` (large copies of the collection's capture thumbnails) |
 
 ## Performance
 
