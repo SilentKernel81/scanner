@@ -432,6 +432,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   `Sec-Fetch-Site`, Socket.IO origins): never set `cors_allowed_origins="*"` or add CORS
   headers, and keep changes behind POST/PUT/DELETE (a GET from another site is only stopped
   under `/api/`). A new way to reach the server by a host name needs `flask.allowed_hosts`.
+- **No machine's own values in `config.yaml`**: it is the shipped default. The camera is
+  `usb_index: auto`, the Ollama endpoint is localhost (Docker sets `LOCAL_AI_ENDPOINT`); one
+  setup's values go in Settings (`data/settings.json`, `data/api_keys.env`), the station's setup
+  page or the environment.
 - **No secret in `config.yaml`**: the cookie key is `data/secret_key` (made on first start).
 - **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.

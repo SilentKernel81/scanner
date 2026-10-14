@@ -432,7 +432,9 @@ settings are read from the saved values, so the page still shows them.
   `auto_capture_enabled`: a connection that drops and comes back goes on scanning; a client
   that restarts has it off, and its pages are told (`auto_capture_toggled`).
 - **The same id connecting again** replaces its earlier connection.
-- **Which camera**: `camera.usb_index` in the station's `config.yaml`, or
+- **Which camera**: `camera.usb_index` in the station's `config.yaml` (`auto`, the default: the
+  first USB camera that is not a laptop's own - `integrated`, `built-in`, `facetime` or `IR` in
+  its name - else the first one, read from /sys, `config.auto_camera_index`), or
   `SCANNER_CAMERA_INDEX` - a number, or a `/dev/v4l/by-id/...` path, which stays the same
   camera when the numbers change (`config.configured_camera`) - or chosen on the station's
   setup page. The path is turned into its `/dev/videoN` at every attempt to open the camera
