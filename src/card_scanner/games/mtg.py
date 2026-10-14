@@ -1,7 +1,7 @@
 """
 Magic: The Gathering - Scryfall card data (database.CardDatabase, table `cards`), set code +
 collector number matching (card_search.CardSearcher), regular / foil / surge foil finishes,
-Moxfield and Archidekt collection export, Moxfield import.
+Moxfield collection export and import.
 """
 import csv
 from datetime import datetime
@@ -46,33 +46,6 @@ def write_moxfield(rows, file):
         foil = 'foil' if row['finish'] in ('foil', 'surge') else ''
         writer.writerow([row['quantity'], row['name'], (row.get('set_code') or '').lower() or row['set_name'],
                          row['condition'], 'English', foil, row['number'], '0', ''])
-
-
-# The conditions used here -> Archidekt's short condition codes (it has no "Mint" or "Excellent")
-ARCHIDEKT_CONDITIONS = {
-    'Mint': 'NM', 'Near Mint': 'NM', 'Excellent': 'LP', 'Good': 'MP', 'Played': 'HP', 'Poor': 'DMG',
-}
-
-
-def write_archidekt(rows, file):
-    """
-    Archidekt collection import (its own export's columns). The Scryfall ID makes the match
-    exact; Edition Code and Collector Number are there for a row Archidekt can't find by id.
-    A surge foil is the foil finish of a surge foil printing (Archidekt's finishes: Normal, Foil, Etched).
-    Written from what Archidekt's export looks like - never tried against its import.
-    """
-    writer = csv.writer(file)
-    writer.writerow(['Quantity', 'Name', 'Finish', 'Condition', 'Date Added', 'Language', 'Purchase Price',
-                     'Tags', 'Edition Name', 'Edition Code', 'Multiverse Id', 'Scryfall ID', 'MTGO ID',
-                     'Collector Number'])
-    for row in rows:
-        finish = 'Foil' if row['finish'] in ('foil', 'surge') else 'Normal'
-        writer.writerow([row['quantity'], row['name'], finish,
-                         ARCHIDEKT_CONDITIONS.get(row['condition'], 'NM'),
-                         (row.get('timestamp') or '')[:10], 'English', '0',
-                         ', '.join(row.get('tags') or []), row['set_name'],
-                         (row.get('set_code') or '').lower(), '', row.get('card_id') or '', '',
-                         row['number']])
 
 
 class Magic(Game):
@@ -235,8 +208,7 @@ class Magic(Game):
         return mtg_decks.format_arena(entries, deck_format, cards)
 
     def export_formats(self):
-        return {'moxfield': ('Moxfield', 'moxfield_export', write_moxfield),
-                'archidekt': ('Archidekt', 'archidekt_export', write_archidekt), **super().export_formats()}
+        return {'moxfield': ('Moxfield', 'moxfield_export', write_moxfield), **super().export_formats()}
 
     import_formats = ('Moxfield',)
 
