@@ -198,7 +198,7 @@
                     <label class="switch-row">
                         <span class="switch-text">
                             <span class="switch-title">Debug trace</span>
-                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames</span>
+                            <span class="switch-desc">Log filtered detections; save frames of slow or doubtful captures to data/debug_frames; send each capture's whole camera frame and outline to the server (data/frames) as training data</span>
                         </span>
                         <input type="checkbox" class="switch" id="toggle-debug-trace">
                     </label>
@@ -384,6 +384,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=58"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=59"></script>
 </body>
 </html>
