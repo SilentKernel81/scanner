@@ -9,7 +9,9 @@ camera:
   # and the station's setup page. 'remote': this machine has no camera - scripts/start.sh and
   # scripts/deploy.sh then start and install only the server
   type: auto
-  usb_index: 2  # /dev/videoN - check with: v4l2-ctl --list-devices
+  # auto: the first USB camera that is not a laptop's own. Or /dev/videoN's number (check with
+  # v4l2-ctl --list-devices); the station's setup page and SCANNER_CAMERA_INDEX choose another
+  usb_index: auto
   resolution: [2560, 1440]
   preview_resolution: [640, 480]
   fps: 20
@@ -62,7 +64,9 @@ vision_ai:
 
   # Local AI Settings (self-hosted models)
   local:
-    endpoint: http://192.168.1.23:11434/v1/chat/completions
+    # Ollama on this machine. Elsewhere: Settings -> Vision AI, or LOCAL_AI_ENDPOINT
+    # (the Docker image sets it to host.docker.internal)
+    endpoint: http://localhost:11434/v1/chat/completions
     model: qwen3.5:9b  # default until a model is chosen in Settings
 
 # Stations: phones / computers with a camera that capture cards and send them here

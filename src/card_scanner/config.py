@@ -6,6 +6,8 @@
 # A station only uses the camera, detection and auto-capture values.
 # ============================================================================
 import os
+import re
+from pathlib import Path
 from card_scanner.config_loader import get_config_loader
 from card_scanner.paths import TOP, USER_DIR
 
@@ -13,13 +15,43 @@ from card_scanner.paths import TOP, USER_DIR
 config = get_config_loader()
 
 
+# A laptop's own camera looks at the person, not at a box of cards
+LAPTOP_CAMERA = re.compile(r'integrated|built-?in|facetime|\bir\b', re.IGNORECASE)
+
+
+def auto_camera_index(root='/sys/class/video4linux'):
+    """
+    The N of /dev/videoN for "auto": the first USB camera that is not a laptop's own, else the
+    first USB camera; None when there is none. Read from /sys - nothing is opened - so it can
+    be asked again at every attempt to open the camera (one plugged in later is found).
+    """
+    cameras = []
+    nodes = sorted(Path(root).glob('video*'), key=lambda node: int(node.name[5:] or 0))
+    for node in nodes:
+        try:
+            if '/usb' not in os.path.realpath(node / 'device'):
+                continue  # a Pi's image processor and codecs are /dev/videoN too
+            if (node / 'index').read_text().strip() != '0':
+                continue  # a webcam's second node is data about the pictures
+            cameras.append((int(node.name[5:]), (node / 'name').read_text().strip()))
+        except (OSError, ValueError):
+            continue
+    outside = [index for index, name in cameras if not LAPTOP_CAMERA.search(name)]
+    return (outside or [index for index, _ in cameras] or [None])[0]
+
+
 def camera_index_from(value, source="SCANNER_CAMERA_INDEX"):
     """
-    A camera chosen as text - a number ("2"), or a device path such as
-    /dev/v4l/by-id/usb-...-video-index0 (the same camera whatever number it got this time) -
-    as the N of /dev/videoN. `source` only names where the text came from, for the error.
+    A camera chosen as text - a number ("2"), "auto" (auto_camera_index), or a device path
+    such as /dev/v4l/by-id/usb-...-video-index0 (the same camera whatever number it got this
+    time) - as the N of /dev/videoN. `source` only names where the text came from, for the error.
     """
     value = str(value).strip()
+    if value.lower() == 'auto':
+        found = auto_camera_index()
+        if found is None:
+            raise ValueError(f"{source}=auto: no USB camera found")
+        return found
     if value.isdigit():
         return int(value)
     device = os.path.realpath(value)
@@ -37,7 +69,7 @@ def configured_camera():
     """
     value = os.getenv('SCANNER_CAMERA_INDEX')
     if not value:
-        return config.get('camera', 'usb_index', default=0)
+        return config.get('camera', 'usb_index', default='auto')
     return int(value) if value.isdigit() else value
 
 
@@ -128,7 +160,7 @@ class Config:
     OCR_PROVIDER = config.get('ocr', 'provider', default='auto')
 
     # Local AI settings
-    LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://192.168.1.60:11434/v1/chat/completions')
+    LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')
     LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL') or config.get('vision_ai', 'local', 'model', default='llava:13b')
 
     # Cleanup settings

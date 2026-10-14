@@ -339,7 +339,7 @@ provider and model, OCR first, sound). `config.yaml` has the rest:
 | Setting | Where | Default | Description |
 |---|---|---|---|
 | `camera.type` | station | `auto` | `auto` (a USB camera if there is one, else a Raspberry Pi camera), `usb` or `picamera`. Also `SCANNER_CAMERA` and the station's setup page. The server opens no camera; `remote` = this machine has none (`scripts/start.sh` and `scripts/deploy.sh` then run only the server) |
-| `camera.usb_index` | station | | `/dev/videoN` number of the USB camera (or `SCANNER_CAMERA_INDEX`: a number or a `/dev/v4l/by-id/...` path) |
+| `camera.usb_index` | station | | `auto` (default: the first USB camera that is not a laptop's own) or the `/dev/videoN` number of the USB camera (or `SCANNER_CAMERA_INDEX`: a number or a `/dev/v4l/by-id/...` path) |
 | `camera.resolution` / `fps` | station | `[2560, 1440]` / `20` | Capture resolution and frames processed per second |
 | `camera.rotate` | station | `0` | Default rotation (0/90/180/270) until it is set in Settings |
 | `camera.crop` | station | | Raspberry Pi camera module only: the part of the sensor's image to use (`[x1, y1, x2, y2]`, fractions) - e.g. the box under a wide lens. Drawn on the station's setup page, which then wins |

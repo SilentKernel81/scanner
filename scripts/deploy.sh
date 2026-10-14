@@ -271,7 +271,7 @@ print(sys.argv[2] if value is None else value)' "$1" "${2:-}"
 }
 
 if [ -n "$CAMERA_INDEX" ]; then
-    sed -i -E "s/^(  usb_index:)[[:space:]]*[0-9]+/\1 ${CAMERA_INDEX}/" config.yaml
+    sed -i -E "s/^(  usb_index:)[[:space:]]*[A-Za-z0-9]+/\1 ${CAMERA_INDEX}/" config.yaml
     ok "Set camera.usb_index to ${CAMERA_INDEX}"
 fi
 
@@ -294,14 +294,26 @@ esac
 step "Camera"
 
 camera_type=$(config_get camera.type auto)
-usb_index=$(config_get camera.usb_index 0)
+usb_index=$(config_get camera.usb_index auto)
+if [ "$usb_index" = "auto" ]; then  # the first camera that is not a laptop's own, as the station takes it
+    found=$(PYTHONPATH=src venv/bin/python -c 'from card_scanner.config import auto_camera_index
+index = auto_camera_index()
+print("" if index is None else index)' 2>/dev/null)
+    if [ -n "$found" ]; then
+        ok "camera.usb_index: auto -> /dev/video${found}"
+        usb_index="$found"
+    else
+        warn "camera.usb_index: auto - no USB camera found right now (a station finds one plugged in later)"
+        usb_index="none"
+    fi
+fi
 if [ "$PICAMERA" -eq 1 ] || [ "$camera_type" = "picamera" ]; then
     ok "Raspberry Pi camera module (camera.type: ${camera_type})"
 else
     if [ -e "/dev/video${usb_index}" ]; then
         name=$(cat "/sys/class/video4linux/video${usb_index}/name" 2>/dev/null || echo "unknown")
         ok "USB camera /dev/video${usb_index}: ${name}"
-    else
+    elif [ "$usb_index" != "none" ]; then
         warn "No camera at /dev/video${usb_index} (camera.usb_index in config.yaml)"
     fi
     if command -v v4l2-ctl >/dev/null; then

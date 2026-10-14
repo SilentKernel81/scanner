@@ -150,7 +150,7 @@ blocked by its firewall from inside a container.
 |---|---|
 | `SCANNER_SERVER` | The server's address |
 | `SCANNER_CAMERA` | `auto` (default: a USB camera if there is one, else a Pi camera), `usb` or `picamera` |
-| `SCANNER_CAMERA_INDEX` | The camera: `N` of `/dev/videoN`, or its `/dev/v4l/by-id/...` path - that one stays the same camera when the numbers change. Default: `camera.usb_index` in `config.yaml` |
+| `SCANNER_CAMERA_INDEX` | The camera: `N` of `/dev/videoN`, or its `/dev/v4l/by-id/...` path - that one stays the same camera when the numbers change. Default: `camera.usb_index` in `config.yaml` (`auto`: the first USB camera that is not a laptop's own) |
 | `SCANNER_STATION_ID` | 1-40 letters, digits, `-` or `_`. Default: the machine's name. It is how the server knows the station: keep it, or the station appears as a new one |
 | `SCANNER_STATION_NAME` | Shown on the server (it can be renamed there) |
 | `SCANNER_STATION_TOKEN` | The server's station token, when it has one |
