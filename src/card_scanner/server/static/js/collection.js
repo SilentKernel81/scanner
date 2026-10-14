@@ -93,7 +93,6 @@ function showTab(tab) {
     currentTab = tab;
     document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== `tab-${tab}`; });
-    remember('collectionTab', tab);
     if (tab === 'stats') renderStats();
     if (tab === 'trades') loadTrades();
 }
@@ -1431,8 +1430,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     else await loadInventory();
     loadDeckList();  // the location filter lists the decks' locations apart
     loadTrades();  // "Set aside for trade" offers the open ones
-    // The tab last used. 'decks' was one of this page's tabs until 2026-10-13: a browser
-    // that remembers it gets the inventory (the decks are a click away, in the header)
-    const tab = recall('collectionTab', 'inventory');
-    showTab(['inventory', 'stats', 'trades'].includes(tab) ? tab : 'inventory');
+    // Always the inventory first, whichever tab was used last (the page used to reopen on it)
+    showTab('inventory');
 });
