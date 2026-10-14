@@ -508,7 +508,7 @@ those to one camera.
 | `POST /api/inventory/delete/<id>` | Delete an inventory entry |
 | `POST /api/clear_inventory` | Delete the active game's entries; with `?area=scan&camera=<id>` one camera's scanned cards and review items |
 | `GET` / `POST /api/scan_inventory/to_collection` | Cards waiting and locations in use; move the scanned cards into the collection (JSON: `location`, `camera` - both optional) |
-| `POST /api/inventory/remove_batch` | Take back the cards added at one time (JSON: `added_at`) |
+| `POST /api/inventory/remove_batch` | Take back the cards that came in together (JSON: `batch`, from an entry's `batches`) |
 | `GET /api/export_inventory/<format>` | Download the inventory: `moxfield` (Magic), `csv` (the app's own, every column) |
 | `POST /api/import_inventory` | Import a collection CSV (multipart `file`, `replace_existing`): Moxfield, or the app's own columns |
 | `GET /api/backups`, `POST /api/backups`, `POST /api/backups/schedule` | List the backups (and the automatic backups' settings); make one (JSON: `note`); set how often automatic backups are made and how many are kept (JSON: `every_hours`, `keep`) |

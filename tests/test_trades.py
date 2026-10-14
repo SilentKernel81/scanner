@@ -124,8 +124,14 @@ class HeldCopiesStay(TradeData):
         cleared = self.collection.clear_inventory(GAME)
         self.assertEqual((cleared['success'], cleared['error']), (False, inv.TRADE_HELD))
         self.assertEqual(len(list(inv.CAPTURES_DIR.glob('*'))), 2)  # the photos too
-        added = self.collection.get_all_cards(GAME)[0]['added_at']
-        self.refused(lambda: self.collection.remove_batch(GAME, added))
+        # The three copies came in together (one batch of 3): taking it back would leave less
+        # than the trade holds
+        self.collection.conn.execute('DELETE FROM inventory_batches WHERE inventory_id = ? AND id != '
+                                     '(SELECT MIN(id) FROM inventory_batches WHERE inventory_id = ?)', (self.card, self.card))
+        self.collection.conn.execute('UPDATE inventory_batches SET quantity = 3 WHERE inventory_id = ?', (self.card,))
+        self.collection.conn.commit()
+        batch = next(c for c in self.collection.get_all_cards(GAME) if c['id'] == self.card)['batches'][0]['batch']
+        self.refused(lambda: self.collection.remove_batch(GAME, batch))
 
     def test_more_copies_and_other_edits_are_fine(self):
         self.collection.add_card(CARD, GAME, 'regular', quiet=True)

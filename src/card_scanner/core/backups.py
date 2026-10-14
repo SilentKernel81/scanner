@@ -31,9 +31,11 @@ BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 # inventory_sources: which station scanned how many of an entry's copies (the scanned cards'
 # camera filter) - it goes with the entries, or a restore would leave today's ownership on
 # yesterday's entries
+# inventory_batches: which copies came together (an "Add to collection", an import); a backup
+# made before it gets the one batch each entry itself knows of when it is restored
 # trades / trade_cards: the cards set aside for a trade name their entries (used in the
 # collection; the scanned cards' file has the tables too, empty)
-INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_sources', 'trades', 'trade_cards')
+INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_batches', 'inventory_sources', 'trades', 'trade_cards')
 DECK_TABLES = ('decks', 'deck_cards')
 # The digital collection (MTG Arena; core/arena.py): its cards and what is known of the
 # account. It has no captures, stations or trades. It could be imported again - but only
@@ -48,6 +50,7 @@ UPLOAD_MAX_FILES = 200_000
 RESTORABLE = {
     'inventory': 'quantity > 0',
     'inventory_captures': 'inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
+    'inventory_batches': 'quantity > 0 AND inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
     'inventory_sources': 'quantity > 0 AND inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
     'trades': '1',
     'trade_cards': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades) AND (inventory_id IS NULL '
@@ -299,6 +302,8 @@ def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=No
                             (tuple(row) for row in source.execute(
                                 f"SELECT {', '.join(columns)} FROM {prefix}{table} "
                                 f"WHERE {RESTORABLE[table].format(prefix=prefix)}")))
+                    if 'inventory' in tables and not _columns(source, prefix + 'inventory_batches'):
+                        manager.rebuild_batches()  # a backup from before batches (or the digital collection's)
                     manager.conn.commit()
                 except Exception as e:
                     manager.conn.rollback()

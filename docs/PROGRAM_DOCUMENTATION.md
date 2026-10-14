@@ -1219,7 +1219,7 @@ totals compared before and after; anything else is rolled back. The older column
 are.
 
 **Constraints** (migrations `inventory_constraints_1`, in both inventory files, and
-`deck_constraints_1`): `inventory.quantity` is an integer above 0, `added_quantity` NULL or not
+`deck_constraints_1`): `inventory.quantity` is an integer above 0, `inventory_batches` follows an entry (`REFERENCES inventory ON DELETE CASCADE`) with a quantity above 0, `added_quantity` NULL or not
 negative; `inventory_captures` and `inventory_sources` belong to an entry (`REFERENCES
 inventory(id) ON DELETE CASCADE`), a station's `quantity` is above 0; `deck_cards` belong to a
 deck (cascade), `quantity` above 0, `board` one of commander / main / side. So an entry or a
@@ -1482,19 +1482,29 @@ did not (the scanned cards are then still waiting). An error while copying rolls
 collection back. Decks, statistics and "owned" only look at
 the collection; the collection page shows a notice while scanned cards are waiting.
 
-Every entry records `added_at` - when it came into its inventory; one time for all entries of
-an "Add to collection" (`timestamp` stays the scan time) - and `added_quantity`, how many of
-its copies came with that (the rest were there before). The collection page sorts by it ("Last
-added to the collection", the default), filters by batch ("Added <time> (n cards)") and, with a
-batch chosen, offers **Remove this batch** (`POST /api/inventory/remove_batch`,
-`InventoryManager.remove_batch`): each entry loses only the copies that batch brought, with
-their newest captures; entries with no other copies are deleted. An entry that keeps copies
-gets `added_quantity = 0`: they belong to no batch any more (shown as "Added before <time>",
-left out of the batch filter), so removing a batch again never takes them. Adds to one entry
-at the same `added_at` (two in one second, a file with repeated rows) add up in
-`added_quantity`; Undo lowers it. The cards are deleted, not
-moved back to the scanner. Both columns are added on startup (`ALTER TABLE`; `added_at` starts
-as the scan time).
+**Batches** (`inventory_batches`, since 2026-10-14). Which copies of an entry came in together
+is one row per batch and entry: `batch` (an id, unique for each time cards came in - two in the
+same second are still two), `inventory_id`, `added_at`, `quantity`. A batch is one "Add to
+collection" (`take_from`: one for the whole move, also with a camera chosen), one import file
+(`import_entries`, `import_csv`, `replace_all`), the cards of one precon deck added at once, or
+one scanned card (`add_card`; `new_batch()` + `batch=` to make several cards one). An entry's
+rows never add up to more than its quantity; copies no row accounts for were there before
+(shown as "Added before <time>"). They follow the copies: a split (`_copy_with`) and a merge
+(`update_card`) move the **newest batch's** copies first - as the newest captures go - and a
+lowered quantity, an undo (its own batch first), a station's copies taken out or a removed
+camera count (`_take_copies`) take from the batches the same way (`_take_from_batches`,
+`_trim_batches`). The collection page filters by batch ("Added <time> (n cards)", from every
+entry's `batches`) and, with one chosen, offers **Remove this batch**
+(`POST /api/inventory/remove_batch`, JSON `batch`; `InventoryManager.remove_batch`): each
+entry loses only the copies that batch brought, with their newest captures and the cameras'
+counts; entries with no other copies are deleted. The cards are deleted, not moved back to the
+scanner. `added_at` / `added_quantity` in an entry's JSON are its newest batch's (0 copies: all
+of them were there before); the entry's own `added_at` column (the page's "Last added" sort) and
+`added_quantity` column are still written, and `added_quantity` is no longer read. The table is
+made on startup and, once (`inventory_batches_1`), filled with the one batch each entry knew of
+(`old:<added_at>`) - nothing is filled where the table has rows already, as the standalone
+program's had. A backup holds the table (`backups.INVENTORY_TABLES`); one made before it gets
+the same one batch per entry when it is restored (`rebuild_batches`). `tests/test_batches.py`.
 
 ### Trades
 
