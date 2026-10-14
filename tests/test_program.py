@@ -191,6 +191,19 @@ class Station(unittest.TestCase):
             self.assertIsNone(program.start_station(5000))
             popen.assert_not_called()
 
+    def test_the_setup_page_stays_on_this_computer_unless_the_pages_are_reachable(self):
+        Config.CAMERA_TYPE = 'usb'
+        saved = (services.app_mode, services.app_settings, Config.HOST)
+        try:
+            for reachable, expected in ((False, '127.0.0.1'), (True, None)):
+                services.app_mode, services.app_settings = True, Settings(network_access=reachable)
+                with mock.patch.object(subprocess, 'Popen') as popen:
+                    program.start_station(5000)
+                self.assertEqual(popen.call_args.kwargs['env'].get('SCANNER_SETUP_HOST'), expected)
+        finally:
+            services.app_mode, services.app_settings, Config.HOST = saved
+            services.station_process = None
+
     def test_a_station_that_does_not_stop_is_killed_and_the_server_does_not_hang(self):
         program.STATION_STOP_SECONDS = 0.6
         # Ignores SIGINT, as a station stuck in a camera call would

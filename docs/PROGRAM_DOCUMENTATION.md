@@ -1937,7 +1937,8 @@ It is the same server, and differs from one on a server only here:
 - **Who can reach it**: `flask.host: auto` means the whole network on a server and
   `127.0.0.1` as a desktop program; the switch "Reachable from other devices" (Settings ->
   Program, `POST /api/network_access`, `data/settings.json: network_access`) overrides it and
-  applies after a restart (`program.network_access`, `listen_host`).
+  applies after a restart (`program.network_access`, `listen_host`). The station's setup page
+  gets `SCANNER_SETUP_HOST=127.0.0.1` under the same rule.
 - **Where it reaches itself**: the station, the browser and `--quit` use `program.local_url`
   - `localhost` for a server that listens on loopback or on every address, the address itself
   for one that listens on an address of its own (`flask.host: 192.168.1.5` answers there, not

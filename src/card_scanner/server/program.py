@@ -195,6 +195,8 @@ def start_station(port):
         return None
     src = str(TOP / 'src')
     env = {**os.environ, 'PYTHONPATH': src + (os.pathsep + os.environ['PYTHONPATH'] if os.environ.get('PYTHONPATH') else '')}
+    if not network_access():
+        env.setdefault('SCANNER_SETUP_HOST', '127.0.0.1')  # the station's setup page has no login either
     try:
         process = subprocess.Popen(station_command(port), cwd=str(TOP), env=env)
     except OSError as e:

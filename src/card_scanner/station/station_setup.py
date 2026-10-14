@@ -496,9 +496,11 @@ class SetupPage:
                 self.wfile.write(body)
 
         try:
-            # '' = every network address of this machine. ThreadingHTTPServer answers each
-            # request in its own thread, so a slow one (a picture) does not hold up the rest
-            server = ThreadingHTTPServer(('', self.port), Handler)
+            # '' = every network address of this machine (SCANNER_SETUP_HOST narrows it: the
+            # server's desktop program keeps the page on this computer). ThreadingHTTPServer
+            # answers each request in its own thread, so a slow one (a picture) does not hold
+            # up the rest
+            server = ThreadingHTTPServer((os.getenv('SCANNER_SETUP_HOST', ''), self.port), Handler)
         except OSError as e:
             logger.warning(f"The setup page could not start on port {self.port} ({e})")
             return False
