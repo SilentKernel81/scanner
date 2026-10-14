@@ -268,14 +268,17 @@ def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=No
     {'restored': the backup's info, 'previous': the backup made of the state replaced}.
     """
     folder = _folder(backup_id)
-    # keep: the backup made here must not push out the one being restored (restoring the oldest
-    # of the automatic backups once deleted it before it was read)
-    previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
-                      automatic=True, keep=backup_id, arena_inventory=arena_inventory)
-    source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
     parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
-    try:
-        with _locked(parts):
+    # One critical section: the backup of what is there now and the replacement of it. A card
+    # accepted between the two would be in neither the backup nor the restored tables (the
+    # managers' locks are re-entrant: create() takes them again)
+    with _locked(parts):
+        # keep: the backup made here must not push out the one being restored (restoring the oldest
+        # of the automatic backups once deleted it before it was read)
+        previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
+                          automatic=True, keep=backup_id, arena_inventory=arena_inventory)
+        source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
+        try:
             # One part at a time: the collection and the decks are two connections to one
             # file, which cannot both hold a write. If a part fails the ones before it are
             # restored already - the backup just made has the state from before
@@ -314,9 +317,9 @@ def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=No
             CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
             for saved in (folder / 'captures').glob('*'):
                 _link(saved, CAPTURES_DIR / saved.name)
-        info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
-    finally:
-        source.close()
+            info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
+        finally:
+            source.close()
     logger.info(f"Restored backup {backup_id} (the state before it: backup {previous['id']})")
     return {'restored': {**info, 'id': backup_id}, 'previous': previous}
 
