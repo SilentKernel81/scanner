@@ -1616,8 +1616,12 @@ the backup being restored, which may itself be the oldest of them), then replace
 rows of each table (the columns the backup has; row ids are kept) and links missing
 thumbnails back. Collection, scanned cards and decks are committed one after the other - the
 collection and the decks are two connections to one file - so a failure part way leaves the
-earlier parts restored; the automatic backup has the state from before. Every page reloads its
-inventory (`inventory_updated`). Card data, the review queue, the stations and settings are not
+earlier parts restored; the automatic backup has the state from before. The automatic backup
+and the replacement are one critical section - the route holds the maintenance barrier, then
+`restore` holds every manager's lock from before the backup is made until the last table is
+in place (`tests/test_restore_locking.py`): a card accepted in between would be in neither the
+backup nor the restored tables. A capture arriving meanwhile waits and is added to the
+restored state. Every page reloads its inventory (`inventory_updated`). Card data, the review queue, the stations and settings are not
 part of these backups: copy the server's `data/` folder for everything (`scripts/backup.sh`
 does that for an installation without Docker).
 

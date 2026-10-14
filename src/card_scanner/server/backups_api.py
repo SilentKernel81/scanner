@@ -120,7 +120,9 @@ def collection_backups():
 def restore_backup(backup_id):
     """Put the collection, scanned cards and decks back as in a backup (the current state is backed up first)"""
     try:
-        result = backups.restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=arena_inventory)
+        # The barrier first, as a capture being settled takes it before the inventories' locks
+        with maintenance_barrier:
+            result = backups.restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=arena_inventory)
     except backups.BackupError as e:
         logger.error(f"Restoring backup {backup_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
