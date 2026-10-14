@@ -23,9 +23,14 @@ matching and the inventory); its README maps each Kotlin file to the Python code
 both in step when changing that logic, the upload's answer (`ServerOutcome.parse` there) or the
 collection CSV (`ExportParityTest` there).
 
-The single-machine scanner this grew from is a separate project
-([SilentKernel81/scanner](https://github.com/SilentKernel81/scanner), `../scanner`): never push
-to it or change it from here (the remote `desktop` is fetch-only on purpose).
+The single-machine scanner this grew from ([SilentKernel81/scanner](https://github.com/SilentKernel81/scanner),
+`../scanner`, the "standalone") is **derived from this repository**: every change is made
+here, and the standalone takes it from here (from its own checkout: `git pull` / merge of this
+repository's `main`; the remote `desktop` here stays fetch-only, nothing is pushed to it from
+here). The two must differ only in what starts the camera: the standalone starts a station
+beside the server on the same machine (`scripts/start.sh`, the AppImage's `AppRun`), the server
+receives the captures of stations elsewhere. So code that exists for one of them only goes
+behind that difference - a launcher, a setting - never into a file the other has too.
 
 The project is developed entirely with AI (this assistant, directed by the user), and the
 documentation says so (README.md, *How this project was built*): keep that statement true and
