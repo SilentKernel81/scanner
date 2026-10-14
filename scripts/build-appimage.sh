@@ -10,7 +10,7 @@
 # the result does not depend on this computer's glibc.
 #
 # Run it:  MTG_SCANNER_HOME=/tmp/try dist/Card_Scanner-x86_64.AppImage --no-browser
-# (without MTG_SCANNER_HOME the data goes to ~/.local/share/mtg-scanner)
+# (without MTG_SCANNER_HOME the data goes to ~/.mtg-scanner)
 # ============================================================================
 
 set -euo pipefail

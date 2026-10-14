@@ -176,7 +176,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   what ships (`config.yaml` as shipped, `src/ocr`, `bin/`; `Config.BASE_DIR`). `paths.USER_DIR` is
   the person's folder - data, `scanned_cards/`, `.env`, their `config.yaml` laid over the shipped
   one (`Config.USER_DIR`, `Config.DATA_DIR`, `server.ROOT`): the same folder as TOP in a checkout
-  and the images, `~/.local/share/mtg-scanner` when packaged, `MTG_SCANNER_HOME` chooses. Never
+  and the images, `~/.mtg-scanner` when packaged, `MTG_SCANNER_HOME` chooses. Never
   write under TOP; name a file of `data/` in a message with `Config.shown('logs', 'app.log')`;
   find `node` / `v4l2-ctl` with `paths.tool()` (a missing `v4l2-ctl` means no focus control, said
   once). `paths.CODE` is
