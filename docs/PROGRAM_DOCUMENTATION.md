@@ -1970,12 +1970,25 @@ one game exists. Card payloads may carry `finish_options` (only those finishes a
 
 ## Configuration and files
 
+**Who may use the server** (`server/access.py`, `tests/test_access.py`): there is no login, and
+a browser sends any web page's requests to a local or network address, so a page open in
+another tab could otherwise change the collection or restore a backup. Every request's Host
+must be `localhost`, an IP address, this computer's own name (alone or under `.local`, `.lan`,
+`.home`, `.home.arpa`, `.internal`, `.localdomain`) or in `flask.allowed_hosts` - another name
+that resolves here is DNS rebinding. A changing request carrying an `Origin` must come from the
+page it was sent to, and a cross-site `/api/` request (`Sec-Fetch-Site`) is refused; Socket.IO
+connections follow the same rule (`socket_origin_allowed`). Stations send no `Origin`, so they
+pass on the Host check alone: a station reaching the server by a host name that is not the
+computer's own (a Docker service name, a reverse proxy) needs it in `flask.allowed_hosts`.
+Never tested with the Android app in server mode reaching the server by a host name.
+
 **Server**
 
 | Where | What |
 |---|---|
-| `config.yaml` | Vision AI defaults, web server, station token, cleanup, card data update interval. `camera.*` is read by a station, not by the server |
+| `config.yaml` | Vision AI defaults, web server (`flask.allowed_hosts`: names the server may be reached under, besides localhost, IP addresses and the computer's own name - see *Who may use the server*), station token, cleanup, card data update interval. `camera.*` is read by a station, not by the server |
 | `.env` (beside `deploy/docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
+| `data/secret_key` | Signs Flask's cookies: a random key made on first start (mode 600) unless `flask.secret_key` is set |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The page only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
 | `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
 | `data/stations.json` | The stations: name, location, capture count, last seen, `camera` (it connects as a camera station), and `settings` - each station's `focus_value`, `camera_rotation`, `refocus_every`, `fixed_area`, `fixed_area_enabled`, `debug_trace`, `auto_add` |
