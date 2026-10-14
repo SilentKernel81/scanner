@@ -58,6 +58,14 @@ class Requests(unittest.TestCase):
                                          base_url='http://localhost').status_code, 403)
         self.assertEqual(self.client.get('/page', base_url='http://evil.example').status_code, 403)
 
+    def test_a_refusal_says_why_where_a_client_looks(self):
+        # The phone app shows `message` of a 4xx answer; the pages' scripts read `error`
+        for reply in (self.client.get('/page', base_url='http://evil.example'),
+                      self.client.post('/api/x', headers={'Origin': 'http://evil.example'}, base_url='http://localhost')):
+            body = reply.get_json()
+            self.assertEqual(reply.status_code, 403)
+            self.assertTrue(body['message'] and body['message'] == body['error'], body)
+
     def test_socket_origin(self):
         env = {'HTTP_HOST': 'localhost:5000'}
         self.assertTrue(access.socket_origin_allowed('http://localhost:5000', env))

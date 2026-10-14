@@ -6,6 +6,7 @@
 # backup. Needs nothing from the rest of the server (state.py installs it).
 # ============================================================================
 import ipaddress
+import json
 import os
 import secrets
 import socket
@@ -77,16 +78,22 @@ def socket_origin_allowed(origin, environ=None):
     return not origin or same_origin(origin, host)
 
 
+def _refusal(text):
+    """The answer to a request that is refused. `message` is what the stations' clients (the
+    phone app) show for a 4xx answer; `error` is what the pages' scripts read"""
+    return jsonify({'success': False, 'error': text, 'message': text}), 403
+
+
 def reject_other_sites():
     if not host_allowed(request.host):
-        return jsonify({'success': False, 'error': f'{request.host} is not a name of this Card Scanner '
-                                                   'server (flask.allowed_hosts in config.yaml)'}), 403
+        return _refusal(f'{request.host} is not a name of this Card Scanner server '
+                        '(flask.allowed_hosts in config.yaml)')
     origin = request.headers.get('Origin')
     changes = request.method not in ('GET', 'HEAD', 'OPTIONS')
     # Sec-Fetch-Site covers the requests browsers send without an Origin (a GET from another site)
     if (changes and origin and not same_origin(origin, request.host)) or (
             request.path.startswith('/api/') and request.headers.get('Sec-Fetch-Site') == 'cross-site'):
-        return jsonify({'success': False, 'error': 'Requests from other web pages are not accepted'}), 403
+        return _refusal('Requests from other web pages are not accepted')
 
 
 def protect(app):
@@ -102,7 +109,8 @@ def protect(app):
 
     def guarded(environ, start_response):
         if not host_allowed(environ.get('HTTP_HOST', '')):
-            body = b'{"success": false, "error": "This name is not a name of this Card Scanner server (flask.allowed_hosts in config.yaml)"}'
+            text = 'This name is not a name of this Card Scanner server (flask.allowed_hosts in config.yaml)'
+            body = json.dumps({'success': False, 'error': text, 'message': text}).encode()
             start_response('403 Forbidden', [('Content-Type', 'application/json'),
                                              ('Content-Length', str(len(body)))])
             return [body]
