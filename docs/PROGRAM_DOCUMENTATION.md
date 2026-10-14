@@ -1629,7 +1629,7 @@ keep spaces together, a minus in front turns one term around
 (`-set:HOB`), and a word with a colon that names no field stays ordinary text. **Not** turns
 the whole field around. The filters are kept in the browser (`localStorage`: `collectionFilters`,
 `saveFilters` / `restoreFilters`) and are there again on the next visit - all but the "Added"
-batch and **No use in my decks**; a set, tag or location that is gone from the collection is
+batch; a set, tag or location that is gone from the collection is
 not filtered by, and **Clear filters** can only be pressed while something is filtered. What
 narrows the list is also shown as chips above it (`activeFilters`: "Rarity: rare ×"), each
 taken off with a click, and is written into the page's address (`FILTER_PARAMS`:
@@ -1676,8 +1676,10 @@ lands in a box, next to the ones in ten precons); with fewer copies there - or n
 location - every entry of the card counts. The deck builder has the same idea as **Not in other decks** on the card search
 (`free=1&deck_id=` → `search_cards(exclude_names=)`) and on the suggestions (`elsewhere`). The deck
 builder goes by card name, not by copies: a card with three copies owned and one in a deck is "in a deck".
-**No use in my decks** goes further, to find what can be sold or given away: it also hides the
-cards EDHREC lists for the commander of one of the decks (`GET /api/inventory/suggested` →
+There used to be a second tick, **No use in my decks**, that also hid the cards EDHREC lists for
+the commander of one of the decks; it was taken off the filters on 2026-10-14 because it needs the
+internet (the page waited for EDHREC). The route is kept, no page calls it now, for a version
+on the Trades tab (`GET /api/inventory/suggested` →
 `Recommendations.commander_cards` per deck with a commander, matched to the owned names by front
 face; asked when the tick is set, one request per deck the first time, then from the 7-day
 cache). Decks EDHREC has no answer for come back in `unknown` and are named in a notification.
