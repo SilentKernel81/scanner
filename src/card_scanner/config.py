@@ -139,7 +139,7 @@ class Config:
 
     # Flask settings
     SECRET_KEY = config.get('flask', 'secret_key', default=None)  # None: data/secret_key (server/access.py)
-    HOST = config.get('flask', 'host', default='0.0.0.0')
+    HOST = config.get('flask', 'host', default='auto')  # auto: the whole network, but this computer only as a desktop program (server/program.py)
     PORT = config.get('flask', 'port', default=5000)
     ALLOWED_HOSTS = config.get('flask', 'allowed_hosts', default=None) or []  # server/access.py
     DEBUG = config.get('flask', 'debug', default=False)

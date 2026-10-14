@@ -82,6 +82,10 @@ class Services:
     recommend = None          # recommendations.Recommendations
     default_desk = None       # desks.Desk of the camera on this machine (set in server/desks.py)
     debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
+    app_mode = False           # started as a desktop program (--app; server/program.py)
+    restart_requested = False  # main starts the program again after shutting down
+    network_access_running = False  # whether other devices can reach this process (main)
+    station_process = None     # the camera station started beside the server (program.start_station)
     daily_backup_status = ''    # the startup banner's line about the day's backup
 
 

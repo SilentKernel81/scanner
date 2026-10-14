@@ -475,6 +475,66 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// Settings -> Program: restart, quit (only there when started as a desktop program), and who
+// may open the pages
+
+async function restartProgram() {
+    const ok = await confirmDialog({
+        title: 'Restart Card Scanner?',
+        message: 'The program stops and starts again (a few seconds); this page reloads by itself.',
+        confirmText: 'Restart'
+    });
+    if (!ok) return;
+    try {
+        const response = await fetch('/api/restart', {method: 'POST'});
+        if (!response.ok) throw new Error('refused');
+        notify('Restarting...', 'info');
+        const started = Date.now();
+        const wait = async () => {
+            try {
+                if ((await fetch('/api/stats', {cache: 'no-store'})).ok && Date.now() - started > 3000) return location.reload();
+            } catch (error) { /* still stopped */ }
+            if (Date.now() - started < 120000) setTimeout(wait, 1000);
+        };
+        setTimeout(wait, 1500);
+    } catch (error) {
+        notify(`Could not restart: ${error.message}`, 'error');
+    }
+}
+
+async function quitProgram() {
+    const ok = await confirmDialog({
+        title: 'Quit Card Scanner?',
+        message: 'The program stops and this page no longer works until it is started again.',
+        confirmText: 'Quit', danger: true
+    });
+    if (!ok) return;
+    try {
+        const response = await fetch('/api/quit', {method: 'POST'});
+        if (!response.ok) throw new Error((await response.json()).error);
+        notify('Card Scanner stopped - you can close this tab', 'success');
+    } catch (error) {
+        notify(`Could not quit: ${error.message}`, 'error');
+    }
+}
+
+async function setNetworkAccess(enabled) {
+    const description = document.getElementById('network-access-desc');
+    const toggle = document.getElementById('toggle-network-access');
+    try {
+        const response = await fetch('/api/network_access', {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled})});
+        const data = await response.json();
+        if (!data.success) throw new Error('refused');
+        description.dataset.saved = String(data.enabled);
+        description.dataset.running = String(data.running);
+        notify(data.enabled === data.running ? 'Saved' : 'Saved - applies after a restart', 'success');
+    } catch (error) {
+        toggle.checked = !enabled;
+        notify(`Could not save: ${error.message}`, 'error');
+    }
+}
+
 // Scanned cards -> collection, from either page: asks for a location first
 
 let toCollectionResolve = null;
