@@ -382,6 +382,32 @@ sudo systemctl status mtg-scanner       # is it running?
 journalctl -u mtg-scanner -f            # live logs (the app also writes data/logs/)
 ```
 
+## As a desktop program (AppImage)
+
+One file that holds the server, this computer's camera station, Python, the Python packages,
+Node.js and the OCR reader - nothing to install (`v4l2-ctl` from v4l-utils is still used when
+it is there: focus lock and sweeps). Built by `scripts/build-appimage.sh` (needs `uv`, `curl`,
+`tar`, `git`; downloads Node.js and appimagetool once) and by the workflow
+`.github/workflows/appimage.yml` when a release is published.
+
+```bash
+chmod +x Card_Scanner-x86_64.AppImage
+./Card_Scanner-x86_64.AppImage              # starts the server and the camera station, opens the page
+./Card_Scanner-x86_64.AppImage --no-browser # without opening the browser
+./Card_Scanner-x86_64.AppImage --no-station # only the server (the cameras are elsewhere)
+./Card_Scanner-x86_64.AppImage --quit       # stops the one that runs
+```
+
+- **Your files** (collection, settings, keys, backups, logs, captures) are in
+  `~/.local/share/mtg-scanner`; `MTG_SCANNER_HOME=/some/folder` chooses another. A
+  `config.yaml` there is laid over the shipped one - it only needs the settings you change.
+- **Only this computer can open the pages** until "Reachable from other devices" is switched
+  on in Settings -> Program (applies after a restart). The station's setup page
+  is at `http://localhost:8080` (which camera, its name).
+- **Settings -> Program** has Restart and Quit. A second start shows the program that runs.
+- **First start**: the card data (~150 MB) is downloaded in the background; the pages work
+  meanwhile.
+
 ## Troubleshooting
 
 **The station's page says "No camera station connected"** - the station isn't running, or

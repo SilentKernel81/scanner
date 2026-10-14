@@ -146,6 +146,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Focus sweep / lock / drift tracking | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe`, `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` |
 | **Both** | |
+| Desktop program (AppImage): launcher options, quit / restart, who can reach it, the station beside the server | `server/program.py`: `parse_arguments`, `network_access`, `listen_host`, `start_station` / `stop_station`, `exec_again_if_requested`; `server/startup.py`: `main`; `packaging/` (`AppRun`), `scripts/build-appimage.sh`, `.github/workflows/appimage.yml`; `templates/_program.html`, `common.js`: `quitProgram`, `restartProgram`, `setNetworkAccess` |
 | Settings | `config.yaml` (+ `config.py`: also `SCANNER_CAMERA`, `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_TOKEN`), `.env`; on the server `data/settings.json` (everyone's choices), `data/stations.json` (each station's), `data/api_keys.env`, `data/prompts.json` |
 | Images | `deploy/`: `Dockerfile` (targets `server`, `client`, `client-pi` for a Raspberry Pi camera), `docker-compose.yml`, `docker-compose.gpu.yml`, `docker-compose.client.yml`, `docker-compose.client-pi.yml`, `.env` (a link to the top folder's); `compose.yaml` in the top folder (includes the server's file); `scripts/docker-entrypoint.sh` |
 
@@ -183,6 +184,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   file's own location means another folder as soon as the file moves - and a server whose
   data folder is a new, empty one starts without complaint. `tests/test_paths.py` checks
   every such path; a new one belongs in it.
+- **The desktop program is this server with a launcher** (`server/program.py`, `app.py --app`):
+  anything that exists only for it goes behind `services.app_mode` or in `packaging/`, never into
+  a file a server does not also have. Try a change to the launcher or the packaging by building
+  (`scripts/build-appimage.sh`) and running it with `MTG_SCANNER_HOME=/tmp/try ... --no-browser`.
 - **One server per data folder**: `startup.lock_instance()` holds `data/app.lock` (flock, gone
   with the process); a second server on the same `USER_DIR` says so and exits.
 - **Only the two launchers in the top folder, and `src/` first on Python's path.** `app.py`

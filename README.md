@@ -104,6 +104,12 @@ docker compose -f deploy/docker-compose.client.yml up -d --build
 # it appears on the server's page by itself
 ```
 
+### As a desktop program
+
+On one Linux computer with a USB webcam the whole thing is a single file: the AppImage built by
+`scripts/build-appimage.sh` (attached to each release) holds the server and the camera station.
+See [docs/INSTALL.md](docs/INSTALL.md#as-a-desktop-program-appimage).
+
 ## Choosing a vision AI provider
 
 On a camera's page, **Settings → Vision AI**: pick a provider and a key field appears (keys you
