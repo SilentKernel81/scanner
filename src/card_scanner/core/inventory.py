@@ -557,9 +557,10 @@ class InventoryManager(storage.Transactional):
         self.conn.execute(f'DELETE FROM inventory_sources WHERE {ids}', params)
         return self.conn.execute(f'DELETE FROM inventory WHERE {where}', params).rowcount
 
-    def _take_copies(self, row_id, copies):
-        """An entry loses copies (the newest batch's first): deleted when none are left - a
-        row is never kept at 0"""
+    def _take_copies(self, row_id, copies, batch=None):
+        """An entry loses copies: deleted when none are left - a row is never kept at 0. They
+        leave its batches newest first (`batch`, when given, before the rest) - the copies
+        that no batch accounts for are the oldest, so they are the last to go"""
         row = self._get_row(row_id)
         if not row:
             return
@@ -567,7 +568,9 @@ class InventoryManager(storage.Transactional):
             self._delete_entries('id = ?', (row_id,))
         else:
             self.conn.execute('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', (copies, row_id))
-            self._trim_batches(row_id, row['quantity'] - copies)
+            if batch:
+                copies -= self._take_from_batch(row_id, batch, copies)
+            self._take_from_batches(row_id, copies)
 
     def _set_source(self, row_id, station, quantity):
         """How many of an entry's copies a station added - no row for none"""
@@ -636,8 +639,24 @@ class InventoryManager(storage.Transactional):
             if to_id is not None:
                 self._note_batch(to_id, row['batch'], row['added_at'], taken)
 
+    def _take_from_batch(self, row_id, batch, count):
+        """Up to `count` copies leave one batch of an entry; returns how many did"""
+        row = self.conn.execute('SELECT id, quantity FROM inventory_batches WHERE inventory_id = ? AND batch = ?',
+                                (row_id, batch)).fetchone()
+        if not row:
+            return 0
+        taken = min(count, row['quantity'])
+        if taken == row['quantity']:
+            self.conn.execute('DELETE FROM inventory_batches WHERE id = ?', (row['id'],))
+        else:
+            self.conn.execute('UPDATE inventory_batches SET quantity = quantity - ? WHERE id = ?', (taken, row['id']))
+        return taken
+
     def _trim_batches(self, row_id, quantity):
-        """An entry's batches never account for more copies than it has"""
+        """An entry's batches never account for more copies than it has - for what was
+        taken out of them already (copies that left are consumed with _take_from_batches:
+        this only takes back what is left over, and would leave an older, untracked copy's
+        batch standing)"""
         known = self.conn.execute('SELECT COALESCE(SUM(quantity), 0) FROM inventory_batches WHERE inventory_id = ?',
                                   (row_id,)).fetchone()[0]
         if known > quantity:
@@ -890,12 +909,7 @@ class InventoryManager(storage.Transactional):
                 self._set_source(row_id, source, (had['quantity'] if had else 0) - quantity)
             if capture_id:
                 self._delete_captures('id = ?', (capture_id,))
-            # What the add brought leaves its own batch first, then the newest ones (_take_copies)
-            self.conn.execute('UPDATE inventory_batches SET quantity = quantity - ? '
-                              'WHERE inventory_id = ? AND batch = ? AND quantity > ?', (quantity, row_id, batch, quantity))
-            if not self.conn.execute('SELECT changes()').fetchone()[0]:
-                self.conn.execute('DELETE FROM inventory_batches WHERE inventory_id = ? AND batch = ?', (row_id, batch))
-            self._take_copies(row_id, quantity)
+            self._take_copies(row_id, quantity, batch=batch)  # what the add brought leaves its own batch first
             self._commit()
         self.log(f"Undid add: {quantity}x {row['card_name']}")
         return row['card_name']
@@ -1161,7 +1175,8 @@ class InventoryManager(storage.Transactional):
                 self._trim_captures(row_id, new_quantity)
                 self._move_captures(row_id, twin['id'])
                 self.conn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', (new_quantity, twin['id']))
-                self._trim_batches(row_id, new_quantity)
+                if new_quantity < row['quantity']:
+                    self._take_from_batches(row_id, row['quantity'] - new_quantity)  # the copies given up first
                 self._take_from_batches(row_id, new_quantity, to_id=twin['id'])
                 self._add_tags(twin['id'], new_tags)
                 self._delete_entries('id = ?', (row_id,))  # its captures and stations went to the twin
@@ -1174,6 +1189,8 @@ class InventoryManager(storage.Transactional):
                                       (*(printing[c] for c in self.PRINTING_COLUMNS), row_id))
                 self._trim_sources(row_id, new_quantity)
                 self._trim_captures(row_id, new_quantity)
+                if new_quantity < row['quantity']:
+                    self._take_from_batches(row_id, row['quantity'] - new_quantity)  # the newest go, as captures do
                 self._trim_batches(row_id, new_quantity)
             self._commit()
         if not quiet:

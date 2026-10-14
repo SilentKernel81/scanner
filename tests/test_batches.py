@@ -149,6 +149,49 @@ class Batches(TemporaryData):
         self.consistent()
 
 
+class PartlyTracked(TemporaryData):
+    """Entries migrated from before batches: only some of their copies are in a batch (the newest;
+    the others were there before). Copies that leave go newest first, so they leave the batch"""
+
+    def entry(self):
+        row = self.collection.add_card(CARD, GAME, 'regular', quantity=3, quiet=True)
+        batch = self.collection.new_batch()
+        # One of the three copies is the batch's; the other two are older and in none
+        self.collection.conn.execute('UPDATE inventory_batches SET batch = ?, quantity = 1 WHERE inventory_id = ?',
+                                     (batch[0], row))
+        self.collection.conn.commit()
+        return row, batch[0]
+
+    def batches(self, row):
+        return [tuple(r) for r in self.collection.conn.execute(
+            'SELECT batch, quantity FROM inventory_batches WHERE inventory_id = ?', (row,))]
+
+    def test_a_lowered_quantity_takes_the_tracked_copy_before_the_older_ones(self):
+        row, batch = self.entry()
+        self.collection.update_card(row, quantity=2, quiet=True)
+        self.assertEqual(self.batches(row), [])
+        self.assertEqual(self.collection.remove_batch(GAME, batch), {'entries': 0, 'cards': 0})
+        self.assertEqual(self.collection.get_all_cards(GAME)[0]['quantity'], 2)  # the older copies stay
+
+    def test_a_merge_that_gives_copies_up_does_the_same(self):
+        row, batch = self.entry()
+        twin = self.collection.add_card(CARD, GAME, 'regular', condition='Played', quantity=1, quiet=True)
+        self.collection.update_card(row, quantity=2, condition='Played', quiet=True)  # lowered, and merged into the twin
+        self.assertEqual(self.collection.get_all_cards(GAME)[0]['quantity'], 3)
+        self.assertEqual(self.collection.get_all_cards(GAME)[0]['id'], twin)
+        self.assertNotIn(batch, {b for b, _ in self.batches(twin)})
+        self.assertEqual(self.collection.conn.execute('PRAGMA foreign_key_check').fetchall(), [])
+
+    def test_copies_taken_out_by_undo_or_a_trade_do_not_take_a_second_batch(self):
+        row, batch = self.entry()
+        again = self.collection.new_batch()
+        self.collection.add_card(CARD, GAME, 'regular', quantity=1, quiet=True, batch=again)
+        self.collection.undo_last_add()                       # its own batch goes, not the older one too
+        self.assertEqual(self.batches(row), [(batch, 1)])
+        self.collection.captured_copy('missing-key', 'desk-a')  # nothing to take: no change either
+        self.assertEqual(self.batches(row), [(batch, 1)])
+
+
 class Migration(TemporaryData):
     def test_a_file_from_before_gets_the_batch_each_entry_knew_of(self):
         path = self.tmp / 'old.db'
