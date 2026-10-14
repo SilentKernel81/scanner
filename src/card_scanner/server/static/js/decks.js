@@ -1096,6 +1096,7 @@ function bindDeckHomeEvents() {
     bindSwitch('deck-kind', button => {
         deckKindShown = button.dataset.kind;
         remember('deckKindShown', deckKindShown);
+        markSwitch('deck-kind', 'kind', deckKindShown);
         renderDeckList();
     });
     // Only marks the choice; saveDeckModal reads it
