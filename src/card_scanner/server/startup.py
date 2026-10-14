@@ -2,9 +2,12 @@
 # FILE: server/startup.py
 # Start-up: every shared object is created here (initialize_components), then the web server runs.
 # ============================================================================
+import signal
+import socket
 import sys
 import threading
 import time
+import webbrowser
 
 try:
     import fcntl
@@ -33,7 +36,7 @@ from card_scanner.server.state import (
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
 from card_scanner.server.captures import resume_pending
-from card_scanner.server.card_data import run_update_checks
+from card_scanner.server.card_data import run_update_checks, start_card_data_update
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.settings_events import saved_debug_mode
 
@@ -43,7 +46,7 @@ from card_scanner.server.settings_events import saved_debug_mode
 # notices).
 from card_scanner.server import (  # noqa: F401
     pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, backups_api, stations_api,
-    scan_events, settings_events, ai_events, card_data,
+    scan_events, settings_events, ai_events, card_data, program,
 )
 
 
@@ -176,24 +179,76 @@ def lock_instance():
     return True
 
 
+def port_answers(port, host='localhost'):
+    """Whether a program on this computer already listens on the port (on that address)"""
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def any_answers(port):
+    """Whether something answers on the port, on loopback or on the address flask.host names"""
+    return any(port_answers(port, url.split('//')[1].rsplit(':', 1)[0].strip('[]'))
+               for url in program.candidate_urls(port))
+
+
+def open_browser_when_ready(url):
+    def wait():
+        for _ in range(120):
+            if any_answers(Config.PORT):
+                webbrowser.open(url)
+                return
+            time.sleep(0.5)
+    threading.Thread(target=wait, daemon=True, name='open-browser').start()
+
+
+def quit_running_program(urls):
+    import requests
+    for url in urls:
+        try:
+            if requests.post(f"{url}/api/quit", timeout=5).ok:
+                print("Card Scanner stopped")
+                return
+        except requests.RequestException:
+            continue
+    print(f"No Card Scanner to stop at {' or '.join(urls)}")
+
+
 def main():
     """Start the web server"""
+    args = program.parse_arguments()
+    services.app_mode = args.app
+    url = program.candidate_urls(Config.PORT)[0]  # until the saved settings are read (local_url below)
+
+    if args.quit:
+        quit_running_program(program.candidate_urls(Config.PORT))
+        return
+
+    # A second copy could not use the databases or the port: show the one that runs instead
+    if not lock_instance():
+        print(f"Card Scanner is running already on this data folder ({Config.shown()}): {url}")
+        if services.app_mode and not args.no_browser:
+            for _ in range(120):  # it may still be starting
+                if any_answers(Config.PORT):
+                    break
+                time.sleep(0.5)
+            webbrowser.open(url)
+        return
+    if any_answers(Config.PORT):
+        print(f"Port {Config.PORT} is in use by another program (or a Card Scanner with another data folder): {url}")
+        if services.app_mode and not args.no_browser:
+            webbrowser.open(url)
+        return
+
     # Use print for important startup messages that should always be visible
     print("="*60)
     print("Card Scanner Web Interface")
     print("="*60)
 
-    if not lock_instance():
-        print(f"\n⚠ Another Card Scanner is running on this data folder ({Config.shown()}): not starting a second one.")
-        return
-
-    # Check if database exists
-    if not Config.DATABASE_FILE.exists() or Config.DATABASE_FILE.stat().st_size == 0:
-        print("\n⚠ WARNING: No card database found!")
-        print("Please run 'python3 scripts/setup_database.py' first")
-        print("to download the card database.")
-        logger.warning("Card database not found - cannot start application")
-        return
+    if Config.USER_DIR != Config.BASE_DIR:
+        print(f"✓ Your data: {Config.USER_DIR}")
 
     # Initialize components
     logger.info("Starting scanner initialization...")
@@ -205,8 +260,14 @@ def main():
     run_backup_schedule()
 
     game = games.active()
-    logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")
-    print(f"✓ {game.label}: {game.card_count():,} cards")
+    if game.card_count():
+        logger.info(f"Scanning {game.label}: {game.card_count():,} cards in the database")
+        print(f"✓ {game.label}: {game.card_count():,} cards")
+    else:
+        # First start: the pages work meanwhile and show the progress
+        logger.info(f"No {game.label} card data yet - downloading it from {game.source}")
+        print(f"⚠ {game.label}: no card data yet - downloading it from {game.source} (a few minutes)")
+        start_card_data_update(game)
 
     # Check Vision AI status
     if identification.card_identifier:
@@ -222,25 +283,32 @@ def main():
     print(services.daily_backup_status)
 
     services.debug_mode_running = saved_debug_mode()
+    services.network_access_running = program.network_access()
+    host = program.listen_host()
+    url = program.local_url(Config.PORT)  # where this computer reaches it: also for an address of its own
     if services.debug_mode_running:
         enable_request_log()
     logger.info(f"Debug trace: {'on' if scanner.debug_trace_enabled else 'off'}, debug mode: {'on' if services.debug_mode_running else 'off'} (Settings)")
-    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {'on - frames go to data/debug_frames' if scanner.debug_trace_enabled else 'off'}")
-    requests_log = Config.shown('logs', 'requests.log')
-    print(f"{'✓' if services.debug_mode_running else '-'} Debug mode: "
-          f"{'on - requests go to ' + requests_log if services.debug_mode_running else 'off'}")
+    # (the messages apart: Python 3.10 and 3.11 cannot nest f-strings with the same quotes)
+    trace_message = "on - frames go to " + Config.shown('debug_frames')
+    requests_message = "on - requests go to " + Config.shown('logs', 'requests.log')
+    print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {trace_message if scanner.debug_trace_enabled else 'off'}")
+    print(f"{'✓' if services.debug_mode_running else '-'} Debug mode: {requests_message if services.debug_mode_running else 'off'}")
 
     print("\n" + "="*60)
     print("Web Interface Starting...")
     print("="*60)
     print("\n✓ Access the scanner at:")
-    print(f"  • Local:   http://localhost:{Config.PORT}")
-    print(f"  • Network: http://<your-pi-ip>:{Config.PORT}")
+    print(f"  • Local:   {url}")
+    if services.network_access_running:
+        print(f"  • Network: http://<this-computer's-address>:{Config.PORT}")
+    else:
+        print("  • This computer only (Settings -> Reachable from other devices)")
     print(f"\n✓ Logs are being written to: {Config.shown('logs', 'app.log')}")
-    print("\nPress Ctrl+C to stop")
+    print("\nPress Ctrl+C to stop" + (" (or Settings -> Quit)" if services.app_mode else ""))
     print("="*60 + "\n")
 
-    logger.info(f"Starting Flask server on {Config.HOST}:{Config.PORT}")
+    logger.info(f"Starting Flask server on {host}:{Config.PORT}")
 
     # Flask's own two start lines (" * Serving Flask app", " * Debug mode") repeat what the
     # banner above says
@@ -248,11 +316,18 @@ def main():
     flask.cli.show_server_banner = lambda *args, **kwargs: None
     sys.stdout.flush()  # those lines used to flush the banner when the output is not a terminal (the service's journal)
 
+    signal.signal(signal.SIGTERM, program.stop_on_signal)  # systemctl stop, Quit, the session ending
+    if services.app_mode:
+        if not args.no_station:
+            program.start_station(Config.PORT)  # this computer's camera, ended with the server
+        if not args.no_browser:
+            open_browser_when_ready(url)
+
     try:
         # Start Flask app with SocketIO
         socketio.run(
             app,
-            host=Config.HOST,
+            host=host,
             port=Config.PORT,
             debug=services.debug_mode_running,
             # Never the reloader: it starts the program a second time, and only one process
@@ -264,6 +339,7 @@ def main():
         print("\n\nShutting down...")
         logger.info("Shutdown requested by user")
     finally:
+        program.stop_station()  # first: it lets go of the camera
         if identification:
             identification.stop()
         if scanner:
@@ -272,3 +348,5 @@ def main():
             database.close()
         logger.info("Scanner stopped successfully")
         print("Scanner stopped.")
+
+    program.exec_again_if_requested()

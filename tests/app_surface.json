@@ -284,6 +284,13 @@
    "get_local_ai_models"
   ],
   [
+   "/api/network_access",
+   [
+    "POST"
+   ],
+   "set_network_access"
+  ],
+  [
    "/api/precons",
    [
     "GET"
@@ -317,6 +324,20 @@
     "GET"
    ],
    "get_prompts"
+  ],
+  [
+   "/api/quit",
+   [
+    "POST"
+   ],
+   "quit_program"
+  ],
+  [
+   "/api/restart",
+   [
+    "POST"
+   ],
+   "restart_program"
   ],
   [
    "/api/scan_inventory/to_collection",

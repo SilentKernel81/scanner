@@ -77,7 +77,10 @@ stations:
 
 # Flask Settings
 flask:
-  host: 0.0.0.0
+  # auto: the whole network (0.0.0.0; there is no login), but this computer only (127.0.0.1) when
+  # started as a desktop program (the AppImage, --app). Or an address to listen on. The switch
+  # "Reachable from other devices" in Settings overrides this
+  host: auto
   port: 5000
   # Names the pages and stations may reach the server under, besides localhost, IP addresses
   # and this computer's own name (alone or with .local, .lan, .home, .home.arpa, .internal,
