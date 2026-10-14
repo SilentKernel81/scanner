@@ -75,8 +75,12 @@ stations:
 flask:
   host: 0.0.0.0
   port: 5000
+  # Names the pages and stations may reach the server under, besides localhost, IP addresses
+  # and this computer's own name (alone or with .local, .lan, .home, .home.arpa, .internal,
+  # .localdomain) - e.g. behind a reverse proxy or a Docker service name: [cards.example.org]
+  allowed_hosts: []
   debug: false
-  secret_key: card_scanner_secret_key_change_in_production
+  # secret_key: signs Flask's cookies; by default a random one is made in data/secret_key
 
 # API URLs
 api:

@@ -57,6 +57,7 @@ scanned_cards/*.upload.json
 !deploy/.env
 # API keys entered in the web interface
 data/api_keys.env
+data/secret_key
 *_api_key.txt
 secrets.txt
 

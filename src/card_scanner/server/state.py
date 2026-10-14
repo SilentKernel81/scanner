@@ -34,24 +34,28 @@ from werkzeug.local import LocalProxy
 
 from card_scanner.config import Config
 from card_scanner.paths import CODE
+from card_scanner.server import access
 
 # Initialize Flask app. Its name stays 'app', as when this was app.py: endpoint names and
 # url_for depend on nothing else. Its folder is server/, where templates/ and static/ are -
 # said outright (a Flask app looks for both beside the module it is named after, and there
 # is no module called 'app' in here). The address of a static file stays /static/...
 app = Flask('app', root_path=str(CODE / 'server'))
-app.config['SECRET_KEY'] = Config.SECRET_KEY
+app.config['SECRET_KEY'] = access.secret_key()
 
 # Initialize SocketIO with proper configuration
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=access.socket_origin_allowed,
     async_mode='threading',
     logger=False,
     engineio_logger=False,
     ping_timeout=60,
     ping_interval=25
 )
+
+# After SocketIO: its middleware must be inside the Host check (server/access.py: protect)
+access.protect(app)
 
 # Cards added by the scanner page, until "Add to collection" (same tables as the collection's)
 SCAN_INVENTORY_FILE = Config.DATA_DIR / 'scan_inventory.db'

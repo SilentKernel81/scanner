@@ -105,9 +105,10 @@ class Config:
     FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=6)
 
     # Flask settings
-    SECRET_KEY = config.get('flask', 'secret_key', default='card_scanner_secret_key_change_in_production')
+    SECRET_KEY = config.get('flask', 'secret_key', default=None)  # None: data/secret_key (server/access.py)
     HOST = config.get('flask', 'host', default='0.0.0.0')
     PORT = config.get('flask', 'port', default=5000)
+    ALLOWED_HOSTS = config.get('flask', 'allowed_hosts', default=None) or []  # server/access.py
     DEBUG = config.get('flask', 'debug', default=False)
 
     # Vision AI settings - Environment variables take precedence

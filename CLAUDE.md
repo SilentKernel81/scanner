@@ -414,6 +414,11 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   keep it matching the server's python-socketio). No `<script>` or stylesheet from a CDN:
   a station network without internet must still work. Card pictures from Scryfall are the
   one thing that does come from outside.
+- **Requests from other web pages are refused** (`server/access.py`: Host names, `Origin`,
+  `Sec-Fetch-Site`, Socket.IO origins): never set `cors_allowed_origins="*"` or add CORS
+  headers, and keep changes behind POST/PUT/DELETE (a GET from another site is only stopped
+  under `/api/`). A new way to reach the server by a host name needs `flask.allowed_hosts`.
+- **No secret in `config.yaml`**: the cookie key is `data/secret_key` (made on first start).
 - **`hidden` vs. display**: `.btn`, `.chip-toggle` etc. set `display`, which beats the `hidden`
   attribute; `collection.css` has `[hidden] { display: none !important }` for that page.
 
