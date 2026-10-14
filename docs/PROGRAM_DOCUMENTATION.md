@@ -827,7 +827,8 @@ camera's own JPEG, encoded again only when the camera is rotated) and a note
 that frame's pixels (full size, also when detection ran at half size; `null` when no outline was
 found and the capture is the whole frame), `frame_width` / `frame_height`, `card_size`, `rotation`,
 `fixed_area`, `stable_frames` / `required_stable_frames`, `new_card` (what made the card count as
-new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `dropped_while_focusing` or
+new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `area_change` (fixed area:
+`area_change`, `big_changes`, `differs_from_captured`), `dropped_while_focusing` or
 `card_gone`, and `seconds_before` the capture), `seconds_since_previous_capture`, `capture_id` and
 `previous_capture_id` (a double capture shows as a pair that follow each other within seconds).
 The pair waits on the station like the capture does (`<image>_frame.jpg`, in the upload note) and
@@ -837,6 +838,23 @@ capture (a retried upload adds nothing), never failing the capture, capped at 3 
 outside the collection backups. The note also has `station`, `number` and `image` (the capture's
 file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
 stations' own `debug_frames/` dumps are what show those).
+
+**Labelling and scoring the frames** (stdlib / this checkout only, never against the live server's
+`data/`: copy `data/frames/` first). `scripts/label_frames.py --frames <folder>` serves a local page
+(127.0.0.1) that shows each frame with the detector's outline and lets a person drag the four corners
+onto the card's own edge (not its sleeve, not the cards under it); it writes
+`<capture_id>.label.json` (`corners` top left, top right, bottom right, bottom left, in the frame's
+pixels, and `status`: `labelled` / `no_card` / `unsure`) beside the pair and changes nothing else.
+`scripts/score_detector.py --frames <folder> [--station ID]` replays the labelled frames through
+`ObjectDetector` and prints the intersection over union (IoU) with the label per station and mode -
+for the outline the station stored (its note) and for the one this code finds now. The replay starts
+cold on one frame (no `previous`), so it is for comparing one version of the code with another, not
+for the live numbers. First measurement (2026-10-14, 78 labelled frames, one Pi box with sleeved
+cards, a webcam): the laptop's stored outlines matched the labels (IoU 0.997, 21 frames); the Pi's
+were too large on nearly every edge (IoU 0.90 in outline mode, 13 frames; mean 3-4% of the card's
+width per side, up to ~10%), following the pile's silhouette - the cards under the top one and the
+sleeves' rims. Among the candidates the detector has, the best one would have reached 0.93, and on
+5 of 13 frames a cold detection found none: edge selection is not the whole problem.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that

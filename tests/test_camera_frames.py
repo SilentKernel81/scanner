@@ -203,5 +203,101 @@ class LargeCopies(unittest.TestCase):
         self.assertEqual(self.data.scan.conn.execute('SELECT COUNT(*) FROM inventory_captures').fetchone()[0], 1)
 
 
+class LabelTool(unittest.TestCase):
+    """scripts/label_frames.py: what it lists and writes (the page itself is not tested)"""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'label_frames', Path(__file__).resolve().parent.parent / 'scripts' / 'label_frames.py')
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = Path(self.folder.name)
+        (self.path / 'aa11.jpg').write_bytes(jpeg())
+        (self.path / 'aa11.json').write_text(json.dumps({
+            'station': 's', 'number': 3, 'frame_width': 640, 'frame_height': 360,
+            'corners': [[10, 10], [100, 10], [100, 150], [10, 150]]}))
+        self.frames = self.tool.Frames(self.path)
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_corners_are_put_in_the_order_top_left_clockwise(self):
+        shuffled = [[100, 150], [10, 10], [10, 150], [100, 10]]
+        self.assertEqual(self.tool.clockwise(shuffled), [[10, 10], [100, 10], [100, 150], [10, 150]])
+        tilted = [[20, 5], [110, 20], [95, 160], [5, 140]]  # a card turned a little: TL, TR, BR, BL
+        self.assertEqual(self.tool.clockwise(tilted[::-1]), tilted)
+
+    def test_a_label_is_written_beside_the_pair_and_listed(self):
+        self.assertEqual(self.frames.listing()[0]['status'], None)
+        label = self.frames.save('aa11', {'status': 'labelled',
+                                         'corners': [[12, 12.04], [98, 11], [97, 149], [11, 151]]})
+        self.assertEqual(label['corners'][0], [12.0, 12.0])
+        self.assertEqual(label['detector_corners'], [[10, 10], [100, 10], [100, 150], [10, 150]])
+        self.assertEqual(self.frames.listing()[0]['status'], 'labelled')
+        self.assertEqual(sorted(p.name for p in self.path.iterdir()), ['aa11.jpg', 'aa11.json', 'aa11.label.json'])
+        self.assertEqual(self.frames.stems(), ['aa11'])  # a label is not a frame of its own
+
+    def test_what_is_not_a_label_is_refused(self):
+        for body in ({'status': 'bogus', 'corners': []}, {'status': 'labelled', 'corners': [[1, 2]]},
+                     {'status': 'labelled', 'corners': [[0, 0], [1, 0], [1, 1], [9999, 9999]]},
+                     {'status': 'labelled', 'corners': 'x'}):
+            with self.assertRaises(ValueError):
+                self.frames.save('aa11', body)
+        with self.assertRaises(ValueError):
+            self.frames.save('nope', {'status': 'no_card'})
+        self.assertEqual(self.frames.save('aa11', {'status': 'no_card'})['corners'], None)
+
+
+class ScoreTool(unittest.TestCase):
+    """scripts/score_detector.py: the overlap measure and the replay over labelled frames"""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'score_detector', Path(__file__).resolve().parent.parent / 'scripts' / 'score_detector.py')
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = Path(self.folder.name)
+        self.label = [[20, 20], [60, 20], [60, 80], [20, 80]]
+        (self.path / 'f1.jpg').write_bytes(jpeg(100, 100))
+        (self.path / 'f1.json').write_text(json.dumps({
+            'station': 's', 'number': 1, 'corners': [[10, 10], [60, 10], [60, 80], [10, 80]]}))
+        (self.path / 'f1.label.json').write_text(json.dumps({'status': 'labelled', 'corners': self.label}))
+        # a frame that was labelled "no card" is not scored
+        (self.path / 'f2.jpg').write_bytes(jpeg(100, 100))
+        (self.path / 'f2.json').write_text(json.dumps({'station': 's', 'number': 2, 'corners': None}))
+        (self.path / 'f2.label.json').write_text(json.dumps({'status': 'no_card', 'corners': None}))
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_iou(self):
+        box = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        shape = (20, 20)
+        self.assertEqual(self.tool.iou(box, box, shape), 1.0)
+        half = [[5, 0], [15, 0], [15, 10], [5, 10]]
+        self.assertAlmostEqual(self.tool.iou(box, half, shape), 50 / 150, places=1)  # 50 shared of 150 covered
+        self.assertEqual(self.tool.iou(None, box, shape), 0.0)
+
+    def test_a_replay_is_scored_against_the_label_and_a_miss_is_zero(self):
+        class Perfect:
+            def detect(self_, frame, previous=None):
+                return (0, 0, 1, 1), 'Card', 1.0, np.array(self.label, np.float32)
+
+        class Nothing:
+            def detect(self_, frame, previous=None):
+                return None, '', 0, None
+
+        rows = self.tool.score(self.path, detector=Perfect())
+        self.assertEqual([r['stem'] for r in rows], ['f1'])           # the "no card" frame is left out
+        self.assertAlmostEqual(rows[0]['replay'], 1.0)
+        self.assertLess(rows[0]['stored'], 0.95)                      # the note's outline was too wide
+        miss = self.tool.score(self.path, detector=Nothing())[0]
+        self.assertEqual((miss['replay'], miss['found']), (0.0, False))
+
+
 if __name__ == '__main__':
     unittest.main()
