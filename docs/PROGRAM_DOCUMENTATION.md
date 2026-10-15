@@ -799,7 +799,10 @@ held detection never counts as a still card.
 
 A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
 
-- the corners moved less than **1%** of the card size since the previous frame **and** since
+- the corners moved less than **1.5%** (`auto_capture.max_movement`; 1% until 2026-10-15, when
+  a Pi 5 run of 211 cards showed the corner network's outline jittering 1-1.5% on a still card
+  on a tall sleeved pile: 32 waits, 18 of 5 s or more, the longest 15 s; the outline detector
+  measured <= 0.4%) of the card size since the previous frame **and** since
   the still streak began - a sleeved card sliding slowly (a few px per frame) passes the
   frame-to-frame test on every frame and used to be captured mid-slide: blurred, then captured
   again when it stopped (seen live with a Lake-town),
