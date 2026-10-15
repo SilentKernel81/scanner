@@ -9,7 +9,7 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=47">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=48">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=25">
 </head>
 <body>
@@ -158,7 +158,7 @@
 
     {% include '_value_dialog.html' %}
 
-    <!-- Settings drawer: backups here; camera, AI and sound are set on the scanner page -->
+    <!-- Settings drawer: backups and storage here; camera, AI and sound are set on the scanner page -->
     <div id="settings-drawer" class="drawer">
         <aside class="drawer-panel">
             <div class="modal-header">
@@ -195,6 +195,19 @@
                     <div id="backup-list" class="backup-list"></div>
                 </div>
                 <div class="settings-section">
+                    <h3>Storage</h3>
+                    <div class="backup-schedule">
+                        <label for="capture-copy-size">Capture size (all cameras)</label>
+                        <select id="capture-copy-size" class="text-input">
+                            <option value="off">Off - thumbnails only</option>
+                            <option value="small">Small - 600 px tall, about 55 KB each</option>
+                            <option value="medium">Medium - 900 px tall, about 100 KB each</option>
+                            <option value="large">Large - 1200 px tall, about 145 KB each</option>
+                        </select>
+                    </div>
+                    <div class="hint" id="capture-copy-hint">Loading...</div>
+                </div>
+                <div class="settings-section">
                     <h3>Scanner</h3>
                     <a class="btn btn-block" href="{{ settings_url }}">Camera, AI, sound and card database</a>
                     <div class="hint">These settings are on the scanner page</div>
@@ -211,6 +224,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=52"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=55"></script>
 </body>
 </html>

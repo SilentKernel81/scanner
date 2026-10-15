@@ -404,7 +404,7 @@ keeps it; nothing has to be configured on the server to add a camera.
 |---|---|
 | `hello` | Answered with the camera's saved settings (`CAMERA_SETTINGS`: focus position, rotation, focus check interval, fixed area, debug trace) and the attributes the server decides (`DECIDED`: add automatically, stability frames, capture delay). The client creates its `CardScanner` with them - which is when the camera opens; after a reconnect only the decided attributes are applied again |
 | `status` (every 0.2 s) | The scanner's state and `get_detection_status()`; the answer says whether the preview is being watched |
-| `preview` | The annotated live view as JPEG (`get_stream_jpeg`), at most ~12 a second and only while a page shows `/video_feed` (measured: 12 fps, 66-81 KB a frame over Wi-Fi) |
+| `preview` | The annotated live view as JPEG (`get_stream_jpeg`), at most ~12 a second and only while a page shows `/video_feed` (measured: 12 fps, 66-81 KB a frame over Wi-Fi). The card's outline is green when it is still, orange while it settles; a capture washes the whole card green, see-through, fading out in 0.6 s (`_wash_card`, drawn into the picture by the station - the page has only the beep; the app does the same on its own overlay) |
 | `setting` | A camera setting the scanner changed (a focus sweep's result, ...): saved on the server |
 | `log`, `captured` | The scanner's log lines, shown on the station's page; the capture beep (`auto_capture_triggered` to its pages) |
 
@@ -827,7 +827,8 @@ camera's own JPEG, encoded again only when the camera is rotated) and a note
 that frame's pixels (full size, also when detection ran at half size; `null` when no outline was
 found and the capture is the whole frame), `frame_width` / `frame_height`, `card_size`, `rotation`,
 `fixed_area`, `stable_frames` / `required_stable_frames`, `new_card` (what made the card count as
-new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `dropped_while_focusing` or
+new: `kind` = `jump_or_image_change` with `jump` and `image_change`, `area_change` (fixed area:
+`area_change`, `big_changes`, `differs_from_captured`), `dropped_while_focusing` or
 `card_gone`, and `seconds_before` the capture), `seconds_since_previous_capture`, `capture_id` and
 `previous_capture_id` (a double capture shows as a pair that follow each other within seconds).
 The pair waits on the station like the capture does (`<image>_frame.jpg`, in the upload note) and
@@ -837,6 +838,80 @@ capture (a retried upload adds nothing), never failing the capture, capped at 3 
 outside the collection backups. The note also has `station`, `number` and `image` (the capture's
 file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
 stations' own `debug_frames/` dumps are what show those).
+
+**Labelling and scoring the frames** (stdlib / this checkout only, never against the live server's
+`data/`: copy `data/frames/` first). `scripts/label_frames.py --frames <folder>` serves a local page
+(127.0.0.1) that shows each frame with the detector's outline and lets a person drag the four corners
+onto the card's own edge (not its sleeve, not the cards under it); it writes
+`<capture_id>.label.json` (`corners` top left, top right, bottom right, bottom left, in the frame's
+pixels, and `status`: `labelled` / `no_card` / `unsure`) beside the pair and changes nothing else.
+`scripts/score_detector.py --frames <folder> [--station ID]` replays the labelled frames through
+`ObjectDetector` and prints the intersection over union (IoU) with the label per station and mode -
+for the outline the station stored (its note) and for the one this code finds now. The replay starts
+cold on one frame (no `previous`), so it is for comparing one version of the code with another, not
+for the live numbers. First measurement (2026-10-14, 78 labelled frames, one Pi box with sleeved
+cards, a webcam): the laptop's stored outlines matched the labels (IoU 0.997, 21 frames); the Pi's
+were too large on nearly every edge (IoU 0.90 in outline mode, 13 frames; mean 3-4% of the card's
+width per side, up to ~10%), following the pile's silhouette - the cards under the top one and the
+sleeves' rims. Among the candidates the detector has, the best one would have reached 0.93, and on
+5 of 13 frames a cold detection found none: edge selection is not the whole problem.
+
+**Our own corner network (2026-10-14; used by the stations since 2026-10-15, not by the Android app yet).** The camera of this
+project is always fixed overhead of a box, which is what the network is built for: no
+perspective or arbitrary rotation to cover, only a card of nearly one size in a window of
+nearly one place. `scripts/train_corner_net.py` trains a small network (0.76 M parameters; one
+card per 192 x 320 window, four corner maps read as soft-argmax positions plus a presence
+score) only from labels made with `scripts/label_frames.py` - no other model's weights or
+outputs. A frame is read in two stages: the whole frame letterboxed, then a window of 1.45 x
+the card's box cut from the full-resolution frame (twice). Validation is by whole station
+(`--train` / `--val`). The labelling page has a click mode (press D: corners 1, 3, 2, 4 - top left,
+bottom right, then top right, bottom left; after the first two the box is there, the other two
+put a tilt right; Escape keeps what is placed) and a station filter. Training on a GPU needs a
+CUDA build of PyTorch (not in `requirements*.txt`): `--device auto` uses it when there is one
+(RTX 3050 laptop: 3000 steps in 2.5 minutes, 17 on the CPU).
+First result (trained on 57 Pi frames, scored on 21 webcam frames of another camera): mean IoU
+0.966, worst 0.954. A box with the same place and size in every frame already scores 0.90 - 0.97
+inside one station (and 0.47 across stations), so a within-station score proves little: the
+held-out one, and the phone's frames are the tests that count. Trained on the Pi's and the
+webcam's frames and scored on the phone's 49 labelled captures: mean IoU 0.969, worst 0.926
+(the app's own outline on the same frames: 0.861; the phone's frames exist only for captures the
+app did make, so the "No card" stretches of the screen recording are the test still to run).
+The exported file (3 MB) loads in OpenCV's dnn and agrees with PyTorch to 4e-6; 2.6 ms a
+window on a laptop CPU. Not tested: speed on a Pi, the Android build.
+
+*In the station* (`station/corner_net.py`; the weights are `station/corner_net.onnx`, 3 MB, beside it
+and so inside the images' `station/` folder; trained on all 253 labelled frames, 3 "no card" ones
+as negatives): `CornerNet.find` runs the whole frame in one window, then one window around the card (a
+second gave the same IoU, 0.978 on 127 labelled frames) with OpenCV's dnn (no PyTorch on a
+station); given the card's previous outline it skips the whole-frame stage. On a Pi 4
+(OpenCV 4.10 in the `client-pi` image, 2026-10-15) the file loads and runs: 58 ms a frame cold
+(the whole frame, then one window), 28 ms with a previous outline (one window); with two
+refinement windows it was 86 / 57 ms. The Android app has the same network (`CornerNet.kt`,
+`CardFinder.kt`, `assets/corner_net.onnx`): on an emulator (OpenCV 4.14) its corners match this
+code's to 0.05 px on four frames, cold and tracked (`CornerNetParityTest`); Settings → "Find
+cards with the corner network" turns it off.
+
+*Live runs of the same 57 sleeved cards with the network on (2026-10-15, one pile, each run once;
+the outline detector alone had needed fixed area on the Pi and lost the card for ~6 s at a time
+on the phone):* Pi 4, outline mode - run 1: 57 captures, no waits; run 2: 58 captures (one double
+inside the run of identical copies at the end: its triggers were image change 0.36 and 0.26),
+11 "card not ready" waits, the longest 9 s. Phone: 57 captures, 57 added, none for review,
+nothing waited longer than 3.9 s. Webcam: 55 captures, no "no outline" waits (how many cards
+were dropped was not counted). Not measured: a different pile, unsleeved cards, other lighting. `ObjectDetector`
+asks it first (`detection.neural` in config.yaml, or `SCANNER_NEURAL_DETECTOR=off`) and believes
+the answer when the score is >= 0.5 and the shape is a card's (convex, 1.12 - 1.68 tall, inside the
+frame, >= 2% of it); otherwise - or when the network fails or its file is missing - the outline
+detector answers as before, so `None` still means "no card" to the capture logic. Scored through the
+station's own code path (`scripts/score_detector.py --neural`, on the frames it was trained on, so
+not a held-out number): IoU 0.977 over 253 frames, an outline on every one, 12 ms a frame on a
+laptop CPU; the outline detector alone: 0.65 with 64 frames without an outline. Frames labelled
+"no card" scored 0.003 - 0.061, card frames 1.00 (those 3 were in training). On the 20 recorded
+drop sequences of 2026-10-06 (webcam, 20 fps) it found an outline on 94% of frames (the outline
+detector 87%); on frames that lie still, the corners moved at most 0.65% of the card's height
+between frames for 90% of pairs (0.85% for the outline detector), median 0.24% against 0.15%,
+far below the 1% still threshold. **Not measured:** the capture logic with it (double captures,
+misses) on a live run, a Pi 4's speed (the station runs at ~7 fps there; with a previous outline
+it is one window), the containers' OpenCV reading the file.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that
@@ -1178,10 +1253,13 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 **`inventory_captures`** (also `inventory.py`) - one row per captured copy behind an entry:
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
 `scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
-name, at most 1200 px tall (~100-150 KB), is kept in `data/captures_full/` for training data later:
+name, at most 1200 px tall (~100-150 KB; the person's choice, below), is kept in `data/captures_full/` for training data later:
 the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
-`scripts/backup.sh`'s archive but not in the collection backups, and captures from before
-have none), `captured_at`, `station` (which station's
+`scripts/backup.sh`'s archive and, since 2026-10-15, in the app's backups as well - the folder
+`captures_full/` beside `captures/`, as hard links, in the zip of a backup, and brought back by a
+restore and by an uploaded zip, so a standalone program that restores a server's backup has the
+pictures too - and in a full backup (as optional pictures: not "missing" for captures that have
+none); captures from before have none, and a zip made before has no such folder), `captured_at`, `station` (which station's
 capture it is) and `capture_key` (the uid of the capture the copy came from, unique; empty in
 the collection and for copies from before 2026-10-12 - see
 [Capture synchronization](#capture-synchronization)). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card
@@ -2084,7 +2162,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 | `.env` (beside `deploy/docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
 | `data/secret_key` | Signs Flask's cookies: a random key made on first start (mode 600) unless `flask.secret_key` is set |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The page only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
-| `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
+| `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), the size of the large copy kept with each capture (`capture_copy_size`: `off` / `small` 600 px / `medium` 900 px / `large` 1200 px - the default - `GET` / `POST /api/capture_copy`: a choice of the server for every camera, on the collection page's Settings under Storage as "Capture size (all cameras)", with the number and size of the copies kept so far; measured on 40 captures at JPEG 85: ~56, ~100 and ~145 KB each; it applies to new captures, existing copies stay), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
 | `data/stations.json` | The stations: name, location, capture count, last seen, `camera` (it connects as a camera station), and `settings` - each station's `focus_value`, `camera_rotation`, `refocus_every`, `fixed_area`, `fixed_area_enabled`, `debug_trace`, `auto_add` |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/cards_database.db` | Card data (`cards`, `card_data_info`), the collection (`inventory`, `inventory_captures`, `inventory_sources`, and the trades: `trades`, `trade_cards`), decks (`decks`, `deck_cards`), the review queue (`review_queue`), and the captures already applied to it (`applied_captures`) |

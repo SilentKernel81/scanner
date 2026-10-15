@@ -227,6 +227,50 @@ class DownloadedBackups(TemporaryData):
         self.assertEqual(self.total('desk-a'), 1)
         self.assertEqual(len(list(inv.CAPTURES_DIR.glob('*.jpg'))), 1)
 
+    def test_the_large_copies_are_in_the_backup_its_zip_and_come_back(self):
+        import zipfile
+        self.add('desk-a')
+        backup_id = self.backup(note='with large copies')
+        kept = {path.name for path in inv.FULL_CAPTURES_DIR.glob('*.jpg')}
+        self.assertEqual(len(kept), 1)
+        self.assertEqual({path.name for path in (backups.BACKUPS_DIR / backup_id / 'captures_full').glob('*')}, kept)
+        names = zipfile.ZipFile(self.packed(backup_id)).namelist()
+        self.assertEqual({name.split('/')[-1] for name in names if f'{backup_id}/captures_full/' in name}, kept)
+        # a program that has none of them (another machine): the backup's zip brings them
+        packed = self.packed(backup_id)
+        backups.delete(backup_id)
+        self.scan.clear_inventory(GAME)
+        for path in list(inv.FULL_CAPTURES_DIR.glob('*')):
+            path.unlink()
+        backups.add_archive(packed)
+        self.restore(backup_id)
+        self.assertEqual({path.name for path in inv.FULL_CAPTURES_DIR.glob('*.jpg')}, kept)
+
+    def test_a_backup_without_large_copies_still_works_both_ways(self):
+        import io, zipfile
+        self.add('desk-a')
+        backup_id = self.backup()
+        # an older backup: no captures_full folder at all, and a zip without those entries
+        shutil.rmtree(backups.BACKUPS_DIR / backup_id / 'captures_full')
+        packed = io.BytesIO()
+        backups.archive(backup_id, packed)
+        self.assertFalse([n for n in zipfile.ZipFile(packed).namelist() if 'captures_full' in n])
+        self.restore(backup_id)                                    # no folder: nothing to bring back, no error
+        backups.delete(backup_id)
+        added = backups.add_archive(packed)
+        self.assertEqual(added['scanned'], 1)
+
+    def test_a_large_copy_with_an_unsafe_name_is_refused(self):
+        import io, zipfile
+        self.add('desk-a')
+        backup_id = self.backup()
+        packed = self.packed(backup_id)
+        with zipfile.ZipFile(packed, 'a') as zipped:
+            zipped.writestr(f'{backup_id}/captures_full/../../evil.jpg', b'x')
+        backups.delete(backup_id)
+        with self.assertRaises(backups.BackupError):
+            backups.add_archive(packed)
+
     def test_files_that_are_not_a_backup_are_refused(self):
         import io, zipfile
         self.add('desk-a')

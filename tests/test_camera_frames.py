@@ -203,5 +203,206 @@ class LargeCopies(unittest.TestCase):
         self.assertEqual(self.data.scan.conn.execute('SELECT COUNT(*) FROM inventory_captures').fetchone()[0], 1)
 
 
+class LabelTool(unittest.TestCase):
+    """scripts/label_frames.py: what it lists and writes (the page itself is not tested)"""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'label_frames', Path(__file__).resolve().parent.parent / 'scripts' / 'label_frames.py')
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = Path(self.folder.name)
+        (self.path / 'aa11.jpg').write_bytes(jpeg())
+        (self.path / 'aa11.json').write_text(json.dumps({
+            'station': 's', 'number': 3, 'frame_width': 640, 'frame_height': 360,
+            'corners': [[10, 10], [100, 10], [100, 150], [10, 150]]}))
+        self.frames = self.tool.Frames(self.path)
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_corners_are_put_in_the_order_top_left_clockwise(self):
+        shuffled = [[100, 150], [10, 10], [10, 150], [100, 10]]
+        self.assertEqual(self.tool.clockwise(shuffled), [[10, 10], [100, 10], [100, 150], [10, 150]])
+        tilted = [[20, 5], [110, 20], [95, 160], [5, 140]]  # a card turned a little: TL, TR, BR, BL
+        self.assertEqual(self.tool.clockwise(tilted[::-1]), tilted)
+
+    def test_a_label_is_written_beside_the_pair_and_listed(self):
+        self.assertEqual(self.frames.listing()[0]['status'], None)
+        label = self.frames.save('aa11', {'status': 'labelled',
+                                         'corners': [[12, 12.04], [98, 11], [97, 149], [11, 151]]})
+        self.assertEqual(label['corners'][0], [12.0, 12.0])
+        self.assertEqual(label['detector_corners'], [[10, 10], [100, 10], [100, 150], [10, 150]])
+        self.assertEqual(self.frames.listing()[0]['status'], 'labelled')
+        self.assertEqual(sorted(p.name for p in self.path.iterdir()), ['aa11.jpg', 'aa11.json', 'aa11.label.json'])
+        self.assertEqual(self.frames.stems(), ['aa11'])  # a label is not a frame of its own
+
+    def test_what_is_not_a_label_is_refused(self):
+        for body in ({'status': 'bogus', 'corners': []}, {'status': 'labelled', 'corners': [[1, 2]]},
+                     {'status': 'labelled', 'corners': [[0, 0], [1, 0], [1, 1], [9999, 9999]]},
+                     {'status': 'labelled', 'corners': 'x'}):
+            with self.assertRaises(ValueError):
+                self.frames.save('aa11', body)
+        with self.assertRaises(ValueError):
+            self.frames.save('nope', {'status': 'no_card'})
+        self.assertEqual(self.frames.save('aa11', {'status': 'no_card'})['corners'], None)
+
+
+class CaptureWash(unittest.TestCase):
+    """The green wash over the whole card at a capture (CardScanner._wash_card)"""
+
+    def setUp(self):
+        from card_scanner.station.scanner import CardScanner
+        self.wash = CardScanner._wash_card
+        self.frame = np.full((200, 300, 3), 100, np.uint8)
+        self.corners = np.array([[50, 40], [150, 40], [150, 180], [50, 180]], np.float32)
+
+    def test_the_card_goes_green_see_through_and_the_rest_stays(self):
+        frame = self.frame.copy()
+        self.wash(frame, self.corners, (50, 40, 150, 180), 0.5)
+        inside = frame[110, 100].astype(int)          # the middle of the card: half way to green
+        for got, want in zip(inside, (50, 177.5, 50)):                    # half way from the card's grey to green
+            self.assertAlmostEqual(got, want, delta=1)
+        self.assertTrue(np.array_equal(frame[10, 10], self.frame[10, 10]))      # outside: untouched
+        self.assertTrue(np.array_equal(frame[110, 200], self.frame[110, 200]))  # beside the card
+        self.assertGreater(inside[1], 100)            # it is a wash, not a fill: the card shows through
+
+    def test_a_tilted_card_only_inside_its_outline(self):
+        frame = self.frame.copy()
+        tilted = np.array([[100, 20], [180, 60], [150, 180], [70, 140]], np.float32)
+        x1, y1, x2, y2 = 70, 20, 180, 180
+        self.wash(frame, tilted, (x1, y1, x2, y2), 1.0)
+        self.assertEqual(tuple(frame[100, 125]), (0, 255, 0))            # inside the outline
+        self.assertTrue(np.array_equal(frame[30, 75], self.frame[30, 75]))  # in the box, outside the card
+
+    def test_a_box_without_corners_and_nothing_to_do(self):
+        frame = self.frame.copy()
+        self.wash(frame, None, (20, 20, 80, 80), 1.0)                     # the fixed area is a box
+        self.assertEqual(tuple(frame[50, 50]), (0, 255, 0))
+        before = frame.copy()
+        self.wash(frame, None, (20, 20, 80, 80), 0.0)                     # faded out: nothing changes
+        self.wash(frame, self.corners, (400, 400, 500, 500), 0.5)         # a box outside the picture
+        self.assertTrue(np.array_equal(frame, before))
+
+
+class CaptureCopySize(unittest.TestCase):
+    """The size of the large copy is the person's choice (inventory.set_full_capture_size, /api/capture_copy)"""
+
+    def setUp(self):
+        from test_ownership import TemporaryData
+        self.data = TemporaryData('setUp')
+        self.data.setUp()
+        cv2.imwrite(str(self.data.photo), np.full((1500, 1000, 3), 128, np.uint8))
+        self.inv = sys.modules['card_scanner.core.inventory']
+        self.saved = self.inv.FULL_CAPTURE_HEIGHT
+
+    def tearDown(self):
+        self.inv.FULL_CAPTURE_HEIGHT = self.saved
+        self.data.tearDown()
+
+    def kept(self):
+        from test_ownership import CARD, GAME
+        self.data.scan.add_card(CARD, GAME, 'regular', quiet=True, capture=self.data.photo)
+        return self.data.scan.conn.execute('SELECT file FROM inventory_captures ORDER BY id DESC').fetchone()[0]
+
+    def test_each_size_gives_its_height(self):
+        for name, height in (('small', 600), ('medium', 900), ('large', 1200)):
+            self.assertEqual(self.inv.set_full_capture_size(name), name)
+            file = self.kept()
+            self.assertEqual(cv2.imread(str(self.inv.FULL_CAPTURES_DIR / file)).shape[0], height)
+            self.assertEqual(cv2.imread(str(self.inv.CAPTURES_DIR / file)).shape[0], 400)  # the thumbnail is the same
+
+    def test_off_keeps_the_thumbnail_only(self):
+        self.inv.set_full_capture_size('off')
+        file = self.kept()
+        self.assertTrue((self.inv.CAPTURES_DIR / file).is_file())
+        self.assertFalse((self.inv.FULL_CAPTURES_DIR / file).exists())
+        self.assertEqual(self.inv.full_capture_usage(), (0, 0))
+
+    def test_an_unknown_size_is_the_default_and_usage_counts_what_is_kept(self):
+        self.assertEqual(self.inv.set_full_capture_size('enormous'), 'large')
+        self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 1200)
+        self.kept()
+        self.kept()
+        count, size = self.inv.full_capture_usage()
+        self.assertEqual(count, 2)
+        self.assertGreater(size, 0)
+
+    def test_the_route_chooses_and_refuses(self):
+        from card_scanner.server import settings_events
+        from card_scanner.server.state import app
+
+        class Store(dict):
+            def set(self, key, value):
+                self[key] = value
+        store = Store()
+        with mock.patch.object(settings_events, 'app_settings', store):
+            with app.test_request_context('/api/capture_copy', method='POST', json={'size': 'small'}):
+                answer = settings_events.set_capture_copy()
+            self.assertEqual(answer.get_json()['size'], 'small')
+            self.assertEqual(store['capture_copy_size'], 'small')
+            self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 600)
+            with app.test_request_context('/api/capture_copy', method='POST', json={'size': 'huge'}):
+                refused, status = settings_events.set_capture_copy()
+            self.assertEqual(status, 400)
+            self.assertIn('error', refused.get_json())          # the key the pages' api() shows
+            self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 600)  # unchanged
+            with app.test_request_context('/api/capture_copy', method='GET'):
+                info = settings_events.set_capture_copy().get_json()
+            self.assertEqual((info['success'], info['size']), (True, 'small'))
+            self.assertEqual(info['sizes']['large'], 1200)
+
+
+class ScoreTool(unittest.TestCase):
+    """scripts/score_detector.py: the overlap measure and the replay over labelled frames"""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'score_detector', Path(__file__).resolve().parent.parent / 'scripts' / 'score_detector.py')
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = Path(self.folder.name)
+        self.label = [[20, 20], [60, 20], [60, 80], [20, 80]]
+        (self.path / 'f1.jpg').write_bytes(jpeg(100, 100))
+        (self.path / 'f1.json').write_text(json.dumps({
+            'station': 's', 'number': 1, 'corners': [[10, 10], [60, 10], [60, 80], [10, 80]]}))
+        (self.path / 'f1.label.json').write_text(json.dumps({'status': 'labelled', 'corners': self.label}))
+        # a frame that was labelled "no card" is not scored
+        (self.path / 'f2.jpg').write_bytes(jpeg(100, 100))
+        (self.path / 'f2.json').write_text(json.dumps({'station': 's', 'number': 2, 'corners': None}))
+        (self.path / 'f2.label.json').write_text(json.dumps({'status': 'no_card', 'corners': None}))
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_iou(self):
+        box = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        shape = (20, 20)
+        self.assertEqual(self.tool.iou(box, box, shape), 1.0)
+        half = [[5, 0], [15, 0], [15, 10], [5, 10]]
+        self.assertAlmostEqual(self.tool.iou(box, half, shape), 50 / 150, places=1)  # 50 shared of 150 covered
+        self.assertEqual(self.tool.iou(None, box, shape), 0.0)
+
+    def test_a_replay_is_scored_against_the_label_and_a_miss_is_zero(self):
+        class Perfect:
+            def detect(self_, frame, previous=None):
+                return (0, 0, 1, 1), 'Card', 1.0, np.array(self.label, np.float32)
+
+        class Nothing:
+            def detect(self_, frame, previous=None):
+                return None, '', 0, None
+
+        rows = self.tool.score(self.path, detector=Perfect())
+        self.assertEqual([r['stem'] for r in rows], ['f1'])           # the "no card" frame is left out
+        self.assertAlmostEqual(rows[0]['replay'], 1.0)
+        self.assertLess(rows[0]['stored'], 0.95)                      # the note's outline was too wide
+        miss = self.tool.score(self.path, detector=Nothing())[0]
+        self.assertEqual((miss['replay'], miss['found']), (0.0, False))
+
+
 if __name__ == '__main__':
     unittest.main()

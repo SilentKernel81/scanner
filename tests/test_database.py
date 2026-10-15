@@ -693,16 +693,33 @@ class FullBackup(TemporaryData):
         review_store.REVIEW_DIR, backups.FULL_DIR = self.saved_review, self.saved_full
         super().tearDown()
 
-    def full(self, **kwargs):
+    def full(self, large=False, **kwargs):
         pictures = 'SELECT file FROM inventory_captures'
+        # The large copies are optional pictures: a capture made before they were kept has none
+        optional = [('captures_full', inv.FULL_CAPTURES_DIR, self.tmp / 'collection.db', pictures, True),
+                    ('captures_full', inv.FULL_CAPTURES_DIR, self.tmp / 'scan.db', pictures, True)] if large else []
         return backups.create_full(
             managers=[self.collection, self.scan, self.decks, self.review, self.pending], barrier=self.barrier,
             databases=[self.tmp / 'collection.db', self.tmp / 'scan.db', self.tmp / 'pending.db'],
             linked=[('captures', inv.CAPTURES_DIR, self.tmp / 'collection.db', pictures),
                     ('captures', inv.CAPTURES_DIR, self.tmp / 'scan.db', pictures),
                     ('review', review_store.REVIEW_DIR, self.tmp / 'collection.db', 'SELECT file FROM review_queue'),
-                    ('scanned_cards', self.tmp, self.tmp / 'pending.db', 'SELECT image FROM pending_captures')],
+                    ('scanned_cards', self.tmp, self.tmp / 'pending.db', 'SELECT image FROM pending_captures')] + optional,
             copied=[self.tmp / 'settings.json', self.tmp / 'not-there.json'], **kwargs)
+
+    def test_large_copies_that_some_captures_lack_are_not_missing(self):
+        self.add('desk-a', copies=2)
+        self.collection.add_card(CARD, GAME, 'regular', capture=self.photo, quiet=True)
+        kept = sorted(inv.FULL_CAPTURES_DIR.glob('*.jpg'))
+        self.assertEqual(len(kept), 3)
+        kept[0].unlink()                                   # a capture from before the large copies were kept
+        made = self.full(large=True)
+        self.assertTrue(made['verified'], made['missing'])
+        self.assertEqual(made['missing'], [])
+        self.assertEqual(made['files']['captures_full'], 2)  # only what exists is counted
+        self.assertEqual(made['files']['captures'], 3)        # the thumbnails are not optional
+        folder = Path(made['folder'])
+        self.assertEqual(len(list((folder / 'captures_full').glob('*.jpg'))), 2)
 
     def test_everything_at_one_moment_and_usable_elsewhere(self):
         self.add('desk-a', copies=2)

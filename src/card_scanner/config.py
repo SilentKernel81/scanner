@@ -125,6 +125,8 @@ class Config:
 
     # Object detection settings
     DETECTION_ALLOW_LANDSCAPE = config.get('detection', 'allow_landscape', default=False)
+    # Our corner network (station/corner_net.py) asked before the outline detector: auto / off
+    DETECTION_NEURAL = os.environ.get('SCANNER_NEURAL_DETECTOR') or config.get('detection', 'neural', default='auto')
 
     # Focus settings
 

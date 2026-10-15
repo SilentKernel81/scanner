@@ -273,6 +273,7 @@ async function loadDeckList() {
     if (!data) return;
     deckList = data.decks;
     fillLocationFilter();
+    renderSpareLocations();   // the trade tab's location list is grouped by the decks too
 }
 
 function fillLocationFilter() {
@@ -902,6 +903,28 @@ function renderStats() {
 function openSettings() {
     $('settings-drawer').classList.add('show');
     loadBackups();
+    loadCaptureCopy();
+}
+
+// The large copy kept with each capture, for every camera: what is chosen, and what is kept so far
+function showCaptureCopy(info) {
+    $('capture-copy-size').value = info.size;
+    $('capture-copy-hint').textContent = (info.size === 'off'
+        ? 'Only the thumbnail of each captured card is kept. '
+        : 'The size of the picture of each captured card that is kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
+        + `${info.count} kept so far, ${info.megabytes} MB (data/captures_full). It applies to captures made from now on, from every camera; the ones already kept stay as they are.`;
+}
+
+async function loadCaptureCopy() {
+    const data = await api('/api/capture_copy');
+    if (data) showCaptureCopy(data);
+}
+
+async function saveCaptureCopy(size) {
+    const data = await api('/api/capture_copy', {method: 'POST', body: {size}});
+    if (!data) return loadCaptureCopy();
+    showCaptureCopy(data);
+    notify(size === 'off' ? 'No large copies will be kept' : `Large copies will be ${size}`, 'success');
 }
 
 function closeSettings() {
@@ -1093,18 +1116,24 @@ function renderSpareLocations() {
     // stays while it is on the list
     const select = $('spare-location');
     const chosen = select.value;
-    let options;
+    let head, places;   // head: "all" and "(none)"; places: [[location, label]]
     if (suggested) {
-        const places = new Map();
-        for (const card of spareBase()) places.set(card.location, (places.get(card.location) || 0) + 1);
-        options = [['', `All locations (${[...places.values()].reduce((sum, count) => sum + count, 0)})`],
-            ...(places.has('') ? [['(none)', `(none) (${places.get('')})`]] : []),
-            ...[...places].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`])];
+        const counts = new Map();
+        for (const card of spareBase()) counts.set(card.location, (counts.get(card.location) || 0) + 1);
+        head = [['', `All locations (${[...counts.values()].reduce((sum, count) => sum + count, 0)})`],
+            ...(counts.has('') ? [['(none)', `(none) (${counts.get('')})`]] : [])];
+        places = [...counts].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`]);
     } else {
-        options = [['', 'All locations'], ['(none)', '(none)'], ...knownLocations().map(place => [place, place])];
+        head = [['', 'All locations'], ['(none)', '(none)']];
+        places = knownLocations().map(place => [place, place]);
     }
-    select.innerHTML = optionsHtml(options);
-    select.value = options.some(([value]) => value === chosen) ? chosen : '';
+    // As the inventory's location filter: boxes and binders first, the locations named after
+    // one of the decks under their own "Decks" heading at the bottom
+    const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
+    const inDecks = places.filter(([place]) => decks.has(place.toLowerCase()));
+    select.innerHTML = optionsHtml([...head, ...places.filter(option => !inDecks.includes(option))])
+        + (inDecks.length ? decksHeadingHtml(select, [...head, ...places].map(([, label]) => label)) + optionsHtml(inDecks) : '');
+    select.value = [...head, ...places].some(([value]) => value === chosen) ? chosen : '';
 }
 
 function renderSpare() {
@@ -1397,6 +1426,7 @@ function bindEvents() {
         if (event.target.files[0]) uploadBackup(event.target.files[0]);
         event.target.value = '';  // the same file can be chosen again
     });
+    $('capture-copy-size').addEventListener('change', event => saveCaptureCopy(event.target.value));
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value) || 1}));
     $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });

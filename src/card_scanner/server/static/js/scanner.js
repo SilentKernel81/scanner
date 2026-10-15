@@ -142,11 +142,9 @@ function startDetectionPolling() {
 // ============================================================================
 
 function captureFeedback() {
-    // The beep and a flash on the video
+    // The beep. The flash is in the live picture itself, drawn by the station: the whole card
+    // washed green for a moment (scanner.py: _wash_card)
     audioManager.playCapture().catch(error => console.error('Failed to play capture sound:', error));
-    const videoContainer = document.querySelector('.video-container');
-    videoContainer.classList.add('capture-flash');
-    setTimeout(() => videoContainer.classList.remove('capture-flash'), 500);
 }
 
 function captureCard() {

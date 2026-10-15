@@ -79,6 +79,9 @@ def full_backup():
         databases=[Config.DATABASE_FILE, SCAN_INVENTORY_FILE, ARENA_INVENTORY_FILE, PENDING_FILE],
         linked=[('captures', inventory_captures_dir(), Config.DATABASE_FILE, pictures),
                 ('captures', inventory_captures_dir(), SCAN_INVENTORY_FILE, pictures),
+                # The large copies: none for the captures made before they were kept
+                ('captures_full', backups.full_captures_dir(), Config.DATABASE_FILE, pictures, True),
+                ('captures_full', backups.full_captures_dir(), SCAN_INVENTORY_FILE, pictures, True),
                 ('review', REVIEW_DIR, Config.DATABASE_FILE, 'SELECT file FROM review_queue'),
                 ('scanned_cards', Config.IMAGES_DIR, PENDING_FILE, 'SELECT image FROM pending_captures'),
                 ('scanned_cards', Config.IMAGES_DIR, PENDING_FILE, 'SELECT foil_image FROM pending_captures')],

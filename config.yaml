@@ -28,6 +28,11 @@ camera:
 detection:
   # The card is found by its outline (fast, tight, perspective-corrected crop)
   allow_landscape: false  # Accept sideways cards. Off: a card's art box can look like a sideways card
+  # Our own corner network (a 3 MB file in the station's folder) is asked first, for the cards the
+  # outline detector loses on a tall pile of sleeved cards; the outline detector answers when it
+  # is unsure. auto: use it when its file loads. off: the outline detector alone (also
+  # SCANNER_NEURAL_DETECTOR=off in the environment)
+  neural: auto
 
 # Auto-capture Settings (now controlled via UI button)
 auto_capture:
