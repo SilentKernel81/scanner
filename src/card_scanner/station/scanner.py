@@ -158,6 +158,8 @@ class CardScanner:
         # card reappears, see _new_card_arrived)
         self.missing_frames_for_new_card = 6
         self.log(f"Debug trace: {'on' if self.debug_trace_enabled else 'off'} (Settings; frames of slow or doubtful captures go to data/debug_frames)", level="info")
+        self.log(f"Corner network: {'on' if self.object_detector.neural else 'off'} "
+                 f"({'asked before the outline detector' if self.object_detector.neural else 'the outline detector alone'}; detection.neural)", level="info")
 
         # Bounding box smoothing to eliminate flicker
         self.smoothed_bbox = None  # Smoothed bounding box coordinates

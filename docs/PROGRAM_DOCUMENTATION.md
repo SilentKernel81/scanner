@@ -881,8 +881,23 @@ window on a laptop CPU. Not tested: speed on a Pi, the Android build.
 
 *In the station* (`station/corner_net.py`; the weights are `station/corner_net.onnx`, 3 MB, beside it
 and so inside the images' `station/` folder; trained on all 253 labelled frames, 3 "no card" ones
-as negatives): `CornerNet.find` runs the same two stages with OpenCV's dnn (no PyTorch on a
-station); given the card's previous outline it skips the whole-frame stage. `ObjectDetector`
+as negatives): `CornerNet.find` runs the whole frame in one window, then one window around the card (a
+second gave the same IoU, 0.978 on 127 labelled frames) with OpenCV's dnn (no PyTorch on a
+station); given the card's previous outline it skips the whole-frame stage. On a Pi 4
+(OpenCV 4.10 in the `client-pi` image, 2026-10-15) the file loads and runs: 58 ms a frame cold
+(the whole frame, then one window), 28 ms with a previous outline (one window); with two
+refinement windows it was 86 / 57 ms. The Android app has the same network (`CornerNet.kt`,
+`CardFinder.kt`, `assets/corner_net.onnx`): on an emulator (OpenCV 4.14) its corners match this
+code's to 0.05 px on four frames, cold and tracked (`CornerNetParityTest`); Settings → "Find
+cards with the corner network" turns it off.
+
+*Live runs of the same 57 sleeved cards with the network on (2026-10-15, one pile, each run once;
+the outline detector alone had needed fixed area on the Pi and lost the card for ~6 s at a time
+on the phone):* Pi 4, outline mode - run 1: 57 captures, no waits; run 2: 58 captures (one double
+inside the run of identical copies at the end: its triggers were image change 0.36 and 0.26),
+11 "card not ready" waits, the longest 9 s. Phone: 57 captures, 57 added, none for review,
+nothing waited longer than 3.9 s. Webcam: 55 captures, no "no outline" waits (how many cards
+were dropped was not counted). Not measured: a different pile, unsleeved cards, other lighting. `ObjectDetector`
 asks it first (`detection.neural` in config.yaml, or `SCANNER_NEURAL_DETECTOR=off`) and believes
 the answer when the score is >= 0.5 and the shape is a card's (convex, 1.12 - 1.68 tall, inside the
 frame, >= 2% of it); otherwise - or when the network fails or its file is missing - the outline
