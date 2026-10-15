@@ -1,0 +1,234 @@
+/* The settings page (templates/settings.html): categories on the left, one category at a time on
+   the right. The look of switches, buttons and fields is style.css's; this is the layout and the
+   few rows the drawers had in collection.css (backups). */
+
+.settings-page {
+    padding-top: 16px;
+    padding-bottom: 48px;
+}
+
+.settings-title {
+    margin: 4px 0 16px;
+    font-size: 22px;
+}
+
+.settings-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+}
+
+.settings-nav {
+    position: sticky;
+    top: 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.settings-nav button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.settings-nav button:hover {
+    background: var(--surface-2);
+}
+
+.settings-nav button.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.settings-nav .icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+.settings-content {
+    max-width: 760px;
+}
+
+.settings-category[hidden],
+.settings-content [hidden] {
+    display: none !important;
+}
+
+.settings-category > h2 {
+    margin: 0 0 6px;
+    font-size: 18px;
+}
+
+.settings-card {
+    margin-top: 14px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.settings-card.flat {
+    border: 0;
+    padding: 0;
+    background: none;
+}
+
+.settings-card > h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+}
+
+.settings-card .input-group + .input-group,
+.settings-card .switch-row + .input-group,
+.settings-card .input-group + .switch-row,
+.settings-card .hint + .input-group {
+    margin-top: 14px;
+}
+
+.settings-card .btn-block + .hint,
+.settings-card .btn-block {
+    margin-top: 8px;
+}
+
+.settings-card .narrow {
+    width: auto;
+    min-width: 120px;
+    max-width: 100%;
+}
+
+.settings-card input.narrow {
+    width: 110px;
+}
+
+.settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.settings-advanced {
+    margin-top: 16px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+}
+
+.settings-advanced > summary {
+    cursor: pointer;
+    color: var(--text-muted, var(--text));
+    font-weight: 600;
+}
+
+.settings-advanced[open] > summary {
+    margin-bottom: 10px;
+}
+
+.camera-status {
+    margin-top: 10px;
+}
+
+.backup-schedule {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 6px;
+    font-size: 13px;
+}
+
+.backup-schedule select {
+    width: auto;
+}
+
+.backup-schedule input {
+    width: 70px;
+}
+
+.backup-create {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.backup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.backup-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.backup-row .idea-name {
+    font-weight: 600;
+}
+
+.backup-row .idea-meta {
+    font-size: 12px;
+    color: var(--text-subtle);
+}
+
+.backup-auto {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.mini-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.mini-btn .icon {
+    width: 16px;
+    height: 16px;
+}
+
+@media (max-width: 720px) {
+    .settings-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-nav {
+        position: static;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .settings-nav button {
+        width: auto;
+    }
+}

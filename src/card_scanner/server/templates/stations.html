@@ -35,8 +35,7 @@
     {% include '_dialogs.html' %}
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script>
-        // Each page defines these two (common.js / _topbar.html)
-        function openSettings() { window.location.href = {{ settings_url|tojson }}; }
+        // Each page defines this (common.js)
         function inventoryChanged() {}
 
         function renderStations(stations, tokenRequired) {

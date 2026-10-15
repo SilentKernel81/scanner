@@ -23,11 +23,6 @@ let detectionEnabled = true;
 let autoScanningEnabled = false;
 let fastScanMode = true;  // "Add cards automatically" - loaded from /api/scan_settings
 let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last capture: 'foil' | 'non-foil' | 'unknown'
-let availableModels = {};  // provider -> model names
-let currentProvider = 'gemini';
-let currentModel = null;
-let activeProvider = null;  // provider/model the server is actually using (not just selected)
-let activeModel = null;
 
 function isOpen(id) {
     return $(id).classList.contains('show');
@@ -200,8 +195,6 @@ function resetFocus() {
 
 socket.on('focus_reset', function(data) {
     addLog(timeNow(), 'info', data.message || 'Focusing...');
-    // Refocusing locks the focus - reflect that in the settings switch
-    $('toggle-autofocus').checked = false;
 });
 
 // ============================================================================
@@ -302,7 +295,6 @@ socket.on('inventory_updated', function(data) {
         // This station's last card taken back (Settings -> Stations, or the station itself)
         addLog(timeNow(), 'warning', `Removed ${data.undone} from the inventory (undo)`);
         if (isOpen('inventory-modal')) loadInventory();
-        if ($('settings-drawer').classList.contains('show')) loadStations();
         return;
     }
 
@@ -672,84 +664,28 @@ function closeReview() {
 // Scan settings remembered on the server
 // ============================================================================
 
-// "Read with OCR first": without the light-ocr package the switch does nothing, so say why
-const OCR_DESC = $('ocr-desc').textContent;
-
-function applyOcrState(enabled, installed) {
-    const toggle = $('toggle-ocr');
-    toggle.checked = Boolean(enabled) && installed;
-    toggle.disabled = !installed;
-    $('ocr-desc').textContent = installed ? OCR_DESC
-        : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
-}
-
-socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
-
-// "Debug mode" is the web server's: the switch is what the next start will use
-const DEBUG_MODE_DESC = $('debug-mode-desc').textContent;
-
-function applyDebugMode(enabled, running) {
-    $('toggle-debug-mode').checked = Boolean(enabled);
-    $('debug-mode-desc').textContent = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
-        : `Now ${running ? 'on' : 'off'}: restart the scanner to turn it ${enabled ? 'on' : 'off'}`;
-}
-
-socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running));
+// The settings themselves are on the settings page (static/js/settings.js); this page keeps
+// what it uses while scanning: the auto-add mode (its hints), the fixed area and the sounds.
 
 function loadScanSettings() {
     fetch('/api/scan_settings')
         .then(response => response.json())
         .then(data => {
             fastScanMode = data.auto_add;
-            $('toggle-fast-scan').checked = data.auto_add;
-            $('toggle-autofocus').checked = data.autofocus;
-            applyOcrState(data.ocr_first, data.ocr_installed);
-            $('toggle-debug-trace').checked = Boolean(data.debug_trace);
-            applyDebugMode(data.debug_mode, data.debug_mode_running);
             addLog(timeNow(), 'info', `Debug trace: ${data.debug_trace ? 'on' : 'off'}, debug mode: ${data.debug_mode_running ? 'on' : 'off'}`);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
-            $('camera-rotation').value = String(data.camera_rotation || 0);
-            $('refocus-every').value = String(data.refocus_every);
             applySound(data.sound);
-            $('scan-location').value = data.scan_location || '';
-            $('scan-location-options').innerHTML = (data.locations || [])
-                .map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
         })
         .catch(error => console.error('Error loading scan settings:', error));
 }
 
 function applySound(sound) {
-    // The sound switch and volume as remembered on the server
+    // The sounds as remembered on the server (changed on the settings page)
     if (!sound) return;
-    $('toggle-audio').checked = sound.enabled;
-    $('audio-volume').value = sound.volume;
-    $('volume-value').textContent = sound.volume + '%';
-    $('toggle-sound-capture').checked = sound.capture;
-    $('toggle-sound-added').checked = sound.added;
     audioManager.setEnabled(sound.enabled);
     audioManager.setVolume(sound.volume / 100);
     audioManager.setMuted('capture', !sound.capture);
     audioManager.setMuted('added', !sound.added);
-}
-
-function saveSound(change) {
-    fetch('/api/sound', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(change)
-    }).catch(error => console.error('Could not save the sound setting:', error));
-}
-
-function setScanLocation(location) {
-    // Where scanned cards are put in the inventory (remembered on the server)
-    fetch('/api/scan_location', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({location: location})
-    })
-    .then(response => response.json())
-    .then(data => { $('scan-location').value = data.scan_location; })
-    .catch(error => notify('Could not save the location: ' + error.message, 'error'));
 }
 
 // ============================================================================
@@ -772,12 +708,7 @@ socket.on('fixed_area_updated', function(state) {
     }
 });
 
-socket.on('refocus_every_updated', function(data) {
-    $('refocus-every').value = String(data.captures);
-});
-
 socket.on('camera_rotation_updated', function(data) {
-    $('camera-rotation').value = String(data.rotation);
     notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
 });
 
@@ -938,7 +869,6 @@ socket.on('database_update_available', function(data) {
 });
 
 function updateDatabase() {
-    setButton('update-database-btn', 'Updating...', true);
     addLog(timeNow(), 'info', `Starting the ${gameInfo.label} card data update from ${gameInfo.source}...`);
     socket.emit('update_database');
 }
@@ -949,254 +879,26 @@ socket.on('database_update_progress', function(data) {
 
 socket.on('database_update_complete', function(data) {
     audioManager.playQueueAlert();  // triple beep: a long operation finished
-    setButton('update-database-btn', 'Update card database');
     addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
     loadStats();
 });
 
 socket.on('database_update_error', function(data) {
     audioManager.playError();
-    setButton('update-database-btn', 'Update card database');
     addLog(timeNow(), 'error', `Database update failed: ${data.message}`);
 });
 
-async function rebuildDatabase() {
-    const ok = await confirmDialog({
-        title: 'Rebuild database schema?',
-        message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your inventory is not touched.',
-        confirmText: 'Rebuild'
-    });
-    if (!ok) return;
-
-    setButton('rebuild-database-btn', 'Rebuilding...', true);
-    addLog(timeNow(), 'info', 'Starting database schema rebuild...');
-    addLog(timeNow(), 'info', 'This will optimize database structure and indexes (~30 seconds)');
-    socket.emit('rebuild_database');
-}
-
-socket.on('database_rebuild_progress', function(data) {
-    addLog(timeNow(), 'info', data.message);
-});
-
-socket.on('database_rebuild_complete', function(data) {
-    audioManager.playQueueAlert();  // triple beep: a long operation finished
-    setButton('rebuild-database-btn', 'Rebuild database schema');
-    addLog(timeNow(), 'success', `Database rebuilt! ${data.cards_imported.toLocaleString()} cards migrated.`);
-    addLog(timeNow(), 'success', `Schema optimized: ${data.schema_type} (with performance indexes)`);
-    addLog(timeNow(), 'success', 'Database queries will now be faster!');
-});
-
-socket.on('database_rebuild_error', function(data) {
-    audioManager.playError();
-    setButton('rebuild-database-btn', 'Rebuild database schema');
-    addLog(timeNow(), 'error', `Database rebuild failed: ${data.message}`);
-});
-
 // ============================================================================
-// Vision AI: provider and model (Settings -> Vision AI)
+// Vision AI (the provider, model and keys are on the settings page)
 // ============================================================================
-
-function fetchAIModels() {
-    return fetch('/api/ai_models')
-        .then(response => response.json())
-        .then(data => { availableModels = data.models; });
-}
-
-function loadAIModels() {
-    return fetchAIModels().catch(error => console.error('Error loading AI models:', error));
-}
-
-function refreshAIModels() {
-    const provider = currentProvider;
-    setButton('refresh-models-btn', '⏳', true);
-    $('ai-model').innerHTML = '<option value="">Refreshing models...</option>';
-    addLog(timeNow(), 'info', `Refreshing ${provider} models...`);
-
-    // Local models come live from Ollama; cloud providers have a static list
-    const refreshed = provider === 'local' ? loadLocalModels(currentModel) : fetchAIModels()
-        .then(() => {
-            populateModelDropdown(provider, currentModel);
-            addLog(timeNow(), 'success', `${provider} models refreshed`);
-        })
-        .catch(error => {
-            console.error('Error refreshing models:', error);
-            addLog(timeNow(), 'error', 'Failed to refresh models');
-        });
-    refreshed.finally(() => setButton('refresh-models-btn', '🔄'));
-}
-
-function populateModelDropdown(provider, selectedModel = null) {
-    const modelSelect = $('ai-model');
-    modelSelect.innerHTML = '';
-    const models = availableModels[provider];
-    if (!models) {
-        modelSelect.add(new Option('No models available', ''));
-        return;
-    }
-    models.forEach(model => modelSelect.add(new Option(model, model, false, model === selectedModel)));
-}
-
-function loadLocalModels(selectedModel = null) {
-    $('ai-model').innerHTML = '<option value="">Loading models from Ollama...</option>';
-
-    // Live models from Ollama; the static list when the server can't be reached
-    return fetch('/api/local_ai_models')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.models && data.models.length > 0) {
-                availableModels['local'] = data.models;
-                addLog(timeNow(), 'success', `Found ${data.models.length} local models`);
-            } else {
-                addLog(timeNow(), 'warning', 'Using static model list (local server not available)');
-            }
-        })
-        .catch(error => {
-            console.error('Error loading local models:', error);
-            addLog(timeNow(), 'warning', 'Could not connect to local AI server');
-        })
-        .then(() => populateModelDropdown('local', selectedModel));
-}
-
-function setActiveModel(provider, model) {
-    currentProvider = provider;
-    currentModel = model;
-    activeProvider = provider;
-    activeModel = model;
-}
-
-function applyProvider(provider) {
-    // Load the provider's models and switch the scanner to it; returning to the active
-    // provider keeps its model instead of jumping to the first one in the list
-    const keepModel = provider === activeProvider ? activeModel : null;
-    const loaded = provider === 'local' ? loadLocalModels(keepModel) : Promise.resolve(populateModelDropdown(provider, keepModel));
-    loaded.then(() => {
-        socket.emit('set_ai_provider', {provider: provider, model: $('ai-model').value});
-        addLog(timeNow(), 'info', `Changing AI provider to ${provider}...`);
-    });
-}
-
-function loadAIProvider() {
-    return fetch('/api/ai_provider')
-        .then(response => response.json())
-        .then(data => {
-            if (!data.provider) return;
-            $('ai-provider').value = data.provider;
-            setActiveModel(data.provider, data.model);
-            if (data.provider === 'local') {
-                loadLocalModels(data.model);
-            } else {
-                populateModelDropdown(data.provider, data.model);
-            }
-        })
-        .catch(error => console.error('Error loading AI provider:', error));
-}
 
 socket.on('ai_provider_set', function(data) {
-    setActiveModel(data.provider, data.model);
     addLog(timeNow(), 'success', data.message);
-    loadPrompts();
+    loadPrompts();   // the prompts are per model
 });
 
 // ============================================================================
-// API keys / local endpoint (Settings -> Vision AI)
-// Keys are shown masked only: the server never sends a full key to the browser.
-// ============================================================================
-
-let aiCredentials = {};
-const PROVIDER_INFO = {
-    gemini: {name: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey'},
-    openai: {name: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys'},
-    anthropic: {name: 'Anthropic', keyUrl: 'https://console.anthropic.com/settings/keys'},
-    local: {name: 'Local AI'}
-};
-
-function providerInfo(provider) {
-    return PROVIDER_INFO[provider] || {name: provider};
-}
-
-function loadCredentials() {
-    return fetch('/api/ai_credentials')
-        .then(response => response.json())
-        .then(data => {
-            aiCredentials = data;
-            renderCredentialField($('ai-provider').value);
-        })
-        .catch(error => console.error('Error loading API key status:', error));
-}
-
-function hasCredential(provider) {
-    return provider === 'local' || Boolean(aiCredentials[provider] && aiCredentials[provider].configured);
-}
-
-function renderCredentialField(provider) {
-    const input = $('ai-credential');
-    const label = $('ai-credential-label');
-    const hint = $('ai-credential-hint');
-    const info = providerInfo(provider);
-    const status = aiCredentials[provider] || {};
-    input.value = '';
-    hint.classList.remove('is-missing');
-
-    if (provider === 'local') {
-        label.textContent = 'Server address';
-        input.type = 'text';
-        input.value = status.endpoint || '';
-        input.placeholder = 'http://localhost:11434/v1/chat/completions';
-        hint.textContent = 'Ollama or another OpenAI-compatible server';
-        return;
-    }
-
-    label.textContent = `${info.name} API key`;
-    input.type = 'password';
-    if (status.configured) {
-        input.placeholder = `Saved: ${status.masked} - type a new key to replace it`;
-        hint.textContent = `Key configured (${status.masked})`;
-    } else {
-        input.placeholder = 'Paste your API key';
-        hint.innerHTML = `No key yet - <a href="${info.keyUrl}" target="_blank" rel="noopener">get one from ${escapeHtml(info.name)}</a>`;
-        hint.classList.add('is-missing');
-    }
-}
-
-async function saveCredential() {
-    const provider = $('ai-provider').value;
-    const value = $('ai-credential').value.trim();
-
-    if (!value) {
-        if (provider === 'local' || !hasCredential(provider)) {
-            notify(provider === 'local' ? 'Enter the server address' : 'Paste an API key first', 'warning');
-            return;
-        }
-        const remove = await confirmDialog({
-            title: `Remove the ${providerInfo(provider).name} key?`,
-            message: 'Removes the key saved in the web interface. A key in the .env file (if any) is used again after a restart.',
-            confirmText: 'Remove key',
-            danger: true
-        });
-        if (!remove) return;
-    }
-    socket.emit('save_ai_credential', {provider: provider, value: value});
-}
-
-socket.on('ai_credential_saved', function(data) {
-    aiCredentials[data.provider] = data.status;
-    const info = providerInfo(data.provider);
-    const selected = $('ai-provider').value;
-    renderCredentialField(selected);
-
-    if (data.provider === 'local') {
-        notify('Local AI address saved', 'success');
-    } else {
-        notify(data.status.configured ? `${info.name} API key saved` : `${info.name} API key removed`, 'success');
-    }
-    // Use the new key / address right away for the selected provider
-    if (data.provider === selected && hasCredential(selected)) {
-        applyProvider(selected);
-    }
-});
-
-// ============================================================================
-// Prompt editor (Settings -> Vision AI -> Edit prompts)
+// Prompt editor (Settings -> Card reading -> Edit prompts opens it: /scan/<id>#prompts)
 // ============================================================================
 
 let promptData = null;      // {provider, model, prompts: {kind: {label, instructions, source, ...}}}
@@ -1218,13 +920,6 @@ function loadPrompts() {
             if (isOpen('prompt-modal')) renderPromptEditor();
         })
         .catch(error => console.error('Error loading prompts:', error));
-}
-
-function updatePromptSummary() {
-    const custom = promptData.order.map(kind => promptData.prompts[kind]).filter(p => p.source !== 'built-in');
-    $('prompt-summary').textContent = custom.length
-        ? custom.map(p => `${p.label}: ${PROMPT_SOURCES[p.source].toLowerCase()}`).join(' · ')
-        : 'What the AI is asked to read on each card - adjustable per model';
 }
 
 function promptText(kind) {
@@ -1395,9 +1090,6 @@ function applyGameFields() {
     if (!gameInfo.has_treatments) $('card-treatment').value = '';
     $('set-code').placeholder = `e.g. ${gameInfo.set_example}`;
     $('collector-number').placeholder = `e.g. ${gameInfo.number_example}`;
-    $('database-source-hint').textContent =
-        `Downloads the latest ${gameInfo.label} card data${gameInfo.id === 'mtg' ? ' and prices' : ''} from ${gameInfo.source}`
-        + (gameInfo.id === 'mtg' ? ' (a few minutes)' : ' (a few seconds)');
 }
 
 function loadGames() {
@@ -1701,21 +1393,9 @@ async function clearInventory() {
 // Settings drawer and overlays
 // ============================================================================
 
-function openSettings() {
-    $('settings-drawer').classList.add('show');
-    loadStations();
-}
-
 // ============================================================================
 // Stations: cameras elsewhere (a phone, a laptop) that capture cards and send them here
 // ============================================================================
-
-function loadStations() {
-    fetch('/api/stations')
-        .then(response => response.json())
-        .then(data => renderStations(data.stations, data.token_required))
-        .catch(error => console.error('Error loading stations:', error));
-}
 
 function stationSetupUrl(station) {
     // The station's own page (which camera, its name, its server). A station on this computer
@@ -1745,76 +1425,15 @@ function showCameraSetupLink() {
         .catch(() => { link.hidden = true; });
 }
 
-function renderStations(stations, tokenRequired) {
-    $('stations-hint').textContent =
-        `Each camera has its own page. A camera station connects with station.py --server ${window.location.origin}`
-        + (tokenRequired ? ' and the station token set on this server.' : '; it appears here when it first connects or sends a card.');
-    $('stations-list').innerHTML = stations.length ? stations.map(station => {
-        const id = escapeHtml(station.id);
-        return `
-        <div class="station" data-id="${id}">
-            <div class="station-fields">
-                <a class="station-link ${station.connected ? 'is-on' : ''}" href="/scan/${id}" title="${station.connected ? 'Camera connected' : 'No camera connected'} - open its page"><svg class="icon"><use href="#i-camera"/></svg></a>
-                <input type="text" class="text-input" value="${escapeHtml(station.name)}" maxlength="60" title="Name"
-                       aria-label="Station name" onchange="saveStation('${id}', {name: this.value})">
-                <input type="text" class="text-input" value="${escapeHtml(station.location || '')}" maxlength="60"
-                       list="scan-location-options" placeholder="Location: as above" title="Its cards get this inventory location"
-                       aria-label="Station location" autocomplete="off" onchange="saveStation('${id}', {location: this.value})">
-            </div>
-            <div class="station-meta">
-                <span class="hint">${station.scanned} scanned card${station.scanned === 1 ? '' : 's'} · ${station.captures} captured in all · last ${escapeHtml(station.last_seen || 'never')}</span>
-                ${stationSetupUrl(station) ? `<a class="btn btn-small" href="${escapeHtml(stationSetupUrl(station))}" target="_blank" rel="noopener" title="Which camera it uses, its name and the server it sends to - on the station">Camera setup</a>` : ''}
-                <button class="btn btn-small" onclick="undoStationAdd('${id}')" title="Take back the last card this station added">Undo last</button>
-                <button class="btn btn-small btn-danger" onclick="forgetStation('${id}')" title="Remove it from this list, with its scanned cards and review cards">Forget</button>
-            </div>
-        </div>`;
-    }).join('') : '<div class="hint">No station has sent a card yet.</div>';
-}
-
-function saveStation(id, change) {
-    fetch('/api/stations/' + encodeURIComponent(id), {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(change)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (!data.success) throw new Error(data.message);
-        loadStations();
-    })
-    .catch(error => notify('Could not save the station: ' + error.message, 'error'));
-}
-
-function undoStationAdd(id) {
-    // Answered with inventory_updated (undone) or an error
-    socket.emit('undo_last_add', {station: id});
-}
-
-async function forgetStation(id) {
-    const ok = await confirmDialog({
-        title: 'Forget this station?',
-        message: 'It is removed from this list, with the cards it scanned that are not in the collection yet and the cards it has waiting for review. Cards already in the collection stay. It comes back, empty, if it connects or sends a card again.',
-        confirmText: 'Forget and delete its cards',
-        danger: true
-    });
-    if (!ok) return;
-    fetch('/api/stations/' + encodeURIComponent(id), {method: 'DELETE'})
-        .then(response => response.json())
-        .then(data => {
-            if (!data.success) throw new Error(data.message);
-            notify(`Station forgotten: ${data.cards} scanned cards and ${data.reviews} review cards removed`, 'success');
-            loadStations();
-        })
-        .catch(error => notify('Could not forget the station: ' + error.message, 'error'));
-}
-
-function closeSettings() {
-    $('settings-drawer').classList.remove('show');
-    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
-}
-
-// The collection page's settings link here (/#settings)
-if (window.location.hash === '#settings') openSettings();
+// Old links to the settings drawer (/scan/<id>#settings) go to the settings page
+if (window.location.hash === '#settings') window.location.replace('/settings#cameras');
+// The settings page's "Edit prompts" opens the editor (/scan/<id>#prompts)
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.location.hash === '#prompts') {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        openPromptEditor();
+    }
+});
 
 // Topmost first: Escape closes the first one open, a click on a backdrop closes that one
 const OVERLAYS = [
@@ -1823,7 +1442,6 @@ const OVERLAYS = [
     ['edit-card-modal', closeEditCard],
     ['prompt-modal', closePromptEditor],
     ['inventory-modal', closeInventory],
-    ['settings-drawer', closeSettings],
 ];
 
 document.addEventListener('keydown', function(event) {
@@ -1833,33 +1451,13 @@ document.addEventListener('keydown', function(event) {
         return;
     }
     const overlay = OVERLAYS.find(([id]) => isOpen(id));
-    if (overlay) overlay[1](); else closeSettings();
+    if (overlay) overlay[1]();
 });
 
 window.addEventListener('click', function(event) {
     const overlay = OVERLAYS.find(([id]) => event.target === $(id));
     if (overlay) overlay[1]();
 });
-
-function testAudio() {
-    addLog(timeNow(), 'info', 'Testing audio system...');
-
-    audioManager.ensureAudioContext().then(() => {
-        // All sounds in sequence
-        audioManager.playCapture();
-        addLog(timeNow(), 'info', '1/3: Capture sound');
-
-        setTimeout(() => {
-            audioManager.playSuccess();
-            addLog(timeNow(), 'info', '2/3: Success sound');
-        }, 400);
-
-        setTimeout(() => {
-            audioManager.playNextReady();
-            addLog(timeNow(), 'success', '3/3: Next Ready sound - Check browser console');
-        }, 1000);
-    });
-}
 
 // ============================================================================
 // Page setup
@@ -1883,106 +1481,18 @@ function setupSearchFields() {
 }
 
 function setupScanToggles() {
-    detectionEnabled = $('toggle-detection').checked;
-
-    onToggle('toggle-detection', enabled => {
-        detectionEnabled = enabled;
-        socket.emit('toggle_detection', {enabled: enabled});  // the server logs the change
-
-        // Shown right away (the next poll refreshes it from the server)
-        updateDetectionStatus(lastDetectionStatus);
-
-        // Auto scanning needs detection
-        if (!enabled && autoScanningEnabled) toggleAutoScanning();
-        $('toggle-auto-scanning-btn').disabled = !enabled;
-    });
-
-    onToggle('toggle-fast-scan', enabled => {
-        fastScanMode = enabled;
-        socket.emit('toggle_fast_scan', {enabled: enabled});  // the server logs the change
-        if (autoScanningEnabled) $('auto-scan-hint').textContent = autoScanHint();
-    });
-
-    // Continuous autofocus on/off (off = find the sharpest focus and lock it)
-    onToggle('toggle-autofocus', enabled => socket.emit('set_autofocus', {enabled: enabled}));
-    // Read cards with light-ocr before asking the vision AI
-    onToggle('toggle-ocr', enabled => socket.emit('toggle_ocr', {enabled: enabled}));
-    onToggle('toggle-debug-mode', enabled => socket.emit('toggle_debug_mode', {enabled: enabled}));
-    onToggle('toggle-debug-trace', enabled => {
-        socket.emit('toggle_debug_trace', {enabled: enabled});
-        addLog(timeNow(), 'info', `Debug trace ${enabled ? 'enabled' : 'disabled'}`);
-    });
-
-    $('refocus-every').addEventListener('change', function(e) {
-        socket.emit('set_refocus_every', {captures: parseInt(e.target.value)});
-    });
-    $('camera-rotation').addEventListener('change', function(e) {
-        socket.emit('set_camera_rotation', {rotation: parseInt(e.target.value)});
-    });
     $('game-select').addEventListener('change', function(e) {
         socket.emit('set_game', {game: e.target.value});
     });
 }
 
-function setupAudioControls() {
-    onToggle('toggle-audio', enabled => {
-        audioManager.setEnabled(enabled);
-        saveSound({enabled: enabled});
-        addLog(timeNow(), 'info', `Sound effects ${enabled ? 'enabled' : 'disabled'}`);
-        if (enabled) audioManager.playSuccess();  // a test sound
-    });
-    onToggle('toggle-sound-capture', enabled => {
-        audioManager.setMuted('capture', !enabled);
-        saveSound({capture: enabled});
-        if (enabled) audioManager.playCapture();
-    });
-    onToggle('toggle-sound-added', enabled => {
-        audioManager.setMuted('added', !enabled);
-        saveSound({added: enabled});
-        if (enabled) audioManager.playAdded();
-    });
-
-    $('audio-volume').addEventListener('input', function(e) {
-        audioManager.setVolume(e.target.value / 100);  // 0-100 -> 0.0-1.0
-        $('volume-value').textContent = e.target.value + '%';
-    });
-    // Saved when the slider is let go, not on every step of the drag
-    $('audio-volume').addEventListener('change', e => saveSound({volume: parseInt(e.target.value)}));
-}
-
 function setupAIControls() {
-    // Change AI provider: show its key / address field; switch once it has a key
-    $('ai-provider').addEventListener('change', function(e) {
-        const provider = e.target.value;
-        currentProvider = provider;
-        renderCredentialField(provider);
-
-        if (hasCredential(provider)) {
-            applyProvider(provider);
-        } else {
-            populateModelDropdown(provider);
-            $('ai-credential').focus();
-            notify(`Enter your ${PROVIDER_INFO[provider].name} API key to use it`, 'warning');
-        }
-    });
-
-    $('ai-model').addEventListener('change', function(e) {
-        socket.emit('set_ai_provider', {provider: currentProvider, model: e.target.value});
-        addLog(timeNow(), 'info', `Changing model to ${e.target.value}...`);
-    });
-
-    // Enter in the key field saves it
-    $('ai-credential').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') saveCredential();
-    });
-
     $('prompt-text').addEventListener('input', onPromptInput);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     setupSearchFields();
     setupScanToggles();
-    setupAudioControls();
     setupAIControls();
     setupAreaDrawing();
     setupInventoryList();
@@ -2001,7 +1511,9 @@ document.addEventListener('DOMContentLoaded', function() {
     $('video-feed').addEventListener('load', updateVideoFrame);
     window.addEventListener('resize', placeAreaLayer);
 
-    // The model list first (the provider's dropdown is filled from it); the key field needs
-    // the current provider
-    loadAIModels().then(loadAIProvider).then(loadCredentials).then(loadPrompts);
+    loadPrompts();
+
+    // A setting changed on the settings page (auto-add, sounds, fixed area) is read again when
+    // this tab is looked at again
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadScanSettings(); });
 });

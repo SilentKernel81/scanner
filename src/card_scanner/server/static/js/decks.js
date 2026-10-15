@@ -1352,11 +1352,6 @@ async function knownLocations() {
     return knownPlaces;
 }
 
-// The header's settings button: the settings (backups) are the collection page's drawer
-function openSettings() {
-    window.location.href = '/collection#settings';
-}
-
 // Called by the shared dialogs when the inventory changed: what is owned may have
 function inventoryChanged() {
     refreshOwned();
