@@ -339,7 +339,12 @@ def pi_camera_picture(width=1152):
         sensor_width, sensor_height = camera.sensor_resolution
         size = (width, int(width * sensor_height / sensor_width) // 2 * 2)
         # "RGB888" is libcamera's name for blue, green, red in memory - OpenCV's order
-        camera.configure(camera.create_still_configuration(main={'size': size, 'format': 'RGB888'}))
+        # The raw stream asked for at the sensor's full size makes libcamera choose its full-view
+        # mode. Without it the small `main` picks a 1536 x 864 mode that is a WINDOW of the sensor
+        # (about two thirds of the view, found 2026-10-15 on a Camera Module 3): a crop drawn on
+        # that picture lands on a larger part of the real sensor than the one drawn
+        camera.configure(camera.create_still_configuration(
+            main={'size': size, 'format': 'RGB888'}, raw={'size': (sensor_width, sensor_height)}))
         camera.start()
         time.sleep(1.5)  # exposure, white balance and autofocus settle
         return camera.capture_array()

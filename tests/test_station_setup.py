@@ -385,5 +385,75 @@ class ThePagePassword(CleanEnvironment):
         self.assertEqual(station_login.session_from(None), '')
 
 
+class CropShape(unittest.TestCase):
+    """The setup page's crop drawing keeps a chosen shape (fitShape in station_setup.html) - run with node"""
+
+    SCRIPT = r"""
+const cases = JSON.parse(process.argv[process.argv.length - 1]);
+console.log(JSON.stringify(cases.map(c => fitShape(c.anchor, c.point, c.ratio, c.w, c.h))));
+"""
+
+    @classmethod
+    def setUpClass(cls):
+        import re
+        import shutil
+        cls.node = shutil.which('node')
+        text = (Path(station_setup.__file__).with_name('station_setup.html')).read_text()
+        found = re.search(r'// fitShape begin(.*?)// fitShape end', text, re.S)
+        assert found, "fitShape is not in the page"
+        cls.source = found.group(1)
+
+    def fit(self, *cases):
+        import subprocess
+        if not self.node:
+            self.skipTest("node is not installed")
+        arguments = [{'anchor': a, 'point': p, 'ratio': r, 'w': w, 'h': h} for a, p, r, w, h in cases]
+        out = subprocess.run([self.node, '-e', self.source + self.SCRIPT, '--', json.dumps(arguments)],
+                             capture_output=True, text=True, check=True).stdout
+        return json.loads(out)
+
+    @staticmethod
+    def shape(rectangle, w, h):
+        return ((rectangle[2] - rectangle[0]) * w) / ((rectangle[3] - rectangle[1]) * h)
+
+    def test_the_drawn_rectangle_has_the_shape_in_pixels(self):
+        w, h = 4608, 2592                                          # a Pi camera's whole sensor picture
+        for point in ([0.7, 0.9], [0.55, 0.95], [0.9, 0.5]):
+            rectangle = self.fit(([0.3, 0.1], point, 0.8, w, h))[0]
+            self.assertAlmostEqual(self.shape(rectangle, w, h), 0.8, places=3)
+
+    def test_it_stays_inside_the_picture_and_the_anchor_stays_put(self):
+        w, h = 2560, 1440
+        rectangle = self.fit(([0.4, 0.2], [1.0, 1.0], 0.8, w, h))[0]  # dragged far past what fits
+        self.assertAlmostEqual(self.shape(rectangle, w, h), 0.8, places=3)
+        self.assertGreaterEqual(min(rectangle), 0.0)
+        self.assertLessEqual(max(rectangle), 1.0)
+        self.assertEqual((rectangle[0], rectangle[1]), (0.4, 0.2))     # the corner it was started at
+        # dragged up and to the left: the anchor is the bottom right corner
+        rectangle = self.fit(([0.6, 0.9], [0.2, 0.3], 0.8, w, h))[0]
+        self.assertAlmostEqual(self.shape(rectangle, w, h), 0.8, places=3)
+        self.assertEqual((rectangle[2], rectangle[3]), (0.6, 0.9))
+
+    def test_a_moved_box_keeps_its_size_and_stops_at_the_edge(self):
+        import subprocess
+        if not self.node:
+            self.skipTest("node is not installed")
+        script = self.source + "console.log(JSON.stringify([moveBox([0.3,0.2,0.6,0.8], 0.1, -0.1), "\
+                               "moveBox([0.3,0.2,0.6,0.8], 0.9, 0.9), moveBox([0.3,0.2,0.6,0.8], -0.9, -0.9)]))"
+        out = json.loads(subprocess.run([self.node, '-e', script], capture_output=True, text=True, check=True).stdout)
+        for moved in out:
+            self.assertAlmostEqual(moved[2] - moved[0], 0.3)
+            self.assertAlmostEqual(moved[3] - moved[1], 0.6)
+        self.assertEqual([round(v, 3) for v in out[0]], [0.4, 0.1, 0.7, 0.7])
+        self.assertEqual([round(v, 3) for v in out[1]], [0.7, 0.4, 1.0, 1.0])
+        self.assertEqual([round(v, 3) for v in out[2]], [0.0, 0.0, 0.3, 0.6])
+
+    def test_free_is_the_plain_rectangle_and_a_wide_shape_works(self):
+        w, h = 2560, 1440
+        free, wide = self.fit(([0.2, 0.2], [0.5, 0.7], 0, w, h), ([0.1, 0.1], [0.6, 0.3], 16 / 9, w, h))
+        self.assertEqual(free, [0.2, 0.2, 0.5, 0.7])
+        self.assertAlmostEqual(self.shape(wide, w, h), 16 / 9, places=3)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -422,15 +422,20 @@ a {
    Camera
    ============================================================================ */
 
-/* The camera's frame is always this size, whatever the camera: a 16:9 box as wide as the panel.
-   A picture of another shape (a cropped or turned camera's tall one) sits inside it, centred,
-   with bars at its sides (object-fit: contain below) - not a frame of its own shape */
+/* The camera's frame has the shape of the picture it shows (scanner.js sets --picture-aspect:
+   width / height, 16:9 until the first picture): as wide as the panel, but never taller than
+   --frame-max-height. So a camera cropped to the box gives a smaller, upright frame, the same
+   for every camera cropped alike, and a wide picture fills the panel. No bars: the frame is
+   the picture's own shape (object-fit: contain below only matters for the first moments) */
 .video-container {
+    --frame-max-height: min(62vh, 620px);
     position: relative;
     border-radius: var(--radius);
     overflow: hidden;
     background: #000;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--picture-aspect, 1.7778);
+    width: min(100%, calc(var(--frame-max-height) * var(--picture-aspect, 1.7778)));
+    margin: 0 auto;
     transition: box-shadow 0.2s;
 }
 

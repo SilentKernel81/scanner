@@ -149,9 +149,19 @@
         it. The picture is shown as the camera sends it; turning it is done on the server's page.
         After changing the crop, draw the fixed area again if you use one.</p>
       <div class="actions" style="margin-top:8px">
+        <label for="cropShape">Shape</label>
+        <select id="cropShape" title="Every camera set to the same shape gives the same live view">
+          <option value="0.8">4:5, upright - the same on every camera</option>
+          <option value="1.7778">16:9, wide</option>
+          <option value="0">Free</option>
+        </select>
         <button type="button" id="cropClear">Use the whole picture</button>
         <span class="hint" id="cropText"></span>
       </div>
+      <p class="hint">Drag inside the green rectangle to move it, right-click the picture to clear it.
+        The shape only decides what you can drag. It changes how the camera's live view
+        looks, not how cards are found or what a capture is: the card is cut from the full picture
+        by its own outline, at the same size with or without a crop.</p>
     </div>
   </section>
 
@@ -412,8 +422,14 @@ $('pictureButton').onclick = async () => {
 };
 
 function showCropText() {
+  const picture = $('picture');
+  let shape = '';
+  if (crop && picture.naturalWidth && picture.naturalHeight) {
+    const ratio = ((crop[2] - crop[0]) * picture.naturalWidth) / ((crop[3] - crop[1]) * picture.naturalHeight);
+    shape = ` - shape ${ratio.toFixed(2)} (wide / tall)`;
+  }
   $('cropText').textContent = crop
-    ? `Using ${Math.round((crop[2] - crop[0]) * 100)}% of the width and ${Math.round((crop[3] - crop[1]) * 100)}% of the height`
+    ? `Using ${Math.round((crop[2] - crop[0]) * 100)}% of the width and ${Math.round((crop[3] - crop[1]) * 100)}% of the height${shape}`
     : 'Using the whole picture';
 }
 
@@ -445,21 +461,78 @@ const position = event => {
   return [Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
           Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))];
 };
-const rectangle = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+// fitShape begin
+// A rectangle dragged from `anchor` towards `point` (both [x, y] as fractions of the picture) that
+// has the width / height `ratio` in PIXELS - the picture's own shape counted in - and stays inside
+// the picture. ratio 0: free (the plain rectangle). The anchor is one corner and stays put.
+function fitShape(anchor, point, ratio, pictureWidth, pictureHeight) {
+  if (!ratio) return [Math.min(anchor[0], point[0]), Math.min(anchor[1], point[1]),
+                      Math.max(anchor[0], point[0]), Math.max(anchor[1], point[1])];
+  const sx = point[0] >= anchor[0] ? 1 : -1, sy = point[1] >= anchor[1] ? 1 : -1;
+  let width = Math.abs(point[0] - anchor[0]) * pictureWidth, height = Math.abs(point[1] - anchor[1]) * pictureHeight;
+  // as large as the drag asks for in either direction
+  if (width / ratio > height) height = width / ratio; else width = height * ratio;
+  // ... but inside the picture, on the side it is dragged to
+  const room = [(sx > 0 ? 1 - anchor[0] : anchor[0]) * pictureWidth, (sy > 0 ? 1 - anchor[1] : anchor[1]) * pictureHeight];
+  const scale = Math.min(1, room[0] / width, room[1] / height);
+  width *= scale; height *= scale;
+  const x2 = anchor[0] + sx * width / pictureWidth, y2 = anchor[1] + sy * height / pictureHeight;
+  return [Math.min(anchor[0], x2), Math.min(anchor[1], y2), Math.max(anchor[0], x2), Math.max(anchor[1], y2)];
+}
+
+// The rectangle `area` moved by (dx, dy) (fractions of the picture), kept inside the picture:
+// its size never changes, it stops at the edge.
+function moveBox(area, dx, dy) {
+  const width = area[2] - area[0], height = area[3] - area[1];
+  const left = Math.min(1 - width, Math.max(0, area[0] + dx)), top = Math.min(1 - height, Math.max(0, area[1] + dy));
+  return [left, top, left + width, top + height];
+}
+// fitShape end
+
+// The rectangle to draw for a drag: in the chosen shape
+const dragged = (a, b) => {
+  const picture = $('picture');
+  return fitShape(a, b, parseFloat($('cropShape').value) || 0, picture.naturalWidth || 1, picture.naturalHeight || 1);
+};
+// A drag that starts inside the crop that is already there moves it (same size); one that starts
+// outside draws a new one. `moving` holds where the move began: {from: [x, y], area: the crop then}.
+let moving = null;
+const insideCrop = point => crop && point[0] >= crop[0] && point[0] <= crop[2] && point[1] >= crop[1] && point[1] <= crop[3];
 $('cropCanvas').onpointerdown = event => {
-  dragStart = position(event);
+  if (event.button !== 0) return;                       // the right button clears (below)
+  const point = position(event);
+  if (insideCrop(point)) moving = {from: point, area: crop};
+  else dragStart = point;
   $('cropCanvas').setPointerCapture(event.pointerId);  // keep getting moves outside the canvas
 };
-$('cropCanvas').onpointermove = event => { if (dragStart) drawCrop(rectangle(dragStart, position(event))); };
+$('cropCanvas').onpointermove = event => {
+  const point = position(event);
+  if (moving) {
+    drawCrop(moveBox(moving.area, point[0] - moving.from[0], point[1] - moving.from[1]));
+  } else if (dragStart) {
+    drawCrop(dragged(dragStart, point));
+  } else {
+    $('cropCanvas').style.cursor = insideCrop(point) ? 'move' : 'crosshair';
+  }
+};
 $('cropCanvas').onpointerup = event => {
+  if (moving) {
+    const point = position(event);
+    crop = moveBox(moving.area, point[0] - moving.from[0], point[1] - moving.from[1]).map(v => Math.round(v * 10000) / 10000);
+    moving = null;
+    showCropText(); drawCrop();
+    return;
+  }
   if (!dragStart) return;
-  const area = rectangle(dragStart, position(event));
+  const area = dragged(dragStart, position(event));
   dragStart = null;
   // A click without dragging is not a crop
   if (area[2] - area[0] >= 0.05 && area[3] - area[1] >= 0.05) crop = area.map(v => Math.round(v * 10000) / 10000);
   showCropText(); drawCrop();
 };
 $('cropClear').onclick = () => { crop = null; showCropText(); drawCrop(); };
+// A right click on the picture clears the crop (and no menu opens)
+$('cropCanvas').oncontextmenu = event => { event.preventDefault(); crop = null; showCropText(); drawCrop(); };
 window.addEventListener('resize', () => drawCrop());
 
 // ---------------------------------------------------------------------------
