@@ -273,6 +273,7 @@ async function loadDeckList() {
     if (!data) return;
     deckList = data.decks;
     fillLocationFilter();
+    renderSpareLocations();   // the trade tab's location list is grouped by the decks too
 }
 
 function fillLocationFilter() {
@@ -1115,18 +1116,24 @@ function renderSpareLocations() {
     // stays while it is on the list
     const select = $('spare-location');
     const chosen = select.value;
-    let options;
+    let head, places;   // head: "all" and "(none)"; places: [[location, label]]
     if (suggested) {
-        const places = new Map();
-        for (const card of spareBase()) places.set(card.location, (places.get(card.location) || 0) + 1);
-        options = [['', `All locations (${[...places.values()].reduce((sum, count) => sum + count, 0)})`],
-            ...(places.has('') ? [['(none)', `(none) (${places.get('')})`]] : []),
-            ...[...places].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`])];
+        const counts = new Map();
+        for (const card of spareBase()) counts.set(card.location, (counts.get(card.location) || 0) + 1);
+        head = [['', `All locations (${[...counts.values()].reduce((sum, count) => sum + count, 0)})`],
+            ...(counts.has('') ? [['(none)', `(none) (${counts.get('')})`]] : [])];
+        places = [...counts].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`]);
     } else {
-        options = [['', 'All locations'], ['(none)', '(none)'], ...knownLocations().map(place => [place, place])];
+        head = [['', 'All locations'], ['(none)', '(none)']];
+        places = knownLocations().map(place => [place, place]);
     }
-    select.innerHTML = optionsHtml(options);
-    select.value = options.some(([value]) => value === chosen) ? chosen : '';
+    // As the inventory's location filter: boxes and binders first, the locations named after
+    // one of the decks under their own "Decks" heading at the bottom
+    const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
+    const inDecks = places.filter(([place]) => decks.has(place.toLowerCase()));
+    select.innerHTML = optionsHtml([...head, ...places.filter(option => !inDecks.includes(option))])
+        + (inDecks.length ? decksHeadingHtml(select, [...head, ...places].map(([, label]) => label)) + optionsHtml(inDecks) : '');
+    select.value = [...head, ...places].some(([value]) => value === chosen) ? chosen : '';
 }
 
 function renderSpare() {
