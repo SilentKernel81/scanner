@@ -829,7 +829,9 @@ keeps the last 3 s of frames (640 px wide - what the outline detector works on) 
 plus the next second, to `data/debug_frames/<time>_<reason>/` (on the station's machine) when a card waits over 2 s or a
 new card is detected, or the card is "gone", less than 2 s after a capture (a likely duplicate:
 a foil Gwen Stacy lost its outline right after its capture and was captured again - by its
-look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 20 dumps
+look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 30 dumps of each
+reason are kept (counted per reason since 2026-10-15: a run of captures writes one "soon after capture" dump each and
+used to push the "waiting" ones out); the older dumps go
 are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
 **Camera frames as training data (debug trace on; since 2026-10-14, never tested on a Pi).** A
@@ -850,7 +852,15 @@ goes with it; an older server ignores the two fields. The server keeps it as
 `data/frames/<capture_id>.jpg` + `.json` (`core/frames.py`, `stations_api.keep_camera_frame`): once per
 capture (a retried upload adds nothing), never failing the capture, capped at 3 GB (oldest first),
 outside the collection backups. The note also has `station`, `number` and `image` (the capture's
-file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
+file in `scanned_cards/`). Since 2026-10-15 a frame goes with its scanned card: once the capture is settled
+the server notes its `uid` in the frame's `.json` (`frames.attach`, called from `submit_capture`), and
+when the scanned cards are cleared (a camera's, or all: `clear_camera`, `clear_inventory`) or added to the
+collection (`scan_to_collection`) the frames of the captures that left the scanned list are deleted
+(`inventory_api.release_frames`, `Inventory.capture_keys`, `frames.forget`) - unless **Keep camera frames
+after clearing or adding** is on (collection page, Settings → Storage; `keep_frames` in
+`data/settings.json`, through `/api/capture_copy`), which is for the days frames are labelled. A frame
+without a `uid` (taken before this, or never settled) stays until the 3 GB cap. Tests:
+`tests/test_frames_release.py`. Only captures have a frame: a card that was *missed* leaves none (the
 stations' own `debug_frames/` dumps are what show those).
 
 **Labelling and scoring the frames** (stdlib / this checkout only, never against the live server's

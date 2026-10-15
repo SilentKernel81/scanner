@@ -1018,6 +1018,10 @@ function openSettings() {
 // The large copy kept with each capture, for every camera: what is chosen, and what is kept so far
 function showCaptureCopy(info) {
     $('capture-copy-size').value = info.size;
+    $('keep-frames').checked = !!info.keep_frames;
+    $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `
+        + (info.keep_frames ? 'They stay after their scanned cards are cleared or added to the collection (until the 3 GB limit).'
+                            : 'The frame of a scanned card is removed when that card is cleared or added to the collection. Label the frames you want for training first, or turn this on.');
     $('capture-copy-hint').textContent = (info.size === 'off'
         ? 'Only the thumbnail of each captured card is kept. '
         : 'The size of the picture of each captured card that is kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
@@ -1027,6 +1031,13 @@ function showCaptureCopy(info) {
 async function loadCaptureCopy() {
     const data = await api('/api/capture_copy');
     if (data) showCaptureCopy(data);
+}
+
+async function saveKeepFrames(keep) {
+    const data = await api('/api/capture_copy', {method: 'POST', body: {keep_frames: keep}});
+    if (!data) return loadCaptureCopy();
+    showCaptureCopy(data);
+    notify(keep ? 'Camera frames stay after their cards are cleared or added' : 'Camera frames go with their cards', 'success');
 }
 
 async function saveCaptureCopy(size) {
@@ -1558,6 +1569,7 @@ function bindEvents() {
         event.target.value = '';  // the same file can be chosen again
     });
     $('capture-copy-size').addEventListener('change', event => saveCaptureCopy(event.target.value));
+    $('keep-frames').addEventListener('change', event => saveKeepFrames(event.target.checked));
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value) || 1}));
     $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });
