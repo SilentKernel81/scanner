@@ -250,6 +250,43 @@ class LabelTool(unittest.TestCase):
         self.assertEqual(self.frames.save('aa11', {'status': 'no_card'})['corners'], None)
 
 
+class CaptureWash(unittest.TestCase):
+    """The green wash over the whole card at a capture (CardScanner._wash_card)"""
+
+    def setUp(self):
+        from card_scanner.station.scanner import CardScanner
+        self.wash = CardScanner._wash_card
+        self.frame = np.full((200, 300, 3), 100, np.uint8)
+        self.corners = np.array([[50, 40], [150, 40], [150, 180], [50, 180]], np.float32)
+
+    def test_the_card_goes_green_see_through_and_the_rest_stays(self):
+        frame = self.frame.copy()
+        self.wash(frame, self.corners, (50, 40, 150, 180), 0.5)
+        inside = frame[110, 100].astype(int)          # the middle of the card: half way to green
+        for got, want in zip(inside, (50, 177.5, 50)):                    # half way from the card's grey to green
+            self.assertAlmostEqual(got, want, delta=1)
+        self.assertTrue(np.array_equal(frame[10, 10], self.frame[10, 10]))      # outside: untouched
+        self.assertTrue(np.array_equal(frame[110, 200], self.frame[110, 200]))  # beside the card
+        self.assertGreater(inside[1], 100)            # it is a wash, not a fill: the card shows through
+
+    def test_a_tilted_card_only_inside_its_outline(self):
+        frame = self.frame.copy()
+        tilted = np.array([[100, 20], [180, 60], [150, 180], [70, 140]], np.float32)
+        x1, y1, x2, y2 = 70, 20, 180, 180
+        self.wash(frame, tilted, (x1, y1, x2, y2), 1.0)
+        self.assertEqual(tuple(frame[100, 125]), (0, 255, 0))            # inside the outline
+        self.assertTrue(np.array_equal(frame[30, 75], self.frame[30, 75]))  # in the box, outside the card
+
+    def test_a_box_without_corners_and_nothing_to_do(self):
+        frame = self.frame.copy()
+        self.wash(frame, None, (20, 20, 80, 80), 1.0)                     # the fixed area is a box
+        self.assertEqual(tuple(frame[50, 50]), (0, 255, 0))
+        before = frame.copy()
+        self.wash(frame, None, (20, 20, 80, 80), 0.0)                     # faded out: nothing changes
+        self.wash(frame, self.corners, (400, 400, 500, 500), 0.5)         # a box outside the picture
+        self.assertTrue(np.array_equal(frame, before))
+
+
 class CaptureCopySize(unittest.TestCase):
     """The size of the large copy is the person's choice (inventory.set_full_capture_size, /api/capture_copy)"""
 
