@@ -32,6 +32,7 @@ body.arena-view #import-button,
 body.arena-view #batch-remove,
 body.arena-view #filter-location,
 body.arena-view #filter-tag,
+body.arena-view #filter-tags,
 body.arena-view .price-range,
 body.arena-view #inventory-sort option[value^="price"],
 body.arena-view #inventory-sort option[value="value_desc"],
@@ -149,6 +150,66 @@ body.arena-view .inventory-thumb {
 
 .summary strong {
     color: var(--text);
+}
+
+/* A dropdown with ticks: the tags to show (filter-tags in collection.html) */
+.multi-filter {
+    position: relative;
+}
+
+.multi-filter > summary {
+    width: auto;
+    min-width: 110px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.multi-filter > summary::-webkit-details-marker {
+    display: none;
+}
+
+.multi-filter > summary::after {
+    content: ' ▾';
+}
+
+.multi-filter.has-choice > summary {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.multi-panel {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 200px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+}
+
+.multi-panel label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.multi-panel label:hover {
+    background: var(--surface-2);
+}
+
+.multi-panel .multi-empty {
+    padding: 6px 8px;
+    color: var(--text-subtle);
 }
 
 /* Color identity chips (W U B R G C) and mana symbols */
