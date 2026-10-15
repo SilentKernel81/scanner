@@ -966,6 +966,18 @@ still: movement ≤ 0.4%, image change ≤ 0.07, detection gaps ≤ 2 frames. In
 11 drops (including two identical copies) every card was captured exactly once; real drops
 measured 2–5 frames without a card, jumps of 4.5–8.5% and image changes of 0.7–1.2.
 
+*Image change, since 2026-10-15:* the corner network's outline of a still card wobbles by 1–1.5%
+of its size from frame to frame (card sizes 867, 874, 879, 890 px within 4 s), which shifts the
+32 × 45 thumbnail by a fraction of a pixel. On a detailed card (Nick Fury, Agent of S.H.I.E.L.D.)
+that alone made the frame-to-frame change 0.3–0.5, the card "disturbed" and so a new card, again
+and again within a second (5 captures of 2 cards in one run, 3 and 2 of 2 in the next; none were
+drops: jumps of 0.5–1.5%). The two comparisons that look at the picture - frame to frame
+(`card_disturbed`) and the settled card against the captured one (`_new_card_arrived`) - now blur
+both thumbnails (σ 1.5) and normalise them again before comparing (`_thumbnail_difference(smooth=True)`),
+and the limit is `IMAGE_CHANGE_LIMIT` = 0.35 (was 0.3 on unblurred ones). Measured on 11 consecutive
+capture pairs of that run: the same card differed 0.45 at most unblurred, 0.22 blurred; different
+cards 0.67 and 0.51 at least. The flicker test above stays unblurred. `tests/test_image_change.py`.
+
 Captures are also at least `auto_capture.delay` (1 s) apart.
 
 When the only sign was the outline vanishing for a frame and coming back shifted (a hand
