@@ -856,6 +856,22 @@ width per side, up to ~10%), following the pile's silhouette - the cards under t
 sleeves' rims. Among the candidates the detector has, the best one would have reached 0.93, and on
 5 of 13 frames a cold detection found none: edge selection is not the whole problem.
 
+**Our own corner network (in progress, 2026-10-14; nothing uses it yet).** The camera of this
+project is always fixed overhead of a box, which is what the network is built for: no
+perspective or arbitrary rotation to cover, only a card of nearly one size in a window of
+nearly one place. `scripts/train_corner_net.py` trains a small network (0.76 M parameters; one
+card per 192 x 320 window, four corner maps read as soft-argmax positions plus a presence
+score) only from labels made with `scripts/label_frames.py` - no other model's weights or
+outputs. A frame is read in two stages: the whole frame letterboxed, then a window of 1.45 x
+the card's box cut from the full-resolution frame (twice). Validation is by whole station
+(`--train` / `--val`). The labelling page has a two-click mode (press D: the card's top left,
+then its bottom right corner; drag a corner to put a tilt right) and a station filter.
+First result (trained on 57 Pi frames, scored on 21 webcam frames of another camera): mean IoU
+0.966, worst 0.954. A box with the same place and size in every frame already scores 0.90 - 0.97
+inside one station (and 0.47 across stations), so a within-station score proves little: the
+held-out one, and the phone's frames (not labelled yet) are the tests that count. Not tested:
+speed on a Pi, running the exported file through OpenCV's dnn, the Android app.
+
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that
 capture is done (`scanner.capture_pending` / status `capturing` until then): a station sends
