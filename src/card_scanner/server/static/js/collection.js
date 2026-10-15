@@ -106,12 +106,22 @@ const CONDITIONS = ['Mint', 'Near Mint', 'Excellent', 'Good', 'Played', 'Poor'];
 const PAGE_SIZES = [25, 50, 100, 200];
 // The filters kept for the next visit. Not the "Added" batch (it comes with "Remove this
 // batch")
-const FILTER_FIELDS = ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location',
-                       'filter-tag', 'filter-price-min', 'filter-price-max'];
+const FILTER_FIELDS = ['filter-text', 'filter-tag', 'filter-price-min', 'filter-price-max'];
+// The dropdowns with ticks (several values, and "Not" for the ticked ones turned around): each
+// is {values: the ticked, not: take the others, options: [[value, label, group]] offered now}.
+// `param` is the name in the page's address: type=Creature|Instant&type_not=1
+const MULTI_FILTERS = {
+    'filter-type': {label: 'Type', any: 'Any type', param: 'type'},
+    'filter-rarity': {label: 'Rarity', any: 'Any rarity', param: 'rarity'},
+    'filter-set': {label: 'Set', any: 'Any set', param: 'set'},
+    'filter-finish': {label: 'Finish', any: 'Any finish', param: 'finish'},
+    'filter-location': {label: 'Location', any: 'Any location', param: 'loc'},
+    'filter-tags': {label: 'Tags', any: 'Any tags', param: 'tags'},
+};
+const multi = Object.fromEntries(Object.keys(MULTI_FILTERS).map(id => [id, {values: new Set(), not: false, options: []}]));
 const FILTER_TICKS = ['filter-text-not', 'filter-free'];
 // ... and their names in the page's address (?set=...&rarity=rare), which can be kept as a bookmark
-const FILTER_PARAMS = {'filter-text': 'q', 'filter-type': 'type', 'filter-rarity': 'rarity', 'filter-set': 'set',
-                       'filter-finish': 'finish', 'filter-location': 'loc', 'filter-tag': 'tag', 'filter-price-min': 'min',
+const FILTER_PARAMS = {'filter-text': 'q', 'filter-tag': 'tag', 'filter-price-min': 'min',
                        'filter-price-max': 'max', 'filter-text-not': 'not', 'filter-free': 'free'};
 const UNDO_SECONDS = 6;
 
@@ -123,38 +133,57 @@ let selected = new Set();   // entry ids
 let lastPicked = null;      // the entry ticked or unticked last: a shift-click reaches from it to the clicked one
 let savedFilters = recallFilters();   // until the first load has filled the lists to choose from
 let filterColors = new Set(savedFilters.colors);
-let filterTags = new Set(savedFilters.tags);   // the tags ticked in the Tags dropdown: a card with any of them shows
 let inventoryView = recall('collectionView', 'list');
 
 function recallFilters() {
     // The filters of the address when it names any (a bookmark), else the ones of the last visit
     let saved = {};
     const params = new URLSearchParams(window.location.search);
-    if ([...Object.values(FILTER_PARAMS), 'colors', 'tags'].some(name => params.has(name))) {
+    const multiParams = Object.values(MULTI_FILTERS).flatMap(field => [field.param, field.param + '_not']);
+    if ([...Object.values(FILTER_PARAMS), 'colors', ...multiParams].some(name => params.has(name))) {
         [...FILTER_FIELDS, ...FILTER_TICKS].forEach(id => {
             const value = params.get(FILTER_PARAMS[id]);
             if (value) saved[id] = FILTER_TICKS.includes(id) ? true : value;
         });
         saved.colors = [...(params.get('colors') || '').toUpperCase()];
-        saved.tags = (params.get('tags') || '').split(',').map(tag => tag.trim()).filter(Boolean);   // a tag has no comma
+        Object.entries(MULTI_FILTERS).forEach(([id, field]) => {
+            const raw = params.get(field.param);
+            if (raw) { saved[id] = raw.split('|').filter(Boolean); saved[id + '-not'] = params.get(field.param + '_not') === '1'; }
+        });
     } else {
         try { saved = JSON.parse(recall('collectionFilters', '{}')) || {}; } catch (e) { /* not ours */ }
     }
-    return {...saved,
-            colors: Array.isArray(saved.colors) ? saved.colors.filter(color => COLORS.some(([key]) => key === color)) : [],
-            tags: Array.isArray(saved.tags) ? saved.tags.filter(tag => typeof tag === 'string' && tag) : []};
+    saved = {...saved, colors: Array.isArray(saved.colors) ? saved.colors.filter(color => COLORS.some(([key]) => key === color)) : []};
+    // One value as an older version kept it (text) is a list of one; the tags of the first
+    // version of the Tags dropdown were kept as `tags`
+    if (saved.tags && !saved['filter-tags']) saved['filter-tags'] = saved.tags;
+    Object.keys(MULTI_FILTERS).forEach(id => {
+        const list = Array.isArray(saved[id]) ? saved[id] : typeof saved[id] === 'string' && saved[id] ? [saved[id]] : [];
+        saved[id] = list.filter(value => typeof value === 'string' && value);
+        saved[id + '-not'] = saved[id + '-not'] === true && saved[id].length > 0;
+    });
+    return saved;
 }
 
 function saveFilters() {
-    const state = {colors: [...filterColors], tags: [...filterTags]};
+    const state = {colors: [...filterColors]};
     FILTER_FIELDS.forEach(id => { if ($(id).value) state[id] = $(id).value; });
+    Object.entries(multi).forEach(([id, filter]) => {
+        if (!filter.values.size) return;
+        state[id] = [...filter.values];
+        if (filter.not) state[id + '-not'] = true;
+    });
     FILTER_TICKS.forEach(id => { if ($(id).checked) state[id] = true; });
     remember('collectionFilters', JSON.stringify(state));
     // The address says the same (the #settings part stays)
     const params = new URLSearchParams();
     [...FILTER_FIELDS, ...FILTER_TICKS].forEach(id => { if (state[id]) params.set(FILTER_PARAMS[id], state[id] === true ? '1' : state[id]); });
     if (state.colors.length) params.set('colors', state.colors.join(''));
-    if (state.tags.length) params.set('tags', state.tags.join(','));
+    Object.entries(MULTI_FILTERS).forEach(([id, field]) => {
+        if (!state[id]) return;
+        params.set(field.param, state[id].join('|'));        // a set's name can have a comma, not a bar
+        if (state[id + '-not']) params.set(field.param + '_not', '1');
+    });
     const query = params.toString();
     try {
         history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
@@ -169,9 +198,12 @@ function restoreFilters() {
         if ($(id).selectedIndex === -1) $(id).value = '';
     });
     FILTER_TICKS.forEach(id => { $(id).checked = savedFilters[id] === true; });
-    const offered = new Set(distinct(inventory.flatMap(card => card.tags)));
-    filterTags = new Set([...filterTags].filter(tag => offered.has(tag)));
-    fillTagList();
+    Object.keys(MULTI_FILTERS).forEach(id => {
+        const offered = new Set(multi[id].options.map(([value]) => value));
+        multi[id].values = new Set(savedFilters[id].filter(value => offered.has(value)));
+        multi[id].not = savedFilters[id + '-not'] === true && multi[id].values.size > 0;
+        renderMulti(id);
+    });
     savedFilters = null;
     saveFilters();  // what was taken, in the address too
 }
@@ -244,36 +276,73 @@ function fillSelect(id, label, values, labels = {}) {
 }
 
 
-// tagFilter begin
-// Whether a card (its `tags`, a list of text) passes the Tags dropdown: nothing ticked lets every
-// card through, else the card needs any one of the ticked tags.
-function passesTagFilter(cardTags, chosenTags) {
-    return chosenTags.size === 0 || cardTags.some(tag => chosenTags.has(tag));
+// multiFilter begin
+// Whether a card passes one of the dropdowns with ticks. `cardValues`: what the card has for it
+// (one value, or its tags); `chosen`: the ticked values; `not`: "everything but the ticked".
+// Nothing ticked lets every card through; else the card needs any one of the ticked values
+// (or, with Not, none of them).
+function passesMulti(cardValues, chosen, not) {
+    if (chosen.size === 0) return true;
+    const has = cardValues.some(value => chosen.has(value));
+    return not ? !has : has;
 }
-// tagFilter end
+// multiFilter end
 
-function fillTagList() {
-    // The Tags dropdown: one tick per tag the collection has (a tag ticked earlier that is gone
-    // is not offered, and so not kept by restoreFilters)
-    const tags = distinct(inventory.flatMap(card => card.tags));
-    $('filter-tags-list').innerHTML = tags.length
-        ? tags.map(tag => `<label><input type="checkbox" value="${escapeHtml(tag)}" ${filterTags.has(tag) ? 'checked' : ''}><span>${escapeHtml(tag)}</span></label>`).join('')
-        : '<div class="multi-empty">No tags yet</div>';
-    $('filter-tags').hidden = tags.length === 0;
-    $('filter-tags-summary').textContent = filterTags.size ? `Tags (${filterTags.size})` : 'Tags';
-    $('filter-tags').classList.toggle('has-choice', filterTags.size > 0);
+function multiSummary(id) {
+    const filter = multi[id], field = MULTI_FILTERS[id];
+    if (!filter.values.size) return field.any;
+    const names = filter.options.filter(([value]) => filter.values.has(value)).map(([, label]) => label);
+    const text = names.length === 1 ? names[0] : `${field.label} (${filter.values.size})`;
+    return (filter.not ? 'Not ' : '') + text;
+}
+
+function renderMulti(id) {
+    // The dropdown's list: a "Not" tick, then one tick per value (a Find box when there are many)
+    const filter = multi[id], box = $(id);
+    const find = filter.options.length > 12
+        ? '<input type="search" class="text-input multi-find" data-find placeholder="Find...">' : '';
+    let group = '';
+    const rows = filter.options.map(([value, label, heading]) => {
+        const title = heading && heading !== group ? `<div class="multi-heading">${escapeHtml(heading)}</div>` : '';
+        group = heading || group;
+        return `${title}<label data-label="${escapeHtml(label.toLowerCase())}"><input type="checkbox" value="${escapeHtml(value)}" `
+            + `${filter.values.has(value) ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`;
+    });
+    box.querySelector('.multi-panel').innerHTML =
+        `<label class="multi-not" title="Show the cards that have none of the ticked ones"><input type="checkbox" data-not ${filter.not ? 'checked' : ''}>`
+        + `<span>Not (all but the ticked)</span></label>${find}` + (rows.join('') || '<div class="multi-empty">Nothing to choose from yet</div>');
+    box.hidden = filter.options.length === 0;
+    updateMultiSummary(id);
+}
+
+function updateMultiSummary(id) {
+    const box = $(id), filter = multi[id];
+    box.querySelector('summary').textContent = multiSummary(id);
+    box.classList.toggle('has-choice', filter.values.size > 0);
+}
+
+function fillMulti(id, entries) {
+    // `entries`: [[value, label]] or [[value, label, group heading]]. A value ticked earlier that
+    // the collection no longer has is let go (not while the collection has not loaded yet)
+    const filter = multi[id];
+    filter.options = entries.map(([value, label, heading]) => [value, label ?? value, heading || '']);
+    if (inventory.length) {
+        const offered = new Set(filter.options.map(([value]) => value));
+        filter.values = new Set([...filter.values].filter(value => offered.has(value)));
+        if (!filter.values.size) filter.not = false;
+    }
+    renderMulti(id);
 }
 
 function fillFilterOptions() {
-    fillSelect('filter-type', 'Any type', distinct(inventory.map(mainType)));
-    fillSelect('filter-rarity', 'Any rarity', distinct(inventory.map(card => card.rarity))
-        .sort((a, b) => (RARITY_ORDER[a] ?? 9) - (RARITY_ORDER[b] ?? 9)));
-    fillSelect('filter-set', 'Any set', distinct(inventory.map(card => card.set_name)));
-    fillSelect('filter-finish', 'Any finish', gameInfo.finishes.map(([key]) => key),
-               Object.fromEntries(gameInfo.finishes));
+    fillMulti('filter-type', distinct(inventory.map(mainType)).map(value => [value]));
+    fillMulti('filter-rarity', distinct(inventory.map(card => card.rarity))
+        .sort((a, b) => (RARITY_ORDER[a] ?? 9) - (RARITY_ORDER[b] ?? 9)).map(value => [value]));
+    fillMulti('filter-set', distinct(inventory.map(card => card.set_name)).map(value => [value]));
+    fillMulti('filter-finish', gameInfo.finishes.map(([key, label]) => [key, label]));
     fillLocationFilter();
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
-    fillTagList();
+    fillMulti('filter-tags', distinct(inventory.flatMap(card => card.tags)).map(value => [value]));
     // The last times cards came into the collection (one batch per "Add to collection", import
     // or scanned card), newest first (card.batches: every batch an entry has copies of, not
     // only its latest)
@@ -311,13 +380,11 @@ function fillLocationFilter() {
     const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
     const places = knownLocations();
     const inDecks = places.filter(place => decks.has(place.toLowerCase()));
-    const select = $('filter-location');
-    const current = select.value;
-    select.innerHTML = optionsHtml([['', 'Any location'], ['(none)', '(none)'],
-                                    ...places.filter(place => !inDecks.includes(place)).map(place => [place, place])])
-        + (inDecks.length ? decksHeadingHtml(select, ['Any location', ...places]) + optionsHtml(inDecks.map(place => [place, place])) : '');
-    select.value = current === '(none)' || places.includes(current) ? current : '';
-    select.hidden = false;
+    // "(none)" is kept as a choice: the cards in no place
+    fillMulti('filter-location', [['(none)', '(none)'],
+                                  ...places.filter(place => !inDecks.includes(place)).map(place => [place, place]),
+                                  ...inDecks.map(place => [place, place, 'Decks'])]);
+    $('filter-location').hidden = false;
 }
 
 function knownLocations() {
@@ -376,17 +443,17 @@ function activeFilters() {
     if (filterColors.size) {
         chips.push({text: `Colors: ${[...filterColors].join(' ')}`, clear: () => { filterColors.clear(); fillFilterOptions(); }});
     }
-    chosen('filter-type', 'Type');
-    chosen('filter-rarity', 'Rarity');
-    chosen('filter-set', 'Set');
-    chosen('filter-finish', 'Finish');
+    const digitalView = inArena();   // (the tags and locations are not in the Arena view)
+    Object.entries(MULTI_FILTERS).forEach(([id, field]) => {
+        const filter = multi[id];
+        if (!filter.values.size || (digitalView && (id === 'filter-location' || id === 'filter-tags'))) return;
+        const names = filter.options.filter(([value]) => filter.values.has(value)).map(([, label]) => label);
+        chips.push({text: `${filter.not ? 'Not ' : ''}${field.label}: ${names.join(', ')}`,
+                    clear: () => { filter.values.clear(); filter.not = false; renderMulti(id); }});
+    });
     // (not in Arena view, where these three are neither shown nor applied: applyFilters)
     const digital = inArena();
-    if (!digital) chosen('filter-location', 'Location');
     if (!digital) chosen('filter-tag', 'Tag');
-    if (!digital && filterTags.size) {
-        chips.push({text: `Tags: ${[...filterTags].join(', ')}`, clear: () => { filterTags.clear(); fillTagList(); }});
-    }
     if ($('filter-added').value) chips.push({text: $('filter-added').selectedOptions[0].textContent, clear: () => { $('filter-added').value = ''; }});
     if ($('filter-free').checked) chips.push({text: 'Not in a deck', clear: () => { $('filter-free').checked = false; }});
     const min = $('filter-price-min').value, max = $('filter-price-max').value;
@@ -404,6 +471,14 @@ function filterByBadge(filter, value) {
         field.value = field.value.toLowerCase().includes(term)
             ? field.value.replace(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').replace(/\s+/g, ' ').trim()
             : `${field.value.trim()} ${term}`.trim();
+    } else if (multi[filter]) {
+        // Only the cards with this value; a second click (when it is the only one ticked) lets go
+        const state = multi[filter];
+        const alone = state.values.size === 1 && state.values.has(value) && !state.not;
+        state.values.clear();
+        state.not = false;
+        if (!alone) state.values.add(value);
+        renderMulti(filter);
     } else {
         const select = $(filter);
         select.value = select.value === value ? '' : value;
@@ -421,27 +496,26 @@ function applyFilters() {
             .some(value => (value || '').toLowerCase().includes(phrase)))
         && terms.every(term => SEARCH_FIELDS[term.field](card, term.value, setCodes) !== term.not);
     const textNot = $('filter-text-not').checked;
-    const type = $('filter-type').value, rarity = $('filter-rarity').value, set = $('filter-set').value;
     // Arena view hides the filters by location, tag and price (its cards have none of the
     // three: collection.css, body.arena-view). A filter that cannot be seen must not filter:
     // a minimum price set for the paper cards would otherwise hide every Arena card, whose
     // price is 0. The values stay in their fields, for the Physical view.
     const digital = inArena();
-    const finish = $('filter-finish').value;
-    const location = digital ? '' : $('filter-location').value, tag = digital ? '' : $('filter-tag').value;
+    const tag = digital ? '' : $('filter-tag').value;
     const added = $('filter-added').value;
     const free = $('filter-free').checked;
     const min = digital ? NaN : parseFloat($('filter-price-min').value), max = digital ? NaN : parseFloat($('filter-price-max').value);
     const rows = inventory.filter(card => {
         // "Not" turns the text search around: the cards that don't have the text anywhere
         if ((phrase || terms.length) && textMatches(card) === textNot) return false;
-        if (type && mainType(card) !== type) return false;
-        if (rarity && card.rarity !== rarity) return false;
-        if (set && card.set_name !== set) return false;
-        if (finish && card.finish !== finish) return false;
-        if (location && card.location !== (location === '(none)' ? '' : location)) return false;
+        const pass = (id, values) => passesMulti(values, multi[id].values, multi[id].not);
+        if (!pass('filter-type', [mainType(card)])) return false;
+        if (!pass('filter-rarity', [card.rarity])) return false;
+        if (!pass('filter-set', [card.set_name])) return false;
+        if (!pass('filter-finish', [card.finish])) return false;
+        if (!digital && !pass('filter-location', [card.location || '(none)'])) return false;
         if (tag && !card.tags.includes(tag)) return false;
-        if (!digital && !passesTagFilter(card.tags, filterTags)) return false;
+        if (!digital && !pass('filter-tags', card.tags)) return false;
         if (added && !batchPart(card, added)) return false;
         if (free && card.decks.length) return false;
         if (!isNaN(min) && card.price < min) return false;
@@ -1324,28 +1398,38 @@ function bindTradeEvents() {
 
 function bindInventoryEvents() {
     // Filters
-    ['filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag', 'filter-added',
-     'filter-free', 'filter-text-not'].forEach(id => $(id).addEventListener('change', filtersChanged));
+    ['filter-tag', 'filter-added', 'filter-free', 'filter-text-not'].forEach(id => $(id).addEventListener('change', filtersChanged));
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(filtersChanged, 150)));
     bindColorChips('filter-colors', filterColors, filtersChanged);
-    // The Tags dropdown: a tick adds or removes that tag; a click anywhere else closes it
-    $('filter-tags-list').addEventListener('change', event => {
-        const box = event.target.closest('input[type=checkbox]');
-        if (!box) return;
-        if (box.checked) filterTags.add(box.value); else filterTags.delete(box.value);
-        fillTagList();
-        filtersChanged();
+    // The dropdowns with ticks: a tick adds or removes that value, the Not tick turns them around,
+    // a Find box narrows the long lists; a click anywhere else closes an open one
+    Object.keys(MULTI_FILTERS).forEach(id => {
+        const panel = $(id).querySelector('.multi-panel');
+        panel.addEventListener('change', event => {
+            const box = event.target;
+            if (box.type !== 'checkbox') return;
+            const filter = multi[id];
+            if ('not' in box.dataset) filter.not = box.checked;
+            else if (box.checked) filter.values.add(box.value); else filter.values.delete(box.value);
+            if (!filter.values.size) filter.not = false;
+            updateMultiSummary(id);
+            filtersChanged();
+        });
+        panel.addEventListener('input', event => {
+            if (!('find' in event.target.dataset)) return;
+            const text = event.target.value.trim().toLowerCase();
+            panel.querySelectorAll('label[data-label]').forEach(label => { label.hidden = !!text && !label.dataset.label.includes(text); });
+        });
     });
     document.addEventListener('click', event => {
-        if (!event.target.closest('#filter-tags')) $('filter-tags').open = false;
+        document.querySelectorAll('.multi-filter[open]').forEach(box => { if (!box.contains(event.target)) box.open = false; });
     });
     $('filter-clear').addEventListener('click', () => {
-        ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
-         'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
+        ['filter-text', 'filter-tag', 'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         $('filter-free').checked = false;
         $('filter-text-not').checked = false;
         filterColors.clear();
-        filterTags.clear();
+        Object.values(multi).forEach(filter => { filter.values.clear(); filter.not = false; });
         fillFilterOptions();
         filtersChanged();
     });

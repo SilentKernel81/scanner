@@ -1787,11 +1787,16 @@ taken off with a click, and is written into the page's address (`FILTER_PARAMS`:
 `/collection?q=qty%3A%3E1&rarity=rare&colors=G`; `history.replaceState`, so no history entry
 per filter) - an address with filters, a bookmark, wins over the remembered ones. A click on a
 row's rarity, finish, location, tag or trade badge filters by it, a second click takes that off
-(`filterByBadge`). Beside the one-tag list there is
-a **Tags** dropdown with a tick per tag (`filterTags`, `fillTagList`, `passesTagFilter`): a card
-shows when it has *any* of the ticked tags; the ticks are remembered with the other filters, in
-the address as `tags=trade,binder` (a tag has no comma), shown as one chip, cleared by **Clear
-filters**, and not applied in the Arena view (which has no tags). `tests/test_tag_filter.py`. A list row shows the card twice: on the left what was captured (a click opens the captures),
+(`filterByBadge`). Type, Rarity, Set, Finish,
+Location and Tags are dropdowns with ticks (`MULTI_FILTERS`, `multi`, `renderMulti`,
+`fillMulti`, `passesMulti`): several values can be ticked - a card shows when it has *any* of
+them - and a **Not** tick at the top of the list turns that around (every card with none of
+them). A list of more than 12 values has a Find box. Each is one chip ("Not Set: Alpha, Beta"),
+and is written into the address as `rarity=rare|mythic&rarity_not=1` (the values joined by a bar:
+a set's name can have a comma; `type`, `rarity`, `set`, `finish`, `loc`, `tags`), so a bookmark
+or a saved filter with one plain value still works. A row's badge ticks only that value (a
+second click lets go). The one-tag list ("Any tag") stays beside the Tags dropdown. The Arena
+view does not apply Location or Tags. `tests/test_multi_filter.py`. A list row shows the card twice: on the left what was captured (a click opens the captures),
 and by its buttons the downloaded picture, small (`.card-peek`; Scryfall's `small` size of the
 `image_uri`) - resting the pointer on that one shows the picture large beside it (`data-image`,
 `showPreview`, `placePreview`, as for the deck builder's rows; devices with a mouse - the box

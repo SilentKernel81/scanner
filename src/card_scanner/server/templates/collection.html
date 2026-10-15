@@ -10,7 +10,7 @@
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=50">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=26">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=27">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -37,16 +37,13 @@
                     <input type="search" id="filter-text" class="text-input filter-text" placeholder="Search, or set:HOB" title='Looks in name, set, type, rarity, location and tags. To look in one place only: set:HOB (the set code, whole), name:ring, type:elf, rarity:rare, tag:trade, loc:"Binder 2", finish:foil, number:14, qty:>4 (more than four copies), trade:jo (set aside for that trade). A minus in front leaves those out: -set:HOB'>
                     <label class="chip-toggle" title="Turn the search around: show the cards that do NOT match what is typed (type set:HOB to see everything that is not from that set)"><input type="checkbox" id="filter-text-not"><span>Not</span></label>
                     <div class="color-chips" id="filter-colors" title="Color identity"></div>
-                    <select id="filter-type" class="select" title="Type"></select>
-                    <select id="filter-rarity" class="select" title="Rarity"></select>
-                    <select id="filter-set" class="select" title="Set"></select>
-                    <select id="filter-finish" class="select" title="Finish"></select>
-                    <select id="filter-location" class="select" title="Location"></select>
+                    <details class="multi-filter" id="filter-type" title="Type - tick several"><summary class="select"></summary><div class="multi-panel"></div></details>
+                    <details class="multi-filter" id="filter-rarity" title="Rarity - tick several"><summary class="select"></summary><div class="multi-panel"></div></details>
+                    <details class="multi-filter" id="filter-set" title="Set - tick several"><summary class="select"></summary><div class="multi-panel"></div></details>
+                    <details class="multi-filter" id="filter-finish" title="Finish - tick several"><summary class="select"></summary><div class="multi-panel"></div></details>
+                    <details class="multi-filter" id="filter-location" title="Location - tick several"><summary class="select"></summary><div class="multi-panel"></div></details>
                     <select id="filter-tag" class="select" title="Tag"></select>
-                    <details class="multi-filter" id="filter-tags" title="Tags - tick several: shows the cards that have any of them">
-                        <summary class="select" id="filter-tags-summary">Tags</summary>
-                        <div class="multi-panel" id="filter-tags-list"></div>
-                    </details>
+                    <details class="multi-filter" id="filter-tags" title="Tags - tick several: the cards that have any of them"><summary class="select"></summary><div class="multi-panel"></div></details>
                     <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
                     <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
                     <span class="price-range" title="Price of one copy (USD)">
@@ -228,6 +225,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=57"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=58"></script>
 </body>
 </html>
