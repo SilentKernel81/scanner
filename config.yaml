@@ -19,9 +19,11 @@ camera:
   # card's long side runs along the frame's long side: more pixels per card and more room for
   # the pile to grow. Also settable in Settings (saved in data/settings.json)
   rotate: 0
-  # Raspberry Pi camera module only: read out just this part of the sensor's image, pixel for
-  # pixel (fractions of the full image: x1, y1, x2, y2) - e.g. the box under a wide lens.
-  # Without it the whole image is scaled to `resolution`
+  # Use just this part of the camera's picture (fractions of the full image: x1, y1, x2, y2) -
+  # e.g. the box under a wide lens. A Raspberry Pi camera module reads out only that part of its
+  # sensor, pixel for pixel; a USB camera sends its whole picture and the station cuts it. Both
+  # then give the same kind of picture. Without it the whole image is used (a Pi camera
+  # scales it to `resolution`). Normally drawn on the station's setup page (port 8080)
   # crop: [0.33, 0.08, 0.67, 0.75]
 
 # Detection Settings

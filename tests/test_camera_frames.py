@@ -250,6 +250,79 @@ class LabelTool(unittest.TestCase):
         self.assertEqual(self.frames.save('aa11', {'status': 'no_card'})['corners'], None)
 
 
+class CameraCrop(unittest.TestCase):
+    """A USB camera's crop (CardScanner._crop_view / _view / get_whole_picture); a Pi camera crops on its sensor"""
+
+    def setUp(self):
+        from card_scanner.station import scanner as scanner_module
+        self.module = scanner_module
+        self.station = object.__new__(scanner_module.CardScanner)
+        self.station.camera_type = 'usb'
+        self.station.rotation = self.station.camera_rotation = 0
+        self.picture = np.arange(200 * 400 * 3, dtype=np.uint8).reshape(200, 400, 3)
+
+    def with_crop(self, crop):
+        return mock.patch.object(self.module.Config, 'CAMERA_CROP', crop)
+
+    def test_a_usb_camera_is_cut_to_the_crop(self):
+        with self.with_crop([0.25, 0.1, 0.75, 0.9]):
+            cut = self.station._crop_view(self.picture)
+        self.assertEqual(cut.shape[:2], (160, 200))                       # 80% of the height, 50% of the width
+        self.assertTrue(np.array_equal(cut, self.picture[20:180, 100:300]))
+        self.assertTrue(cut.flags['C_CONTIGUOUS'])                         # a copy, safe to draw on
+
+    def test_the_same_fractions_cut_a_half_size_picture_alike(self):
+        full = np.zeros((200, 400, 3), np.uint8)
+        half = np.zeros((100, 200, 3), np.uint8)
+        with self.with_crop([0.3, 0.2, 0.7, 0.8]):
+            a, b = self.station._crop_view(full), self.station._crop_view(half)
+        self.assertEqual((a.shape[1] / full.shape[1], a.shape[0] / full.shape[0]),
+                         (b.shape[1] / half.shape[1], b.shape[0] / half.shape[0]))
+
+    def test_no_crop_a_pi_camera_and_a_useless_crop_leave_the_picture_alone(self):
+        with self.with_crop(None):
+            self.assertIs(self.station._crop_view(self.picture), self.picture)
+        self.station.camera_type = 'picamera'                              # cropped on its sensor already
+        with self.with_crop([0.25, 0.1, 0.75, 0.9]):
+            self.assertIs(self.station._crop_view(self.picture), self.picture)
+        self.station.camera_type = 'usb'
+        with self.with_crop([0.5, 0.5, 0.505, 0.505]):                     # a few pixels: not a crop
+            self.assertIs(self.station._crop_view(self.picture), self.picture)
+
+    def test_the_crop_comes_before_the_turn(self):
+        self.station.rotation = 90
+        with self.with_crop([0.0, 0.0, 0.5, 1.0]):                         # the left half, then turned
+            view = self.station._view(self.picture)
+        self.assertEqual(view.shape[:2], (200, 200))                       # 200 x 200 turned: still 200 x 200
+        self.station.picture_probe = None
+        with self.with_crop([0.0, 0.0, 0.25, 1.0]):
+            view = self.station._view(self.picture)
+        self.assertEqual(view.shape[:2], (100, 200))                       # 100 wide, 200 tall -> 100 tall, 200 wide
+
+    def test_the_setup_page_gets_the_whole_picture(self):
+        import threading
+        self.station.frame_lock = threading.Lock()
+        self.station.whole_frame = self.picture
+        with self.with_crop([0.25, 0.1, 0.75, 0.9]):
+            whole = self.station.get_whole_picture()
+        self.assertEqual(whole.shape, self.picture.shape)                   # not cropped
+        self.assertIsNot(whole, self.picture)                                # a copy
+        self.station.whole_frame = None
+        self.assertIsNone(self.station.get_whole_picture())
+
+    def test_a_crop_gives_the_stored_frame_the_cropped_picture_not_the_cameras_jpeg(self):
+        ok, buffer = cv2.imencode('.jpg', np.zeros((200, 400, 3), np.uint8))
+        raw = buffer.ravel()
+        cropped = np.zeros((160, 200, 3), np.uint8)
+        with self.with_crop(None):
+            kept = self.station._frame_snapshot(cropped, raw, None)
+        self.assertEqual(kept['jpeg'], raw.tobytes())                       # no crop: the camera's own bytes
+        with self.with_crop([0.25, 0.1, 0.75, 0.9]):
+            kept = self.station._frame_snapshot(cropped, raw, None)
+        stored = cv2.imdecode(np.frombuffer(kept['jpeg'], np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(stored.shape[:2], (160, 200))                      # the crop, so the outline's pixels fit
+
+
 class CaptureWash(unittest.TestCase):
     """The green wash over the whole card at a capture (CardScanner._wash_card)"""
 

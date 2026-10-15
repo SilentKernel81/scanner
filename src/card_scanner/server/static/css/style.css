@@ -422,6 +422,9 @@ a {
    Camera
    ============================================================================ */
 
+/* The camera's frame is always this size, whatever the camera: a 16:9 box as wide as the panel.
+   A picture of another shape (a cropped or turned camera's tall one) sits inside it, centred,
+   with bars at its sides (object-fit: contain below) - not a frame of its own shape */
 .video-container {
     position: relative;
     border-radius: var(--radius);
@@ -1878,14 +1881,6 @@ input[type="radio"] {
 
 .game-select[hidden] {
     display: none;
-}
-
-/* A rotated (portrait) camera image */
-.video-container.portrait {
-    aspect-ratio: 9 / 16;
-    height: min(75vh, 900px);
-    width: auto;
-    margin: 0 auto;
 }
 
 /* Camera panel actions: fixed area toggle, area drawing */

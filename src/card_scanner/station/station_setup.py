@@ -557,7 +557,8 @@ class SetupPage:
                 if kind == 'picamera':
                     return scanner.with_camera_released(lambda: take_picture('picamera'))
                 if camera_index_or_none(index or Config.USB_CAMERA_SOURCE) == Config.USB_CAMERA_INDEX:
-                    frame = scanner.get_full_frame()
+                    # The whole picture, not the crop the scanner works on: the crop is drawn on it
+                    frame = scanner.get_whole_picture()
                     if frame is None:
                         raise RuntimeError("The camera has no picture yet")
                     ok, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
