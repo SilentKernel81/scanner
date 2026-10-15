@@ -465,7 +465,7 @@ scanning stays on the camera's page on the server.
 | Server address, station token. *Test connection* asks the address for `/api/stations` (only a scanner server answers that) and, if the server wants a token, for this station's capture 0 - a request that needs the token and changes nothing: 401 means the token is wrong | `server`, `token` |
 | Name, id | `name`, `id` |
 | Camera: *automatic*, a USB camera (listed from `/sys/class/video4linux`, saved by its `/dev/v4l/by-id/` name where it has one) or a Raspberry Pi camera (listed by `picamera2`) | `camera`, `camera_index` |
-| A Pi camera's crop, dragged on a picture of the whole sensor | `crop` |
+| A crop, dragged on a picture of the whole camera image (any camera, since 2026-10-15). A Pi camera reads out just that part of its sensor; a USB camera sends its whole picture and the station cuts the crop from every frame (`CardScanner._crop_view`: a slice of the decoded picture, before the rotation, no scaling - the pixels are the camera's own; the live frames are cut at half size, the captures at full size). The picture the page draws on is the camera's whole one (`get_whole_picture`), and a fixed area has to be drawn again after the crop changes | `crop` |
 | Status: connected, the camera and its pictures a second, captures waiting to be sent, temperature | - |
 
 - **Who wins** (`resolve`): the command line, then the environment (`SCANNER_SERVER`, ...),

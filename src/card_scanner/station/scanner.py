@@ -100,6 +100,7 @@ class CardScanner:
         self.failed_reads = 0  # Frames in a row that could not be read
         self.current_frame = None  # Live frame (RGB) - half resolution with a raw-JPEG camera
         self.current_raw = None  # The camera's JPEG of current_frame (full-resolution source), or None
+        self.whole_frame = None  # The camera's picture before the crop and the rotation (the setup page draws the crop on it)
         self.raw_mjpeg = False  # Camera delivers raw JPEG: decode at half size live, full size on capture
         self.half_size_decode = False
         self.next_retrieve = 0.0  # When the next raw frame is due for decoding (CAMERA_FPS pacing)
@@ -553,6 +554,33 @@ class CardScanner:
 
     ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
 
+    def _software_crop(self):
+        """
+        The part of the picture to use (x1, y1, x2, y2 as fractions), for a camera that cannot read
+        out part of its sensor: a USB camera sends the whole picture and the station cuts the
+        crop from it. A Pi camera crops on its sensor (_open_pi_camera), so None for it.
+        """
+        crop = Config.CAMERA_CROP
+        if getattr(self, 'camera_type', None) != 'usb' or not crop or len(crop) != 4:
+            return None
+        return tuple(float(v) for v in crop)
+
+    def _crop_view(self, image):
+        """The crop of a USB camera's picture (a copy), or the picture itself when there is none"""
+        crop = self._software_crop()
+        if crop is None or image is None:
+            return image
+        height, width = image.shape[:2]
+        left, top = int(round(crop[0] * width)), int(round(crop[1] * height))
+        right, bottom = int(round(crop[2] * width)), int(round(crop[3] * height))
+        if right - left < 32 or bottom - top < 32:   # nothing usable left: the whole picture
+            return image
+        return image[top:bottom, left:right].copy()
+
+    def _view(self, image):
+        """What the scanner works on: the picture cropped (a USB camera), then turned"""
+        return self._rotate(self._crop_view(image))
+
     def _rotate(self, image):
         code = self.ROTATIONS.get((self.rotation - self.camera_rotation) % 360)
         return image if code is None or image is None else cv2.rotate(image, code)
@@ -926,7 +954,7 @@ class CardScanner:
         self._close_camera()
         with self.frame_lock:
             self.camera_error = reason
-            self.current_frame = self.current_raw = self.annotated_frame = None
+            self.current_frame = self.current_raw = self.annotated_frame = self.whole_frame = None
             self.card_detected = False
             self.stable_frames = 0
 
@@ -1120,7 +1148,8 @@ class CardScanner:
                     width, height = self.small_size
                     small = cv2.cvtColor(small, cv2.COLOR_YUV420p2BGR)[:height, :width]
 
-                frame = self._rotate(frame)
+                whole = frame  # as the camera sent it
+                frame = self._view(frame)
                 self.current_small = self._rotate(small) if self.camera_type == 'picamera' else None
                 self._frame_processed()
                 annotated = frame.copy()
@@ -1368,6 +1397,7 @@ class CardScanner:
                 with self.frame_lock:
                     self.current_frame = frame
                     self.current_raw = raw
+                    self.whole_frame = whole
                     self.annotated_frame = annotated
                     self.frame_id += 1
 
@@ -1382,8 +1412,17 @@ class CardScanner:
         with self.frame_lock:
             frame, raw = self.current_frame, self.current_raw
         if raw is not None and self.half_size_decode:
-            return self._rotate(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
+            return self._view(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
         return None if frame is None else frame.copy()
+
+    def get_whole_picture(self):
+        """
+        The camera's whole picture, as it sends it: not cropped, not rotated (RGB, the half-size
+        live frame when frames are decoded at half size) - for the setup page to draw a crop on.
+        """
+        with self.frame_lock:
+            whole = self.whole_frame
+        return None if whole is None else whole.copy()
 
     def get_stream_jpeg(self, max_height=720):
         """
@@ -1431,7 +1470,7 @@ class CardScanner:
         frame, bbox, corners, raw = detected
         if raw is not None and self.half_size_decode:
             # Detection ran on the half-size frame: cut the card from the full-size image
-            full = self._rotate(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
+            full = self._view(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
             scale_x, scale_y = full.shape[1] / frame.shape[1], full.shape[0] / frame.shape[0]
             frame = full
             if corners is not None:
@@ -1454,7 +1493,8 @@ class CardScanner:
         """
         height, width = frame.shape[:2]
         jpeg = None
-        if raw is not None and self.ROTATIONS.get((self.rotation - self.camera_rotation) % 360) is None:
+        if raw is not None and self.ROTATIONS.get((self.rotation - self.camera_rotation) % 360) is None \
+                and self._software_crop() is None:   # a crop: the stored frame is the cropped one
             jpeg = np.asarray(raw, dtype=np.uint8).tobytes()
         else:
             ok, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
