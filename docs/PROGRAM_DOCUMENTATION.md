@@ -799,7 +799,9 @@ held detection never counts as a still card.
 
 A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
 
-- the corners moved less than **1.5%** (`auto_capture.max_movement`; 1% until 2026-10-15, when
+- the corners moved less than **2%** (`auto_capture.max_movement`; 1.5% for a few hours on 2026-10-15
+  and 1% before - Warleader's Call, a sharp still card whose outline moved 1.6-1.7%, waited 6 s at 1.5%;
+  the earlier change from 1% was made when
   a Pi 5 run of 211 cards showed the corner network's outline jittering 1-1.5% on a still card
   on a tall sleeved pile: 32 waits, 18 of 5 s or more, the longest 15 s; the outline detector
   measured <= 0.4%) of the card size since the previous frame **and** since
