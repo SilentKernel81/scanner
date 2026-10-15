@@ -40,6 +40,8 @@ cv2.setNumThreads(2)
 CAMERA_RETRY_SECONDS = 3
 MEASURED_FPS = 20  # Frame rate of the USB cameras the frame-count thresholds were measured with
 CAMERA_LOST_AFTER = 20  # failed reads in a row (~2 s) before the camera counts as gone
+CAPTURE_FLASH_SECONDS = 0.6  # a capture shows as a green wash over the whole card, fading out in this time
+CAPTURE_FLASH_ALPHA = 0.45   # how green it starts
 
 
 def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_step=10, settle=0.2):
@@ -147,6 +149,7 @@ class CardScanner:
         # {'jpeg': bytes, 'meta': dict} for the station to send beside the card's picture
         self.last_capture_frame = None
         self.last_new_card = None  # why the card now on the pile counts as new: {'kind', 'at', ...}
+        self.capture_flash_at = 0.0  # when the last capture was taken (the live view's green wash)
         self._previous_capture_at = None
         self.debug_dump = None  # (folder, frames still to save after the trigger)
 
@@ -712,10 +715,31 @@ class CardScanner:
                 and time.time() - self.last_auto_capture_time >= self.auto_capture_delay):
             self._trigger_auto_capture()
 
+    @staticmethod
+    def _wash_card(annotated, corners, box, alpha):
+        """
+        Blend green over the card, see-through (alpha 0..1), in place on the live view's picture.
+        Only the card's own rectangle of the frame is copied and blended: a whole frame would be
+        a few megabytes per picture on a Pi.
+        """
+        height, width = annotated.shape[:2]
+        x1, y1, x2, y2 = box
+        x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(width, int(x2)), min(height, int(y2))
+        if x2 <= x1 or y2 <= y1 or alpha <= 0:
+            return
+        region = annotated[y1:y2, x1:x2]
+        wash = region.copy()
+        if corners is not None:
+            cv2.fillPoly(wash, [(np.asarray(corners) - [x1, y1]).astype(np.int32)], (0, 255, 0))
+        else:
+            wash[:] = (0, 255, 0)  # the fixed area is a box
+        cv2.addWeighted(wash, alpha, region, 1 - alpha, 0, region)
+
     def _mark_captured(self):
         """Remember the captured card; auto-capture waits for the next one"""
         self.area_captured = self.area_thumb
         self.awaiting_new_card = True
+        self.capture_flash_at = time.time()
         self.captured_thumbnail = self.previous_thumbnail
         # A drop seen during an earlier focus move was this card's: when it was taken as new by
         # another sign ("Card gone"), the flag used to survive and made this very card "new"
@@ -1261,6 +1285,12 @@ class CardScanner:
                             box_color = (0, 255, 0)  # Green when stable
                         else:
                             box_color = (255, 165, 0)  # Orange when stabilizing
+
+                        # A capture: the whole card washed green, fading out (instead of only the outline)
+                        flash_age = time.time() - self.capture_flash_at
+                        if flash_age < CAPTURE_FLASH_SECONDS:
+                            self._wash_card(annotated, display_corners, (x1, y1, x2, y2),
+                                            CAPTURE_FLASH_ALPHA * (1 - flash_age / CAPTURE_FLASH_SECONDS))
 
                         # Draw the card outline (the fixed area has a box without one)
                         if display_corners is not None:
