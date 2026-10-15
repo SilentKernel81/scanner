@@ -1255,8 +1255,11 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 `scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
 name, at most 1200 px tall (~100-150 KB; the person's choice, below), is kept in `data/captures_full/` for training data later:
 the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
-`scripts/backup.sh`'s archive but not in the collection backups, and captures from before
-have none), `captured_at`, `station` (which station's
+`scripts/backup.sh`'s archive and, since 2026-10-15, in the app's backups as well - the folder
+`captures_full/` beside `captures/`, as hard links, in the zip of a backup, and brought back by a
+restore and by an uploaded zip, so a standalone program that restores a server's backup has the
+pictures too - and in a full backup (as optional pictures: not "missing" for captures that have
+none); captures from before have none, and a zip made before has no such folder), `captured_at`, `station` (which station's
 capture it is) and `capture_key` (the uid of the capture the copy came from, unique; empty in
 the collection and for copies from before 2026-10-12 - see
 [Capture synchronization](#capture-synchronization)). The capture follows the card from the queues to the add: `search_and_emit_card` puts it on the matched card

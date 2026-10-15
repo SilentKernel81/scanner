@@ -23,9 +23,12 @@ logger = logging.getLogger('backups')  # the name its log lines always had (the 
 
 # Made by the user (kept until deleted), on a schedule (create_scheduled) and before a restore.
 # One folder per backup, named by its time: backup.db (the tables below as plain copies, and
-# `info`) and captures/ - the capture thumbnails the entries point at, as hard links (no extra
-# space; they stay when the app deletes its own). Card data and settings are not part of it:
-# scripts/backup.sh archives everything.
+# `info`), captures/ - the capture thumbnails the entries point at - and captures_full/ - the
+# large copies of them (inventory.FULL_CAPTURES_DIR; none for captures made before they were
+# kept or with the size set to off), both as hard links (no extra space; they stay when the app
+# deletes its own). A backup's zip has all three, so a standalone program restores a server's
+# backup with its pictures. Card data and settings are not part of it: scripts/backup.sh
+# archives everything.
 BACKUPS_DIR = Config.DATA_DIR / 'backups'
 BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 # inventory_sources: which station scanned how many of an entry's copies (the scanned cards'
@@ -42,8 +45,10 @@ DECK_TABLES = ('decks', 'deck_cards')
 # from a machine with Arena on it, and the Arena decks in a backup are counted against it
 ARENA_TABLES = ('inventory', 'arena_account')
 CAPTURE_NAME = re.compile(r'^[A-Za-z0-9_-]+\.(jpg|jpeg|png)$')  # a capture inside an uploaded backup
-UPLOAD_MAX_BYTES = 2 * 1024 ** 3  # an uploaded backup, unpacked (a 4,600-card one is ~100 MB)
-UPLOAD_MAX_FILES = 200_000
+# An uploaded backup, unpacked: thumbnails ~25 KB and large copies ~145 KB a capture (a
+# 4,600-card one with both is ~800 MB)
+UPLOAD_MAX_BYTES = 8 * 1024 ** 3
+UPLOAD_MAX_FILES = 400_000
 # restore: the rows of a backup that can stand in the tables as they are now (the constraints of
 # inventory.py / decks.py) - backups made before them may hold entries without copies and rows
 # beside entries or decks that were gone already. {prefix}: 'collection_' / 'scanned_' / ''
@@ -104,6 +109,12 @@ def _folder(backup_id):
     return folder
 
 
+def full_captures_dir():
+    """Where the large copies are now (read when needed: a test, or a program, may point it elsewhere)"""
+    from card_scanner.core import inventory
+    return inventory.FULL_CAPTURES_DIR
+
+
 def _link(source, target):
     """A capture file in another place: a hard link, or a copy where links don't work"""
     if target.exists() or not source.exists():
@@ -144,6 +155,7 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
     folder = BACKUPS_DIR / backup_id
     work = BACKUPS_DIR / f'.{backup_id}.tmp'  # moved into place when complete
     (work / 'captures').mkdir(parents=True)
+    (work / 'captures_full').mkdir()
     try:
         target = sqlite3.connect(str(work / 'backup.db'))
         parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
@@ -159,6 +171,7 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
             for prefix in ('collection_', 'scanned_'):
                 for (file,) in target.execute(f'SELECT file FROM {prefix}inventory_captures'):
                     _link(CAPTURES_DIR / file, work / 'captures' / file)
+                    _link(full_captures_dir() / file, work / 'captures_full' / file)  # none for the older ones
         count = lambda sql: target.execute(sql).fetchone()[0]
         info = {
             'id': backup_id, 'created': created.strftime('%Y-%m-%d %H:%M:%S'), 'note': (note or '').strip()[:80],
@@ -317,6 +330,10 @@ def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=No
             CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
             for saved in (folder / 'captures').glob('*'):
                 _link(saved, CAPTURES_DIR / saved.name)
+            if (folder / 'captures_full').is_dir():  # a backup made before they were kept has none
+                full_captures_dir().mkdir(parents=True, exist_ok=True)
+                for saved in (folder / 'captures_full').glob('*'):
+                    _link(saved, full_captures_dir() / saved.name)
             info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
         finally:
             source.close()
@@ -333,8 +350,9 @@ def archive(backup_id, target):
     folder = _folder(backup_id)
     with zipfile.ZipFile(target, 'w') as zipped:
         zipped.write(folder / 'backup.db', f'{backup_id}/backup.db', zipfile.ZIP_DEFLATED)
-        for capture in sorted((folder / 'captures').glob('*')):
-            zipped.write(capture, f'{backup_id}/captures/{capture.name}', zipfile.ZIP_STORED)  # JPEGs don't shrink
+        for part in ('captures', 'captures_full'):
+            for capture in sorted((folder / part).glob('*')):
+                zipped.write(capture, f'{backup_id}/{part}/{capture.name}', zipfile.ZIP_STORED)  # JPEGs don't shrink
     return f'scanner-backup-{backup_id}.zip'
 
 
@@ -360,7 +378,7 @@ def add_archive(source):
         for member in members:
             parts = member.filename.split('/')
             if not (parts == [backup_id, 'backup.db']
-                    or (len(parts) == 3 and parts[1] == 'captures' and CAPTURE_NAME.match(parts[2]))):
+                    or (len(parts) == 3 and parts[1] in ('captures', 'captures_full') and CAPTURE_NAME.match(parts[2]))):
                 raise BackupError(f'This is not a backup file: it contains "{member.filename[:80]}"')
         if len(members) > UPLOAD_MAX_FILES or sum(member.file_size for member in members) > UPLOAD_MAX_BYTES:
             raise BackupError('This backup file is too large')
@@ -369,6 +387,7 @@ def add_archive(source):
         work = BACKUPS_DIR / f'.{backup_id}.upload.tmp'  # moved into place when complete and checked
         shutil.rmtree(work, ignore_errors=True)
         (work / 'captures').mkdir(parents=True)
+        (work / 'captures_full').mkdir()
         try:
             left = UPLOAD_MAX_BYTES  # what is really unpacked - the sizes above are only what the file claims
             for member in members:
@@ -424,8 +443,9 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
     barrier: a lock held by whatever else settles captures or deletes pictures (server/state.py:
         maintenance_barrier);
     databases: the database files; linked: [(folder name in the backup, source folder,
-        database file, SQL giving the file names)] - the pictures the rows point at, as hard
-        links; copied: small files beside them (settings).
+        database file, SQL giving the file names[, optional])] - the pictures the rows point at,
+        as hard links (optional: some rows have none, which is not "missing"); copied: small
+        files beside them (settings).
     Afterwards, without the locks, the snapshots are opened and checked and every file a row
     names is looked for. Returns the manifest (also manifest.json in the folder): 'id',
     'folder', 'databases' {name: rows per table}, 'files' {folder: count}, 'missing', 'verified'.
@@ -450,7 +470,7 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
                 finally:
                     source.close()
                     target.close()
-            for name, source_dir, database, sql in linked:
+            for name, source_dir, database, sql, *_ in linked:
                 (work / name).mkdir(exist_ok=True)
                 snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
                 try:
@@ -476,12 +496,16 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
                     table: snapshot.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in tables}
             finally:
                 snapshot.close()
-        for name, _source_dir, database, sql in linked:
+        for name, _source_dir, database, sql, *rest in linked:
             snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
             try:
                 named = {file for (file,) in snapshot.execute(sql) if file}
             finally:
                 snapshot.close()
+            if rest and rest[0]:
+                # Optional pictures (the large copies: older captures have none): only what is
+                # there is counted, and the rest is not "missing"
+                named = {file for file in named if (work / name / file).is_file()}
             manifest['files'][name] = manifest['files'].get(name, 0) + len(named)
             manifest['missing'] += sorted(f'{name}/{file}' for file in named if not (work / name / file).is_file())
         manifest['verified'] = not manifest['missing']
