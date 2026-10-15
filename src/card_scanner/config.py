@@ -138,7 +138,9 @@ class Config:
     # the still streak, for the card to count as still. 1% was measured with the outline
     # detector (still card: <= 0.4%); the corner network's outline jitters ~1-1.5% on a tall
     # sleeved pile, which kept cards waiting for 5-15 s (Pi 5, 2026-10-15)
-    AUTO_CAPTURE_MAX_MOVEMENT = float(config.get('auto_capture', 'max_movement', default=0.015))
+    # 2% since 2026-10-15 (1.5% before): Warleader's Call waited 6 s with its outline moving
+    # 1.6-1.7% on a sharp, still card
+    AUTO_CAPTURE_MAX_MOVEMENT = float(config.get('auto_capture', 'max_movement', default=0.02))
     AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=10))
 
     # Fast scan mode settings
