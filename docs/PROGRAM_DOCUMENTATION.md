@@ -523,6 +523,12 @@ scanning stays on the camera's page on the server.
 - **The camera in Config** (`apply_camera`): the saved camera and crop are put into `Config`
   before the scanner is created, and only where the environment did not decide.
 - **Show picture** (`SetupPage.picture`): a free camera is opened for one picture and closed.
+- **Crop shape** (setup page, `fitShape`): the crop is dragged in a chosen shape - 4:5 upright
+  (the default), 16:9 or free - counted in the picture's own pixels, so a Pi 4 and a webcam both
+  set to 4:5 give live views of the same shape on the scanner page (whose frame follows the
+  picture's shape). Only the drawing is constrained: what is saved is still the four fractions,
+  and detection, the capture and its storage are unchanged (the card is cut from the full
+  picture by its outline). Tested in `tests/test_station_setup.py` (`CropShape`, run with node).
   A USB camera the scanner is using: the scanner's current frame. A Pi camera the scanner is
   using: the scanner shows only its crop, so it lets go of the camera for the moment
   (`CardScanner.with_camera_released` - the capture thread closes it, the picture is taken,
