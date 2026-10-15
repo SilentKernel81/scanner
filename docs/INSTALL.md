@@ -45,7 +45,7 @@ Files: `deploy/Dockerfile` (target `server`), `deploy/docker-compose.yml`, `depl
 ### Vision AI
 
 Open any camera's page (or, before a camera exists, enter the keys in `.env`) and choose the
-provider in **Settings → Vision AI**. It is one choice for all cameras, remembered on the
+provider in **Settings → Card reading**. It is one choice for all cameras, remembered on the
 server.
 
 - **Cloud**: pick the provider and paste the API key into the field that appears - it is saved
@@ -315,7 +315,7 @@ their project `scanner-server`: if your folder has another name, run `docker com
 with the *old* files before pulling (containers of the old name would be in the way), and a
 station set up on its setup page has its settings in a volume of the old name
 (`<folder>_station-data`) - copy it to `scanner-server_station-data`, or set the station up
-again on its page. Card data is updated from the web interface (**Settings → Update
+again on its page. Card data is updated from the web interface (**Settings → Collection and data → Update
 card database**, or the Database counter when it shows a dot).
 
 ## Backups
@@ -405,9 +405,9 @@ chmod +x Card_Scanner-x86_64.AppImage
   A checkout of the project keeps its own `data/` and does not see these files: to run a
   checkout on the AppImage's collection, start it with `MTG_SCANNER_HOME=~/.mtg-scanner`.
 - **Only this computer can open the pages** until "Reachable from other devices" is switched
-  on in Settings -> Program (applies after a restart). The station's setup page
+  on in Settings → Server (applies after a restart). The station's setup page
   (`http://localhost:8080`: which camera, its name) follows the same rule.
-- **Settings -> Program** has Restart and Quit. A second start shows the program that runs.
+- **Settings → Server** has Restart and Quit. A second start shows the program that runs.
 - **First start**: the card data (~150 MB) is downloaded in the background; the pages work
   meanwhile.
 

@@ -514,6 +514,13 @@
    "scan_page"
   ],
   [
+   "/settings",
+   [
+    "GET"
+   ],
+   "settings_page"
+  ],
+  [
    "/static/<path:filename>",
    [
     "GET"

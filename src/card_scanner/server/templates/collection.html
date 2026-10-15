@@ -159,69 +159,6 @@
 
     {% include '_value_dialog.html' %}
 
-    <!-- Settings drawer: backups and storage here; camera, AI and sound are set on the scanner page -->
-    <div id="settings-drawer" class="drawer">
-        <aside class="drawer-panel">
-            <div class="modal-header">
-                <h2>Settings</h2>
-                <span class="close" id="settings-close">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h3>Backups</h3>
-                    <div class="hint">Your collection, the scanned cards and your decks as they are now. Make one yourself before a big load (adding scanned cards, importing a file) - restoring it puts all three back.</div>
-                    <div class="backup-schedule">
-                        <label for="backup-every">Automatic backup</label>
-                        <select id="backup-every" class="text-input">
-                            <option value="0">Off</option>
-                            <option value="1">Every hour</option>
-                            <option value="6">Every 6 hours</option>
-                            <option value="12">Every 12 hours</option>
-                            <option value="24">Every day</option>
-                            <option value="168">Every week</option>
-                        </select>
-                        <label for="backup-keep">keep the last</label>
-                        <input type="number" id="backup-keep" class="text-input" min="1" max="60" value="7">
-                    </div>
-                    <div class="hint">Made while the app runs, and only when something changed since the last backup. Older automatic ones are cleared away when a new one is made; the ones you make stay until you delete them. Backups are kept on the server's own disk: download one (the arrow beside it) to have a copy elsewhere.</div>
-                    <div class="model-row backup-new">
-                        <input type="text" id="backup-note" class="text-input" maxlength="80" placeholder="Note (optional)" autocomplete="off">
-                        <button class="btn btn-primary" id="backup-create">Back up now</button>
-                    </div>
-                    <div class="backup-upload">
-                        <button class="btn btn-small" id="backup-upload">Upload a backup file</button>
-                        <input type="file" id="backup-upload-input" accept=".zip,application/zip" style="display: none;">
-                        <span class="hint">A zip downloaded here: it joins the list, to be restored when you choose</span>
-                    </div>
-                    <div id="backup-list" class="backup-list"></div>
-                </div>
-                <div class="settings-section">
-                    <h3>Storage</h3>
-                    <div class="backup-schedule">
-                        <label for="capture-copy-size">Capture size (all cameras)</label>
-                        <select id="capture-copy-size" class="text-input">
-                            <option value="off">Off - thumbnails only</option>
-                            <option value="small">Small - 600 px tall, about 55 KB each</option>
-                            <option value="medium">Medium - 900 px tall, about 100 KB each</option>
-                            <option value="large">Large - 1200 px tall, about 145 KB each</option>
-                        </select>
-                    </div>
-                    <div class="hint" id="capture-copy-hint">Loading...</div>
-                    <label class="chip-toggle" id="keep-frames-label" title="With Debug trace on, a station sends the whole camera frame behind each capture (training data for the card detector). By default a frame goes when its scanned card is cleared or added to the collection">
-                        <input type="checkbox" id="keep-frames"><span>Keep camera frames after clearing or adding</span>
-                    </label>
-                    <div class="hint" id="keep-frames-hint"></div>
-                </div>
-                <div class="settings-section">
-                    <h3>Scanner</h3>
-                    <a class="btn btn-block" href="{{ settings_url }}">Camera, AI, sound and card database</a>
-                    <div class="hint">These settings are on the scanner page</div>
-                </div>
-                {% include '_program.html' %}
-            </div>
-        </aside>
-    </div>
-
     <!-- Card image beside the row under the mouse -->
     <img id="card-preview" class="card-preview" alt="" hidden>
 
@@ -229,6 +166,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=59"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=60"></script>
 </body>
 </html>
