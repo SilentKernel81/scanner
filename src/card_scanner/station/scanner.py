@@ -317,8 +317,9 @@ class CardScanner:
 
     def _is_card_settled(self, frame, points):
         """
-        True if the card is still and in focus: its corners moved less than ~1% of the
-        card size since the previous frame and since the still streak began, its sharpness
+        True if the card is still and in focus: its corners moved less than ~1.5% of the
+        card size (Config.AUTO_CAPTURE_MAX_MOVEMENT) since the previous frame and since the
+        still streak began, its sharpness
         changed by less than 20%
         (autofocus still adjusting changes it a lot between frames), and the image is
         sharp enough to read (a camera that hasn't focused yet is steady but blurry).
@@ -358,7 +359,8 @@ class CardScanner:
         self.card_disturbed = movement > 0.03 or image_change > 0.3
         self.last_frame_change = (movement, image_change)
         self.settle_metrics = (movement, drift, sharpness_change, sharpness)
-        settled = movement < 0.01 and drift < 0.01 and sharpness_change < 0.2 and self.card_in_focus
+        limit = Config.AUTO_CAPTURE_MAX_MOVEMENT
+        settled = movement < limit and drift < limit and sharpness_change < 0.2 and self.card_in_focus
         if not settled:
             self.settle_anchor = points
         return settled
@@ -405,7 +407,8 @@ class CardScanner:
         """
         Log file only: while auto scanning waits for a card to become ready for more than 2 s,
         say why once a second - not detected, or which stillness / sharpness test fails
-        (limits: movement 1%, drift 1%, sharpness change 20%, sharpness min_sharpness)
+        (limits: movement and drift Config.AUTO_CAPTURE_MAX_MOVEMENT, sharpness change 20%,
+        sharpness min_sharpness)
         """
         waiting = (self.auto_capture_enabled and not self.awaiting_new_card and not self.card_under_review
                    and not self.capture_pending and not self._focus_moving()

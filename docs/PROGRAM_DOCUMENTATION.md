@@ -799,7 +799,10 @@ held detection never counts as a still card.
 
 A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
 
-- the corners moved less than **1%** of the card size since the previous frame **and** since
+- the corners moved less than **1.5%** (`auto_capture.max_movement`; 1% until 2026-10-15, when
+  a Pi 5 run of 211 cards showed the corner network's outline jittering 1-1.5% on a still card
+  on a tall sleeved pile: 32 waits, 18 of 5 s or more, the longest 15 s; the outline detector
+  measured <= 0.4%) of the card size since the previous frame **and** since
   the still streak began - a sleeved card sliding slowly (a few px per frame) passes the
   frame-to-frame test on every frame and used to be captured mid-slide: blurred, then captured
   again when it stopped (seen live with a Lake-town),
@@ -1784,7 +1787,16 @@ taken off with a click, and is written into the page's address (`FILTER_PARAMS`:
 `/collection?q=qty%3A%3E1&rarity=rare&colors=G`; `history.replaceState`, so no history entry
 per filter) - an address with filters, a bookmark, wins over the remembered ones. A click on a
 row's rarity, finish, location, tag or trade badge filters by it, a second click takes that off
-(`filterByBadge`). A list row shows the card twice: on the left what was captured (a click opens the captures),
+(`filterByBadge`). Type, Rarity, Set, Finish,
+Location and Tags are dropdowns with ticks (`MULTI_FILTERS`, `multi`, `renderMulti`,
+`fillMulti`, `passesMulti`): several values can be ticked - a card shows when it has *any* of
+them - and a **Not** tick at the top of the list turns that around (every card with none of
+them). A list of more than 12 values has a Find box. Each is one chip ("Not Set: Alpha, Beta"),
+and is written into the address as `rarity=rare|mythic&rarity_not=1` (the values joined by a bar:
+a set's name can have a comma; `type`, `rarity`, `set`, `finish`, `loc`, `tags`), so a bookmark
+or a saved filter with one plain value still works. A row's badge ticks only that value (a
+second click lets go). The one-tag list ("Any tag") stays beside the Tags dropdown. The Arena
+view does not apply Location or Tags. `tests/test_multi_filter.py`. A list row shows the card twice: on the left what was captured (a click opens the captures),
 and by its buttons the downloaded picture, small (`.card-peek`; Scryfall's `small` size of the
 `image_uri`) - resting the pointer on that one shows the picture large beside it (`data-image`,
 `showPreview`, `placePreview`, as for the deck builder's rows; devices with a mouse - the box
