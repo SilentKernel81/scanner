@@ -220,16 +220,23 @@ class Magic(Game):
         # (foil / etched / empty), Collector Number, Tags
         if not {'count', 'name', 'edition'} <= columns:
             return None
-        result = {'format': 'Moxfield', 'entries': [], 'by_name': 0, 'not_found': []}
+        # `unnamed`: rows that hold something but no card name - cannot be matched, so a
+        # replacement must not go ahead without them (see import_inventory)
+        result = {'format': 'Moxfield', 'entries': [], 'by_name': 0, 'not_found': [], 'unnamed': 0}
         front = lambda card_name: search_key(card_name.split(' // ')[0])
         for row in rows:
             name = (row.get('name') or '').strip()
             if not name:
+                if any((value or '').strip() for value in row.values()):
+                    result['unnamed'] += 1
                 continue
             # The printing by set code + collector number; a card the database has under
             # another number (or a row without one) is still taken, by its name
             edition, number = (row.get('edition') or '').strip(), (row.get('collector number') or '').strip()
             card = self.db.get_card_by_set_number(edition, number, exact=True)
+            if card and front(card['name']) != front(name):
+                # A set and number that belong to another card: never taken on the numbers alone
+                card = None
             if not card:
                 # Written another way ("007" for 7) - only when it is the card the row names
                 card = self.db.get_card_by_set_number(edition, number)
