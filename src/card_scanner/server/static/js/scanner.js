@@ -797,6 +797,19 @@ function placeAreaLayer() {
     Object.assign($('area-layer').style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
 }
 
+function updateVideoFrame() {
+    // The frame takes the shape of the picture the camera sends (a cropped camera's is tall):
+    // style.css sizes it from --picture-aspect, up to a maximum height
+    const img = $('video-feed');
+    if (!(img.naturalWidth && img.naturalHeight)) return;
+    const aspect = (img.naturalWidth / img.naturalHeight).toFixed(4);
+    const frame = img.parentElement;
+    if (frame.style.getPropertyValue('--picture-aspect') !== aspect) {
+        frame.style.setProperty('--picture-aspect', aspect);
+        placeAreaLayer();   // the drawing layer lies over the picture: follow it
+    }
+}
+
 function isDrawingArea() {
     return $('area-layer').classList.contains('is-drawing');
 }
@@ -1981,6 +1994,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     showCameraSetupLink();
     setInterval(showCameraSetupLink, 15000);
+
+    // The frame follows the picture's shape (a cropped camera's is tall)
+    updateVideoFrame();
+    setInterval(updateVideoFrame, 1000);
+    $('video-feed').addEventListener('load', updateVideoFrame);
+    window.addEventListener('resize', placeAreaLayer);
 
     // The model list first (the provider's dropdown is filled from it); the key field needs
     // the current provider
