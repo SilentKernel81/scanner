@@ -17,7 +17,9 @@ pile under it. Nothing else is written, and the frames and their notes are never
 Local only (127.0.0.1) and standard library only - no server and no card_scanner import, so it
 runs against a copy of the frames from anywhere. Keys on the page: 1-4 pick a corner, arrows
 nudge it (shift: 5 px), S saves and goes on, N / P next / previous, R resets to the detector's
-outline, U shows only the frames not labelled yet.
+outline, U shows only the frames not labelled yet. TWO-CLICK MODE (the default way to start when
+the detector's outline is far off): press D (or "Two clicks") and click the card's top left corner,
+then its bottom right corner - the four corners follow; drag any of them to fine-tune, then S.
 """
 import argparse
 import json
@@ -140,6 +142,8 @@ PAGE = r'''<!doctype html>
   <span id="where"></span>
   <span id="progress" class="pill"></span>
   <label><input type="checkbox" id="onlyNew"> only unlabelled</label>
+  <label>station <select id="stationFilter"><option value="">all</option></select></label>
+  <button id="twoClicks" title="Click the card's top left corner, then its bottom right one (D)">Two clicks (D)</button>
   <span style="flex:1"></span>
   <button id="prev">&larr; Prev (P)</button>
   <button id="next">Next (N) &rarr;</button>
@@ -161,7 +165,9 @@ PAGE = r'''<!doctype html>
       <button id="unsure">Unsure</button>
     </div>
     <div class="key">The label is the <b>card's own edge</b> - not its sleeve, not the cards under it.<br>
-      Keys: 1-4 pick a corner, arrows nudge (shift: 5 px), S save, N / P next / previous, R reset.</div>
+      Keys: D two clicks (top left, then bottom right), 1-4 pick a corner, arrows nudge (shift: 5 px),
+      S save, N / P next / previous, R reset.</div>
+    <div id="mode" class="key"></div>
     <div id="note" class="key"></div>
     <div id="list"></div>
   </div>
@@ -170,6 +176,7 @@ PAGE = r'''<!doctype html>
 // State: the list of frames, which one is shown, and its label's four corners in FRAME pixels
 let items = [], shown = [], index = 0, frame = null;     // frame: {stem, note, label}
 let corners = null, detector = null, picked = 0, dragging = -1;
+let drawing = null;   // two-click mode: null, or the first click [x, y] once it is made (else [])
 const image = new Image();
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const loupe = document.getElementById('loupe'), lctx = loupe.getContext('2d');
@@ -182,8 +189,18 @@ async function loadList(keepStem) {
   applyFilter(keepStem);
 }
 
+function fillStations() {
+  const select = $('stationFilter'), chosen = select.value;
+  const names = [...new Set(items.map(i => i.station || ''))].sort();
+  select.innerHTML = '<option value="">all</option>' + names.map(n => `<option>${n}</option>`).join('');
+  select.value = names.includes(chosen) ? chosen : '';
+}
+
 function applyFilter(keepStem) {
-  shown = $('onlyNew').checked ? items.filter(i => !i.status || i.stem === keepStem) : items;
+  fillStations();
+  const station = $('stationFilter').value;
+  shown = items.filter(i => (!station || i.station === station) &&
+                           (!$('onlyNew').checked || !i.status || i.stem === keepStem));
   const at = shown.findIndex(i => i.stem === keepStem);
   index = at >= 0 ? at : Math.min(index, Math.max(0, shown.length - 1));
   const done = items.filter(i => i.status).length;
@@ -203,6 +220,7 @@ async function show(k) {
   const start = frame.label && frame.label.corners ? frame.label.corners : detector;
   corners = start ? start.map(p => p.slice()) : defaultBox(n);
   picked = 0;
+  drawing = null; setMode();
   $('where').textContent = `${n.station} #${n.number}  ${n.received || ''}  ${n.frame_width}x${n.frame_height}` +
     (frame.label ? `  [${frame.label.status}]` : '') + (detector ? '' : '  (no outline was found)');
   const nk = n.new_card || {};
@@ -242,6 +260,9 @@ function draw() {
   const css = getComputedStyle(document.documentElement);
   outline(detector, css.getPropertyValue('--det').trim(), true);
   outline(corners, css.getPropertyValue('--accent').trim(), false);
+  if (drawing !== null && drawing.length) {   // the first click of two-click mode
+    ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(drawing[0] * scale, drawing[1] * scale, 7, 0, 7); ctx.fill();
+  }
   corners.forEach((p, i) => {
     ctx.fillStyle = i === picked ? '#facc15' : css.getPropertyValue('--accent').trim();
     ctx.beginPath(); ctx.arc(p[0] * scale, p[1] * scale, i === picked ? 7 : 5, 0, 7); ctx.fill();
@@ -266,8 +287,25 @@ function eventPoint(e) {
   return [(e.clientX - box.left) / scale, (e.clientY - box.top) / scale];
 }
 
+function setMode() {
+  $('mode').textContent = drawing === null ? '' :
+    (drawing.length ? 'Two clicks: now click the BOTTOM RIGHT corner' : 'Two clicks: click the TOP LEFT corner');
+  $('twoClicks').style.outline = drawing === null ? '' : '2px solid var(--accent)';
+}
+
+// The card is portrait: the first click is its top left, the second its bottom right. The box
+// that follows is axis-aligned - a card's tilt is then put right by dragging a corner.
+function startTwoClicks() { drawing = []; setMode(); draw(); }
+
 canvas.addEventListener('pointerdown', e => {
   const [x, y] = eventPoint(e);
+  if (drawing !== null) {
+    if (!drawing.length) { drawing = [x, y]; setMode(); return; }
+    const [x0, y0] = drawing, left = Math.min(x0, x), right = Math.max(x0, x), top = Math.min(y0, y), bottom = Math.max(y0, y);
+    corners = [[left, top], [right, top], [right, bottom], [left, bottom]];
+    drawing = null; picked = 2; setMode(); draw();
+    return;
+  }
   let best = -1, bestD = 18 / scale;                       // within ~18 screen px of a corner
   corners.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bestD) { best = i; bestD = d; } });
   if (best >= 0) { dragging = picked = best; canvas.setPointerCapture(e.pointerId); draw(); }
@@ -279,6 +317,14 @@ canvas.addEventListener('pointermove', e => {
   draw();
 });
 canvas.addEventListener('pointerup', () => { dragging = -1; });
+canvas.addEventListener('pointermove', e => {
+  if (drawing === null || dragging >= 0) return;
+  const [x, y] = eventPoint(e);                   // loupe at the pointer while placing a corner
+  const r = 40; lctx.imageSmoothingEnabled = false; lctx.fillStyle = '#000'; lctx.fillRect(0, 0, 240, 240);
+  lctx.drawImage(image, x - r, y - r, 2 * r, 2 * r, 0, 0, 240, 240);
+  lctx.strokeStyle = '#facc15'; lctx.beginPath(); lctx.moveTo(120, 0); lctx.lineTo(120, 240);
+  lctx.moveTo(0, 120); lctx.lineTo(240, 120); lctx.stroke();
+});
 
 async function save(status) {
   const body = {status, corners: status === 'no_card' ? null : corners};
@@ -295,6 +341,8 @@ $('reset').onclick = reset;
 $('next').onclick = () => show(index + 1);
 $('prev').onclick = () => show(index - 1);
 $('onlyNew').onchange = () => applyFilter(frame && frame.stem);
+$('stationFilter').onchange = () => { index = 0; applyFilter(null); };
+$('twoClicks').onclick = startTwoClicks;
 function reset() { corners = (detector || defaultBox(frame.note)).map(p => p.slice()); draw(); }
 
 document.addEventListener('keydown', e => {
@@ -302,6 +350,8 @@ document.addEventListener('keydown', e => {
   if (k >= '1' && k <= '4') { picked = +k - 1; draw(); return; }
   const step = e.shiftKey ? 5 : 1, move = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[k];
   if (move) { corners[picked][0] += move[0]; corners[picked][1] += move[1]; draw(); e.preventDefault(); return; }
+  if (k === 'd' || k === 'D') { startTwoClicks(); return; }
+  if (k === 'Escape' && drawing !== null) { drawing = null; setMode(); draw(); return; }
   if (k === 's' || k === 'S') save('labelled');
   else if (k === 'n' || k === 'N') show(index + 1);
   else if (k === 'p' || k === 'P') show(index - 1);
