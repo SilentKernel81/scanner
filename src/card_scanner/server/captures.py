@@ -11,6 +11,7 @@ import threading
 
 from card_scanner.config import Config
 from card_scanner import games
+from card_scanner.core import frames
 
 from card_scanner.server.state import (
     app_settings, capture_outcomes, capture_outcomes_lock, identification, maintenance_barrier,
@@ -308,6 +309,7 @@ def submit_capture(image_path, image, foil_image, number, game_id, station=None,
                 # an outcome without it is of a capture that cannot be followed.
                 outcome['sync_key'] = uid
                 pending.settle(pending_id, outcome)  # off the queue, its outcome on record
+                frames.attach(capture_id, uid)       # its camera frame (if kept) goes with the card
             except Exception as e:
                 logger.exception(f"Capture {Path(image_path).name} could not be added or queued for review: {e}")
                 log_to_client(f"{station_prefix(station)}Capture {Path(image_path).name} failed: {e}", level="error")

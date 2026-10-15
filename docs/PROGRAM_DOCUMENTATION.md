@@ -799,7 +799,9 @@ held detection never counts as a still card.
 
 A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
 
-- the corners moved less than **1.5%** (`auto_capture.max_movement`; 1% until 2026-10-15, when
+- the corners moved less than **1.5%** (`auto_capture.max_movement`; 1% until 2026-10-15. 2% was tried for one run of the
+  same 69 cards (no waits, but one double: Captain America again 1 s after its capture, jump 3.8% with the
+  picture unchanged) and put back - the limit is not to be moved on one run's evidence; 1% was changed when
   a Pi 5 run of 211 cards showed the corner network's outline jittering 1-1.5% on a still card
   on a tall sleeved pile: 32 waits, 18 of 5 s or more, the longest 15 s; the outline detector
   measured <= 0.4%) of the card size since the previous frame **and** since
@@ -829,7 +831,9 @@ keeps the last 3 s of frames (640 px wide - what the outline detector works on) 
 plus the next second, to `data/debug_frames/<time>_<reason>/` (on the station's machine) when a card waits over 2 s or a
 new card is detected, or the card is "gone", less than 2 s after a capture (a likely duplicate:
 a foil Gwen Stacy lost its outline right after its capture and was captured again - by its
-look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 20 dumps
+look the pair differed 0.79, so appearance can't tell such a case from a new card); the newest 30 dumps of each
+reason are kept (counted per reason since 2026-10-15: a run of captures writes one "soon after capture" dump each and
+used to push the "waiting" ones out); the older dumps go
 are kept. Replaying such frames through `CardScanner` with a fake camera reproduces the case.
 
 **Camera frames as training data (debug trace on; since 2026-10-14, never tested on a Pi).** A
@@ -850,7 +854,15 @@ goes with it; an older server ignores the two fields. The server keeps it as
 `data/frames/<capture_id>.jpg` + `.json` (`core/frames.py`, `stations_api.keep_camera_frame`): once per
 capture (a retried upload adds nothing), never failing the capture, capped at 3 GB (oldest first),
 outside the collection backups. The note also has `station`, `number` and `image` (the capture's
-file in `scanned_cards/`). Only captures have a frame: a card that was *missed* leaves none (the
+file in `scanned_cards/`). Since 2026-10-15 a frame goes with its scanned card: once the capture is settled
+the server notes its `uid` in the frame's `.json` (`frames.attach`, called from `submit_capture`), and
+when the scanned cards are cleared (a camera's, or all: `clear_camera`, `clear_inventory`) or added to the
+collection (`scan_to_collection`) the frames of the captures that left the scanned list are deleted
+(`inventory_api.release_frames`, `Inventory.capture_keys`, `frames.forget`) - unless **Keep camera frames
+after clearing or adding** is on (collection page, Settings → Storage; `keep_frames` in
+`data/settings.json`, through `/api/capture_copy`), which is for the days frames are labelled. A frame
+without a `uid` (taken before this, or never settled) stays until the 3 GB cap. Tests:
+`tests/test_frames_release.py`. Only captures have a frame: a card that was *missed* leaves none (the
 stations' own `debug_frames/` dumps are what show those).
 
 **Labelling and scoring the frames** (stdlib / this checkout only, never against the live server's
@@ -955,6 +967,18 @@ Identical copies are caught by the drop, not by their looks. Measured noise of a
 still: movement ≤ 0.4%, image change ≤ 0.07, detection gaps ≤ 2 frames. In a live test with
 11 drops (including two identical copies) every card was captured exactly once; real drops
 measured 2–5 frames without a card, jumps of 4.5–8.5% and image changes of 0.7–1.2.
+
+*Image change, since 2026-10-15:* the corner network's outline of a still card wobbles by 1–1.5%
+of its size from frame to frame (card sizes 867, 874, 879, 890 px within 4 s), which shifts the
+32 × 45 thumbnail by a fraction of a pixel. On a detailed card (Nick Fury, Agent of S.H.I.E.L.D.)
+that alone made the frame-to-frame change 0.3–0.5, the card "disturbed" and so a new card, again
+and again within a second (5 captures of 2 cards in one run, 3 and 2 of 2 in the next; none were
+drops: jumps of 0.5–1.5%). The two comparisons that look at the picture - frame to frame
+(`card_disturbed`) and the settled card against the captured one (`_new_card_arrived`) - now blur
+both thumbnails (σ 1.5) and normalise them again before comparing (`_thumbnail_difference(smooth=True)`),
+and the limit is `IMAGE_CHANGE_LIMIT` = 0.35 (was 0.3 on unblurred ones). Measured on 11 consecutive
+capture pairs of that run: the same card differed 0.45 at most unblurred, 0.22 blurred; different
+cards 0.67 and 0.51 at least. The flicker test above stays unblurred. `tests/test_image_change.py`.
 
 Captures are also at least `auto_capture.delay` (1 s) apart.
 
