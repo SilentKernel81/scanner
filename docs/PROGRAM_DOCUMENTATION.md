@@ -1328,7 +1328,8 @@ The app's own columns (`Card Name`, `Set`) → `import_csv`; CSVs written before
 file, or one where no card is found, is refused before "replace" deletes anything - and since
 2026-10-15 so is a Moxfield replacement in which any row is unresolved (`not_found`) or has no
 name (`unnamed`), as the app's own file already was: the answer names the cards, nothing is
-changed, and adding instead still takes the known ones and lists the rest. Every upload of the
+changed, and adding instead still takes the known ones and lists the rest (`skipped` counts
+not-found cards and unnamed rows both; `unnamed` says how many of them). Every upload of the
 app's own CSV is written to a temporary file of its own in `data/uploads/` (`tempfile`), removed
 afterwards. Tests: `tests/test_import_replace.py`.
 

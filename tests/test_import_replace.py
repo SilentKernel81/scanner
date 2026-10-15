@@ -143,6 +143,14 @@ class ImportRoute(TemporaryData):
         self.assertEqual(answer.get_json()['stats']['not_found'], ['No Such Card'])
         self.assertEqual(self.cards_of(self.collection), {**self.before, ('Mountain', 'regular'): 2})
 
+    def test_adding_counts_rows_without_a_name_as_skipped(self):
+        answer = self.post(moxfield(('2', 'Mountain', 'tst', 'Near Mint', '', '2', ''),
+                                    ('1', 'No Such Card', 'tst', 'Near Mint', '', '99', ''),
+                                    ('1', '', 'tst', 'Near Mint', '', '3', '')), replace=False)
+        stats = answer.get_json()['stats']
+        self.assertEqual((answer.status_code, stats['skipped'], stats['unnamed']), (200, 2, 1))
+        self.assertEqual(stats['not_found'], ['No Such Card'])
+
     def test_a_fully_matched_replacement_replaces(self):
         answer = self.post(moxfield(('3', 'Mountain', 'tst', 'Near Mint', '', '2', '')), replace=True)
         self.assertEqual(answer.status_code, 200)
