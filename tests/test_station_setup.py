@@ -434,6 +434,20 @@ console.log(JSON.stringify(cases.map(c => fitShape(c.anchor, c.point, c.ratio, c
         self.assertAlmostEqual(self.shape(rectangle, w, h), 0.8, places=3)
         self.assertEqual((rectangle[2], rectangle[3]), (0.6, 0.9))
 
+    def test_a_moved_box_keeps_its_size_and_stops_at_the_edge(self):
+        import subprocess
+        if not self.node:
+            self.skipTest("node is not installed")
+        script = self.source + "console.log(JSON.stringify([moveBox([0.3,0.2,0.6,0.8], 0.1, -0.1), "\
+                               "moveBox([0.3,0.2,0.6,0.8], 0.9, 0.9), moveBox([0.3,0.2,0.6,0.8], -0.9, -0.9)]))"
+        out = json.loads(subprocess.run([self.node, '-e', script], capture_output=True, text=True, check=True).stdout)
+        for moved in out:
+            self.assertAlmostEqual(moved[2] - moved[0], 0.3)
+            self.assertAlmostEqual(moved[3] - moved[1], 0.6)
+        self.assertEqual([round(v, 3) for v in out[0]], [0.4, 0.1, 0.7, 0.7])
+        self.assertEqual([round(v, 3) for v in out[1]], [0.7, 0.4, 1.0, 1.0])
+        self.assertEqual([round(v, 3) for v in out[2]], [0.0, 0.0, 0.3, 0.6])
+
     def test_free_is_the_plain_rectangle_and_a_wide_shape_works(self):
         w, h = 2560, 1440
         free, wide = self.fit(([0.2, 0.2], [0.5, 0.7], 0, w, h), ([0.1, 0.1], [0.6, 0.3], 16 / 9, w, h))

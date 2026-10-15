@@ -529,6 +529,8 @@ scanning stays on the camera's page on the server.
   picture's shape). Only the drawing is constrained: what is saved is still the four fractions,
   and detection, the capture and its storage are unchanged (the card is cut from the full
   picture by its outline). Tested in `tests/test_station_setup.py` (`CropShape`, run with node).
+  A drag that starts inside the drawn crop moves it (`moveBox`, same size, stops at the picture's
+  edge); one that starts outside draws a new one; a right click clears it.
   A USB camera the scanner is using: the scanner's current frame. A Pi camera the scanner is
   using: the scanner shows only its crop, so it lets go of the camera for the moment
   (`CardScanner.with_camera_released` - the capture thread closes it, the picture is taken,
