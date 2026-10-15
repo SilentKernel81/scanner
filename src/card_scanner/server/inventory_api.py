@@ -315,11 +315,15 @@ def import_inventory():
                                 'error': f"{' and '.join(reasons)} - the collection was not replaced. Correct the "
                                          'file, or add it instead of replacing.'}), 400
             stats = inventory_area().import_entries(parsed['entries'], game.id, replace_existing=replace_existing)
-            stats.update(format=parsed['format'], by_name=parsed['by_name'],
-                         skipped=len(parsed['not_found']), not_found=parsed['not_found'][:10])
+            # skipped: every row that was left out - cards not found, and rows without a name
+            unnamed = parsed.get('unnamed', 0)
+            stats.update(format=parsed['format'], by_name=parsed['by_name'], unnamed=unnamed,
+                         skipped=len(parsed['not_found']) + unnamed, not_found=parsed['not_found'][:10])
             if parsed['not_found']:
                 logger.warning(f"Import: {len(parsed['not_found'])} cards not found: "
                                + ', '.join(parsed['not_found'][:50]))
+            if unnamed:
+                logger.warning(f"Import: {unnamed} rows without a card name left out")
         elif {'card name', 'set'} <= columns:
             # The app's own columns (the "Card Scanner" export, and CSVs written before it)
             upload_dir = Config.DATA_DIR / 'uploads'
