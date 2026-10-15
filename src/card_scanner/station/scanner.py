@@ -42,6 +42,7 @@ MEASURED_FPS = 20  # Frame rate of the USB cameras the frame-count thresholds we
 CAMERA_LOST_AFTER = 20  # failed reads in a row (~2 s) before the camera counts as gone
 CAPTURE_FLASH_SECONDS = 0.6  # a capture shows as a green wash over the whole card, fading out in this time
 CAPTURE_FLASH_ALPHA = 0.45   # how green it starts
+AUTO_TINT_ALPHA = 0.22       # a card found by itself is tinted (no border): how strongly, in its state's colour
 
 
 def focus_sweep(set_focus, measure_sharpness, low, high, coarse_step=50, fine_step=10, settle=0.2):
@@ -719,6 +720,20 @@ class CardScanner:
                 and time.time() - self.last_auto_capture_time >= self.auto_capture_delay):
             self._trigger_auto_capture()
 
+    def _mark_auto_card(self, annotated, corners, box, color):
+        """
+        A card the station found by its outline: no border - the card is tinted, see-through, in
+        the colour of its state (orange settling, green ready, blue held), and at a capture washed
+        a stronger green that fades down to the tint.
+        """
+        age = time.time() - self.capture_flash_at
+        if 0 <= age < CAPTURE_FLASH_SECONDS:
+            flash = CAPTURE_FLASH_ALPHA * (1 - age / CAPTURE_FLASH_SECONDS)
+            if flash > AUTO_TINT_ALPHA:
+                self._wash_card(annotated, corners, box, flash)
+                return
+        self._wash_card(annotated, corners, box, AUTO_TINT_ALPHA, color)
+
     def _flash_capture(self, annotated, corners, box):
         """The wash over a card just captured: strongest at the capture, gone after CAPTURE_FLASH_SECONDS"""
         age = time.time() - self.capture_flash_at
@@ -726,9 +741,9 @@ class CardScanner:
             self._wash_card(annotated, corners, box, CAPTURE_FLASH_ALPHA * (1 - age / CAPTURE_FLASH_SECONDS))
 
     @staticmethod
-    def _wash_card(annotated, corners, box, alpha):
+    def _wash_card(annotated, corners, box, alpha, color=(0, 255, 0)):
         """
-        Blend green over the card, see-through (alpha 0..1), in place on the live view's picture.
+        Blend a colour (green) over the card, see-through (alpha 0..1), in place on the live view's picture.
         Only the card's own rectangle of the frame is copied and blended: a whole frame would be
         a few megabytes per picture on a Pi.
         """
@@ -740,9 +755,9 @@ class CardScanner:
         region = annotated[y1:y2, x1:x2]
         wash = region.copy()
         if corners is not None:
-            cv2.fillPoly(wash, [(np.asarray(corners) - [x1, y1]).astype(np.int32)], (0, 255, 0))
+            cv2.fillPoly(wash, [(np.asarray(corners) - [x1, y1]).astype(np.int32)], color)
         else:
-            wash[:] = (0, 255, 0)  # the fixed area is a box
+            wash[:] = color  # the fixed area is a box
         cv2.addWeighted(wash, alpha, region, 1 - alpha, 0, region)
 
     def _mark_captured(self):
@@ -1296,14 +1311,10 @@ class CardScanner:
                         else:
                             box_color = (255, 165, 0)  # Orange when stabilizing
 
-                        # A capture: the whole card washed green, fading out (instead of only the outline)
-                        self._flash_capture(annotated, display_corners, (x1, y1, x2, y2))
-
-                        # Draw the card outline (the fixed area has a box without one)
-                        if display_corners is not None:
-                            cv2.polylines(annotated, [display_corners.astype(np.int32)], True, box_color, 3)
-                        else:
-                            cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 3)
+                        # A card found by itself has no border: it is tinted in its state's colour,
+                        # and washed green, stronger, for a moment at a capture. (The fixed area keeps
+                        # its rectangle: that is the area that was drawn)
+                        self._mark_auto_card(annotated, display_corners, (x1, y1, x2, y2), box_color)
 
                         # Create label
                         label = f"{card_name} ({confidence:.2f})"
