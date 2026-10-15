@@ -418,14 +418,43 @@ def warp_card(frame, corners, out_h=None):
     return cv2.warpPerspective(frame, cv2.getPerspectiveTransform(src, dst), (out_w, out_h))
 
 
+# What the corner network's answer must be before it is believed (else the outline detector looks)
+NEURAL_MIN_SCORE = 0.5
+NEURAL_ASPECT_TOLERANCE = 0.2   # wider than the outline detector's 0.08: a tilted card seen from above
+NEURAL_MIN_AREA = 0.02          # of the frame, as the outline detector's min_area
+
+
+def _plausible_neural(corners, shape, allow_landscape):
+    """Whether four corners from the network are a card seen from above: convex, a card's shape, in the frame"""
+    corners = np.asarray(corners, np.float32)
+    height, width = shape[:2]
+    if not np.isfinite(corners).all():
+        return False
+    margin_x, margin_y = 0.02 * width, 0.02 * height
+    if (corners[:, 0].min() < -margin_x or corners[:, 0].max() > width + margin_x
+            or corners[:, 1].min() < -margin_y or corners[:, 1].max() > height + margin_y):
+        return False
+    if abs(cv2.contourArea(corners)) < NEURAL_MIN_AREA * width * height or not cv2.isContourConvex(corners):
+        return False
+    side_w = (np.linalg.norm(corners[1] - corners[0]) + np.linalg.norm(corners[2] - corners[3])) / 2
+    side_h = (np.linalg.norm(corners[3] - corners[0]) + np.linalg.norm(corners[2] - corners[1])) / 2
+    if min(side_w, side_h) == 0 or (side_w > side_h and not allow_landscape):
+        return False
+    ratio = max(side_w, side_h) / min(side_w, side_h)
+    return abs(ratio - CARD_ASPECT_RATIO) / CARD_ASPECT_RATIO <= NEURAL_ASPECT_TOLERANCE
+
+
 class ObjectDetector:
-    """Finds a card in a frame by its outline"""
-    def __init__(self, allow_landscape=False):
+    """Finds a card in a frame: by our corner network when there is one, else by its outline"""
+    def __init__(self, allow_landscape=False, neural=None):
         """
         Args:
             allow_landscape (bool): Accept sideways cards
+            neural: a corner_net.CornerNet, or None. It is asked first; the outline detector
+                answers when it finds no card, is unsure, or gives a shape that is no card's
         """
         self.allow_landscape = allow_landscape
+        self.neural = neural
 
     def detect(self, frame, previous=None):
         """
@@ -438,10 +467,23 @@ class ObjectDetector:
         if frame is None:
             return None, "", 0, None
 
+        height, width = frame.shape[:2]
+        if self.neural is not None:
+            try:
+                corners, score = self.neural.find(frame, previous=previous)
+            except Exception as e:  # never stop scanning over the second opinion
+                logger.warning(f"Corner network failed ({e}) - the outline detector alone is used")
+                self.neural = None
+                corners = None
+            if corners is not None and score >= NEURAL_MIN_SCORE and \
+                    _plausible_neural(corners, frame.shape, self.allow_landscape):
+                x1, y1 = np.floor(corners.min(axis=0)).astype(int)
+                x2, y2 = np.ceil(corners.max(axis=0)).astype(int)
+                return (max(0, x1), max(0, y1), min(width, x2), min(height, y2)), "Card", float(score), corners
+
         corners, score = find_card_outline(frame, allow_landscape=self.allow_landscape, previous=previous)
         if corners is None:
             return None, "", 0, None
-        height, width = frame.shape[:2]
         x1, y1 = np.floor(corners.min(axis=0)).astype(int)
         x2, y2 = np.ceil(corners.max(axis=0)).astype(int)
         bounding_box = (max(0, x1), max(0, y1), min(width, x2), min(height, y2))

@@ -47,8 +47,8 @@ def iou(a, b, shape):
     return float((first & second).sum()) / union if union else 0.0
 
 
-def load(folder, station=None):
-    """(note, label, picture path) of each labelled frame, oldest first"""
+def load(folder, station=None, statuses=('labelled',)):
+    """(stem, note, label, picture path) of each frame with one of these label statuses, oldest first"""
     found = []
     for label_path in sorted(Path(folder).glob('*.label.json'), key=lambda p: p.stat().st_mtime):
         stem = label_path.name[:-len('.label.json')]
@@ -58,7 +58,9 @@ def load(folder, station=None):
         except (OSError, ValueError):
             continue
         picture = Path(folder) / f'{stem}.jpg'
-        if label.get('status') != 'labelled' or not label.get('corners') or not picture.is_file():
+        if label.get('status') not in statuses or not picture.is_file():
+            continue
+        if label.get('status') == 'labelled' and not label.get('corners'):
             continue
         if station and note.get('station') != station:
             continue
@@ -66,9 +68,12 @@ def load(folder, station=None):
     return found
 
 
-def score(folder, station=None, detector=None):
-    """One row per labelled frame (see the module's text); the detector is replaced in tests"""
-    detector = detector or ObjectDetector()
+def score(folder, station=None, detector=None, neural=None):
+    """
+    One row per labelled frame (see the module's text); the detector is replaced in tests.
+    neural: a station.corner_net.CornerNet to ask first, as a station does (None: the outline detector alone)
+    """
+    detector = detector or ObjectDetector(neural=neural)
     rows = []
     for stem, note, label, picture in load(folder, station):
         bgr = cv2.imread(str(picture))
@@ -110,10 +115,19 @@ def main():
     parser.add_argument('--station', help="only this station's frames")
     parser.add_argument('--worst', type=int, default=8, help="list this many worst replayed frames")
     parser.add_argument('--json', help="also write every row to this file")
+    parser.add_argument('--neural', nargs='?', const='station', metavar='ONNX',
+                        help="ask the corner network first, as a station does: the one beside "
+                             "station/corner_net.py, or this file")
     args = parser.parse_args()
     if not Path(args.frames).is_dir():
         sys.exit(f"{args.frames} is not a folder - give the one with the .jpg / .json / .label.json files (--frames)")
-    rows = score(args.frames, args.station)
+    neural = None
+    if args.neural:
+        from card_scanner.station import corner_net
+        neural = corner_net.load('auto') if args.neural == 'station' else corner_net.CornerNet(args.neural)
+        if neural is None:
+            sys.exit("the corner network could not be loaded")
+    rows = score(args.frames, args.station, neural=neural)
     if not rows:
         sys.exit("no labelled frames there (label them with scripts/label_frames.py first)")
     summary(rows, "All")

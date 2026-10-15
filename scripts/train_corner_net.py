@@ -140,21 +140,32 @@ def augment_colour(window, rng):
 class Frames:
     """Labelled frames kept in memory, shrunk so that a window's worth is cheap to cut"""
 
-    def __init__(self, rows, longest=1600):
+    def __init__(self, rows, longest=1600, empties=()):
         self.items = []
-        for stem, note, label, picture in rows:
-            bgr = cv2.imread(str(picture))
-            if bgr is None:
-                continue
-            scale = min(1.0, longest / max(bgr.shape[:2]))
-            if scale < 1:
-                bgr = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-            self.items.append({'rgb': cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), 'scale': scale,
-                               'quad': np.array(label['corners'], np.float64) * scale,
+        self.empties = []   # frames labelled "no card" (a card in the air, a hand): negatives for the score
+        for source, target in ((rows, self.items), (empties, self.empties)):
+            for stem, note, label, picture in source:
+                bgr = cv2.imread(str(picture))
+                if bgr is None:
+                    continue
+                scale = min(1.0, longest / max(bgr.shape[:2]))
+                if scale < 1:
+                    bgr = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                target.append({'rgb': cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), 'scale': scale,
+                               'quad': np.array(label['corners'], np.float64) * scale if label.get('corners') else None,
                                'station': note['station'], 'number': note.get('number'), 'stem': stem})
 
     def sample(self, rng, train_negative=0.15):
         """One training window: (tensor, corners in window pixels (4, 2), card present, mask)"""
+        if self.empties and rng.random() < 0.06:
+            # a frame with no card on top of the pile: the whole frame, or a window in it, scores 0
+            it = self.empties[rng.integers(len(self.empties))]
+            h, w = it['rgb'].shape[:2]
+            if rng.random() < 0.5:
+                m = window_matrix(w / 2, h / 2, max(h, w * H / W))
+            else:
+                m = window_matrix(rng.uniform(0.3, 0.7) * w, rng.uniform(0.3, 0.7) * h, rng.uniform(0.3, 0.6) * h)
+            return to_tensor(augment_colour(cut(it['rgb'], m), rng)), np.zeros((4, 2), np.float32), 0.0, 0.0
         it = self.items[rng.integers(len(self.items))]
         quad = it['quad']
         centre = quad.mean(axis=0)
@@ -305,7 +316,11 @@ def main():
     model.to(device)
     print(f"network: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters, on {device}"
           + (f" ({torch.cuda.get_device_name(device)})" if device.type == 'cuda' else ""))
-    train, val = Frames(train_rows), Frames(val_rows)
+    # Frames labelled "no card" are negatives for the score (the training stations' only)
+    empties = [r for r in load(args.frames, statuses=('no_card',))
+               if train_names is None or r[1]['station'] in train_names]
+    train, val = Frames(train_rows, empties=empties), Frames(val_rows)
+    print(f"{len(train.empties)} frames without a card (negatives)")
 
     if args.steps > 0 and train.items:
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
