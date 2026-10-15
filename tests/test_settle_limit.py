@@ -47,17 +47,15 @@ class Settled(unittest.TestCase):
     def diagonal(self):
         return float(np.linalg.norm(CARD[2] - CARD[0]))
 
-    def test_the_default_limit_is_two_percent(self):
-        self.assertAlmostEqual(Config.AUTO_CAPTURE_MAX_MOVEMENT, 0.02)
+    def test_the_default_limit_is_one_and_a_half_percent(self):
+        self.assertAlmostEqual(Config.AUTO_CAPTURE_MAX_MOVEMENT, 0.015)
 
-    def test_a_jitter_of_one_to_two_percent_is_still(self):
-        for percent in (1.25, 1.7):                                    # along the diagonal
-            shift = self.diagonal() * percent / 100 / np.sqrt(2)
-            self.setUp()
-            self.assertTrue(self.after(shift), f"{percent}%")
+    def test_a_jitter_of_one_to_one_and_a_half_percent_is_still(self):
+        shift = self.diagonal() * 0.0125 / np.sqrt(2)                  # 1.25% along the diagonal
+        self.assertTrue(self.after(shift))
 
-    def test_two_and_a_half_percent_is_not_still(self):
-        shift = self.diagonal() * 0.025 / np.sqrt(2)
+    def test_two_percent_is_not_still(self):
+        shift = self.diagonal() * 0.02 / np.sqrt(2)
         self.assertFalse(self.after(shift))
 
     def test_the_limit_can_be_set(self):
