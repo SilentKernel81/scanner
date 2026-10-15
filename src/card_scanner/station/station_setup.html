@@ -143,9 +143,11 @@
       <canvas id="cropCanvas"></canvas>
     </div>
     <div id="cropTools" style="display:none">
-      <p class="hint">Raspberry Pi camera: drag a rectangle around the box to use only that part of the
-        picture, at the sensor's full resolution. The picture is shown as the sensor sees it;
-        turning it is done on the server's page.</p>
+      <p class="hint">Drag a rectangle around the box to use only that part of the picture, so every
+        camera shows the box the same way. A Raspberry Pi camera reads out just that part of its
+        sensor, at its full resolution; a USB camera sends the whole picture and the station cuts
+        it. The picture is shown as the camera sends it; turning it is done on the server's page.
+        After changing the crop, draw the fixed area again if you use one.</p>
       <div class="actions" style="margin-top:8px">
         <button type="button" id="cropClear">Use the whole picture</button>
         <span class="hint" id="cropText"></span>
@@ -400,7 +402,7 @@ $('pictureButton').onclick = async () => {
     $('picture').src = URL.createObjectURL(await response.blob());
     await $('picture').decode();  // wait until the browser has it, so its size is known
     $('pictureBox').style.display = 'block';
-    $('cropTools').style.display = camera === 'picamera' ? 'block' : 'none';
+    $('cropTools').style.display = 'block';   // any camera: a USB camera is cropped by the station
     say('pictureMessage', '');
     drawCrop();
   } catch (error) {
@@ -419,7 +421,7 @@ function showCropText() {
 // `draft` is the rectangle being dragged right now, if any.
 function drawCrop(draft) {
   const canvas = $('cropCanvas'), picture = $('picture');
-  if ($('cropTools').style.display === 'none') {  // not a Pi camera: nothing to draw
+  if ($('cropTools').style.display === 'none') {  // no picture taken yet: nothing to draw on
     canvas.width = canvas.height = 0;
     return;
   }
