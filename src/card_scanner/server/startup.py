@@ -67,6 +67,9 @@ def initialize_components():
     # now runs station_client.py beside this program)
     logger.info("Initializing scanner...")
     services.app_settings = Settings()
+    # How large the large copy of each capture is (the person's choice on the scanner page)
+    from card_scanner.core import inventory as inventory_module
+    inventory_module.set_full_capture_size(services.app_settings.get('capture_copy_size', inventory_module.FULL_CAPTURE_DEFAULT))
     services.stations = Stations()
     services.camera_hub = CameraHub(socketio, services.stations, make_remote_scanner)
     # A request that names no station has no camera: this one never connects

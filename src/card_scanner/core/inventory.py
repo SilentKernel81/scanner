@@ -6,6 +6,7 @@
 # cards (scan_inventory.db), which move into the collection with take_from.
 # ============================================================================
 import csv
+import os
 import functools
 import re
 import logging
@@ -32,8 +33,37 @@ CAPTURE_HEIGHT = 400  # px - ~25 KB per card
 # The pages never load these (a list row would 6x its size); they are in the data folder, hence
 # in scripts/backup.sh's archive, but not in the collection backups (data/backups/).
 FULL_CAPTURES_DIR = Config.DATA_DIR / 'captures_full'
-FULL_CAPTURE_HEIGHT = 1200  # px - pictures taller than this are shrunk; ~100-150 KB per card
+# The sizes a person can choose (Settings on the scanner page, `capture_copy_size` in
+# data/settings.json): the height in px a large copy is shrunk to. A computer station's capture
+# is ~1150 px tall, a phone's more: "large" keeps them about as they came. Measured on 40
+# captures at JPEG 85: ~56 KB, ~100 KB and ~145 KB each. "off": no large copy, thumbnails only
+FULL_CAPTURE_SIZES = {'off': 0, 'small': 600, 'medium': 900, 'large': 1200}
+FULL_CAPTURE_DEFAULT = 'large'
+FULL_CAPTURE_HEIGHT = FULL_CAPTURE_SIZES[FULL_CAPTURE_DEFAULT]  # px; 0: no large copy (set_full_capture_size)
 FULL_CAPTURE_QUALITY = 85  # JPEG quality
+
+
+def set_full_capture_size(name):
+    """Choose how large the large copies of new captures are (a key of FULL_CAPTURE_SIZES; an unknown one is the default)"""
+    global FULL_CAPTURE_HEIGHT
+    if name not in FULL_CAPTURE_SIZES:
+        name = FULL_CAPTURE_DEFAULT
+    FULL_CAPTURE_HEIGHT = FULL_CAPTURE_SIZES[name]
+    return name
+
+
+def full_capture_usage():
+    """(number of large copies, bytes they take) - a look at the folder, for the settings page"""
+    count = size = 0
+    try:
+        with os.scandir(FULL_CAPTURES_DIR) as entries:
+            for entry in entries:
+                if entry.is_file():
+                    count += 1
+                    size += entry.stat().st_size
+    except OSError:
+        pass  # no folder yet: nothing kept
+    return count, size
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
@@ -556,15 +586,17 @@ class InventoryManager(storage.Transactional):
                 return None
             name = f"{uuid.uuid4().hex}.jpg"
             # The large copy first and without failing the capture: it is the extra one
-            try:
-                FULL_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
-                large = image
-                if large.shape[0] > FULL_CAPTURE_HEIGHT:
-                    large = cv2.resize(large, (round(large.shape[1] * FULL_CAPTURE_HEIGHT / large.shape[0]),
-                                               FULL_CAPTURE_HEIGHT), interpolation=cv2.INTER_AREA)
-                cv2.imwrite(str(FULL_CAPTURES_DIR / name), large, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY])
-            except Exception as e:
-                logger.warning(f"Could not keep the large copy of {image_path}: {e}")
+            # (none at all when the person chose "off")
+            if FULL_CAPTURE_HEIGHT > 0:
+                try:
+                    FULL_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+                    large = image
+                    if large.shape[0] > FULL_CAPTURE_HEIGHT:
+                        large = cv2.resize(large, (round(large.shape[1] * FULL_CAPTURE_HEIGHT / large.shape[0]),
+                                                   FULL_CAPTURE_HEIGHT), interpolation=cv2.INTER_AREA)
+                    cv2.imwrite(str(FULL_CAPTURES_DIR / name), large, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY])
+                except Exception as e:
+                    logger.warning(f"Could not keep the large copy of {image_path}: {e}")
             height, width = image.shape[:2]
             if height > CAPTURE_HEIGHT:
                 image = cv2.resize(image, (round(width * CAPTURE_HEIGHT / height), CAPTURE_HEIGHT),

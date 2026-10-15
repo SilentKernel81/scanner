@@ -101,6 +101,14 @@
    "upload_backup"
   ],
   [
+   "/api/capture_copy",
+   [
+    "GET",
+    "POST"
+   ],
+   "set_capture_copy"
+  ],
+  [
    "/api/cards/printings",
    [
     "GET"
