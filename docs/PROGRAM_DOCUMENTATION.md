@@ -826,7 +826,7 @@ pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the bee
 the scanner's log - the station's output, its page's Activity, and `data/logs/app.log` on the
 server - says why, once a second (`_trace_waiting`): *no card outline found* (every 5 s), or
 *card not ready (n/N)* with the frame's movement, drift, sharpness change and sharpness against
-their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Debug trace** on (remembered per station: `debug_trace`), the scanner also
+their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Cameras → Advanced → Debug trace** on (remembered per station: `debug_trace`), the scanner also
 keeps the last 3 s of frames (640 px wide - what the outline detector works on) and saves them,
 plus the next second, to `data/debug_frames/<time>_<reason>/` (on the station's machine) when a card waits over 2 s or a
 new card is detected, or the card is "gone", less than 2 s after a capture (a likely duplicate:
@@ -1156,7 +1156,7 @@ answers are capped (`num_predict`), so a model that starts reasoning aloud can't
 
 ### Prompts
 
-Prompts live in `prompts.py` and are editable in Settings → Vision AI → **Edit prompts**. Each
+Prompts live in `prompts.py` and are editable in Settings → Card reading → **Edit prompts**. Each
 prompt (card identification, foil marker) has two parts:
 
 - **instructions** - what the card looks like and where each value is; this is what the editor
@@ -1722,9 +1722,7 @@ transaction under the collection's lock, so the second sees the first's result o
 
 ### Backups
 
-The gear button opens the page's settings drawer (`/collection#settings` opens it directly; the
-scanner pages' drawers link there, and this one links to a scanner page's settings for camera,
-AI and sound - `settings_url`).
+They are on the settings page, **Collection and data** (see [The settings page](#the-settings-page)).
 **Back up now** (`POST /api/backups`, `backups.create`) writes `data/backups/<date_time>/`:
 `backup.db` with plain copies of `inventory`, `inventory_captures`, `inventory_sources`, `trades` and `trade_cards` of the collection
 (`collection_*`) and of the scanned cards (`scanned_*`), `decks`, `deck_cards` and an `info`
@@ -2171,13 +2169,35 @@ beside the pointer - the scanner's script has its own `$`);
 `static/css/style.css` has the dark / light theme (CSS variables).
 
 **The scanner page**: top bar with counters; search bar and camera on the left, card panel on
-the right, activity log below; settings in a slide-out drawer. It polls `/api/detection_status`
+the right, activity log below; its settings are on the settings page. It polls `/api/detection_status`
 every 500 ms for the status pill (and `camera_error`, the message over the video), shows
 `/video_feed?station=<id>` (MJPEG: each new frame once), and talks to the server over
 Socket.IO. Its socket joins its station's room, and its `/api/` requests carry `?station=`, so
-it only sees its own camera - see [A page per camera](#a-page-per-camera). The settings drawer
-has the station's own settings (scanning, camera), the list of stations (rename, location, undo
-its last card, forget), and the shared ones (vision AI, prompts, card database, sound).
+it only sees its own camera - see [A page per camera](#a-page-per-camera). The prompt editor
+(a modal) stays on this page; the settings page's "Edit prompts" opens it (`/scan/<id>#prompts`).
+
+#### The settings page
+
+`/settings` (`server/pages.py: settings_page`, `templates/settings.html`, `static/js/settings.js`,
+`static/css/settings.css`; since 2026-10-15 - before it each scanner page and the collection page
+had a drawer of its own with a different part of the settings). The header's gear is a link to it
+on every page. Five categories, a list on the left and one at a time on the right (`#cameras`,
+`#sounds`, `#reading`, `#data`, `#server` in the address; `/scan/<id>#settings` and
+`/collection#settings` go to it):
+
+| Category | Holds |
+|---|---|
+| **Cameras** | one camera chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Camera autofocus, Check the focus every, Camera rotation, the fixed area's state (it is drawn on the camera's page); under Advanced: Debug trace |
+| **Sounds** | Sound effects, Capture beep, Card added, Volume - for every camera |
+| **Card reading** | Read with OCR first, the vision AI (provider, key, model), Prompts (the summary, and a link to the editor) |
+| **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames), under Advanced: Rebuild database schema |
+| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, under Advanced: Debug mode |
+
+Each setting is saved when it is changed, through the routes and Socket.IO events the drawers
+used (nothing new on the server side except the page's route). Not carried over: the
+"Auto-detection" switch (its state was never read back from the camera; the scanner page
+shows "Manual Mode" no more). A scanner page that is open while a setting changes on the
+settings page reads them again when its tab is looked at again. `tests/test_settings_page.py`.
 
 Socket.IO events of the pages (namespace `/`; the stations' own connection is described under
 [A camera station](#a-camera-station)):

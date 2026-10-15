@@ -38,12 +38,16 @@ def scan_page(station_id):
     return render_template('scanner.html', station=stations.get(station_id))
 
 
+@app.route('/settings')
+def settings_page():
+    """Every setting, in categories (cameras, sounds, card reading, collection and data, server)"""
+    return render_template('settings.html')
+
+
 @app.context_processor
 def page_links():
-    """settings_url: where the camera / AI settings are - a scanner page (the first station's when there are several)"""
-    if not stations or not stations.all():
-        return {'settings_url': '/#settings'}
-    return {'settings_url': f"/scan/{stations.all()[0]['id']}#settings"}
+    """settings_url: the settings page (since 2026-10-15 one page for all of them)"""
+    return {'settings_url': '/settings'}
 
 
 @app.route('/collection')

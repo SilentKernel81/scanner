@@ -89,13 +89,14 @@ class Routes(unittest.TestCase):
         answer = self.client.post('/api/network_access', json={'enabled': True}, base_url='http://localhost').get_json()
         self.assertEqual((answer['enabled'], services.app_settings.get('network_access')), (True, True))
 
-    def test_the_settings_drawer_has_the_program_section(self):
+    def test_the_settings_page_has_the_server_section(self):
         services.app_mode = True
-        page = self.client.get('/collection', base_url='http://localhost').get_data(as_text=True)
+        page = self.client.get('/settings', base_url='http://localhost').get_data(as_text=True)
         self.assertIn('Quit Card Scanner', page)
         self.assertIn('toggle-network-access', page)
+        self.assertIn('Restart Card Scanner', page)
         services.app_mode = False
-        page = self.client.get('/collection', base_url='http://localhost').get_data(as_text=True)
+        page = self.client.get('/settings', base_url='http://localhost').get_data(as_text=True)
         self.assertNotIn('Quit Card Scanner', page)
         self.assertIn('Restart Card Scanner', page)
 

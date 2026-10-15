@@ -1,4 +1,4 @@
-// Collection page: inventory management, trades, statistics, and the settings drawer (backups).
+// Collection page: inventory management, trades and statistics (backups and storage: the settings page).
 // Shared helpers come from common.js (escapeHtml, dialogs, notify, the edit dialog, sorts) and
 // library.js ($, api, money, optionsHtml, valueDialog, the card preview ...).
 // The decks were part of this page until 2026-10-13: they are pages of their own now
@@ -1006,136 +1006,6 @@ function renderStats() {
 
 
 // ============================================================================
-// Settings drawer: backups of the collection, the scanned cards and the decks
-// ============================================================================
-
-function openSettings() {
-    $('settings-drawer').classList.add('show');
-    loadBackups();
-    loadCaptureCopy();
-}
-
-// The large copy kept with each capture, for every camera: what is chosen, and what is kept so far
-function showCaptureCopy(info) {
-    $('capture-copy-size').value = info.size;
-    $('keep-frames').checked = !!info.keep_frames;
-    $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `
-        + (info.keep_frames ? 'They stay after their scanned cards are cleared or added to the collection (until the 3 GB limit).'
-                            : 'The frame of a scanned card is removed when that card is cleared or added to the collection. Label the frames you want for training first, or turn this on.');
-    $('capture-copy-hint').textContent = (info.size === 'off'
-        ? 'Only the thumbnail of each captured card is kept. '
-        : 'The size of the picture of each captured card that is kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
-        + `${info.count} kept so far, ${info.megabytes} MB (data/captures_full). It applies to captures made from now on, from every camera; the ones already kept stay as they are.`;
-}
-
-async function loadCaptureCopy() {
-    const data = await api('/api/capture_copy');
-    if (data) showCaptureCopy(data);
-}
-
-async function saveKeepFrames(keep) {
-    const data = await api('/api/capture_copy', {method: 'POST', body: {keep_frames: keep}});
-    if (!data) return loadCaptureCopy();
-    showCaptureCopy(data);
-    notify(keep ? 'Camera frames stay after their cards are cleared or added' : 'Camera frames go with their cards', 'success');
-}
-
-async function saveCaptureCopy(size) {
-    const data = await api('/api/capture_copy', {method: 'POST', body: {size}});
-    if (!data) return loadCaptureCopy();
-    showCaptureCopy(data);
-    notify(size === 'off' ? 'No large copies will be kept' : `Large copies will be ${size}`, 'success');
-}
-
-function closeSettings() {
-    $('settings-drawer').classList.remove('show');
-    if (window.location.hash === '#settings') history.replaceState(null, '', window.location.pathname);
-}
-
-async function loadBackups() {
-    const data = await api('/api/backups');
-    if (!data) return;
-    renderBackups(data.backups);
-    $('backup-every').value = String(data.schedule.every_hours);
-    $('backup-keep').value = data.schedule.keep;
-    $('backup-keep').disabled = !data.schedule.every_hours;
-}
-
-async function saveBackupSchedule(change) {
-    // How often automatic backups are made, how many are kept (the server answers with what it took)
-    const data = await api('/api/backups/schedule', {method: 'POST', body: change});
-    if (!data) return loadBackups();
-    $('backup-every').value = String(data.schedule.every_hours);
-    $('backup-keep').value = data.schedule.keep;
-    $('backup-keep').disabled = !data.schedule.every_hours;
-    notify(data.schedule.every_hours ? 'Automatic backups saved' : 'Automatic backups switched off', 'success');
-}
-
-function renderBackups(backups) {
-    $('backup-list').innerHTML = backups.map(backup => `
-        <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
-            <div>
-                <div class="idea-name">${escapeHtml(backup.created.slice(0, 16))}${backup.automatic || backup.daily ? ' <span class="backup-auto">automatic</span>' : backup.uploaded ? ' <span class="backup-auto">uploaded</span>' : ''}</div>
-                ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
-                <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
-            </div>
-            <button class="btn btn-small" data-backup-action="restore">Restore</button>
-            <a class="mini-btn" href="/api/backups/${encodeURIComponent(backup.id)}/download" download title="Download this backup as a zip file, to keep a copy elsewhere"><svg class="icon"><use href="#i-download"/></svg></a>
-            <button class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
-        </div>`).join('') || '<div class="hint">No backups yet.</div>';
-}
-
-async function createBackup() {
-    const button = $('backup-create');
-    button.disabled = true;
-    const data = await api('/api/backups', {method: 'POST', body: {note: $('backup-note').value}});
-    button.disabled = false;
-    if (!data) return;
-    $('backup-note').value = '';
-    renderBackups(data.backups);
-    notify(`Backup made: ${plural(data.backup.cards, 'card')}, ${data.backup.scanned} scanned, ${plural(data.backup.decks, 'deck')}`, 'success');
-}
-
-async function uploadBackup(file) {
-    // A backup downloaded earlier joins the list; restoring it is a separate step
-    const button = $('backup-upload');
-    button.disabled = true;
-    button.textContent = 'Uploading...';
-    const form = new FormData();
-    form.append('file', file);
-    const data = await api('/api/backups/upload', {method: 'POST', body: form});
-    button.disabled = false;
-    button.textContent = 'Upload a backup file';
-    if (!data) return;
-    renderBackups(data.backups);
-    notify(`Backup of ${data.backup.created.slice(0, 16)} added to the list: ${plural(data.backup.cards, 'card')}, ${plural(data.backup.decks, 'deck')}`, 'success');
-}
-
-async function backupAction(row, action) {
-    const id = row.dataset.backup, created = row.dataset.created;
-    if (action === 'restore') {
-        const ok = await confirmDialog({title: `Restore the backup of ${created}?`, confirmText: 'Restore', danger: true,
-            message: 'The collection, the scanned cards and the decks go back to how they were then - everything '
-                + 'changed since is replaced. What you have now is backed up first, so you can go back to it.'});
-        if (!ok) return;
-        const data = await api(`/api/backups/${id}/restore`, {method: 'POST'});
-        if (!data) return loadBackups();  // a backup of the state before may have been made
-        renderBackups(data.backups);
-        notify(`Backup of ${created} restored`, 'success');
-        selected.clear();
-        loadInventory();
-        loadScanned();
-        loadDeckList();  // the decks' names may be different (the location filter lists them)
-    } else {
-        const ok = await confirmDialog({title: `Delete the backup of ${created}?`, confirmText: 'Delete', danger: true,
-            message: "Your cards are not changed. This can't be undone."});
-        if (!ok) return;
-        const data = await api(`/api/backups/${id}`, {method: 'DELETE'});
-        if (data) renderBackups(data.backups);
-    }
-}
-
-// ============================================================================
 // Trades: cards set aside until a trade is confirmed
 // ============================================================================
 
@@ -1537,7 +1407,6 @@ const OVERLAYS = [
     ['value-modal', () => closeValueDialog(null)],
     ['capture-modal', closeCaptures],
     ['edit-card-modal', closeEditCard],
-    ['settings-drawer', closeSettings],
 ];
 
 function bindEvents() {
@@ -1560,24 +1429,8 @@ function bindEvents() {
     });
     bindCardPreview();
 
-    // Settings drawer (backups); /collection#settings opens it (the scanner's settings link here)
-    $('settings-close').addEventListener('click', closeSettings);
-    $('backup-create').addEventListener('click', createBackup);
-    $('backup-upload').addEventListener('click', () => $('backup-upload-input').click());
-    $('backup-upload-input').addEventListener('change', event => {
-        if (event.target.files[0]) uploadBackup(event.target.files[0]);
-        event.target.value = '';  // the same file can be chosen again
-    });
-    $('capture-copy-size').addEventListener('change', event => saveCaptureCopy(event.target.value));
-    $('keep-frames').addEventListener('change', event => saveKeepFrames(event.target.checked));
-    $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
-    $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value) || 1}));
-    $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });
-    $('backup-list').addEventListener('click', event => {
-        const button = event.target.closest('[data-backup-action]');
-        if (button) backupAction(button.closest('[data-backup]'), button.dataset.backupAction);
-    });
-    if (window.location.hash === '#settings') openSettings();
+    // The settings drawer is gone: backups and storage are on the settings page
+    if (window.location.hash === '#settings') window.location.replace('/settings#data');
 
     // Overlays: Escape closes the topmost one open, a click outside the one clicked
     bindOverlays(OVERLAYS);

@@ -1,4 +1,4 @@
-{# The header of every page (page: 'scanner', 'stations' - the cameras' overview - 'collection' or 'decks'): two rows. Brand, game and the settings
+{# The header of every page (page: 'scanner', 'stations' - the cameras' overview - 'collection', 'decks' or 'settings'): two rows. Brand, game and the settings
    button above, the page links below them: all in the same place from page to page; only the part right of the
    links (.topbar-page) is the page's own. The upper row scrolls away, the lower one stays (style.css: .topbar) #}
 <header class="topbar">
@@ -14,7 +14,7 @@
             {% elif page in ('collection', 'decks') %}
             <span class="game-label" id="game-label"></span>
             {% endif %}
-            <button class="icon-btn topbar-settings" id="settings-open" onclick="openSettings()" title="Settings{{ ' and backups' if page == 'collection' }}"><svg class="icon"><use href="#i-settings"/></svg></button>
+            <a class="icon-btn topbar-settings {{ 'is-active' if page == 'settings' }}" id="settings-open" href="{{ url_for('settings_page') }}" title="Settings: cameras, sounds, card reading, backups and the server"><svg class="icon"><use href="#i-settings"/></svg></a>
         </div>
     </div>
     <div class="topbar-nav">
@@ -58,7 +58,7 @@
                 </div>
                 </div>
             </div>
-            {% elif page == 'stations' %}
+            {% elif page in ('stations', 'settings') %}
             <div class="topbar-page"></div>
             {% elif page == 'decks' %}
             {# The deck list's three tabs; hidden while one deck is open (decks.js) #}
