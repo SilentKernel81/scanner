@@ -352,11 +352,11 @@ class CardScanner:
             self.settle_anchor = points
         drift = np.linalg.norm(points - self.settle_anchor, axis=1).max() / card_size
         sharpness_change = abs(sharpness - previous_sharpness) / max(previous_sharpness, 1e-6)
-        image_change = self._thumbnail_difference(thumbnail, previous_thumbnail)
+        image_change = self._thumbnail_difference(thumbnail, previous_thumbnail, smooth=True)
 
         # A drop (or a hand) makes the card jump or change far beyond camera noise
         # (measured on a card lying still: movement <= 0.4%, image change <= 0.07)
-        self.card_disturbed = movement > 0.03 or image_change > 0.3
+        self.card_disturbed = movement > 0.03 or image_change > self.IMAGE_CHANGE_LIMIT
         self.last_frame_change = (movement, image_change)
         self.settle_metrics = (movement, drift, sharpness_change, sharpness)
         limit = Config.AUTO_CAPTURE_MAX_MOVEMENT
@@ -372,11 +372,26 @@ class CardScanner:
         gray = cv2.cvtColor(cv2.resize(card, (32, 45), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
         return (gray - gray.mean()) / (gray.std() + 1e-6)
 
+    # What counts as "the picture of the card changed" (smoothed thumbnails, see _thumbnail_difference).
+    # Measured 2026-10-15 on frames of the same card captured twice in a row against frames of
+    # different cards (Pi 5, corner network): the same card differed up to 0.22 (it was 0.45
+    # unsmoothed, from the outline's wobble alone), different cards 0.51 and more
+    IMAGE_CHANGE_LIMIT = 0.35
+
     @staticmethod
-    def _thumbnail_difference(a, b):
-        """Mean difference between two card thumbnails (0 = identical)"""
+    def _thumbnail_difference(a, b, smooth=False):
+        """
+        Mean difference between two card thumbnails (0 = identical). `smooth`: blurred first and
+        normalised again - the outline of a still card wobbles by 1-1.5% of its size from frame to
+        frame (the corner network), which shifts a detailed card's thumbnail by a fraction of a pixel
+        and made one card "change" by 0.3-0.5 every frame, so it was captured again and again.
+        Blurred, the same card differs by <= 0.22, a different one by >= 0.5.
+        """
         if a is None or b is None or a.shape != b.shape:
             return 0.0
+        if smooth:
+            a, b = (cv2.GaussianBlur(x, (0, 0), 1.5) for x in (a, b))
+            a, b = ((x - x.mean()) / (x.std() + 1e-6) for x in (a, b))
         return float(np.abs(a - b).mean())
 
     def _new_card_arrived(self, gap):
@@ -393,7 +408,8 @@ class CardScanner:
         self.new_card_gap_only = False
         if self.card_disturbed:
             return True
-        if self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail) > 0.3:
+        if self._thumbnail_difference(self.previous_thumbnail, self.captured_thumbnail,
+                                      smooth=True) > self.IMAGE_CHANGE_LIMIT:
             return True
         movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
         if gap >= 1 and movement > 0.008:
