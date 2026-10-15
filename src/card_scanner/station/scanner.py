@@ -703,6 +703,10 @@ class CardScanner:
             color, label = (255, 165, 0), f"Fixed area [Stabilizing {self.stable_frames}/{self.required_stable_frames}]"
         else:
             color, label = (0, 255, 0), "Fixed area [Ready]"
+        # A capture: the card (its outline when one was found inside the area, else the whole area)
+        # washed green, fading out - as in outline mode
+        if present:
+            self._flash_capture(annotated, corners, (x1, y1, x2, y2))
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         text_scale = max(0.7, width / 1280 * 0.7)
         cv2.putText(annotated, label, (x1, max(int(30 * text_scale), y1 - 10)),
@@ -714,6 +718,12 @@ class CardScanner:
                 and self.stable_frames >= self.required_stable_frames
                 and time.time() - self.last_auto_capture_time >= self.auto_capture_delay):
             self._trigger_auto_capture()
+
+    def _flash_capture(self, annotated, corners, box):
+        """The wash over a card just captured: strongest at the capture, gone after CAPTURE_FLASH_SECONDS"""
+        age = time.time() - self.capture_flash_at
+        if 0 <= age < CAPTURE_FLASH_SECONDS:
+            self._wash_card(annotated, corners, box, CAPTURE_FLASH_ALPHA * (1 - age / CAPTURE_FLASH_SECONDS))
 
     @staticmethod
     def _wash_card(annotated, corners, box, alpha):
@@ -1287,10 +1297,7 @@ class CardScanner:
                             box_color = (255, 165, 0)  # Orange when stabilizing
 
                         # A capture: the whole card washed green, fading out (instead of only the outline)
-                        flash_age = time.time() - self.capture_flash_at
-                        if flash_age < CAPTURE_FLASH_SECONDS:
-                            self._wash_card(annotated, display_corners, (x1, y1, x2, y2),
-                                            CAPTURE_FLASH_ALPHA * (1 - flash_age / CAPTURE_FLASH_SECONDS))
+                        self._flash_capture(annotated, display_corners, (x1, y1, x2, y2))
 
                         # Draw the card outline (the fixed area has a box without one)
                         if display_corners is not None:
