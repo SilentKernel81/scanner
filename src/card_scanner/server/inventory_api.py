@@ -3,6 +3,8 @@
 # The inventory's routes: list, edit, delete, bulk edits, import / export, clear.
 # ============================================================================
 import csv
+import tempfile
+from pathlib import Path
 from datetime import datetime
 from flask import Response, jsonify, request, send_file
 import io
@@ -300,18 +302,37 @@ def import_inventory():
                 # Nothing is replaced by a file with no card that could be matched
                 return jsonify({'success': False, 'error': f"No card in this {parsed['format']} file was found "
                                                            f"in the {game.label} card database"}), 400
+            if replace_existing and (parsed['not_found'] or parsed.get('unnamed')):
+                # As the app's own file does: a replacement with rows left out would delete the
+                # cards those rows stand for. Nothing is changed.
+                missing = parsed['not_found']
+                listed = ', '.join(missing[:10]) + (f" and {len(missing) - 10} more" if len(missing) > 10 else '')
+                reasons = [f"{len(missing)} card{'s' if len(missing) != 1 else ''} not found in the "
+                           f"{game.label} card database" + (f" ({listed})" if missing else '')] if missing else []
+                if parsed.get('unnamed'):
+                    reasons.append(f"{parsed['unnamed']} row{'s' if parsed['unnamed'] != 1 else ''} without a card name")
+                return jsonify({'success': False,
+                                'error': f"{' and '.join(reasons)} - the collection was not replaced. Correct the "
+                                         'file, or add it instead of replacing.'}), 400
             stats = inventory_area().import_entries(parsed['entries'], game.id, replace_existing=replace_existing)
-            stats.update(format=parsed['format'], by_name=parsed['by_name'],
-                         skipped=len(parsed['not_found']), not_found=parsed['not_found'][:10])
+            # skipped: every row that was left out - cards not found, and rows without a name
+            unnamed = parsed.get('unnamed', 0)
+            stats.update(format=parsed['format'], by_name=parsed['by_name'], unnamed=unnamed,
+                         skipped=len(parsed['not_found']) + unnamed, not_found=parsed['not_found'][:10])
             if parsed['not_found']:
                 logger.warning(f"Import: {len(parsed['not_found'])} cards not found: "
                                + ', '.join(parsed['not_found'][:50]))
+            if unnamed:
+                logger.warning(f"Import: {unnamed} rows without a card name left out")
         elif {'card name', 'set'} <= columns:
             # The app's own columns (the "Card Scanner" export, and CSVs written before it)
             upload_dir = Config.DATA_DIR / 'uploads'
             upload_dir.mkdir(parents=True, exist_ok=True)
-            temp_file_path = upload_dir / f"import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            temp_file_path.write_text(content, newline='')
+            # A file of its own per request: two uploads in the same second used to share a name
+            with tempfile.NamedTemporaryFile('w', newline='', encoding='utf-8', dir=upload_dir,
+                                             prefix='import_', suffix='.csv', delete=False) as handle:
+                handle.write(content)
+                temp_file_path = Path(handle.name)
             try:
                 stats = inventory_area().import_csv(temp_file_path, game.id, list(game.finishes),
                                                     replace_existing=replace_existing)

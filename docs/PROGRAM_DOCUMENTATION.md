@@ -1317,14 +1317,21 @@ imported there on 2026-10-14 (Moxfield's own import: not tried); every game: "Ca
 reads another app's file (`import_formats` names them). `POST /api/import_inventory` picks by
 the file's columns: Moxfield (`Count`, `Name`, `Edition`) → `Magic.import_rows` matches each row
 to its printing by set code + collector number as written (`get_card_by_set_number(exact=True)`:
-"M19-128" of The List), then the number's variants if the name agrees, then the name alone
-(counted as `by_name`: maybe another printing); `foil`/`etched` become foil, or surge for a
+"M19-128" of The List) - when the card's front name agrees with the row's, since 2026-10-15
+(before, an exact match was taken whatever the name said) - then the number's variants if the
+name agrees, then the name alone (counted as `by_name`: maybe another printing); `foil`/`etched` become foil, or surge for a
 surge foil printing; Moxfield's conditions map to the ones here (Lightly Played → Excellent,
 Moderately → Good, Heavily → Played, Damaged → Poor); tags are kept, the location is empty
 (Moxfield has none - entries that differ only by location merge) → `inventory.import_entries`.
 The app's own columns (`Card Name`, `Set`) → `import_csv`; CSVs written before the `Card ID` /
 `Set Code` columns existed import without a link to their printing. Any other
-file, or one where no card is found, is refused before "replace" deletes anything.
+file, or one where no card is found, is refused before "replace" deletes anything - and since
+2026-10-15 so is a Moxfield replacement in which any row is unresolved (`not_found`) or has no
+name (`unnamed`), as the app's own file already was: the answer names the cards, nothing is
+changed, and adding instead still takes the known ones and lists the rest (`skipped` counts
+not-found cards and unnamed rows both; `unnamed` says how many of them). Every upload of the
+app's own CSV is written to a temporary file of its own in `data/uploads/` (`tempfile`), removed
+afterwards. Tests: `tests/test_import_replace.py`.
 
 **The database files, in common** (`storage.py`, since 2026-10-09). Every manager's connection
 comes from `storage.connect`: usable from any thread (each manager has its lock), rows by

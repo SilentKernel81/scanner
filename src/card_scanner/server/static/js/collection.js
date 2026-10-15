@@ -843,8 +843,10 @@ async function importInventory() {
         const data = await api('/api/import_inventory' + areaQuery(), {method: 'POST', body: form});
         if (data) {
             const stats = data.stats;
-            const missing = stats.not_found.length
-                ? ` Not found: ${stats.not_found.join(', ')}${stats.skipped > stats.not_found.length ? ', ...' : ''}.` : '';
+            const unnamed = stats.unnamed || 0;   // rows without a card name: counted in `skipped`
+            const missing = (stats.not_found.length
+                ? ` Not found: ${stats.not_found.join(', ')}${stats.skipped - unnamed > stats.not_found.length ? ', ...' : ''}.` : '')
+                + (unnamed ? ` ${unnamed} row${unnamed === 1 ? '' : 's'} without a card name.` : '');
             notify(`${stats.format} import: ${stats.added} added, ${stats.updated} added to cards you had`
                 + (stats.by_name ? `, ${stats.by_name} matched by name only (check their printing)` : '')
                 + (stats.skipped ? `, ${stats.skipped} skipped.` : '.') + (stats.errors ? ` ${stats.errors} errors.` : '') + missing,
