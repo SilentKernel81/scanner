@@ -207,6 +207,29 @@ body.arena-view .inventory-thumb {
     background: var(--surface-2);
 }
 
+.multi-panel .multi-not {
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+    color: var(--text-muted, var(--text));
+}
+
+.multi-panel .multi-heading {
+    margin-top: 4px;
+    padding: 4px 8px 2px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--text-subtle);
+}
+
+.multi-panel .multi-find {
+    margin: 4px 0;
+}
+
+.multi-panel [hidden] {
+    display: none !important;
+}
+
 .multi-panel .multi-empty {
     padding: 6px 8px;
     color: var(--text-subtle);
