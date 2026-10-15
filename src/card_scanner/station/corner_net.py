@@ -12,8 +12,9 @@
 # expected position under a softmax of one map per corner, with a score for "a card is here".
 #   1. the whole frame in one window: the card is small there, this only finds where it is;
 #   2. a window of 1.45 x the card's box, cut from the frame itself: the corners come out
-#      precisely. Done twice. With the card's previous outline known (a card held in view), the
-#      first stage is skipped and the windows are put around that outline.
+#      precisely. Once: a second window gave the same accuracy (IoU 0.978 both on 127 labelled
+#      frames) and cost another 30 ms on a Pi 4. With the card's previous outline known (a card
+#      held in view), the first stage is skipped and the window is put around that outline.
 
 import logging
 import threading
@@ -38,7 +39,7 @@ STD = np.array([0.229, 0.224, 0.225], np.float32)
 class CornerNet:
     """The network, loaded once; `find` reads a frame. One instance serves all threads (a lock)."""
 
-    def __init__(self, path=MODEL_FILE, refine=2):
+    def __init__(self, path=MODEL_FILE, refine=1):
         self.net = cv2.dnn.readNetFromONNX(str(path))
         self.refine = refine           # windows of the second stage
         self._lock = threading.Lock()  # a dnn network is not safe to run from two threads at once
