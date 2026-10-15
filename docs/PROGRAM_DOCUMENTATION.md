@@ -906,7 +906,7 @@ The exported file (3 MB) loads in OpenCV's dnn and agrees with PyTorch to 4e-6; 
 window on a laptop CPU. Not tested: speed on a Pi, the Android build.
 
 *In the station* (`station/corner_net.py`; the weights are `station/corner_net.onnx`, 3 MB, beside it
-and so inside the images' `station/` folder; trained on all 253 labelled frames, 3 "no card" ones
+and so inside the images' `station/` folder; trained on 253 labelled frames, 3 "no card" ones
 as negatives): `CornerNet.find` runs the whole frame in one window, then one window around the card (a
 second gave the same IoU, 0.978 on 127 labelled frames) with OpenCV's dnn (no PyTorch on a
 station); given the card's previous outline it skips the whole-frame stage. On a Pi 4
@@ -916,6 +916,17 @@ refinement windows it was 86 / 57 ms. The Android app has the same network (`Cor
 `CardFinder.kt`, `assets/corner_net.onnx`): on an emulator (OpenCV 4.14) its corners match this
 code's to 0.05 px on four frames, cold and tracked (`CornerNetParityTest`); Settings → "Find
 cards with the corner network" turns it off.
+
+*Retrained on 2026-10-15 (the file in the stations since then)*: 42 more frames were labelled, the
+most doubtful outlines of the Pi 5's runs of the same 69-card pile (odd shapes, tilted edges, the
+doubles' frames; `~/mtg-detector-data/label_next`), and the network was trained again on all 299
+labels with the same recipe (3000 steps, ~2 min on an RTX 3050; file size and speed unchanged).
+Held out by whole runs, twice (the same physical cards, so optimistic): 16 frames mean IoU 0.933 ->
+0.966 (worst 0.870 -> 0.939), 26 frames 0.932 -> 0.954 (worst 0.898 -> 0.921). On all 295 labelled
+frames (trained on): 0.970 -> 0.975, worst 0.870 -> 0.935. Live, the same 69 cards on the Pi 5: 69
+captures, none for review, no double, no wait but the first card's (the run before: Monica's left side
+was cut off and the card went to review). Not tested on the Pi 4, the phone (its app has the old
+network until its asset is replaced) or a different pile.
 
 *Live runs of the same 57 sleeved cards with the network on (2026-10-15, one pile, each run once;
 the outline detector alone had needed fixed area on the Pi and lost the card for ~6 s at a time
