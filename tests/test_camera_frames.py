@@ -250,6 +250,74 @@ class LabelTool(unittest.TestCase):
         self.assertEqual(self.frames.save('aa11', {'status': 'no_card'})['corners'], None)
 
 
+class CaptureCopySize(unittest.TestCase):
+    """The size of the large copy is the person's choice (inventory.set_full_capture_size, /api/capture_copy)"""
+
+    def setUp(self):
+        from test_ownership import TemporaryData
+        self.data = TemporaryData('setUp')
+        self.data.setUp()
+        cv2.imwrite(str(self.data.photo), np.full((1500, 1000, 3), 128, np.uint8))
+        self.inv = sys.modules['card_scanner.core.inventory']
+        self.saved = self.inv.FULL_CAPTURE_HEIGHT
+
+    def tearDown(self):
+        self.inv.FULL_CAPTURE_HEIGHT = self.saved
+        self.data.tearDown()
+
+    def kept(self):
+        from test_ownership import CARD, GAME
+        self.data.scan.add_card(CARD, GAME, 'regular', quiet=True, capture=self.data.photo)
+        return self.data.scan.conn.execute('SELECT file FROM inventory_captures ORDER BY id DESC').fetchone()[0]
+
+    def test_each_size_gives_its_height(self):
+        for name, height in (('small', 600), ('medium', 900), ('large', 1200)):
+            self.assertEqual(self.inv.set_full_capture_size(name), name)
+            file = self.kept()
+            self.assertEqual(cv2.imread(str(self.inv.FULL_CAPTURES_DIR / file)).shape[0], height)
+            self.assertEqual(cv2.imread(str(self.inv.CAPTURES_DIR / file)).shape[0], 400)  # the thumbnail is the same
+
+    def test_off_keeps_the_thumbnail_only(self):
+        self.inv.set_full_capture_size('off')
+        file = self.kept()
+        self.assertTrue((self.inv.CAPTURES_DIR / file).is_file())
+        self.assertFalse((self.inv.FULL_CAPTURES_DIR / file).exists())
+        self.assertEqual(self.inv.full_capture_usage(), (0, 0))
+
+    def test_an_unknown_size_is_the_default_and_usage_counts_what_is_kept(self):
+        self.assertEqual(self.inv.set_full_capture_size('enormous'), 'large')
+        self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 1200)
+        self.kept()
+        self.kept()
+        count, size = self.inv.full_capture_usage()
+        self.assertEqual(count, 2)
+        self.assertGreater(size, 0)
+
+    def test_the_route_chooses_and_refuses(self):
+        from card_scanner.server import settings_events
+        from card_scanner.server.state import app
+
+        class Store(dict):
+            def set(self, key, value):
+                self[key] = value
+        store = Store()
+        with mock.patch.object(settings_events, 'app_settings', store):
+            with app.test_request_context('/api/capture_copy', method='POST', json={'size': 'small'}):
+                answer = settings_events.set_capture_copy()
+            self.assertEqual(answer.get_json()['size'], 'small')
+            self.assertEqual(store['capture_copy_size'], 'small')
+            self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 600)
+            with app.test_request_context('/api/capture_copy', method='POST', json={'size': 'huge'}):
+                refused, status = settings_events.set_capture_copy()
+            self.assertEqual(status, 400)
+            self.assertIn('error', refused.get_json())          # the key the pages' api() shows
+            self.assertEqual(self.inv.FULL_CAPTURE_HEIGHT, 600)  # unchanged
+            with app.test_request_context('/api/capture_copy', method='GET'):
+                info = settings_events.set_capture_copy().get_json()
+            self.assertEqual((info['success'], info['size']), (True, 'small'))
+            self.assertEqual(info['sizes']['large'], 1200)
+
+
 class ScoreTool(unittest.TestCase):
     """scripts/score_detector.py: the overlap measure and the replay over labelled frames"""
 

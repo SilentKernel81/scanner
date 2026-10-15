@@ -23,6 +23,7 @@ class Settings:
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
         'ocr_first': True,  # light-ocr reads each card; the vision AI only when that isn't a confirmed match
         'debug_trace': False,  # Log filtered detections, save frames of slow or doubtful captures
+        'capture_copy_size': 'large',  # The large copy kept with each capture: off / small / medium / large
         'sound_enabled': True,  # Sound effects on the scanner page
         'sound_volume': 30,  # 0-100
         'backup_every_hours': 24,  # Automatic backups: how often (0 = off; backups.SCHEDULE_HOURS)

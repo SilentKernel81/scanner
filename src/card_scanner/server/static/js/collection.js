@@ -902,6 +902,28 @@ function renderStats() {
 function openSettings() {
     $('settings-drawer').classList.add('show');
     loadBackups();
+    loadCaptureCopy();
+}
+
+// The large copy kept with each capture, for every camera: what is chosen, and what is kept so far
+function showCaptureCopy(info) {
+    $('capture-copy-size').value = info.size;
+    $('capture-copy-hint').textContent = (info.size === 'off'
+        ? 'Only the thumbnail of each captured card is kept. '
+        : 'The size of the picture of each captured card that is kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
+        + `${info.count} kept so far, ${info.megabytes} MB (data/captures_full). It applies to captures made from now on, from every camera; the ones already kept stay as they are.`;
+}
+
+async function loadCaptureCopy() {
+    const data = await api('/api/capture_copy');
+    if (data) showCaptureCopy(data);
+}
+
+async function saveCaptureCopy(size) {
+    const data = await api('/api/capture_copy', {method: 'POST', body: {size}});
+    if (!data) return loadCaptureCopy();
+    showCaptureCopy(data);
+    notify(size === 'off' ? 'No large copies will be kept' : `Large copies will be ${size}`, 'success');
 }
 
 function closeSettings() {
@@ -1397,6 +1419,7 @@ function bindEvents() {
         if (event.target.files[0]) uploadBackup(event.target.files[0]);
         event.target.value = '';  // the same file can be chosen again
     });
+    $('capture-copy-size').addEventListener('change', event => saveCaptureCopy(event.target.value));
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value) || 1}));
     $('backup-note').addEventListener('keydown', event => { if (event.key === 'Enter') createBackup(); });

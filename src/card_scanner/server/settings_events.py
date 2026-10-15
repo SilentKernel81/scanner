@@ -5,6 +5,7 @@
 from flask import jsonify, request
 from flask_socketio import emit
 
+from card_scanner.core import inventory as inventory_module
 from card_scanner.core.card_ocr import CardOcr
 from card_scanner.config import Config
 from card_scanner import games
@@ -150,6 +151,35 @@ def get_scan_settings():
         'sound': sound_settings(),
         'locations': inventory.locations(games.active_id()) if inventory else [],
     })
+
+
+def capture_copy_info():
+    """The large copy kept with each capture: what is chosen, the choices (px), and what is kept so far"""
+    chosen = app_settings.get('capture_copy_size', inventory_module.FULL_CAPTURE_DEFAULT) if app_settings else \
+        inventory_module.FULL_CAPTURE_DEFAULT
+    count, size = inventory_module.full_capture_usage()
+    return {'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
+            'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1)}
+
+
+@app.route('/api/capture_copy', methods=['GET', 'POST'])
+def set_capture_copy():
+    """
+    The large copy kept with each capture, for every camera (a choice of the server, in
+    data/settings.json; the collection page's Settings): GET answers what is chosen, the choices and
+    what is kept so far; POST (JSON: 'size' = off / small / medium / large) chooses for new captures.
+    """
+    if request.method == 'GET':
+        return jsonify({'success': True, **capture_copy_info()})
+    data = request.get_json(silent=True) or {}
+    size = data.get('size')
+    if size not in inventory_module.FULL_CAPTURE_SIZES:
+        message = f"size is one of {', '.join(inventory_module.FULL_CAPTURE_SIZES)}"
+        return jsonify({'success': False, 'error': message, 'message': message}), 400
+    inventory_module.set_full_capture_size(size)
+    app_settings.set('capture_copy_size', size)
+    logger.info(f"Large copy of each capture: {size} ({inventory_module.FULL_CAPTURE_SIZES[size]} px)")
+    return jsonify({'success': True, **capture_copy_info()})
 
 
 def sound_settings():
