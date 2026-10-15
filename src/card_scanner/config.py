@@ -134,6 +134,11 @@ class Config:
     AUTO_CAPTURE_DELAY = config.get('auto_capture', 'delay', default=1.0)
     AUTO_CAPTURE_STABILITY_FRAMES = config.get('auto_capture', 'stability_frames', default=5)
     AUTO_CAPTURE_MIN_SHARPNESS = config.get('auto_capture', 'min_sharpness', default=250)
+    # How much a card's corners may move (fraction of the card's size) between frames, and over
+    # the still streak, for the card to count as still. 1% was measured with the outline
+    # detector (still card: <= 0.4%); the corner network's outline jitters ~1-1.5% on a tall
+    # sleeved pile, which kept cards waiting for 5-15 s (Pi 5, 2026-10-15)
+    AUTO_CAPTURE_MAX_MOVEMENT = float(config.get('auto_capture', 'max_movement', default=0.015))
     AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=10))
 
     # Fast scan mode settings
