@@ -1721,6 +1721,25 @@ function stationSetupUrl(station) {
     return `http://${host.includes(':') ? '[' + host + ']' : host}:${station.setup.port}`;
 }
 
+function showCameraSetupLink() {
+    // Under the camera: a link to this camera's station setup page, so changing cameras is one click.
+    // A page of its own station knows it; the server's own page uses the one connected station.
+    const link = $('camera-setup-link');
+    if (!link) return;
+    fetch('/api/stations')
+        .then(response => response.json())
+        .then(data => {
+            const here = STATION
+                ? data.stations.find(station => station.id === STATION.id)
+                : (data.stations.filter(station => station.connected).length === 1
+                    ? data.stations.find(station => station.connected) : null);
+            const url = here ? stationSetupUrl(here) : '';
+            link.hidden = !url;
+            if (url) $('camera-setup-anchor').href = url;
+        })
+        .catch(() => { link.hidden = true; });
+}
+
 function renderStations(stations, tokenRequired) {
     $('stations-hint').textContent =
         `Each camera has its own page. A camera station connects with station.py --server ${window.location.origin}`
@@ -1968,6 +1987,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadStats();
     setInterval(loadStats, 5000);
+
+    showCameraSetupLink();
+    setInterval(showCameraSetupLink, 15000);
 
     // The model list first (the provider's dropdown is filled from it); the key field needs
     // the current provider
