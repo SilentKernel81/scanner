@@ -24,6 +24,7 @@ import logging
 import re
 from card_scanner.config import Config, camera_index_or_none
 from card_scanner.paths import tool
+from card_scanner.station import corner_net
 from card_scanner.station.object_detector import ObjectDetector, warp_card
 from card_scanner.settings import Settings
 
@@ -112,7 +113,8 @@ class CardScanner:
         self.frame_lock = threading.Lock()
         self.capture_thread = None
         self.running = False
-        self.object_detector = ObjectDetector(allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE)
+        self.object_detector = ObjectDetector(allow_landscape=Config.DETECTION_ALLOW_LANDSCAPE,
+                                              neural=corner_net.load(Config.DETECTION_NEURAL))
 
         # Frame stability tracking (for auto-capture)
         self.stable_frames = 0

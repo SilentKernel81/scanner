@@ -856,7 +856,7 @@ width per side, up to ~10%), following the pile's silhouette - the cards under t
 sleeves' rims. Among the candidates the detector has, the best one would have reached 0.93, and on
 5 of 13 frames a cold detection found none: edge selection is not the whole problem.
 
-**Our own corner network (in progress, 2026-10-14; nothing uses it yet).** The camera of this
+**Our own corner network (2026-10-14; used by the stations since 2026-10-15, not by the Android app yet).** The camera of this
 project is always fixed overhead of a box, which is what the network is built for: no
 perspective or arbitrary rotation to cover, only a card of nearly one size in a window of
 nearly one place. `scripts/train_corner_net.py` trains a small network (0.76 M parameters; one
@@ -877,7 +877,26 @@ webcam's frames and scored on the phone's 49 labelled captures: mean IoU 0.969, 
 (the app's own outline on the same frames: 0.861; the phone's frames exist only for captures the
 app did make, so the "No card" stretches of the screen recording are the test still to run).
 The exported file (3 MB) loads in OpenCV's dnn and agrees with PyTorch to 4e-6; 2.6 ms a
-window on a laptop CPU. Not tested: speed on a Pi, the Android build, the station.
+window on a laptop CPU. Not tested: speed on a Pi, the Android build.
+
+*In the station* (`station/corner_net.py`; the weights are `station/corner_net.onnx`, 3 MB, beside it
+and so inside the images' `station/` folder; trained on all 253 labelled frames, 3 "no card" ones
+as negatives): `CornerNet.find` runs the same two stages with OpenCV's dnn (no PyTorch on a
+station); given the card's previous outline it skips the whole-frame stage. `ObjectDetector`
+asks it first (`detection.neural` in config.yaml, or `SCANNER_NEURAL_DETECTOR=off`) and believes
+the answer when the score is >= 0.5 and the shape is a card's (convex, 1.12 - 1.68 tall, inside the
+frame, >= 2% of it); otherwise - or when the network fails or its file is missing - the outline
+detector answers as before, so `None` still means "no card" to the capture logic. Scored through the
+station's own code path (`scripts/score_detector.py --neural`, on the frames it was trained on, so
+not a held-out number): IoU 0.977 over 253 frames, an outline on every one, 12 ms a frame on a
+laptop CPU; the outline detector alone: 0.65 with 64 frames without an outline. Frames labelled
+"no card" scored 0.003 - 0.061, card frames 1.00 (those 3 were in training). On the 20 recorded
+drop sequences of 2026-10-06 (webcam, 20 fps) it found an outline on 94% of frames (the outline
+detector 87%); on frames that lie still, the corners moved at most 0.65% of the card's height
+between frames for 90% of pairs (0.85% for the outline detector), median 0.24% against 0.15%,
+far below the 1% still threshold. **Not measured:** the capture logic with it (double captures,
+misses) on a live run, a Pi 4's speed (the station runs at ~7 fps there; with a previous outline
+it is one window), the containers' OpenCV reading the file.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that

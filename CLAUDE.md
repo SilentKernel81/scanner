@@ -87,7 +87,9 @@ list written for MTG Arena (what it is made of - not whether Arena takes it); `t
 the digital collection (reading an Arena export, finding its cards, replacing whole, backups)
 and the decks' two kinds; `tests/test_paths.py` that the data, `config.yaml`,
 the pages and the OCR reader are where the programs look for them (it must pass before and
-after any move of files - see docs/plans/SRC_MOVE_PLAN.md); `tests/test_layout.py` which
+after any move of files - see docs/plans/SRC_MOVE_PLAN.md); `tests/test_corner_net.py` the station's corner network (its file, when its answer is believed,
+the fallback); `tests/test_camera_frames.py` the frames kept as training data and the labelling /
+scoring tools; `tests/test_layout.py` which
 part of the package may import which, and that every import statement - also inside
 functions no test calls - names a module that exists. Nothing else is
 automated: verify changes
@@ -149,7 +151,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | How fast a station runs on a machine (container against plain Python, one Pi against another) | `scripts/benchmark_station.py` (the station stopped first) |
 | Capture loop, stillness, auto-capture, new-card detection, fixed area | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`, `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / drift tracking | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe`, `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
-| Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` |
+| Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` (asks `corner_net.py`'s network first - `detection.neural`, `corner_net.onnx` beside it - and falls back to the outline detector); training and scoring: `scripts/train_corner_net.py`, `scripts/label_frames.py`, `scripts/score_detector.py --neural` |
 | **Both** | |
 | Desktop program (AppImage): launcher options, quit / restart, who can reach it, the station beside the server | `server/program.py`: `parse_arguments`, `network_access`, `listen_host`, `start_station` / `stop_station`, `exec_again_if_requested`; `server/startup.py`: `main`; `packaging/` (`AppRun`), `scripts/build-appimage.sh`, `.github/workflows/appimage.yml`; `templates/_program.html`, `common.js`: `quitProgram`, `restartProgram`, `setNetworkAccess` |
 | Settings | `config.yaml` (+ `config.py`: also `SCANNER_CAMERA`, `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_TOKEN`), `.env`; on the server `data/settings.json` (everyone's choices), `data/stations.json` (each station's), `data/api_keys.env`, `data/prompts.json` |
