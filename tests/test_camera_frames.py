@@ -277,6 +277,27 @@ class CaptureWash(unittest.TestCase):
         self.assertEqual(tuple(frame[100, 125]), (0, 255, 0))            # inside the outline
         self.assertTrue(np.array_equal(frame[30, 75], self.frame[30, 75]))  # in the box, outside the card
 
+    def test_it_fades_with_the_time_since_the_capture_in_both_modes(self):
+        from card_scanner.station import scanner as scanner_module
+        import time as time_module
+        station = object.__new__(scanner_module.CardScanner)   # no camera: only the wash's own state is used
+        box = (50, 40, 150, 180)
+        for corners in (self.corners, None):                  # an outline found inside the area / only the area
+            levels = []
+            for seconds_ago in (0.0, 0.3, 0.55, 0.7, 5.0):
+                frame = self.frame.copy()
+                station.capture_flash_at = time_module.time() - seconds_ago
+                station._flash_capture(frame, corners, box)
+                levels.append(int(frame[110, 100][1]) - 100)    # how much greener than the grey, mid card
+            self.assertGreater(levels[0], levels[1])            # fading out
+            self.assertGreater(levels[1], levels[2])
+            self.assertGreater(levels[2], 0)
+            self.assertEqual(levels[3:], [0, 0])                # gone after 0.6 s
+        station.capture_flash_at = 0.0                           # never captured: nothing
+        frame = self.frame.copy()
+        station._flash_capture(frame, self.corners, box)
+        self.assertTrue(np.array_equal(frame, self.frame))
+
     def test_a_box_without_corners_and_nothing_to_do(self):
         frame = self.frame.copy()
         self.wash(frame, None, (20, 20, 80, 80), 1.0)                     # the fixed area is a box
