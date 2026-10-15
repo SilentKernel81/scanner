@@ -298,6 +298,35 @@ class CaptureWash(unittest.TestCase):
         station._flash_capture(frame, self.corners, box)
         self.assertTrue(np.array_equal(frame, self.frame))
 
+    def test_a_card_found_by_itself_has_no_border_only_a_tint_and_the_green_flash(self):
+        import time as time_module
+        from card_scanner.station import scanner as scanner_module
+        station = object.__new__(scanner_module.CardScanner)
+        box = (50, 40, 150, 180)
+        orange, green = (255, 165, 0), (0, 255, 0)
+        grey = self.frame[110, 100].astype(int)
+
+        def mark(color, seconds_ago):
+            frame = self.frame.copy()
+            station.capture_flash_at = time_module.time() - seconds_ago
+            station._mark_auto_card(frame, self.corners, box, color)
+            return frame
+
+        settling = mark(orange, 60)[110, 100].astype(int)           # no capture lately: the state's tint
+        self.assertGreater(settling[0], grey[0])                     # towards orange: more red,
+        self.assertLess(settling[2], grey[2] + 1)                    # no blue added
+        ready = mark(green, 60)[110, 100].astype(int)
+        self.assertGreater(ready[1], grey[1])                        # towards green
+        # no border: the card's edge is tinted like its middle, not drawn in the pure colour
+        edge = mark(green, 60)[40, 100].astype(int)
+        self.assertLess(edge[1], 200)
+        # a capture: stronger than the tint, in green whatever the state's colour, fading down to the tint
+        flash = mark(orange, 0.0)[110, 100].astype(int)
+        later = mark(orange, 0.35)[110, 100].astype(int)
+        self.assertGreater(flash[1] - grey[1], ready[1] - grey[1])  # more green than the ready tint
+        self.assertGreater(flash[1], later[1])
+        self.assertEqual(mark(orange, 0.58)[110, 100].tolist(), settling.tolist())  # the tint again
+
     def test_a_box_without_corners_and_nothing_to_do(self):
         frame = self.frame.copy()
         self.wash(frame, None, (20, 20, 80, 80), 1.0)                     # the fixed area is a box
