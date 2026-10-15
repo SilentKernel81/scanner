@@ -5,6 +5,7 @@
 from flask import jsonify, request
 from flask_socketio import emit
 
+from card_scanner.core import frames
 from card_scanner.core import inventory as inventory_module
 from card_scanner.core.card_ocr import CardOcr
 from card_scanner.config import Config
@@ -158,8 +159,13 @@ def capture_copy_info():
     chosen = app_settings.get('capture_copy_size', inventory_module.FULL_CAPTURE_DEFAULT) if app_settings else \
         inventory_module.FULL_CAPTURE_DEFAULT
     count, size = inventory_module.full_capture_usage()
+    kept, frames_size = frames.usage()
     return {'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
-            'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1)}
+            'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1),
+            # The camera frames kept for training (Debug trace): whether they stay when their
+            # scanned cards are cleared or added to the collection, and what is kept
+            'keep_frames': bool(app_settings.get('keep_frames', False)) if app_settings else False,
+            'frames': kept, 'frames_megabytes': round(frames_size / 1048576, 1)}
 
 
 @app.route('/api/capture_copy', methods=['GET', 'POST'])
@@ -172,13 +178,18 @@ def set_capture_copy():
     if request.method == 'GET':
         return jsonify({'success': True, **capture_copy_info()})
     data = request.get_json(silent=True) or {}
-    size = data.get('size')
-    if size not in inventory_module.FULL_CAPTURE_SIZES:
-        message = f"size is one of {', '.join(inventory_module.FULL_CAPTURE_SIZES)}"
-        return jsonify({'success': False, 'error': message, 'message': message}), 400
-    inventory_module.set_full_capture_size(size)
-    app_settings.set('capture_copy_size', size)
-    logger.info(f"Large copy of each capture: {size} ({inventory_module.FULL_CAPTURE_SIZES[size]} px)")
+    if 'keep_frames' in data:
+        # Keep the camera frames of scanned cards that are cleared or added to the collection
+        app_settings.set('keep_frames', bool(data['keep_frames']))
+        logger.info(f"Camera frames of cleared or added scanned cards: {'kept' if data['keep_frames'] else 'removed with them'}")
+    if 'size' in data or 'keep_frames' not in data:
+        size = data.get('size')
+        if size not in inventory_module.FULL_CAPTURE_SIZES:
+            message = f"size is one of {', '.join(inventory_module.FULL_CAPTURE_SIZES)}"
+            return jsonify({'success': False, 'error': message, 'message': message}), 400
+        inventory_module.set_full_capture_size(size)
+        app_settings.set('capture_copy_size', size)
+        logger.info(f"Large copy of each capture: {size} ({inventory_module.FULL_CAPTURE_SIZES[size]} px)")
     return jsonify({'success': True, **capture_copy_info()})
 
 

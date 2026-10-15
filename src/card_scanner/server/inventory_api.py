@@ -10,11 +10,12 @@ from flask import Response, jsonify, request, send_file
 import io
 
 from card_scanner.config import Config
+from card_scanner.core import frames
 from card_scanner.core.database import search_key
 from card_scanner import games
 
 from card_scanner.server.state import (
-    app, arena_inventory, deck_store, inventory, review, scan_inventory, socketio, stations, trade_store,
+    app, app_settings, arena_inventory, deck_store, inventory, review, scan_inventory, socketio, stations, trade_store,
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client
@@ -61,7 +62,9 @@ def scan_to_collection():
                         # the page lists the locations named after a deck apart
                         'decks': [deck['name'] for deck in deck_store.list_decks(game.id)] if game.deck_formats else []})
     location = str((request.get_json(silent=True) or {}).get('location') or '').strip()[:60]
+    keys = scan_inventory.capture_keys(game.id, camera)
     moved = inventory.take_from(scan_inventory, game.id, location=location, station=camera)
+    release_frames(game, keys)
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')
     return jsonify({'success': True, **moved, 'stats': scan_inventory.get_stats(game.id)})
 
@@ -359,14 +362,34 @@ def import_inventory():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def release_frames(game, keys_before):
+    """
+    The camera frames kept for training (core/frames.py) go with the scanned cards they were taken
+    for: once those are cleared or moved into the collection (`keys_before`: the uids that had a
+    copy before; what is not there now is gone). Unless "Keep camera frames" is on in the
+    collection page's Settings. Never fails the clear or the move.
+    """
+    try:
+        if not keys_before or (app_settings and app_settings.get('keep_frames', False)):
+            return
+        gone = keys_before - scan_inventory.capture_keys(game.id)
+        removed = frames.forget(gone)
+        if removed:
+            logger.info(f"Camera frames: {removed} removed with their scanned cards")
+    except Exception as e:
+        logger.warning(f"Could not release the camera frames of the scanned cards: {e}")
+
+
 def clear_camera(game, camera):
     """
     A camera starts over: the cards it scanned (not yet in the collection) go, and the cards it
     has waiting for review. Returns (clear_inventory's result, review items removed).
     """
+    keys = scan_inventory.capture_keys(game.id, camera)
     result = scan_inventory.clear_inventory(game.id, station=camera)
     if not result['success']:
         return result, 0
+    release_frames(game, keys)
     reviews = review.clear(game.id, camera)
     with in_desk(desk_for(camera)):
         if desk().current_review_id is not None:  # its page had one open
@@ -393,7 +416,10 @@ def clear_inventory():
         if camera:
             result, reviews = clear_camera(game, camera)
         else:
+            keys = scan_inventory.capture_keys(game.id) if inventory_area() is scan_inventory else None
             result, reviews = inventory_area().clear_inventory(game.id), 0
+            if keys and result['success']:
+                release_frames(game, keys)
 
         if result['success']:
             if inventory_area() is scan_inventory:

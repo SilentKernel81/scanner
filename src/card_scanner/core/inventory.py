@@ -984,6 +984,17 @@ class InventoryManager(storage.Transactional):
         return row['card_name']
 
     @_writes
+    def capture_keys(self, game, station=None):
+        """The uids of the captures that have a copy here (of one station's, with `station`)"""
+        query = '''SELECT c.capture_key FROM inventory_captures c JOIN inventory i ON i.id = c.inventory_id
+                   WHERE c.capture_key IS NOT NULL AND i.game = ?'''
+        values = [game]
+        if station:
+            query += ' AND c.station = ?'
+            values.append(station)
+        with self._lock:
+            return {row['capture_key'] for row in self.conn.execute(query, values)}
+
     def captured_copy(self, capture_key, station, remove=False):
         """
         Where the copy of one capture is (a phone asks about its scans; server/stations_api.py:

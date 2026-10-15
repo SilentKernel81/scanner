@@ -207,6 +207,10 @@
                         </select>
                     </div>
                     <div class="hint" id="capture-copy-hint">Loading...</div>
+                    <label class="chip-toggle" id="keep-frames-label" title="With Debug trace on, a station sends the whole camera frame behind each capture (training data for the card detector). By default a frame goes when its scanned card is cleared or added to the collection">
+                        <input type="checkbox" id="keep-frames"><span>Keep camera frames after clearing or adding</span>
+                    </label>
+                    <div class="hint" id="keep-frames-hint"></div>
                 </div>
                 <div class="settings-section">
                     <h3>Scanner</h3>
@@ -225,6 +229,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=58"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=59"></script>
 </body>
 </html>

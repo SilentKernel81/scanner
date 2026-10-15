@@ -451,8 +451,12 @@ class CardScanner:
             self._save_debug_frame(folder, self.debug_frames[-1])
             self.debug_dump = (folder, remaining - 1) if remaining > 1 else None
 
-    def _start_debug_dump(self, reason, after=20, keep=20):
-        """Save the buffered frames and the next `after` ones; keep the newest `keep` dumps"""
+    def _start_debug_dump(self, reason, after=20, keep=30):
+        """
+        Save the buffered frames and the next `after` ones; keep the newest `keep` dumps of this
+        reason. (Counted per reason: a run of captures writes one "new_card_soon_after_capture"
+        each and used to push the rarer "waiting" ones out before anyone looked at them.)
+        """
         if not self.debug_trace_enabled or self.debug_dump:
             return
         root = Config.DATA_DIR / 'debug_frames'
@@ -462,7 +466,8 @@ class CardScanner:
             for item in list(self.debug_frames):
                 self._save_debug_frame(folder, item)
             self.debug_dump = (folder, after)
-            for old in sorted(p for p in root.iterdir() if p.is_dir())[:-keep]:
+            same_reason = sorted(p for p in root.iterdir() if p.is_dir() and p.name.endswith(f"_{reason}"))
+            for old in same_reason[:-keep]:
                 shutil.rmtree(old, ignore_errors=True)
             logger.info(f"Debug frames saved to {folder}")
         except OSError as e:
