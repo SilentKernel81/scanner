@@ -31,8 +31,10 @@ scoring uses the intersection over union (IoU) with the label, as scripts/score_
 import argparse
 import json
 import math
+import queue
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -191,6 +193,35 @@ def batch(frames, size, rng):
     return torch.stack(xs), torch.from_numpy(np.stack(ps)), torch.tensor(pres), torch.tensor(mask)
 
 
+class Prefetch:
+    """Builds the next batches in background threads while the network works on the last one"""
+
+    def __init__(self, frames, size, seed, workers=3, depth=6):
+        self.queue = queue.Queue(maxsize=depth)
+        self.stop = threading.Event()
+        self.threads = [threading.Thread(target=self._work, args=(frames, size, seed + 1000 * i), daemon=True)
+                        for i in range(workers)]
+        for t in self.threads:
+            t.start()
+
+    def _work(self, frames, size, seed):
+        rng = np.random.default_rng(seed)       # one generator per thread: no shared state
+        while not self.stop.is_set():
+            item = batch(frames, size, rng)
+            while not self.stop.is_set():
+                try:
+                    self.queue.put(item, timeout=0.2)
+                    break
+                except queue.Full:
+                    pass
+
+    def get(self):
+        return self.queue.get()
+
+    def close(self):
+        self.stop.set()
+
+
 # ----------------------------------------------------------------------------------------
 # Using it on a whole frame (two stages)
 # ----------------------------------------------------------------------------------------
@@ -199,10 +230,11 @@ def batch(frames, size, rng):
 def read_window(model, rgb, cx, cy, height):
     m = window_matrix(cx, cy, height)
     win = cut(rgb, m)
-    maps, presence = model(to_tensor(win)[None])
-    pts = decode(maps)[0].numpy().astype(np.float64)
+    device = next(model.parameters()).device
+    maps, presence = model(to_tensor(win)[None].to(device))
+    pts = decode(maps)[0].cpu().numpy().astype(np.float64)
     inv = cv2.invertAffineTransform(m)
-    return pts @ inv[:, :2].T + inv[:, 2], float(torch.sigmoid(presence)[0, 0])
+    return pts @ inv[:, :2].T + inv[:, 2], float(torch.sigmoid(presence)[0, 0].cpu())
 
 
 def find(model, rgb):
@@ -251,6 +283,8 @@ def main():
     parser.add_argument('--export', help="write the trained network as ONNX to this file")
     parser.add_argument('--save', help="write the weights (PyTorch) to this file")
     parser.add_argument('--load', help="start from / score these weights; with --steps 0 only scores")
+    parser.add_argument('--device', default='auto', help="auto (CUDA when there is one), cuda or cpu")
+    parser.add_argument('--workers', type=int, default=3, help="threads that build batches")
     args = parser.parse_args()
 
     rows = load(args.frames)
@@ -263,27 +297,32 @@ def main():
     torch.set_num_threads(max(1, torch.get_num_threads()))
     rng = np.random.default_rng(args.seed); random.seed(args.seed); torch.manual_seed(args.seed)
 
+    device = torch.device('cuda' if args.device == 'auto' and torch.cuda.is_available() else
+                          ('cpu' if args.device == 'auto' else args.device))
     model = CornerNet()
     if args.load:
-        model.load_state_dict(torch.load(args.load))
-    print(f"network: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters")
+        model.load_state_dict(torch.load(args.load, map_location='cpu'))
+    model.to(device)
+    print(f"network: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters, on {device}"
+          + (f" ({torch.cuda.get_device_name(device)})" if device.type == 'cuda' else ""))
     train, val = Frames(train_rows), Frames(val_rows)
 
     if args.steps > 0 and train.items:
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
         sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps, pct_start=0.1)
         started = time.time()
+        feeder = Prefetch(train, args.batch, args.seed, workers=args.workers)
         for step in range(1, args.steps + 1):
             model.train()
-            x, pts, pres, mask = batch(train, args.batch, rng)
+            x, pts, pres, mask = (t.to(device, non_blocking=True) for t in feeder.get())
             maps, presence = model(x)
             pred = decode(maps)
             # corners: L1 in window pixels (about 1 px at 1/4 resolution matters) where a card is present
             corner_loss = (torch.abs(pred - pts).mean(dim=(1, 2)) * mask).sum() / mask.sum().clamp(min=1)
             # a sharp map: the target's Gaussian as a cross-entropy keeps each corner's map unimodal
             b = pts.shape[0]
-            gy = (torch.arange(maps.shape[2]).float() + 0.5) * STRIDE
-            gx = (torch.arange(maps.shape[3]).float() + 0.5) * STRIDE
+            gy = (torch.arange(maps.shape[2], device=device).float() + 0.5) * STRIDE
+            gx = (torch.arange(maps.shape[3], device=device).float() + 0.5) * STRIDE
             dx2 = (gx[None, None, None, :] - pts[:, :, 0, None, None]) ** 2
             dy2 = (gy[None, None, :, None] - pts[:, :, 1, None, None]) ** 2
             target = torch.exp(-(dx2 + dy2) / (2 * 6.0 ** 2))
@@ -298,6 +337,7 @@ def main():
                       f"score {presence_loss.item():.2f})  {time.time() - started:.0f}s")
             if val.items and step % 1000 == 0 and step != args.steps:
                 evaluate(model, val, f"held out @ step {step}")
+        feeder.close()
         if args.save:
             torch.save(model.state_dict(), args.save)
 
@@ -307,6 +347,7 @@ def main():
     evaluate(model, train, "training frames")
     if args.export:
         model.eval()
+        model.cpu()
         torch.onnx.export(model, torch.zeros(1, 3, H, W), args.export, input_names=['image'],
                           output_names=['maps', 'presence'], opset_version=13, dynamo=False)
         print("exported", args.export, f"({Path(args.export).stat().st_size / 1e6:.2f} MB)")

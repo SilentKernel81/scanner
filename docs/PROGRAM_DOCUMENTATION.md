@@ -864,13 +864,20 @@ card per 192 x 320 window, four corner maps read as soft-argmax positions plus a
 score) only from labels made with `scripts/label_frames.py` - no other model's weights or
 outputs. A frame is read in two stages: the whole frame letterboxed, then a window of 1.45 x
 the card's box cut from the full-resolution frame (twice). Validation is by whole station
-(`--train` / `--val`). The labelling page has a two-click mode (press D: the card's top left,
-then its bottom right corner; drag a corner to put a tilt right) and a station filter.
+(`--train` / `--val`). The labelling page has a click mode (press D: corners 1, 3, 2, 4 - top left,
+bottom right, then top right, bottom left; after the first two the box is there, the other two
+put a tilt right; Escape keeps what is placed) and a station filter. Training on a GPU needs a
+CUDA build of PyTorch (not in `requirements*.txt`): `--device auto` uses it when there is one
+(RTX 3050 laptop: 3000 steps in 2.5 minutes, 17 on the CPU).
 First result (trained on 57 Pi frames, scored on 21 webcam frames of another camera): mean IoU
 0.966, worst 0.954. A box with the same place and size in every frame already scores 0.90 - 0.97
 inside one station (and 0.47 across stations), so a within-station score proves little: the
-held-out one, and the phone's frames (not labelled yet) are the tests that count. Not tested:
-speed on a Pi, running the exported file through OpenCV's dnn, the Android app.
+held-out one, and the phone's frames are the tests that count. Trained on the Pi's and the
+webcam's frames and scored on the phone's 49 labelled captures: mean IoU 0.969, worst 0.926
+(the app's own outline on the same frames: 0.861; the phone's frames exist only for captures the
+app did make, so the "No card" stretches of the screen recording are the test still to run).
+The exported file (3 MB) loads in OpenCV's dnn and agrees with PyTorch to 4e-6; 2.6 ms a
+window on a laptop CPU. Not tested: speed on a Pi, the Android build, the station.
 
 **The capture beep is the signal to drop the next card.** `auto_capture_triggered` (beep +
 flash) reaches the station's pages once the image is taken and a focus probe started by that
