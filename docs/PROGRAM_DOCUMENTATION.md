@@ -1787,7 +1787,11 @@ taken off with a click, and is written into the page's address (`FILTER_PARAMS`:
 `/collection?q=qty%3A%3E1&rarity=rare&colors=G`; `history.replaceState`, so no history entry
 per filter) - an address with filters, a bookmark, wins over the remembered ones. A click on a
 row's rarity, finish, location, tag or trade badge filters by it, a second click takes that off
-(`filterByBadge`). A list row shows the card twice: on the left what was captured (a click opens the captures),
+(`filterByBadge`). Beside the one-tag list there is
+a **Tags** dropdown with a tick per tag (`filterTags`, `fillTagList`, `passesTagFilter`): a card
+shows when it has *any* of the ticked tags; the ticks are remembered with the other filters, in
+the address as `tags=trade,binder` (a tag has no comma), shown as one chip, cleared by **Clear
+filters**, and not applied in the Arena view (which has no tags). `tests/test_tag_filter.py`. A list row shows the card twice: on the left what was captured (a click opens the captures),
 and by its buttons the downloaded picture, small (`.card-peek`; Scryfall's `small` size of the
 `image_uri`) - resting the pointer on that one shows the picture large beside it (`data-image`,
 `showPreview`, `placePreview`, as for the deck builder's rows; devices with a mouse - the box

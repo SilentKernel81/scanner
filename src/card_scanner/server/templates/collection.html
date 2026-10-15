@@ -10,7 +10,7 @@
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=50">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=25">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=26">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -43,6 +43,10 @@
                     <select id="filter-finish" class="select" title="Finish"></select>
                     <select id="filter-location" class="select" title="Location"></select>
                     <select id="filter-tag" class="select" title="Tag"></select>
+                    <details class="multi-filter" id="filter-tags" title="Tags - tick several: shows the cards that have any of them">
+                        <summary class="select" id="filter-tags-summary">Tags</summary>
+                        <div class="multi-panel" id="filter-tags-list"></div>
+                    </details>
                     <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
                     <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
                     <span class="price-range" title="Price of one copy (USD)">
@@ -224,6 +228,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=2"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=56"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=57"></script>
 </body>
 </html>

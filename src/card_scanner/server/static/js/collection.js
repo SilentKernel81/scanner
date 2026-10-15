@@ -123,26 +123,30 @@ let selected = new Set();   // entry ids
 let lastPicked = null;      // the entry ticked or unticked last: a shift-click reaches from it to the clicked one
 let savedFilters = recallFilters();   // until the first load has filled the lists to choose from
 let filterColors = new Set(savedFilters.colors);
+let filterTags = new Set(savedFilters.tags);   // the tags ticked in the Tags dropdown: a card with any of them shows
 let inventoryView = recall('collectionView', 'list');
 
 function recallFilters() {
     // The filters of the address when it names any (a bookmark), else the ones of the last visit
     let saved = {};
     const params = new URLSearchParams(window.location.search);
-    if ([...Object.values(FILTER_PARAMS), 'colors'].some(name => params.has(name))) {
+    if ([...Object.values(FILTER_PARAMS), 'colors', 'tags'].some(name => params.has(name))) {
         [...FILTER_FIELDS, ...FILTER_TICKS].forEach(id => {
             const value = params.get(FILTER_PARAMS[id]);
             if (value) saved[id] = FILTER_TICKS.includes(id) ? true : value;
         });
         saved.colors = [...(params.get('colors') || '').toUpperCase()];
+        saved.tags = (params.get('tags') || '').split(',').map(tag => tag.trim()).filter(Boolean);   // a tag has no comma
     } else {
         try { saved = JSON.parse(recall('collectionFilters', '{}')) || {}; } catch (e) { /* not ours */ }
     }
-    return {...saved, colors: Array.isArray(saved.colors) ? saved.colors.filter(color => COLORS.some(([key]) => key === color)) : []};
+    return {...saved,
+            colors: Array.isArray(saved.colors) ? saved.colors.filter(color => COLORS.some(([key]) => key === color)) : [],
+            tags: Array.isArray(saved.tags) ? saved.tags.filter(tag => typeof tag === 'string' && tag) : []};
 }
 
 function saveFilters() {
-    const state = {colors: [...filterColors]};
+    const state = {colors: [...filterColors], tags: [...filterTags]};
     FILTER_FIELDS.forEach(id => { if ($(id).value) state[id] = $(id).value; });
     FILTER_TICKS.forEach(id => { if ($(id).checked) state[id] = true; });
     remember('collectionFilters', JSON.stringify(state));
@@ -150,6 +154,7 @@ function saveFilters() {
     const params = new URLSearchParams();
     [...FILTER_FIELDS, ...FILTER_TICKS].forEach(id => { if (state[id]) params.set(FILTER_PARAMS[id], state[id] === true ? '1' : state[id]); });
     if (state.colors.length) params.set('colors', state.colors.join(''));
+    if (state.tags.length) params.set('tags', state.tags.join(','));
     const query = params.toString();
     try {
         history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
@@ -164,6 +169,9 @@ function restoreFilters() {
         if ($(id).selectedIndex === -1) $(id).value = '';
     });
     FILTER_TICKS.forEach(id => { $(id).checked = savedFilters[id] === true; });
+    const offered = new Set(distinct(inventory.flatMap(card => card.tags)));
+    filterTags = new Set([...filterTags].filter(tag => offered.has(tag)));
+    fillTagList();
     savedFilters = null;
     saveFilters();  // what was taken, in the address too
 }
@@ -236,6 +244,26 @@ function fillSelect(id, label, values, labels = {}) {
 }
 
 
+// tagFilter begin
+// Whether a card (its `tags`, a list of text) passes the Tags dropdown: nothing ticked lets every
+// card through, else the card needs any one of the ticked tags.
+function passesTagFilter(cardTags, chosenTags) {
+    return chosenTags.size === 0 || cardTags.some(tag => chosenTags.has(tag));
+}
+// tagFilter end
+
+function fillTagList() {
+    // The Tags dropdown: one tick per tag the collection has (a tag ticked earlier that is gone
+    // is not offered, and so not kept by restoreFilters)
+    const tags = distinct(inventory.flatMap(card => card.tags));
+    $('filter-tags-list').innerHTML = tags.length
+        ? tags.map(tag => `<label><input type="checkbox" value="${escapeHtml(tag)}" ${filterTags.has(tag) ? 'checked' : ''}><span>${escapeHtml(tag)}</span></label>`).join('')
+        : '<div class="multi-empty">No tags yet</div>';
+    $('filter-tags').hidden = tags.length === 0;
+    $('filter-tags-summary').textContent = filterTags.size ? `Tags (${filterTags.size})` : 'Tags';
+    $('filter-tags').classList.toggle('has-choice', filterTags.size > 0);
+}
+
 function fillFilterOptions() {
     fillSelect('filter-type', 'Any type', distinct(inventory.map(mainType)));
     fillSelect('filter-rarity', 'Any rarity', distinct(inventory.map(card => card.rarity))
@@ -245,6 +273,7 @@ function fillFilterOptions() {
                Object.fromEntries(gameInfo.finishes));
     fillLocationFilter();
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
+    fillTagList();
     // The last times cards came into the collection (one batch per "Add to collection", import
     // or scanned card), newest first (card.batches: every batch an entry has copies of, not
     // only its latest)
@@ -355,6 +384,9 @@ function activeFilters() {
     const digital = inArena();
     if (!digital) chosen('filter-location', 'Location');
     if (!digital) chosen('filter-tag', 'Tag');
+    if (!digital && filterTags.size) {
+        chips.push({text: `Tags: ${[...filterTags].join(', ')}`, clear: () => { filterTags.clear(); fillTagList(); }});
+    }
     if ($('filter-added').value) chips.push({text: $('filter-added').selectedOptions[0].textContent, clear: () => { $('filter-added').value = ''; }});
     if ($('filter-free').checked) chips.push({text: 'Not in a deck', clear: () => { $('filter-free').checked = false; }});
     const min = $('filter-price-min').value, max = $('filter-price-max').value;
@@ -409,6 +441,7 @@ function applyFilters() {
         if (finish && card.finish !== finish) return false;
         if (location && card.location !== (location === '(none)' ? '' : location)) return false;
         if (tag && !card.tags.includes(tag)) return false;
+        if (!digital && !passesTagFilter(card.tags, filterTags)) return false;
         if (added && !batchPart(card, added)) return false;
         if (free && card.decks.length) return false;
         if (!isNaN(min) && card.price < min) return false;
@@ -1295,12 +1328,24 @@ function bindInventoryEvents() {
      'filter-free', 'filter-text-not'].forEach(id => $(id).addEventListener('change', filtersChanged));
     ['filter-text', 'filter-price-min', 'filter-price-max'].forEach(id => $(id).addEventListener('input', debounce(filtersChanged, 150)));
     bindColorChips('filter-colors', filterColors, filtersChanged);
+    // The Tags dropdown: a tick adds or removes that tag; a click anywhere else closes it
+    $('filter-tags-list').addEventListener('change', event => {
+        const box = event.target.closest('input[type=checkbox]');
+        if (!box) return;
+        if (box.checked) filterTags.add(box.value); else filterTags.delete(box.value);
+        fillTagList();
+        filtersChanged();
+    });
+    document.addEventListener('click', event => {
+        if (!event.target.closest('#filter-tags')) $('filter-tags').open = false;
+    });
     $('filter-clear').addEventListener('click', () => {
         ['filter-text', 'filter-type', 'filter-rarity', 'filter-set', 'filter-finish', 'filter-location', 'filter-tag',
          'filter-added', 'filter-price-min', 'filter-price-max'].forEach(id => { $(id).value = ''; });
         $('filter-free').checked = false;
         $('filter-text-not').checked = false;
         filterColors.clear();
+        filterTags.clear();
         fillFilterOptions();
         filtersChanged();
     });
