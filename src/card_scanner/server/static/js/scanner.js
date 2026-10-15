@@ -797,14 +797,6 @@ function placeAreaLayer() {
     Object.assign($('area-layer').style, {left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px'});
 }
 
-function updateVideoOrientation() {
-    // A rotated camera gives a portrait image: show it upright instead of letterboxed
-    const img = $('video-feed');
-    if (img.naturalWidth && img.naturalHeight) {
-        img.parentElement.classList.toggle('portrait', img.naturalHeight > img.naturalWidth);
-    }
-}
-
 function isDrawingArea() {
     return $('area-layer').classList.contains('is-drawing');
 }
@@ -1983,7 +1975,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setupInventoryList();
 
     loadGames();
-    setInterval(updateVideoOrientation, 1000);
 
     loadStats();
     setInterval(loadStats, 5000);
