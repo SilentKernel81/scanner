@@ -21,6 +21,7 @@ from card_scanner.config import Config
 from card_scanner.paths import TOP
 from card_scanner.server.logs import logger
 from card_scanner.server.state import app, services
+from card_scanner.server.lock import guarded
 
 LOCAL_HOSTS = ('127.0.0.1', 'localhost', '::1')
 LOOPBACK = ('127.0.0.1', '::1', '::ffff:127.0.0.1')
@@ -83,6 +84,7 @@ def program_state():
 
 
 @app.route('/api/network_access', methods=['POST'])
+@guarded
 def set_network_access():
     """Remember whether other devices may open the pages (JSON: 'enabled'); the next start takes it"""
     enabled = bool((request.get_json(silent=True) or {}).get('enabled'))
@@ -121,6 +123,7 @@ def _stop_soon():
 
 
 @app.route('/api/restart', methods=['POST'])
+@guarded
 def restart_program():
     """Stop and start the program again - what the settings that apply "after a restart" wait for"""
     services.restart_requested = True
@@ -130,6 +133,7 @@ def restart_program():
 
 
 @app.route('/api/quit', methods=['POST'])
+@guarded
 def quit_program():
     """Stop the program (desktop program only, and only from the computer it runs on: a
     server is stopped with its service or container)"""

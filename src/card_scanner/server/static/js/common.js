@@ -476,6 +476,69 @@ function confirmDialog({title, message, confirmText = 'OK', danger = false}) {
     ]}).then(value => value === true);
 }
 
+// The settings password (server/lock.py): when one is set, a few actions - the AI keys, restart,
+// network access, debug mode, restoring / uploading / downloading / deleting a backup - answer
+// 401 {locked: true}. Every fetch of every page goes through this wrapper: it asks for the
+// password and repeats the request once. (A Socket.IO event answers an `error` event with
+// locked: true instead - settings.js handles that one.)
+
+function passwordDialog({title, message}) {
+    // Resolves with what was typed, or null when cancelled
+    const field = document.createElement('input');
+    field.type = 'password';
+    field.className = 'dialog-field';
+    field.autocomplete = 'current-password';
+    field.setAttribute('aria-label', 'Settings password');
+    document.getElementById('dialog-message').after(field);
+    field.addEventListener('keydown', event => { if (event.key === 'Enter') closeDialog(true); });
+    const answer = choiceDialog({title, message, choices: [
+        {label: 'Cancel', value: false},
+        {label: 'Unlock', value: true, style: 'primary'}
+    ]}).then(ok => ok ? field.value : null);
+    field.focus();
+    answer.finally(() => field.remove());
+    return answer;
+}
+
+let unlocking = null;   // one password question at a time, however many requests were refused
+
+function unlockSettings(reason) {
+    // True once the browser holds the unlocked cookie; false when the person cancels
+    if (!unlocking) {
+        unlocking = (async () => {
+            let message = reason || 'This action needs the settings password.';
+            for (;;) {
+                const typed = await passwordDialog({title: 'Settings password', message});
+                if (typed === null) return false;
+                const response = await plainFetchForLock('/api/settings_lock', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: typed})});
+                if (response.ok) return true;
+                message = ((await response.json().catch(() => ({}))).error || 'Wrong password') + ' - try again.';
+            }
+        })().finally(() => { unlocking = null; });
+    }
+    return unlocking;
+}
+
+async function ensureSettingsUnlocked() {
+    // For a download link, which a refused request would turn into a saved error file: ask first
+    try {
+        const status = await (await plainFetchForLock('/api/settings_lock', {cache: 'no-store'})).json();
+        return !status.has_password || status.unlocked || await unlockSettings();
+    } catch (error) {
+        return true;   // the server is not reachable: the link will say so
+    }
+}
+
+const plainFetchForLock = window.fetch.bind(window);
+window.fetch = async (input, options) => {
+    const response = await plainFetchForLock(input, options);
+    if (response.status !== 401) return response;
+    const body = await response.clone().json().catch(() => null);
+    if (!body || !body.locked) return response;
+    return (await unlockSettings(body.error)) ? plainFetchForLock(input, options) : response;
+};
+
 // The first download of the card data: until a game has cards nothing can be identified or
 // found, so every page says so - and says why when the download failed and is tried again
 

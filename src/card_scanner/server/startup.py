@@ -45,7 +45,7 @@ from card_scanner.server.settings_events import saved_debug_mode
 # from this list is a set of routes that silently does not exist (tests/test_app_surface.py
 # notices).
 from card_scanner.server import (  # noqa: F401
-    pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, backups_api, stations_api,
+    lock, pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, backups_api, stations_api,
     scan_events, settings_events, ai_events, card_data, program,
 )
 

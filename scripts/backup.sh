@@ -67,7 +67,25 @@ fail() {
 # which is the same thing when nothing is running.
 mkdir -p "$STAGING/data"
 SERVER_URL="${SCANNER_URL:-http://localhost:5000}"
-ANSWER=$(curl -fsS -m 300 -X POST "$SERVER_URL/api/backups/full" 2>/dev/null || true)
+# With a settings password set on the server (server/lock.py) a full backup needs it: logged in first,
+# with the password of SCANNER_SETTINGS_PASSWORD (the environment, else this project's .env), through a
+# cookie file in the staging folder. Without it the server answers "locked" and the script says so,
+# instead of pretending that no server runs.
+SETTINGS_PASSWORD="${SCANNER_SETTINGS_PASSWORD:-}"
+if [ -z "$SETTINGS_PASSWORD" ] && [ -f .env ]; then
+    SETTINGS_PASSWORD=$(grep -E '^SCANNER_SETTINGS_PASSWORD=' .env | tail -1 | cut -d= -f2- || true)
+fi
+COOKIES="$STAGING/cookies.txt"
+if [ -n "$SETTINGS_PASSWORD" ]; then
+    # the password goes in on the standard input, not on a command line anyone can list
+    SETTINGS_PASSWORD="$SETTINGS_PASSWORD" python3 -c 'import json, os; print(json.dumps({"password": os.environ["SETTINGS_PASSWORD"]}))' \
+        | curl -fsS -m 60 -c "$COOKIES" -X POST -H 'Content-Type: application/json' -d @- "$SERVER_URL/api/settings_lock" >/dev/null 2>&1 \
+        || print_warn "The settings password was not accepted by $SERVER_URL"
+fi
+ANSWER=$(curl -sS -m 300 -b "$COOKIES" -X POST "$SERVER_URL/api/backups/full" 2>/dev/null || true)
+if printf '%s' "$ANSWER" | grep -q '"locked"'; then
+    print_warn "The server wants its settings password for a coordinated snapshot: put SCANNER_SETTINGS_PASSWORD in the environment or in .env"
+fi
 FULL=$(printf '%s' "$ANSWER" | python3 -c 'import json, sys; print(json.load(sys.stdin)["backup"]["id"])' 2>/dev/null || true)
 if [ -n "$FULL" ] && [ -d "data/backups/full/$FULL" ]; then
     print_info "The running server took a coordinated snapshot ($FULL)"
@@ -79,7 +97,7 @@ if [ -n "$FULL" ] && [ -d "data/backups/full/$FULL" ]; then
         if [ -f "$db" ] && [ ! -f "$STAGING/$db" ]; then SNAPSHOT_ALSO+=("$db"); fi
     done
 else
-    print_warn "No running server at $SERVER_URL: each database file is snapshot on its own"
+    print_warn "No coordinated snapshot from $SERVER_URL (no running server, or it is locked - see above): each database file is snapshot on its own"
     for db in data/*.db; do
         if [ -f "$db" ]; then SNAPSHOT_ALSO+=("$db"); fi
     done

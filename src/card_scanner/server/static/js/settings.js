@@ -75,7 +75,10 @@ function connect() {
     if (socket) socket.disconnect();
     socket = io(cameraId ? {query: {station: cameraId}} : {});
 
-    socket.on('error', data => notify((data && data.message) || 'The server refused that', 'error'));
+    socket.on('error', data => {
+        if (data && data.locked) return unlockAndReconnect();
+        notify((data && data.message) || 'The server refused that', 'error');
+    });
 
     // Camera
     socket.on('fast_scan_toggled', () => {});
@@ -692,7 +695,72 @@ function applyDebugMode(enabled, running, debuggerRunning) {
     $('debug-mode-desc').textContent = text;
 }
 
+// -- The settings password (server/lock.py) ---------------------------------
+
+async function unlockAndReconnect() {
+    // A guarded event was refused. The unlocked cookie is only read when a connection is made:
+    // after the password the page connects again, and the action is asked for once more
+    if (!(await unlockSettings())) return;
+    connect();
+    loadLock();
+    notify('Unlocked - do that again', 'info');
+}
+
+async function loadLock() {
+    const status = await (await fetch('/api/settings_lock', {cache: 'no-store'})).json();
+    $('lock-status').textContent = !status.has_password
+        ? 'No password is set: everything is open.'
+        : status.fixed
+            ? 'The password is set by SCANNER_SETTINGS_PASSWORD in the server\'s environment (it cannot be changed here). '
+              + (status.unlocked ? 'This browser is unlocked.' : 'This browser is locked.')
+            : status.unlocked ? 'A password is set. This browser is unlocked (for 12 hours).' : 'A password is set. This browser is locked.';
+    $('lock-set-row').hidden = status.fixed;
+    $('lock-set').textContent = status.has_password ? 'Change password' : 'Set password';
+    $('lock-unlock').hidden = !(status.has_password && !status.unlocked);
+    $('lock-lock').hidden = !(status.has_password && status.unlocked);
+    $('lock-remove').hidden = !(status.has_password && !status.fixed);
+}
+
+function bindLock() {
+    $('lock-set').addEventListener('click', async () => {
+        const data = await api('/api/settings_password', {method: 'POST', body: {password: $('lock-new').value}});
+        if (!data) return;
+        $('lock-new').value = '';
+        notify('Settings password saved', 'success');
+        connect();          // the cookie it came with is read when a connection is made
+        loadLock();
+    });
+    $('lock-unlock').addEventListener('click', async () => { if (await unlockSettings()) { connect(); loadLock(); } });
+    $('lock-lock').addEventListener('click', async () => {
+        await fetch('/api/settings_lock', {method: 'DELETE'});
+        connect();
+        loadLock();
+    });
+    $('lock-remove').addEventListener('click', async () => {
+        if (!(await confirmDialog({title: 'Remove the settings password?', message: 'Everything is open again to anyone who can reach this server.',
+                                    confirmText: 'Remove', danger: true}))) return;
+        if (await api('/api/settings_password', {method: 'POST', body: {password: ''}})) {
+            notify('Settings password removed', 'success');
+            connect();
+            loadLock();
+        }
+    });
+    // A backup's download is a link: a refused request would be saved as a file, so ask first
+    $('backup-list').addEventListener('click', async event => {
+        const link = event.target.closest('a[download]');
+        if (!link || link.dataset.unlocked) return;
+        event.preventDefault();
+        if (await ensureSettingsUnlocked()) {
+            link.dataset.unlocked = '1';
+            link.click();
+            delete link.dataset.unlocked;
+        }
+    });
+}
+
 function bindServer() {
+    bindLock();
+    loadLock();
     $('restart-program').addEventListener('click', restartProgram);
     if ($('quit-program')) $('quit-program').addEventListener('click', quitProgram);
     $('toggle-network-access').addEventListener('change', event => setNetworkAccess(event.target.checked));

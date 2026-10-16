@@ -62,22 +62,31 @@ def hash_password(password, salt, cost=None):
 
 
 class Login:
-    """The setup page's password and sessions. One instance, shared by all requests."""
+    """
+    The setup page's password and sessions. One instance, shared by all requests.
 
-    def __init__(self):
+    The defaults are the station's setup page's. The server's settings password
+    (server/lock.py) is the same mechanism with a file, an environment variable and a cookie of
+    its own: a different `file`, `variable`, `cookie` and a shorter `session_seconds`.
+    """
+
+    def __init__(self, file=None, variable=PASSWORD_VARIABLE, cookie=COOKIE, session_seconds=SESSION_SECONDS):
+        self.file = file or LOGIN_FILE
+        self.variable = variable
+        self.cookie = cookie
+        self.session_seconds = session_seconds
         self.lock = threading.Lock()   # requests come in several threads
         self.failures = 0              # wrong passwords in a row
         self.locked_until = 0.0        # no attempt is accepted before this time
-        self.fixed = bool(os.getenv(PASSWORD_VARIABLE))
+        self.fixed = bool(os.getenv(self.variable))
         self.record = self._load()
         if self.fixed:
-            self._adopt_environment_password(os.getenv(PASSWORD_VARIABLE))
+            self._adopt_environment_password(os.getenv(self.variable))
 
-    @staticmethod
-    def _load():
+    def _load(self):
         """The saved record, or None when no password has been chosen yet"""
         try:
-            record = json.loads(LOGIN_FILE.read_text())
+            record = json.loads(self.file.read_text())
             if all(isinstance(record.get(name), str) for name in ('salt', 'hash', 'key')):
                 return record
         except (OSError, ValueError, AttributeError):
@@ -116,15 +125,14 @@ class Login:
         salt = secrets.token_hex(16)  # 16 random bytes; secrets = random numbers fit for security
         return {'salt': salt, 'cost': dict(SCRYPT), 'hash': hash_password(password, salt), 'key': secrets.token_hex(32)}
 
-    @staticmethod
-    def _write(record):
+    def _write(self, record):
         """Save a record: whole or not at all (as station_setup.save), readable by this user only"""
-        LOGIN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        temporary = LOGIN_FILE.with_suffix('.json.tmp')
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.file.with_suffix('.json.tmp')
         # Created private from the start (not written first and restricted after)
         with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as file:
             json.dump(record, file, indent=2)
-        os.replace(temporary, LOGIN_FILE)
+        os.replace(temporary, self.file)
 
     def has_password(self):
         return self.record is not None
@@ -135,7 +143,7 @@ class Login:
         every browser that was logged in has to log in again with the new password.
         """
         if self.fixed:
-            raise ValueError(f"The password is set by {PASSWORD_VARIABLE} in the environment - change it there")
+            raise ValueError(f"The password is set by {self.variable} in the environment - change it there")
         password = str(password or '')
         if len(password) < MINIMUM_LENGTH:
             raise ValueError(f"The password needs at least {MINIMUM_LENGTH} characters")
@@ -143,6 +151,17 @@ class Login:
         self._write(record)
         with self.lock:
             self.record, self.failures, self.locked_until = record, 0, 0.0
+
+    def remove_password(self):
+        """No password any more (the server's settings lock): the file goes, every login with it"""
+        if self.fixed:
+            raise ValueError(f"The password is set by {self.variable} in the environment - remove it there")
+        try:
+            self.file.unlink()
+        except FileNotFoundError:
+            pass
+        with self.lock:
+            self.record, self.failures, self.locked_until = None, 0, 0.0
 
     def check(self, password):
         """
@@ -178,7 +197,7 @@ class Login:
 
     def new_session(self):
         """The cookie value for a browser that just logged in"""
-        expiry = int(time.time()) + SESSION_SECONDS
+        expiry = int(time.time()) + self.session_seconds
         return f"{expiry}.{self._signature(expiry)}"
 
     def valid_session(self, value):
@@ -197,14 +216,14 @@ class Login:
           SameSite=Strict  it is only sent on requests made from this page itself, so another
                            site open in the same browser cannot act on the station with it
         """
-        age = SESSION_SECONDS if value else 0
-        return f"{COOKIE}={value}; Path=/; Max-Age={age}; HttpOnly; SameSite=Strict"
+        age = self.session_seconds if value else 0
+        return f"{self.cookie}={value}; Path=/; Max-Age={age}; HttpOnly; SameSite=Strict"
 
 
-def session_from(cookie_header):
+def session_from(cookie_header, cookie=COOKIE):
     """The session value in a request's Cookie header ("a=1; station_session=...; b=2"), or ''"""
     for part in (cookie_header or '').split(';'):
         name, _, value = part.strip().partition('=')
-        if name == COOKIE:
+        if name == cookie:
             return value
     return ''

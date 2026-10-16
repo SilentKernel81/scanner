@@ -232,3 +232,16 @@
         width: auto;
     }
 }
+
+/* The settings password card (Server) */
+.lock-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.lock-row input {
+    flex: 1 1 220px;
+    min-width: 0;
+}

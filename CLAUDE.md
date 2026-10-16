@@ -164,7 +164,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 
 - **The server is the package `server/`** (`card_scanner.server`), not one file: `server/__init__.py` lists its
   modules in the order they build on each other, and **a module imports only from those
-  before it** (state, logs, desks, captures, card_data, pages, decks_api, deck_ideas_api,
+  before it** (state, logs, lock, desks, captures, card_data, pages, decks_api, deck_ideas_api,
   inventory_api, arena_api, trades_api, backups_api, stations_api, scan_events, settings_events,
   ai_events, startup) - an import the other way is a cycle and fails at start. What two
   modules both need lives in the earlier one. Routes are plain `@app.route` on the one app
@@ -314,7 +314,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   (`venv/bin/python tests/test_app_surface.py --record`), and a line
   in docs/PROGRAM_DOCUMENTATION.md. Messages between server and station are in `remote_scanner.py`
   and `station_client.py` - change both.
-- **Stations are open without a token** (`stations.token`), like the web UI, which has no login.
+- **Stations are open without a token** (`stations.token`), like the web UI, which has no login
+  except for one optional lock: the settings password (`server/lock.py`) on the AI keys, restart / quit,
+  network access, debug mode and the backups' restore / upload / download / delete / full backup. A new
+  route or event of that kind takes `@guarded` / `@guarded_event`; the list is in docs/PROGRAM_DOCUMENTATION.md.
   **Never send full API keys to the browser**: `api_keys.credential_status()` masks them; the UI
   can only replace or remove a key.
 - **Where the compose files are.** In `deploy/`, with paths written from there (`../data`), the

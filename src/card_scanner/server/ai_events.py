@@ -13,6 +13,7 @@ from card_scanner.core import prompts
 
 from card_scanner.server.state import app, identification, socketio
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded_event
 
 
 @app.route('/api/ai_credentials')
@@ -106,6 +107,7 @@ def get_local_ai_models():
 
 
 @socketio.on('save_ai_credential')
+@guarded_event
 def handle_save_ai_credential(data):
     """Save a provider's API key (or the local endpoint) entered in Settings"""
     provider = (data.get('provider') or '').lower()

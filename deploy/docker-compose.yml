@@ -25,7 +25,11 @@ services:
     restart: unless-stopped
     user: "${SCANNER_UID:-1000}:${SCANNER_GID:-1000}"  # the owner of data/ and scanned_cards/
     ports:
-      - "${SCANNER_PORT:-5000}:5000"
+      # SCANNER_BIND (in .env) limits which address of this machine the port is published on:
+      # 127.0.0.1 for a server only this computer uses, a LAN address for one network card.
+      # Unset, the port is published on every address, as before (stations, the phone and the
+      # other computers reach it - that is the point of the server).
+      - "${SCANNER_BIND:+${SCANNER_BIND}:}${SCANNER_PORT:-5000}:5000"
     volumes:
       - ../data:/app/data                   # collection, scanned cards, settings, keys, backups, logs
       - ../scanned_cards:/app/scanned_cards # captured card images
