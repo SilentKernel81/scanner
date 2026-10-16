@@ -5,8 +5,10 @@ Values entered in the UI are saved to data/api_keys.env (only readable by the ow
 override .env - the systemd service can only write inside data/. They are applied to
 os.environ immediately, so no restart is needed.
 """
+import ipaddress
 import os
 import re
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -61,6 +63,46 @@ def credential_status():
     return status
 
 
+# Names that lead to a machine of one's own network (no public name ends like this)
+PRIVATE_NAME_ENDINGS = ('.local', '.lan', '.home', '.home.arpa', '.internal', '.localdomain', '.docker')
+# Tailscale and other carrier-grade-NAT addresses: a private network too
+SHARED_ADDRESS_SPACE = ipaddress.ip_network('100.64.0.0/10')
+
+
+def check_local_endpoint(value):
+    """
+    The local AI endpoint is where every card's picture is sent: it must be a machine of the person's
+    own network - loopback, a private address (10/8, 172.16/12, 192.168/16, link-local, Tailscale's
+    100.64/10), `localhost`, a name without dots or ending in .local / .lan / .home / .internal /
+    .docker. Anything else (a public address, a public name) is refused, unless the environment says
+    ALLOW_PUBLIC_AI_ENDPOINT=1: the settings can be changed by anyone who can reach the server, and
+    an address of someone else would receive a photo of each card. Raises ValueError.
+    """
+    try:
+        parts = urlparse(value)
+        host = parts.hostname
+        parts.port  # a bad port raises here
+    except ValueError:
+        raise ValueError("The local AI endpoint is not a valid address")
+    if parts.scheme not in ('http', 'https') or not host:
+        raise ValueError("The local AI endpoint must start with http:// or https://")
+    if parts.username or parts.password:
+        raise ValueError("The local AI endpoint must not contain a user name or password")
+    if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
+        return
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        name = host.lower().rstrip('.')
+        if name == 'localhost' or '.' not in name or name.endswith(PRIVATE_NAME_ENDINGS):
+            return
+    else:
+        if address.is_private or address.is_loopback or address.is_link_local or address in SHARED_ADDRESS_SPACE:
+            return
+    raise ValueError(f"The local AI endpoint must be on your own network (not {host}); "
+                     "ALLOW_PUBLIC_AI_ENDPOINT=1 in the server's environment allows another address")
+
+
 def save_credential(provider, value):
     """
     Save a provider's API key (or the local endpoint) to data/api_keys.env and apply it.
@@ -70,8 +112,8 @@ def save_credential(provider, value):
     if not variable:
         raise ValueError(f"Unknown provider: {provider}")
     value = (value or '').strip()
-    if provider == 'local' and value and not re.match(r'^https?://', value):
-        raise ValueError("The local AI endpoint must start with http:// or https://")
+    if provider == 'local' and value:
+        check_local_endpoint(value)
     if '\n' in value or '\r' in value:
         raise ValueError("Invalid value")
 

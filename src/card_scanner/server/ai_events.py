@@ -95,10 +95,12 @@ def get_local_ai_models():
             'models': []
         })
     except Exception as e:
+        # The details go to the log, not to whoever asked: this route fetches an address the settings
+        # name, and an error message would tell a caller what is behind it
         logger.error(f"Error fetching local models: {e}")
         return jsonify({
             'success': False,
-            'error': str(e),
+            'error': 'Could not get the models from the local AI server',
             'models': []
         })
 
