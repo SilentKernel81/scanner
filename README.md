@@ -540,6 +540,13 @@ docs/PROGRAM_DOCUMENTATION.md.
 
 The web interface has no login: run it on a network you trust.
 
+## Ask an AI about your decks (MCP)
+
+`mcp_server/` is a small read-only MCP server: an AI assistant (Claude, or a local model through an
+MCP client) can list your decks, see what you own and what is missing, suggest cards for a
+commander and check what adding a card would do, without changing anything. Setup:
+[mcp_server/README.md](mcp_server/README.md).
+
 ## How this project was built
 
 This project was developed entirely with AI. The code, the tests and the documentation - this

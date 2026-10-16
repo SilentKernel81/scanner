@@ -2238,6 +2238,23 @@ the card data hint follow it too. The game selector in the top bar only appears 
 one game exists. Card payloads may carry `finish_options` (only those finishes are offered),
 `prices` (`[[finish label, USD]]`) and `thumb_uri` (printing picker).
 
+## The MCP server (decks and collection for an AI assistant)
+
+`mcp_server/` (since 2026-10-15; its README.md has the install and the Claude settings): a
+separate program on the machine of the AI client that speaks MCP over standard input / output and
+asks this server's web API - `/api/decks`, `/api/decks/<id>`, `/api/decks/<id>/suggestions`,
+`/api/decks/ideas/<kind>`, `/api/cards/search`, `/api/inventory`, `/api/stats` - so nothing changes
+here. **Version 1 only reads.** Ten tools: `list_decks`, `get_deck`, `check_deck`, `missing_cards`,
+`suggest_for_deck` (EDHREC through the server), `what_can_i_build` (starts the server's background
+search and waits up to a time), `propose_deck_changes` (works out whether each card exists, is
+legal, fits the commander's colours, how many copies are owned and which decks use it, the
+singleton rule of commander formats, and the deck's size before and after - **nothing is
+changed**), `search_collection`, `find_card`, `collection_summary`. Answers are short on purpose
+(small local models). Tested: `tests/test_mcp_tools.py` on a stand-in API; the protocol (tool list,
+calls, an error in the tool's own words) with the library's client against the real server, 2026-10-15.
+Not tried: a local model as the client. The server has no login: writes (add / remove a card) are for
+later, one at a time, each confirmed.
+
 ## Configuration and files
 
 **Who may use the server** (`server/access.py`, `tests/test_access.py`): there is no login, and
