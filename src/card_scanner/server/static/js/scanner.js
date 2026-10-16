@@ -1420,34 +1420,6 @@ async function clearInventory() {
 // Stations: cameras elsewhere (a phone, a laptop) that capture cards and send them here
 // ============================================================================
 
-function stationSetupUrl(station) {
-    // The station's own page (which camera, its name, its server). A station on this computer
-    // connects from a loopback address: that is this page's host
-    if (!station.setup || !station.setup.port) return '';
-    const loopback = !station.setup.address || ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(station.setup.address);
-    const host = loopback ? window.location.hostname : station.setup.address;
-    return `http://${host.includes(':') ? '[' + host + ']' : host}:${station.setup.port}`;
-}
-
-function showCameraSetupLink() {
-    // Under the camera: a link to this camera's station setup page, so changing cameras is one click.
-    // A page of its own station knows it; the server's own page uses the one connected station.
-    const link = $('camera-setup-link');
-    if (!link) return;
-    fetch('/api/stations')
-        .then(response => response.json())
-        .then(data => {
-            const here = STATION
-                ? data.stations.find(station => station.id === STATION.id)
-                : (data.stations.filter(station => station.connected).length === 1
-                    ? data.stations.find(station => station.connected) : null);
-            const url = here ? stationSetupUrl(here) : '';
-            link.hidden = !url;
-            if (url) $('camera-setup-anchor').href = url;
-        })
-        .catch(() => { link.hidden = true; });
-}
-
 // Old links to the settings drawer (/scan/<id>#settings) go to the settings page
 if (window.location.hash === '#settings') window.location.replace('/settings#cameras');
 // The settings page's "Edit prompts" opens the editor (/scan/<id>#prompts)
@@ -1524,9 +1496,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadStats();
     everyWhileVisible(loadStats, 5000);
-
-    showCameraSetupLink();
-    everyWhileVisible(showCameraSetupLink, 15000);
 
     // The frame follows the picture's shape (a cropped camera's is tall)
     updateVideoFrame();

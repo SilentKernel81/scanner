@@ -441,11 +441,11 @@ settings are read from the saved values, so the page still shows them.
 - **Its setup page is linked from the server**: a station tells its setup page's port when it
   connects (`auth.setup_port`), the server keeps it with the address it connected from
   (`CameraHub.setup_page`, `setup` in `GET /api/stations`) and the scanner page's Stations list
-  offers **Camera setup** (`stationSetupUrl`) - a station on this computer connects from a
-  loopback address, and the link then uses the host the page was opened on.
-  The same link sits under the camera's picture (`showCameraSetupLink`, every 15 s): a
-  station's page uses its own station, the server's page the one connected station; no link
-  while the station has not told a setup port. Tried only through the page's code, not in a browser.
+  is not on the scanner page any more (it was under the camera's picture until 2026-10-16): the
+  **Settings** page's Cameras category has a **Camera setup** button for the chosen camera
+  (`settings.js`: `stationSetupUrl`) - a station on this computer connects from a loopback address, and
+  the link then uses the host the page was opened on; no button while the station has not told a setup port.
+  Tried only through the page's code, not in a browser.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml` (`auto`, the default: the
   first USB camera that is not a laptop's own - `integrated`, `built-in`, `facetime` or `IR` in
   its name - else the first one, read from /sys, `config.auto_camera_index`), or
