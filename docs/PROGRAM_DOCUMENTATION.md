@@ -1769,7 +1769,7 @@ missing, `verified`). It is taken holding every manager's lock (in the order `ta
 and `maintenance_barrier`, which a capture being settled and the clean-up of old pictures hold
 too - so a card on its way to the collection or a capture being added is in none of the
 snapshots or in all of them; the files are opened and checked after the locks are let go. The
-last 2 are kept. `scripts/backup.sh` then archives those snapshots with the rest of `data/`
+last 2 are kept. `scripts/backup.sh` (which runs with `umask 077`: its archive holds the API keys, so the archive is 0600 and `~/scanner-backups` 0700, the older ones tightened on the next run - `tests/test_backup_script.py`) then archives those snapshots with the rest of `data/`
 (without a running server it snapshots each file on its own, which is the same when nothing
 runs). Bringing one back is done by hand with the server stopped (INSTALL.md). Tested on
 temporary data (`FullBackup`: opened in another folder, an interrupted move in it is finished)

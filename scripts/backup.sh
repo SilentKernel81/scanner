@@ -4,6 +4,11 @@
 
 set -e
 
+# The archive holds the API keys (.env, data/api_keys.env, data/secret_key), which the app keeps
+# readable by its user only: so must the backup be (an outside code review found it 0644 in a 0755
+# directory, 2026-10-16)
+umask 077
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -33,8 +38,10 @@ fi
 
 cd "$SCANNER_DIR"
 
-# Create backup directory
+# Create backup directory - this user's alone, and so the backups already in it
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+chmod 600 "$BACKUP_DIR"/scanner-backup-*.tar.gz 2>/dev/null || true
 
 print_info "Creating backup..."
 
