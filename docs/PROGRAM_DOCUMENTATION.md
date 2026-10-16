@@ -1653,6 +1653,14 @@ commander. Adding cards - search, suggestions, popular decks - is a panel that s
 (`showAdding`); buy list, duplicate and delete are behind a menu. The view, the grouping and
 the list's tab are remembered in the browser. Made for a screen with a pointer: on a phone
 nothing can be pointed at, and the pages were not laid out or tried there.
+**The scanner page's timers and handlers** (since 2026-10-16): `everyWhileVisible` (`scanner.js`) runs the detection
+poll (500 ms), the stats (5 s), the camera link (15 s) and the picture-shape check (1 s) only while the tab is
+visible and once at once when it comes back; the detection poll never has two requests open. The printings and
+similar-card lists hold their value in `data-printing` / `data-similar` with one delegated click handler (a card
+named `A\B` or `It's` broke the old `onclick="f('...')"`), and `escapeHtml` takes null / undefined / numbers.
+`scripts/check_scanner_page.py` tries these in headless Chromium against a server on copied data that knows a
+station called `check`. Not done: the inventory modal still rebuilds every row on an update (not measured as a problem).
+
 `scripts/check_deck_pages.py` tries the pages in headless Chromium (on a server with copied
 data only: it creates and deletes decks).
 

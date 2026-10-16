@@ -26,7 +26,8 @@ function escapeHtml(text) {
         '"': '&quot;',
         "'": '&#039;'
     };
-    return text.replace(/[&<>"']/g, m => map[m]);
+    // null / undefined / a number are text too (a card without a set used to stop the whole panel)
+    return String(text ?? '').replace(/[&<>"']/g, m => map[m]);
 }
 
 const RARITY_ORDER = {special: 0, bonus: 0, mythic: 1, rare: 2, uncommon: 3, common: 4};

@@ -121,16 +121,39 @@ function updateDetectionStatus(status) {
 
 let detectionPolling = null;
 
+function everyWhileVisible(task, milliseconds) {
+    // setInterval that does nothing while the tab is hidden (a page in the background used to keep
+    // asking the server twice a second), and catches up at once when the tab comes back
+    const timer = setInterval(() => { if (!document.hidden) task(); }, milliseconds);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) task(); });
+    return timer;
+}
+
+let detectionRequestOpen = false;
+
 function startDetectionPolling() {
-    // Called on every (re)connect: one poll, every 500 ms
+    // Called on every (re)connect: one poll, every 500 ms - never a second request while the
+    // last one is not back (a slow server was given a queue of them)
     if (detectionPolling) return;
-    detectionPolling = setInterval(function() {
+    detectionPolling = everyWhileVisible(function() {
+        if (detectionRequestOpen) return;
+        detectionRequestOpen = true;
         fetch('/api/detection_status')
             .then(response => response.json())
             .then(updateDetectionStatus)
-            .catch(error => console.error('Error polling detection status:', error));
+            .catch(error => console.error('Error polling detection status:', error))
+            .finally(() => { detectionRequestOpen = false; });
     }, 500);
 }
+
+// The cards of the panel's lists (printings, similar cards) hold their value in data-* attributes:
+// a name put inside onclick="f('...')" breaks at a backslash or a quote
+document.addEventListener('click', event => {
+    const printing = event.target.closest('[data-printing]');
+    if (printing) return selectPrinting(printing.dataset.printing);
+    const similar = event.target.closest('[data-similar]');
+    if (similar) selectSimilarCard(similar.dataset.similar);
+});
 
 // ============================================================================
 // Capture, auto scanning, focus
@@ -464,7 +487,7 @@ function displayPrintings(cardName, cards) {
         const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
         const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
         return `
-            <div class="printing-card" onclick="selectPrinting('${escapeHtml(card.id)}')">
+            <div class="printing-card" data-printing="${escapeHtml(card.id)}">
                 ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
                 <strong>${escapeHtml(card.set)}</strong><br>
                 <span class="meta">#${escapeHtml(card.number)} &middot; ${price}</span>
@@ -483,7 +506,7 @@ function selectPrinting(cardId) {
 
 function displaySimilarCards(cards) {
     const similar = cards.map(card => `
-        <div class="similar-card" onclick="selectSimilarCard('${escapeHtml(card.name.replace(/'/g, "\\'"))}')">
+        <div class="similar-card" data-similar="${escapeHtml(card.name)}">
             <strong>${escapeHtml(card.name)}</strong><br>
             <small>${escapeHtml(card.set)} · ${card.price}</small>
         </div>
@@ -1500,14 +1523,14 @@ document.addEventListener('DOMContentLoaded', function() {
     loadGames();
 
     loadStats();
-    setInterval(loadStats, 5000);
+    everyWhileVisible(loadStats, 5000);
 
     showCameraSetupLink();
-    setInterval(showCameraSetupLink, 15000);
+    everyWhileVisible(showCameraSetupLink, 15000);
 
     // The frame follows the picture's shape (a cropped camera's is tall)
     updateVideoFrame();
-    setInterval(updateVideoFrame, 1000);
+    everyWhileVisible(updateVideoFrame, 1000);
     $('video-feed').addEventListener('load', updateVideoFrame);
     window.addEventListener('resize', placeAreaLayer);
 
