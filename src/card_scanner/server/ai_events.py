@@ -13,6 +13,7 @@ from card_scanner.core import prompts
 
 from card_scanner.server.state import app, identification, socketio
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded_event
 
 
 @app.route('/api/ai_credentials')
@@ -59,7 +60,7 @@ def get_local_ai_models():
         logger.info(f"Fetching models from Ollama: {ollama_api}")
 
         # Query Ollama for available models
-        response = requests.get(ollama_api, timeout=5)
+        response = requests.get(ollama_api, timeout=5, allow_redirects=False)
         response.raise_for_status()
 
         data = response.json()
@@ -95,15 +96,18 @@ def get_local_ai_models():
             'models': []
         })
     except Exception as e:
+        # The details go to the log, not to whoever asked: this route fetches an address the settings
+        # name, and an error message would tell a caller what is behind it
         logger.error(f"Error fetching local models: {e}")
         return jsonify({
             'success': False,
-            'error': str(e),
+            'error': 'Could not get the models from the local AI server',
             'models': []
         })
 
 
 @socketio.on('save_ai_credential')
+@guarded_event
 def handle_save_ai_credential(data):
     """Save a provider's API key (or the local endpoint) entered in Settings"""
     provider = (data.get('provider') or '').lower()

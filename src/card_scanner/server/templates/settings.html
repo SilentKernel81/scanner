@@ -7,8 +7,8 @@
     <title>Settings - Card Scanner</title>
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=50">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=54">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=2">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -291,12 +291,27 @@
                         </label>
                     </div>
 
+                    <div class="settings-card" id="lock-card">
+                        <h3>Settings password</h3>
+                        <p class="hint">Optional. With a password set, the AI keys and endpoint, restart, network access, debug mode and the backups (restore, upload, download, delete) ask for it first. Scanning, the collection and the decks stay open. The page is plain HTTP, so the password crosses the network unencrypted: it keeps out mistakes and the curious, not someone listening on the network. Forgotten: delete <code>data/settings_login.json</code> and restart.</p>
+                        <div class="hint" id="lock-status"></div>
+                        <div class="lock-row" id="lock-set-row">
+                            <input type="password" id="lock-new" placeholder="New password (8 characters or more)" autocomplete="new-password">
+                            <button type="button" class="btn" id="lock-set">Set password</button>
+                        </div>
+                        <div class="lock-row">
+                            <button type="button" class="btn" id="lock-unlock" hidden>Unlock this browser</button>
+                            <button type="button" class="btn" id="lock-lock" hidden>Lock this browser</button>
+                            <button type="button" class="btn btn-danger" id="lock-remove" hidden>Remove the password</button>
+                        </div>
+                    </div>
+
                     <details class="settings-advanced">
                         <summary>Advanced</summary>
                         <label class="switch-row">
                             <span class="switch-text">
                                 <span class="switch-title">Debug mode</span>
-                                <span class="switch-desc" id="debug-mode-desc">The web server's debugger and a request log (data/logs/requests.log). The debugger can run code on the server from a browser on your network: leave it off unless you are looking for a problem. Applies after a restart.</span>
+                                <span class="switch-desc" id="debug-mode-desc">A request log (data/logs/requests.log) and, when the server listens on this computer only, the web server's interactive debugger (an error page with a Python console). A server that other devices can reach never starts the debugger - anyone on the network could use it. Applies after a restart.</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-debug-mode">
                         </label>
@@ -309,7 +324,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=21"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=4"></script>
 </body>
 </html>

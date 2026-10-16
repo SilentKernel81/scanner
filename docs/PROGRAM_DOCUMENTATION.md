@@ -427,6 +427,12 @@ settings are read from the saved values, so the page still shows them.
   `capture_id`, retried until the server has it, then the local file is deleted. `mode: auto`
   is added or queued for review; `mode: review` is read at once and shown on the page, and the
   client holds its next auto-capture until the page says Add or Skip (`card_under_review`).
+  **A capture the server answers oddly 20 times** (an error page, a 5xx for that picture, a wrong
+  token - anything but "received" or "refused"; no answer at all does not count) is **parked**
+  (`Station.park`, since 2026-10-16): it joins the held captures with its picture and note on disk, the
+  setup page shows it ("the server kept answering with something other than ...") and offers
+  "Send them to this server", the next start tries it again, and the captures behind it go on instead
+  of waiting for ever. `tests/test_station_uploads.py`.
 - **The server or the network goes away**: the station keeps scanning and the captures wait;
   the client reconnects by itself (~5 s after a server restart). Its own state decides
   `auto_capture_enabled`: a connection that drops and comes back goes on scanning; a client
@@ -435,11 +441,11 @@ settings are read from the saved values, so the page still shows them.
 - **Its setup page is linked from the server**: a station tells its setup page's port when it
   connects (`auth.setup_port`), the server keeps it with the address it connected from
   (`CameraHub.setup_page`, `setup` in `GET /api/stations`) and the scanner page's Stations list
-  offers **Camera setup** (`stationSetupUrl`) - a station on this computer connects from a
-  loopback address, and the link then uses the host the page was opened on.
-  The same link sits under the camera's picture (`showCameraSetupLink`, every 15 s): a
-  station's page uses its own station, the server's page the one connected station; no link
-  while the station has not told a setup port. Tried only through the page's code, not in a browser.
+  is not on the scanner page any more (it was under the camera's picture until 2026-10-16): the
+  **Settings** page's Cameras category has a **Camera setup** button for the chosen camera
+  (`settings.js`: `stationSetupUrl`) - a station on this computer connects from a loopback address, and
+  the link then uses the host the page was opened on; no button while the station has not told a setup port.
+  Tried only through the page's code, not in a browser.
 - **Which camera**: `camera.usb_index` in the station's `config.yaml` (`auto`, the default: the
   first USB camera that is not a laptop's own - `integrated`, `built-in`, `facetime` or `IR` in
   its name - else the first one, read from /sys, `config.auto_camera_index`), or
@@ -1133,6 +1139,14 @@ chooses GPU or CPU. Only Magic has a parser (`card_ocr.PARSERS`); other games ar
 
 ### The vision AI request
 
+**Retries** (since 2026-10-16; `CardIdentifier._post_with_retry`, `tests/test_ai_retry.py`): the three cloud providers
+(Gemini, OpenAI, Anthropic) are asked up to three times when the answer is a rate limit (429), the provider's own
+error (500 / 502 / 503 / 504) or a timeout / connection error - after 1 s and 3 s, or the `Retry-After` the provider
+sent (at most 8 s). A wrong key or a bad request (400 / 401 / 403 / 404) is not repeated. The last answer is handed
+back and the caller raises for its status as before (the card then goes to review). A local server has its own
+fallback (native API, then the OpenAI-compatible one) and is not retried. Before this, one 429 in a batch sent the
+card to the review queue as "not identified".
+
 `CardIdentifier.identify_card()` sends the flat card image (JPEG, longest side
 `vision_ai.image_size`, 1024 px) with a prompt asking for three values from fixed places on the
 card:
@@ -1262,6 +1276,13 @@ One SQLite file, `data/cards_database.db`.
 
 **`cards`** - Scryfall's "default cards" bulk data (gzipped JSON lines), tokens/emblems/art
 cards excluded. Columns are defined once in `database.CARD_COLUMNS`:
+
+**The download is streamed** (since 2026-10-16; `CardDatabase._stream_cards`, `tests/test_card_data_stream.py`):
+`download_scryfall_data` hands back a generator that decompresses and parses the gzipped JSON lines as they arrive,
+and the import (`populate_database`) inserts them in batches of 5,000 - the file is never held whole. Measured with a
+real download into a throwaway database: 112,899 cards in 10 s, peak memory 44 MB (the old path joined, decompressed
+and parsed everything into one list; the review of 2026-10-16 estimated ~1.5 GB). A file cut off mid-way raises and the
+swap (`replace_table`) does not happen: the old cards stay.
 
 | Group | Columns |
 |---|---|
@@ -1638,6 +1659,14 @@ commander. Adding cards - search, suggestions, popular decks - is a panel that s
 (`showAdding`); buy list, duplicate and delete are behind a menu. The view, the grouping and
 the list's tab are remembered in the browser. Made for a screen with a pointer: on a phone
 nothing can be pointed at, and the pages were not laid out or tried there.
+**The scanner page's timers and handlers** (since 2026-10-16): `everyWhileVisible` (`scanner.js`) runs the detection
+poll (500 ms), the stats (5 s), the camera link (15 s) and the picture-shape check (1 s) only while the tab is
+visible and once at once when it comes back; the detection poll never has two requests open. The printings and
+similar-card lists hold their value in `data-printing` / `data-similar` with one delegated click handler (a card
+named `A\B` or `It's` broke the old `onclick="f('...')"`), and `escapeHtml` takes null / undefined / numbers.
+`scripts/check_scanner_page.py` tries these in headless Chromium against a server on copied data that knows a
+station called `check`. Not done: the inventory modal still rebuilds every row on an update (not measured as a problem).
+
 `scripts/check_deck_pages.py` tries the pages in headless Chromium (on a server with copied
 data only: it creates and deletes decks).
 
@@ -1769,7 +1798,7 @@ missing, `verified`). It is taken holding every manager's lock (in the order `ta
 and `maintenance_barrier`, which a capture being settled and the clean-up of old pictures hold
 too - so a card on its way to the collection or a capture being added is in none of the
 snapshots or in all of them; the files are opened and checked after the locks are let go. The
-last 2 are kept. `scripts/backup.sh` then archives those snapshots with the rest of `data/`
+last 2 are kept. `scripts/backup.sh` (which runs with `umask 077`: its archive holds the API keys, so the archive is 0600 and `~/scanner-backups` 0700, the older ones tightened on the next run - `tests/test_backup_script.py`) then archives those snapshots with the rest of `data/`
 (without a running server it snapshots each file on its own, which is the same when nothing
 runs). Bringing one back is done by hand with the server stopped (INSTALL.md). Tested on
 temporary data (`FullBackup`: opened in another folder, an interrupted move in it is finished)
@@ -2193,7 +2222,7 @@ it only sees its own camera - see [A page per camera](#a-page-per-camera). The p
 
 `/settings` (`server/pages.py: settings_page`, `templates/settings.html`, `static/js/settings.js`,
 `static/css/settings.css`; since 2026-10-15 - before it each scanner page and the collection page
-had a drawer of its own with a different part of the settings). The header's gear is a link to it
+had a drawer of its own with a different part of the settings). Settings is the last link of the header's lower row, in its right corner (it was a gear button in the top row until 2026-10-16; on a narrow window it stays in the first row, the page's own tabs go below), a link to it
 on every page. Five categories, a list on the left and one at a time on the right (`#cameras`,
 `#sounds`, `#reading`, `#data`, `#server` in the address; `/scan/<id>#settings` and
 `/collection#settings` go to it):
@@ -2204,8 +2233,14 @@ on every page. Five categories, a list on the left and one at a time on the righ
 | **Sounds** | Sound effects, Capture beep, Card added, Volume - for every camera |
 | **Card reading** | Read with OCR first, the vision AI (provider, key, model), Prompts (the summary, and a link to the editor) |
 | **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames), under Advanced: Rebuild database schema |
-| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, under Advanced: Debug mode |
+| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Advanced: Debug mode |
 
+**Debug mode** (Server → Advanced) is two things: the request log (`data/logs/requests.log`) and Werkzeug's
+interactive debugger. Since 2026-10-16 the debugger only runs when the server listens on this computer
+alone (`program.debugger_allowed`; `services.debugger_running`; the page says which is on) or when the
+server is started with `SCANNER_LAN_DEBUGGER=1` - the switch can be reached from the network, and an
+error page with a Python console (its PIN goes to the log) would be one step from running code for
+anyone on it (an outside code review, 2026-10-16; the real server had it on until 2026-10-15).
 Each setting is saved when it is changed, through the routes and Socket.IO events the drawers
 used (nothing new on the server side except the page's route). Not carried over: the
 "Auto-detection" switch (its state was never read back from the camera; the scanner page
@@ -2218,7 +2253,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 | Page → server | Server → page |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Flask's debug mode, for the next start), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -2238,7 +2273,53 @@ the card data hint follow it too. The game selector in the top bar only appears 
 one game exists. Card payloads may carry `finish_options` (only those finishes are offered),
 `prices` (`[[finish label, USD]]`) and `thumb_uri` (printing picker).
 
+## The MCP server (decks and collection for an AI assistant)
+
+`mcp_server/` (since 2026-10-15; its README.md has the install and the Claude settings): a
+separate program on the machine of the AI client that speaks MCP over standard input / output and
+asks this server's web API - `/api/decks`, `/api/decks/<id>`, `/api/decks/<id>/suggestions`,
+`/api/decks/ideas/<kind>`, `/api/cards/search`, `/api/inventory`, `/api/stats` - so nothing changes
+here. **Version 1 only reads.** Ten tools: `list_decks`, `get_deck`, `check_deck`, `missing_cards`,
+`suggest_for_deck` (EDHREC through the server), `what_can_i_build` (starts the server's background
+search and waits up to a time), `propose_deck_changes` (works out whether each card exists, is
+legal, fits the commander's colours, how many copies are owned and which decks use it, the
+singleton rule of commander formats, and the deck's size before and after - **nothing is
+changed**), `search_collection`, `find_card`, `collection_summary`. Answers are short on purpose
+(small local models). Tested: `tests/test_mcp_tools.py` on a stand-in API; the protocol (tool list,
+calls, an error in the tool's own words) with the library's client against the real server, 2026-10-15.
+Not tried: a local model as the client. The server has no login: writes (add / remove a card) are for
+later, one at a time, each confirmed.
+
 ## Configuration and files
+
+**Where a setting comes from, and which wins** (written 2026-10-16 after an outside review found the
+four sources hard to tell apart). Later in the list wins over earlier, per setting:
+
+| Source | What it holds | Notes |
+|---|---|---|
+| `config.yaml` (shipped, top folder) | every default | never edited per machine (it has no machine's own values and no secret) |
+| the person's `config.yaml` (`USER_DIR`; the same file in a checkout) | only what they change, laid over the shipped one section by section | `${NAME}` in a value is replaced by that environment variable (anywhere in the text) |
+| the environment and `.env` | `SCANNER_*`, `LOCAL_AI_ENDPOINT`, API keys ... | the server reads `.env` when it starts (`server/__init__.py`) and it does not override a variable that is already set |
+| `data/api_keys.env` | keys and the local AI address saved from the Settings page | **overrides** the environment and `.env` (`load_dotenv(override=True)`) |
+| `data/settings.json` | choices made in the web interface, everyone's (provider, OCR first, sounds, backups, capture size, debug mode ...) | where a setting also exists in `config.yaml` (`refocus_every`, `refocus_on_drop`), this wins once it has been set |
+| `data/stations.json` | each camera's own choices on the server (rotation, focus, refocus, debug trace, fixed area) | per station; falls back to `data/settings.json` |
+| a station's own: command line > environment > `data/station.json` > default | the server's address, the station's id / name / token, the camera | `station_setup.resolve`; a value from the command line or the environment is shown as fixed on the setup page |
+
+**The local AI endpoint** (since 2026-10-16; `api_keys.check_local_endpoint`, `tests/test_local_endpoint.py`) is where every
+card's picture is sent, and the Settings page can change it from any device that reaches the server (unless a settings
+password is set). It must be `http(s)` with no user name, and its host is **resolved**: every address it resolves to must
+be loopback, private (10/8, 172.16/12, 192.168/16, fc00::/7), link-local or Tailscale's 100.64/10 - the text of a name proves
+nothing (`http://134744072` is 8.8.8.8 to the resolver, found by the outside review; a public DNS name can end in `.lan`);
+a name that does not resolve is refused. Another address is refused unless the server's environment has
+`ALLOW_PUBLIC_AI_ENDPOINT=1`. The requests to a local server do not follow redirects. Not covered: a name whose DNS answer
+changes after it was saved (the check is at saving time), and the address in `config.yaml` or the environment (the owner's,
+not checked). `/api/local_ai_models` says only "could not get the models" (the cause is in the log).
+
+**How much a request may carry** (since 2026-10-16): `MAX_CONTENT_LENGTH` is 64 MB (`server/state.py`) - a
+capture is at most ~30 MB, a collection or Arena file a few MB - and `backups_api.limit_the_request_body`
+refuses a bigger body with 413 before any route runs (Flask only checks when a route reads it, and several
+answer "not ready" first). Uploading a backup (`upload_backup`) raises the limit for itself to 8 GB: it
+holds the captures. `tests/test_upload_limit.py`.
 
 **Who may use the server** (`server/access.py`, `tests/test_access.py`): there is no login, and
 a browser sends any web page's requests to a local or network address, so a page open in
@@ -2251,6 +2332,29 @@ connections follow the same rule (`socket_origin_allowed`). Stations send no `Or
 pass on the Host check alone: a station reaching the server by a host name that is not the
 computer's own (a Docker service name, a reverse proxy) needs it in `flask.allowed_hosts`.
 Never tested with the Android app in server mode reaching the server by a host name.
+
+**The settings password** (since 2026-10-16; `server/lock.py`, `tests/test_settings_lock.py`,
+`scripts/check_settings_lock.py`): the pages have no login, but the few actions that can hurt beyond one
+card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
+`SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
+quit, network access, Debug mode (`toggle_debug_mode`) and, of the backups, restore, upload, download, delete and
+making a *full* backup (it holds the keys). Open: scanning, the cameras and their settings, the collection, the
+decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
+`error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
+password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO
+connection after an unlock (the cookie is read when a connection is made) and asks for the event again; a backup's
+download link asks first (`ensureSettingsUnlocked`), as a refused link would be saved as a file. It is the camera
+station's setup-page mechanism (`station_login.Login`, parametrised): the password only as an scrypt hash in
+`data/settings_login.json`, an HttpOnly SameSite=Strict cookie signed with a random key, 12-hour sessions, wrong
+passwords wait 1, 2, 4 ... 30 s (so a stranger can make the owner wait). The first password can be set by anyone
+who reaches the page; changing or removing it needs the current one. Not covered: the page is plain HTTP, so the
+password crosses the network unencrypted - it keeps out mistakes and the curious, not someone listening. A
+forgotten password: delete `data/settings_login.json` and restart. `scripts/backup.sh` asks for the full backup, which is guarded: it logs in with `SCANNER_SETTINGS_PASSWORD` (the environment, else the checkout's `.env`; `tests/test_backup_script.py`) and says so when the server is locked and it has no password. A new guarded route takes `@guarded`, a new
+guarded event `@guarded_event` (below `@socketio.on`).
+
+**`SCANNER_BIND`** (Docker, `deploy/docker-compose.yml`): the address the port is published on; unset it is every
+address (as before), `127.0.0.1` only this computer. It is read by Compose for the `ports:` line only - the server
+inside the container still listens on all of its addresses.
 
 **Server**
 

@@ -5,6 +5,7 @@ and restart, and the camera station that runs beside it.
 
 Run:  venv/bin/python tests/test_program.py        (or with the others: -m unittest discover tests)
 """
+import os
 import subprocess
 import sys
 import time
@@ -99,6 +100,22 @@ class Routes(unittest.TestCase):
         page = self.client.get('/settings', base_url='http://localhost').get_data(as_text=True)
         self.assertNotIn('Quit Card Scanner', page)
         self.assertIn('Restart Card Scanner', page)
+
+
+class Debugger(unittest.TestCase):
+    """Debug mode's interactive debugger only runs where nobody else can reach the server"""
+
+    def test_only_on_this_computer_unless_asked_for(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('SCANNER_LAN_DEBUGGER', None)
+            self.assertTrue(program.debugger_allowed('127.0.0.1'))
+            self.assertTrue(program.debugger_allowed('localhost'))
+            self.assertFalse(program.debugger_allowed('0.0.0.0'))
+            self.assertFalse(program.debugger_allowed('192.168.1.5'))
+            os.environ['SCANNER_LAN_DEBUGGER'] = '1'
+            self.assertTrue(program.debugger_allowed('0.0.0.0'))
+            os.environ['SCANNER_LAN_DEBUGGER'] = 'yes'      # only exactly 1 asks for it
+            self.assertFalse(program.debugger_allowed('0.0.0.0'))
 
 
 class Shutdown(unittest.TestCase):

@@ -13,6 +13,7 @@ from card_scanner import games
 
 from card_scanner.server.state import app, app_settings, identification, inventory, services, socketio, stations
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded_event
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
 from card_scanner.server.captures import scan_location, set_pending_capture
 from card_scanner.server.card_data import start_card_data_update
@@ -143,6 +144,7 @@ def get_scan_settings():
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'debug_mode': saved_debug_mode(),
         'debug_mode_running': bool(services.debug_mode_running),
+        'debugger_running': bool(services.debugger_running),
         'autofocus': scanner.focus_locked_value is None if scanner else True,
         'fixed_area_enabled': bool(scanner.fixed_area_enabled) if scanner else False,
         'fixed_area': scanner.fixed_area if scanner else None,
@@ -277,6 +279,7 @@ def handle_toggle_debug_trace(data):
 
 
 @socketio.on('toggle_debug_mode')
+@guarded_event
 def handle_toggle_debug_mode(data):
     """Flask's debug mode on/off (remembered; the server takes it when it starts)"""
     if not scanner:
@@ -284,7 +287,8 @@ def handle_toggle_debug_mode(data):
         return
     enabled = bool(data.get('enabled', False))
     app_settings.set('debug_mode', enabled)
-    emit('debug_mode_toggled', {'enabled': enabled, 'running': bool(services.debug_mode_running)})
+    emit('debug_mode_toggled', {'enabled': enabled, 'running': bool(services.debug_mode_running),
+                                'debugger': bool(services.debugger_running)})
     logger.info(f"Debug mode toggled: {enabled} (running: {services.debug_mode_running})")
     if enabled != bool(services.debug_mode_running):
         log_to_client(f"Debug mode: {'on' if enabled else 'off'} after the next restart", level="info")

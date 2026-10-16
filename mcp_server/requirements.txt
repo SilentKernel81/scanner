@@ -1,0 +1,2 @@
+# The card scanner MCP server (card_scanner_mcp.py) - on the machine that runs the AI client, not on the server
+mcp>=1.2

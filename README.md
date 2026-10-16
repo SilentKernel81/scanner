@@ -311,7 +311,7 @@ a phone too; the deck pages are made for a screen with a pointer.
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
 - **Backups** - one is made automatically the first time the server starts each day (the last
-  7 are kept). The gear button opens Settings: **Back up now** keeps your collection, the
+  7 are kept). The **Settings** link in the right corner of the header (Collection and data): **Back up now** keeps your collection, the
   scanned cards and your decks as they are - do it before a big load. **Restore** puts all
   three back as they were; what you had at that moment is backed up first, so a restore can be
   taken back.
@@ -539,6 +539,13 @@ station holds a Socket.IO connection of its own (`/station`); both are listed in
 docs/PROGRAM_DOCUMENTATION.md.
 
 The web interface has no login: run it on a network you trust.
+
+## Ask an AI about your decks (MCP)
+
+`mcp_server/` is a small read-only MCP server: an AI assistant (Claude, or a local model through an
+MCP client) can list your decks, see what you own and what is missing, suggest cards for a
+commander and check what adding a card would do, without changing anything. Setup:
+[mcp_server/README.md](mcp_server/README.md).
 
 ## How this project was built
 

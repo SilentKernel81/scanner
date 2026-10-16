@@ -9,7 +9,7 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=50">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=54">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -62,11 +62,6 @@
                                 <span class="status-text">Waiting for card...</span>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- The camera station's own setup page (which camera, its name, its server): filled by showCameraSetupLink -->
-                    <div class="camera-setup-link hint" id="camera-setup-link" hidden>
-                        <a id="camera-setup-anchor" target="_blank" rel="noopener">Change camera or station settings</a>
                     </div>
 
                     <!-- Shown while drawing the fixed area - below the video, so all of it can be drawn on -->
@@ -222,7 +217,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=66"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=21"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=68"></script>
 </body>
 </html>

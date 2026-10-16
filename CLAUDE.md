@@ -152,6 +152,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Capture loop, stillness, auto-capture, new-card detection, fixed area | `scanner.py`: `_capture_frames` (camera missing / lost: `_open_camera`, `_read_failed`, `_wait_for_camera`), `_is_card_settled`, `_new_card_arrived`, `_mark_captured`, `_fixed_area_step`, `set_fixed_area` |
 | Focus sweep / lock / drift tracking | `scanner.py`: `focus_sweep`, `refocus`, `_run_focus_sweep`, `_run_focus_probe`, `_move_focus` (approach from below: the lens has play), `_check_focus_drift`, `set_continuous_autofocus` |
 | Outline detection, warp | `object_detector.py`: `find_card_outline` (+ `_track_outline`, `_outline_from_edge_groups`, `_card_inside_box`), `warp_card`, `ObjectDetector.detect` (asks `corner_net.py`'s network first - `detection.neural`, `corner_net.onnx` beside it - and falls back to the outline detector); training and scoring: `scripts/train_corner_net.py`, `scripts/label_frames.py`, `scripts/score_detector.py --neural` |
+| **MCP server** (an AI assistant reads the decks and the collection; its own folder, runs on the client's machine) | `mcp_server/`: `card_scanner_mcp.py` (registers the tools; `mcp` 2.x `MCPServer`, 1.x `FastMCP` as fallback), `tools.py` (the tools: plain functions of a `ScannerApi`), `scanner_api.py` (urllib client of the server's web API); read-only, `propose_deck_changes` changes nothing; `tests/test_mcp_tools.py` (a stand-in API, no MCP library); README.md there. Keep it out of `src/` and the images: it imports nothing of the project and needs the `mcp` library |
 | **Both** | |
 | Desktop program (AppImage): launcher options, quit / restart, who can reach it, the station beside the server | `server/program.py`: `parse_arguments`, `network_access`, `listen_host`, `start_station` / `stop_station`, `exec_again_if_requested`; `server/startup.py`: `main`; `packaging/` (`AppRun`), `scripts/build-appimage.sh`, `.github/workflows/appimage.yml`; `templates/_program.html`, `common.js`: `quitProgram`, `restartProgram`, `setNetworkAccess` |
 | Settings | `config.yaml` (+ `config.py`: also `SCANNER_CAMERA`, `SCANNER_CAMERA_INDEX`, `SCANNER_STATION_TOKEN`), `.env`; on the server `data/settings.json` (everyone's choices), `data/stations.json` (each station's), `data/api_keys.env`, `data/prompts.json` |
@@ -163,7 +164,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 
 - **The server is the package `server/`** (`card_scanner.server`), not one file: `server/__init__.py` lists its
   modules in the order they build on each other, and **a module imports only from those
-  before it** (state, logs, desks, captures, card_data, pages, decks_api, deck_ideas_api,
+  before it** (state, logs, lock, desks, captures, card_data, pages, decks_api, deck_ideas_api,
   inventory_api, arena_api, trades_api, backups_api, stations_api, scan_events, settings_events,
   ai_events, startup) - an import the other way is a cycle and fails at start. What two
   modules both need lives in the earlier one. Routes are plain `@app.route` on the one app
@@ -313,7 +314,10 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   (`venv/bin/python tests/test_app_surface.py --record`), and a line
   in docs/PROGRAM_DOCUMENTATION.md. Messages between server and station are in `remote_scanner.py`
   and `station_client.py` - change both.
-- **Stations are open without a token** (`stations.token`), like the web UI, which has no login.
+- **Stations are open without a token** (`stations.token`), like the web UI, which has no login
+  except for one optional lock: the settings password (`server/lock.py`) on the AI keys, restart / quit,
+  network access, debug mode and the backups' restore / upload / download / delete / full backup. A new
+  route or event of that kind takes `@guarded` / `@guarded_event`; the list is in docs/PROGRAM_DOCUMENTATION.md.
   **Never send full API keys to the browser**: `api_keys.credential_status()` masks them; the UI
   can only replace or remove a key.
 - **Where the compose files are.** In `deploy/`, with paths written from there (`../data`), the

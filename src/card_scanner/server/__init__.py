@@ -10,6 +10,7 @@ they build on each other - a module imports only from those above it:
 
     state            the Flask / Socket.IO app and the shared objects (database, inventories, ...)
     logs             the log files
+    lock             the optional settings password: the routes and events that need it (guarded)
     desks            one desk per camera - whose card, review and events something is
     captures         a read card's way (route_identified -> search_and_emit_card ->
                      add_automatically / queue_for_review) and the captures waiting to be read

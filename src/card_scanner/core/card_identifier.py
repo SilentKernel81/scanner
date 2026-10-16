@@ -299,6 +299,40 @@ class CardIdentifier:
     # Provider requests: send one image + prompt, return the response text
     # ------------------------------------------------------------------------
 
+    # A cloud provider's answer that is worth asking again: rate limit (429) and its own trouble (5xx)
+    RETRY_STATUS = (429, 500, 502, 503, 504)
+    RETRY_DELAYS = (1.0, 3.0)      # seconds before the second and the third try
+    RETRY_AFTER_MAX = 8.0          # what a Retry-After header may ask for, at most
+
+    def _post_with_retry(self, url, **kwargs):
+        """
+        requests.post for the cloud providers, tried up to three times when the answer is a rate limit
+        (429), the provider's own error (5xx) or a timeout / connection error - a passing hiccup in
+        a batch used to send the card to the review queue ("not identified"). Other answers (a wrong
+        key, a bad request) are returned at once. The last answer is returned whatever it is: the
+        caller raises for its status as before. Not used for a local server, which has its own fallback.
+        """
+        attempts = len(self.RETRY_DELAYS) + 1
+        for attempt in range(attempts):
+            wait = None
+            try:
+                response = requests.post(url, **kwargs)
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt == attempts - 1:
+                    raise
+                reason = type(e).__name__
+            else:
+                if response.status_code not in self.RETRY_STATUS or attempt == attempts - 1:
+                    return response
+                reason = f"HTTP {response.status_code}"
+                try:
+                    wait = min(float(response.headers.get('Retry-After', '')), self.RETRY_AFTER_MAX)
+                except (TypeError, ValueError):
+                    wait = None
+            delay = max(self.RETRY_DELAYS[attempt], wait or 0.0)
+            self.log(f"{self.provider}: {reason} - trying again in {delay:.0f} s ({attempt + 2}/{attempts})", level="warning")
+            time.sleep(delay)
+
     def _ask(self, base64_image, prompt, max_tokens):
         """Send an image and a prompt to the configured provider and return the text answer"""
         if self.provider == 'gemini':
@@ -321,7 +355,7 @@ class CardIdentifier:
                 ]
             }]
         }
-        response = requests.post(
+        response = self._post_with_retry(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
             json=payload,
@@ -346,7 +380,7 @@ class CardIdentifier:
             ],
             "max_tokens": max_tokens
         }
-        response = requests.post(
+        response = self._post_with_retry(
             "https://api.openai.com/v1/chat/completions",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
             json=payload,
@@ -370,7 +404,7 @@ class CardIdentifier:
                 }
             ]
         }
-        response = requests.post(
+        response = self._post_with_retry(
             "https://api.anthropic.com/v1/messages",
             headers={"Content-Type": "application/json", "x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
             json=payload,
@@ -406,7 +440,8 @@ class CardIdentifier:
         }
 
         try:
-            response = requests.post(ollama_endpoint, json=payload, timeout=60)
+            # no redirects: the endpoint was checked to be on the person's own network, where it points to is not
+            response = requests.post(ollama_endpoint, json=payload, timeout=60, allow_redirects=False)
             response.raise_for_status()
             response_json = response.json()
 
@@ -439,7 +474,7 @@ class CardIdentifier:
             ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
             try:
                 # An empty message list just loads the model
-                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120)
+                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120, allow_redirects=False)
                 self.log(f"Local model {self.model} loaded")
             except Exception as e:
                 self.log(f"Could not preload local model: {e}", level="warning")
@@ -464,7 +499,7 @@ class CardIdentifier:
         }
 
         try:
-            response = requests.post(self.local_endpoint, json=payload, timeout=60)
+            response = requests.post(self.local_endpoint, json=payload, timeout=60, allow_redirects=False)
             response.raise_for_status()
             response_json = response.json()
 

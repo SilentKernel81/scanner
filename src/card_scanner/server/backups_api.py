@@ -2,7 +2,7 @@
 # FILE: server/backups_api.py
 # Backups: the schedule, create / restore / upload / download, full backups.
 # ============================================================================
-from flask import jsonify, request, send_file
+from flask import abort, jsonify, request, send_file
 import tempfile
 import threading
 import time
@@ -19,6 +19,7 @@ from card_scanner.server.state import (
     pending, review, scan_inventory, socketio,
 )
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded, unlocked, LOCKED_MESSAGE
 from card_scanner.server.desks import log_to_client
 
 
@@ -96,6 +97,8 @@ def full_backups():
     archives while the server runs. Not restored from the web interface (docs/INSTALL.md).
     """
     if request.method == 'POST':
+        if not unlocked():   # a full backup holds the keys and the secret key; listing them is open
+            return jsonify({'success': False, 'error': LOCKED_MESSAGE, 'locked': True}), 401
         try:
             made = full_backup()
         except Exception as e:
@@ -120,6 +123,7 @@ def collection_backups():
 
 
 @app.route('/api/backups/<backup_id>/restore', methods=['POST'])
+@guarded
 def restore_backup(backup_id):
     """Put the collection, scanned cards and decks back as in a backup (the current state is backed up first)"""
     try:
@@ -139,7 +143,25 @@ def restore_backup(backup_id):
     return jsonify({'success': True, **result, 'backups': backups.list_backups()})
 
 
+BACKUP_UPLOAD_LIMIT = 8 * 1024 ** 3   # a backup with its captures can be gigabytes
+
+
+@app.before_request
+def limit_the_request_body():
+    """
+    The server's request limit (state.py) - 64 MB, for pictures and collection files - is applied
+    before any route runs (Flask only checks when a route reads the body, and several answer
+    "not ready" first); a backup, which holds the captures, is the one upload allowed to be bigger.
+    """
+    if request.endpoint == 'upload_backup':
+        request.max_content_length = BACKUP_UPLOAD_LIMIT
+    limit = request.max_content_length
+    if limit is not None and request.content_length is not None and request.content_length > limit:
+        abort(413)
+
+
 @app.route('/api/backups/upload', methods=['POST'])
+@guarded
 def upload_backup():
     """Add a downloaded backup to the list again (multipart: file) - it is not restored by this"""
     file = request.files.get('file')
@@ -156,6 +178,7 @@ def upload_backup():
 
 
 @app.route('/api/backups/<backup_id>/download')
+@guarded
 def download_backup(backup_id):
     """A backup as one zip file (its folder of data/backups/, to keep somewhere else)"""
     packed = tempfile.TemporaryFile()  # on disk: a backup with its captures is ~100 MB
@@ -174,6 +197,7 @@ def download_backup(backup_id):
 
 
 @app.route('/api/backups/<backup_id>', methods=['DELETE'])
+@guarded
 def delete_backup(backup_id):
     try:
         backups.delete(backup_id)

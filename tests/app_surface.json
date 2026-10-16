@@ -370,6 +370,34 @@
    "get_scan_settings"
   ],
   [
+   "/api/settings_lock",
+   [
+    "DELETE"
+   ],
+   "settings_lock"
+  ],
+  [
+   "/api/settings_lock",
+   [
+    "GET"
+   ],
+   "settings_lock_status"
+  ],
+  [
+   "/api/settings_lock",
+   [
+    "POST"
+   ],
+   "settings_unlock"
+  ],
+  [
+   "/api/settings_password",
+   [
+    "POST"
+   ],
+   "settings_password"
+  ],
+  [
    "/api/sound",
    [
     "POST"

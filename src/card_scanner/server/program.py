@@ -21,6 +21,7 @@ from card_scanner.config import Config
 from card_scanner.paths import TOP
 from card_scanner.server.logs import logger
 from card_scanner.server.state import app, services
+from card_scanner.server.lock import guarded
 
 LOCAL_HOSTS = ('127.0.0.1', 'localhost', '::1')
 LOOPBACK = ('127.0.0.1', '::1', '::ffff:127.0.0.1')
@@ -55,6 +56,18 @@ def network_access():
     return Config.HOST not in LOCAL_HOSTS
 
 
+def debugger_allowed(host):
+    """
+    Whether Debug mode may also turn on Werkzeug's interactive debugger: only when the server
+    listens on this computer alone (loopback), or when the person asked for it on the command line
+    of this very process - the environment variable SCANNER_LAN_DEBUGGER=1. On a server that other
+    devices reach, an error page with a Python console would be one step from running code for
+    anyone on the network (the PIN is written to the log), and the switch that turns it on is
+    reachable from the network too. The request log (Debug mode's other half) is always kept.
+    """
+    return host in LOCAL_HOSTS or os.environ.get('SCANNER_LAN_DEBUGGER') == '1'
+
+
 def listen_host():
     """The address the server listens on (taken when it starts)"""
     if not network_access():
@@ -71,6 +84,7 @@ def program_state():
 
 
 @app.route('/api/network_access', methods=['POST'])
+@guarded
 def set_network_access():
     """Remember whether other devices may open the pages (JSON: 'enabled'); the next start takes it"""
     enabled = bool((request.get_json(silent=True) or {}).get('enabled'))
@@ -109,6 +123,7 @@ def _stop_soon():
 
 
 @app.route('/api/restart', methods=['POST'])
+@guarded
 def restart_program():
     """Stop and start the program again - what the settings that apply "after a restart" wait for"""
     services.restart_requested = True
@@ -118,6 +133,7 @@ def restart_program():
 
 
 @app.route('/api/quit', methods=['POST'])
+@guarded
 def quit_program():
     """Stop the program (desktop program only, and only from the computer it runs on: a
     server is stopped with its service or container)"""

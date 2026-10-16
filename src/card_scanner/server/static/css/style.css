@@ -247,9 +247,10 @@ a {
 .topbar-page {
     margin-left: auto;
 }
-
-.topbar-settings {
+/* Settings: the last link of the header, in its right corner (after the page's own part, which has the auto margin) */
+.topbar-settings-link {
     flex-shrink: 0;
+    margin-left: 12px;
 }
 
 .game-label {
@@ -2175,6 +2176,13 @@ input[type="radio"] {
     .topbar-page {
         width: 100%;
         margin: 0;
+        order: 3;
+    }
+
+    /* Settings stays in the first row, at its right end */
+    .topbar-settings-link {
+        margin-left: auto;
+        order: 2;
     }
 }
 
@@ -2321,3 +2329,12 @@ input[type="radio"] {
 }
 .data-banner.is-error { background: #fdecea; color: #8a1f17; border-bottom-color: #f2b8b2; }
 .data-banner[hidden] { display: none; }
+
+/* The settings password's question (common.js: passwordDialog), in the shared dialog */
+#dialog-modal .dialog-field {
+    width: 100%;
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    font: inherit;
+}

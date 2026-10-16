@@ -54,13 +54,10 @@ class ConfigLoader:
         elif isinstance(obj, list):
             return [self._substitute_env_vars(item) for item in obj]
         elif isinstance(obj, str):
-            # Match ${VAR_NAME} pattern
-            pattern = r'\$\{([^}]+)\}'
-            match = re.match(pattern, obj)
-            if match:
-                var_name = match.group(1)
-                return os.getenv(var_name, '')  # Return empty string if not set
-            return obj
+            # Every ${VAR_NAME} in the text is replaced by the variable's value ('' if it is not
+            # set): "${DATA}/cards" is the variable and "/cards" (it used to become only the variable's
+            # value - the rest was dropped - because only the start of the text was matched)
+            return re.sub(r'\$\{([^}]+)\}', lambda match: os.getenv(match.group(1), ''), obj)
         else:
             return obj
 

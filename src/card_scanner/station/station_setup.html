@@ -299,6 +299,8 @@ function showStatus() {
     if (held) row('Kept, not sent',
       `${held.count} captured card${held.count === 1 ? '' : 's'} taken for ${escapeHtml(held.server || '?')}` +
       ` as "${escapeHtml(held.station || '?')}" (since ${escapeHtml(held.oldest || '?')}).<br>` +
+      (held.parked ? `<br>${held.parked} of them: the server kept answering with something other than "received" or "refused" - ` +
+        `they are tried again at the next start, or now with the button.` : '') + `<br>` +
       `<button type="button" onclick="heldCaptures('send')">Send them to this server</button> ` +
       `<button type="button" onclick="heldCaptures('delete', this)">Delete them</button>`, 'warn');
   }
