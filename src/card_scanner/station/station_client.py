@@ -251,11 +251,15 @@ class Station:
             return
         self.capture_number += 1
         number = self.capture_number
+        # The moment the scanner decided to capture (CardScanner._trigger_auto_capture): the beep's
+        # delay is counted from it
+        triggered = getattr(scanner, 'last_auto_capture_time', 0) or time.time()
         image_path, card_image, foil_image = scanner.capture_card_image_only(number, settle=0)
         if not image_path:
             scanner.capture_pending = False
             scanner.card_under_review = False
             return
+        image_taken = time.time()
         # The capture beep - the signal to drop the next card: once the image is taken and a
         # focus probe started by this capture (~1 s, every refocus_every cards) is done
         deadline = time.time() + 2.5
@@ -263,6 +267,13 @@ class Station:
             time.sleep(0.05)
         scanner.capture_pending = False
         self.emit('captured', {'number': number})
+        # Where the time between the capture and the beep went (log file only; the rest of the
+        # way - the server, the page, the speakers - is not measured here)
+        beep_sent = time.time()
+        logger.info(f"Capture #{number}: image taken {(image_taken - triggered) * 1000:.0f} ms after the decision, "
+                    f"beep sent {(beep_sent - triggered) * 1000:.0f} ms after it"
+                    + (f" (waited {(beep_sent - image_taken) * 1000:.0f} ms for the focus probe)"
+                       if beep_sent - image_taken > 0.15 else ""))
         if fast:
             scanner.card_under_review = False  # ready for the next drop; else until Add / Skip on the page
         self.queue_upload(image_path, card_image, foil_image, 'auto' if fast else 'review',
