@@ -244,6 +244,17 @@ class Station:
     def auto_captured(self):
         """CardScanner's auto-capture callback (its own thread): take the image, beep, send it"""
         scanner = self.scanner
+        try:
+            self._auto_captured(scanner)
+        except Exception as e:
+            # Whatever went wrong, the scanner must not stay "capturing" or "under review" - the
+            # next card would never be taken (until the server sent a reset)
+            logger.exception(f"Auto-capture failed: {e}")
+            scanner.capture_pending = False
+            scanner.card_under_review = False
+            self.send_log(f"The capture failed ({e}) - ready for the next card", level="error")
+
+    def _auto_captured(self, scanner):
         fast = bool(getattr(scanner, 'fast_scan_mode', True))  # as it is now, not when it is sent
         if not scanner.is_card_detected():
             logger.warning("Auto-capture triggered but no card detected")
@@ -257,8 +268,11 @@ class Station:
         triggered = getattr(scanner, 'last_auto_capture_time', 0) or time.time()
         image_path, card_image, foil_image = scanner.capture_card_image_only(number, settle=0)
         if not image_path:
+            # The picture could not be saved (the scanner said why): the card is not captured, and
+            # the person is told - not left waiting for a beep
             scanner.capture_pending = False
             scanner.card_under_review = False
+            self.send_log("The card was not captured: its picture could not be saved - check the station's disk", level="error")
             return
         image_taken = time.time()
         # The capture beep - the signal to drop the next card: once the image is taken and a
