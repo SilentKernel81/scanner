@@ -2276,6 +2276,12 @@ four sources hard to tell apart). Later in the list wins over earlier, per setti
 | `data/stations.json` | each camera's own choices on the server (rotation, focus, refocus, debug trace, fixed area) | per station; falls back to `data/settings.json` |
 | a station's own: command line > environment > `data/station.json` > default | the server's address, the station's id / name / token, the camera | `station_setup.resolve`; a value from the command line or the environment is shown as fixed on the setup page |
 
+**How much a request may carry** (since 2026-10-16): `MAX_CONTENT_LENGTH` is 64 MB (`server/state.py`) - a
+capture is at most ~30 MB, a collection or Arena file a few MB - and `backups_api.limit_the_request_body`
+refuses a bigger body with 413 before any route runs (Flask only checks when a route reads it, and several
+answer "not ready" first). Uploading a backup (`upload_backup`) raises the limit for itself to 8 GB: it
+holds the captures. `tests/test_upload_limit.py`.
+
 **Who may use the server** (`server/access.py`, `tests/test_access.py`): there is no login, and
 a browser sends any web page's requests to a local or network address, so a page open in
 another tab could otherwise change the collection or restore a backup. Every request's Host

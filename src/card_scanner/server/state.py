@@ -42,6 +42,11 @@ from card_scanner.server import access
 # is no module called 'app' in here). The address of a static file stays /static/...
 app = Flask('app', root_path=str(CODE / 'server'))
 app.config['SECRET_KEY'] = access.secret_key()
+# What a request may carry: a capture is at most ~30 MB (a card's picture and its foil picture and the
+# camera frame beside them), a collection file a few MB. Without a limit the server reads whatever
+# is sent (an import was read whole into memory). The one route that takes more - uploading a
+# backup, which holds the captures - raises it for itself (backups_api.py: upload_backup).
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024
 
 # Initialize SocketIO with proper configuration
 socketio = SocketIO(
