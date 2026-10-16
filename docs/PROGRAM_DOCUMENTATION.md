@@ -1133,6 +1133,14 @@ chooses GPU or CPU. Only Magic has a parser (`card_ocr.PARSERS`); other games ar
 
 ### The vision AI request
 
+**Retries** (since 2026-10-16; `CardIdentifier._post_with_retry`, `tests/test_ai_retry.py`): the three cloud providers
+(Gemini, OpenAI, Anthropic) are asked up to three times when the answer is a rate limit (429), the provider's own
+error (500 / 502 / 503 / 504) or a timeout / connection error - after 1 s and 3 s, or the `Retry-After` the provider
+sent (at most 8 s). A wrong key or a bad request (400 / 401 / 403 / 404) is not repeated. The last answer is handed
+back and the caller raises for its status as before (the card then goes to review). A local server has its own
+fallback (native API, then the OpenAI-compatible one) and is not retried. Before this, one 429 in a batch sent the
+card to the review queue as "not identified".
+
 `CardIdentifier.identify_card()` sends the flat card image (JPEG, longest side
 `vision_ai.image_size`, 1024 px) with a prompt asking for three values from fixed places on the
 card:
