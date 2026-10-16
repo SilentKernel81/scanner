@@ -266,5 +266,71 @@ class Uploads(unittest.TestCase):
         self.assertEqual(station.pending_count(), 2)
 
 
+    # --------------------------------------------------------------------
+    # A capture the server keeps answering oddly is set aside, the ones behind it go on
+
+    def fast_clock(self):
+        """time.time / time.sleep of the station that run at once: the back-off waits are not real"""
+        now = [1000.0]
+        for name, function in (('time', lambda: now[0]), ('sleep', lambda seconds: now.__setitem__(0, now[0] + seconds))):
+            patcher = mock.patch.object(station_client.time, name, function)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_capture_answered_oddly_for_ever_is_parked_and_the_next_one_goes(self):
+        self.fast_clock()
+        station = self.station()
+        poison = self.capture(station, 1)
+        self.capture(station, 2)
+
+        class ByPicture(Server):
+            """404 HTML for the first picture, accepted for the others"""
+            def post(self, url, files=None, headers=None, data=None, timeout=None):
+                self.answers = [Answer(404, 'not the server') if files['image'][0] == poison.name else ACCEPTED]
+                return super().post(url, files=files, headers=headers, data=data, timeout=timeout)
+
+        server = ByPicture(ACCEPTED)
+        self.send_all(station, server)
+        self.assertEqual(station.held_summary()['parked'], 1)
+        self.assertTrue(poison.exists())                       # kept on disk
+        self.assertEqual(self.notes(), [station.note_path(poison).name])   # its note stays; the second one's went
+        self.assertEqual(station.pending_count(), 0)           # nothing is left waiting behind it
+
+    def test_a_parked_capture_is_tried_again_at_the_next_start_and_by_the_button(self):
+        self.fast_clock()
+        station = self.station()
+        self.capture(station, 1)
+        self.send_all(station, Server(Answer(500, {'success': False})))
+        self.assertEqual(station.held_summary()['parked'], 1)
+        self.assertEqual(len(self.notes()), 1)
+
+        after = self.station()                                  # the next start: its note names this server
+        after.load_pending()
+        self.assertEqual((after.uploads.qsize(), after.held_summary()), (1, None))
+        server = Server(ACCEPTED)
+        self.send_all(after, server)
+        self.assertEqual((len(server.received), self.notes()), (1, []))
+
+        station.send_held()                                     # the setup page's button
+        self.assertEqual((station.uploads.qsize(), station.held_summary()), (1, None))
+
+    def test_no_answer_at_all_is_never_parked(self):
+        self.fast_clock()
+        station = self.station()
+        self.capture(station, 1)
+        sends = []
+
+        class Away(Server):
+            def post(inner, *args, **kwargs):
+                sends.append(1)
+                if len(sends) > 60:
+                    station.stopping = True                   # a server away for 60 tries: still not parked
+                raise requests.ConnectionError('away')
+
+        station.send_until_settled(Away(ACCEPTED), station.uploads.get())
+        self.assertGreater(len(sends), 40)
+        self.assertIsNone(station.held_summary())
+
+
 if __name__ == '__main__':
     unittest.main()

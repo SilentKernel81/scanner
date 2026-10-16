@@ -452,7 +452,7 @@ class Station:
             if not self.held:
                 return None
             return {'count': len(self.held), 'server': self.held[0]['server'], 'station': self.held[0]['station'],
-                    'oldest': self.held[0]['taken']}
+                    'oldest': self.held[0]['taken'], 'parked': sum(1 for item in self.held if item.get('parked'))}
 
     def send_held(self):
         """The setup page's "Send them to this server": the held captures join the queue"""
@@ -493,15 +493,24 @@ class Station:
             finally:
                 self.upload_idle.set()
 
+    # A capture the server answers again and again with something that is neither "received" nor
+    # "refused" (an error page, a 5xx for this picture, a wrong token) is set aside after this many
+    # answers, so that the captures behind it are not held up for ever. Not counted: no answer at all
+    # (the server is away) - that is retried for ever, "at least once"
+    PARK_AFTER_ANSWERS = 20
+
     def send_until_settled(self, session, item):
         """
         Send one capture, again and again until the server has it or refuses it for good. Left
         early only when the station is stopping: the capture's note stays, and the next start
-        sends it.
+        sends it. Set aside (parked, see park) after PARK_AFTER_ANSWERS odd answers.
         """
         delay = 1.0
         while not self.stopping:
             verdict = self.send_once(session, item)
+            if verdict == 'retry' and item.get('odd_answers', 0) >= self.PARK_AFTER_ANSWERS:
+                self.park(item)
+                return
             if verdict == 'accepted':
                 self.remove_capture(item)
                 return
@@ -515,6 +524,23 @@ class Station:
             while time.time() < deadline and not self.stopping:
                 time.sleep(0.1)
             delay = min(delay * 2, 15.0)
+
+    def park(self, item):
+        """
+        Set a capture aside that the server keeps answering oddly: it joins the held captures (the
+        setup page shows them and offers to send them again), its picture and note stay on disk,
+        and the next start tries it again. The captures behind it go on.
+        """
+        item['parked'] = True
+        item['odd_answers'] = 0
+        # An item queued during this run has no note's fields (those come from load_pending): where it was going is here
+        item.setdefault('server', self.server)
+        item.setdefault('station', self.id)
+        item.setdefault('taken', time.strftime('%Y-%m-%d %H:%M:%S'))
+        with self.held_lock:
+            self.held.append(item)
+        logger.error(f"{item['image'].name}: the server answered {self.PARK_AFTER_ANSWERS} times with something that is "
+                     f"neither 'received' nor 'refused' - set aside (the setup page offers to send it again); the next ones go on")
 
     def send_once(self, session, item):
         """One attempt to send a capture: 'accepted', 'refused' or 'retry' (see upload_verdict)"""
@@ -544,7 +570,9 @@ class Station:
         if verdict == 'refused':
             logger.error(f"The server refused {item['image'].name}: {response.text[:200]} - the picture is kept")
         elif verdict == 'retry':
-            logger.warning(f"Unexpected answer {response.status_code} for {item['image'].name} - trying again")
+            item['odd_answers'] = item.get('odd_answers', 0) + 1
+            logger.warning(f"Unexpected answer {response.status_code} for {item['image'].name} - trying again "
+                           f"({item['odd_answers']}/{self.PARK_AFTER_ANSWERS})")
         return verdict
 
 
