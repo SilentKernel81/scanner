@@ -1463,7 +1463,7 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
   or restored position is approached from 30 below (`_move_focus`).
 - **Focus probe while scanning** (`_run_focus_probe`, every `auto_capture.refocus_every`
-  captures, default 10; **Settings → Check the focus every** changes it while scanning): the best position drifts - in one session it moved from 395 to 430 in
+  captures, default 10; **Settings → Cameras → Check the focus every** changes it while scanning; the count starts from zero each time auto scanning is started - `auto_capture_enabled` is a property that resets `captures_since_focus` on off → on - and is not reset by stopping, so a session of 12 cards with a check every 20 has none, and `tests/test_focus_count.py`): the best position drifts - in one session it moved from 395 to 430 in
   about 45 minutes (lens warming up, pile height), and the text in the captures became ~10×
   blurrier while the card as a whole still passed `min_sharpness`, so the automatic refocus
   never started. In the gap after a capture (~1 s, the image is already taken) the probe
@@ -2168,7 +2168,8 @@ does not (`$`, `api`, `valueDialog` with `templates/_value_dialog.html`, the car
 beside the pointer - the scanner's script has its own `$`);
 `static/css/style.css` has the dark / light theme (CSS variables).
 
-**The scanner page**: top bar with counters; search bar and camera on the left, card panel on
+**The scanner page**: top bar with counters; the camera on the left with the manual search
+below it (first the scan, then the search; the search was above the camera until 2026-10-15), card panel on
 the right, activity log below; its settings are on the settings page. It polls `/api/detection_status`
 every 500 ms for the status pill (and `camera_error`, the message over the video), shows
 `/video_feed?station=<id>` (MJPEG: each new frame once), and talks to the server over
