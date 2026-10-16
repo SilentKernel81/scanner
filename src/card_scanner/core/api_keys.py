@@ -99,7 +99,25 @@ def check_local_endpoint(value):
         raise ValueError("The local AI endpoint must not contain a user name or password")
     if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
         return
+    refuse_https_by_name(parts.scheme, host)
     own_network_addresses(host)
+
+
+def refuse_https_by_name(scheme, host):
+    """
+    An https endpoint must be an IP address: a request to a name resolves it again when it connects, so a
+    name whose DNS answer changes between the check and the connection (DNS rebinding) would still send
+    the pictures to a public server with a valid certificate. An http endpoint is connected to the checked
+    address itself (pinned_endpoint); pinning https as well - the address, with the name kept for the
+    certificate - is not done. A local AI server is http in practice (Ollama, LM Studio, vLLM).
+    """
+    if scheme != 'https':
+        return
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError("An https local AI endpoint must be written as an IP address (a name could change "
+                         "where it points between the check and the connection); use http:// on your own network")
 
 
 def own_network_addresses(host):
@@ -135,8 +153,8 @@ def pinned_endpoint(url):
     request. The host is resolved NOW, every address must be on the person's own network, and an http
     request is sent to that address itself (the name stays in the Host header): a name whose DNS answer
     changed after the endpoint was saved - to a public server - is refused, and cannot change between the
-    check and the connection. An https endpoint is checked the same way but connects by name (the
-    certificate is checked against it; a short gap remains). ALLOW_PUBLIC_AI_ENDPOINT=1 switches this off.
+    check and the connection. An https endpoint must be an IP address (refuse_https_by_name).
+    ALLOW_PUBLIC_AI_ENDPOINT=1 switches this off.
     Raises ValueError. (Outside code review, 2026-10-16.)
     """
     if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
@@ -145,9 +163,10 @@ def pinned_endpoint(url):
     host = parts.hostname
     if not host:
         raise ValueError("The local AI endpoint has no host")
+    refuse_https_by_name(parts.scheme, host)
     address = own_network_addresses(host)[0]
     if parts.scheme != 'http':
-        return url, {}
+        return url, {}       # https by an IP address (a name was refused above): nothing to pin
     shown = f"[{address}]" if ':' in address else address
     netloc = shown + (f":{parts.port}" if parts.port else '')
     return parts._replace(netloc=netloc).geturl(), {'Host': parts.netloc}

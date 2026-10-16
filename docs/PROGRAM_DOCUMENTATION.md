@@ -2315,8 +2315,9 @@ a name that does not resolve is refused. Another address is refused unless the s
 (`api_keys.pinned_endpoint`, used by `CardIdentifier._local` and the models route): the host is resolved then, every
 address must be on the own network, and an `http` request is sent to that address itself with the name in the `Host`
 header - so a name whose DNS answer was changed to a public server after it was saved (DNS rebinding, found by the second
-Codex review) is refused and cannot change between the check and the connection. An `https` endpoint is checked the same
-way but connects by name (its certificate is checked against it; a short gap remains). Redirects are not followed. This
+Codex review) is refused and cannot change between the check and the connection. An `https` endpoint must be an **IP address**
+(`refuse_https_by_name`; a name is resolved again when a request connects, and pinning https to the checked address while
+keeping the name for the certificate is not done - the third Codex review found it; a local AI server is http in practice). Redirects are not followed. This
 applies to the address in `config.yaml` or the environment too: a deliberately public one needs
 `ALLOW_PUBLIC_AI_ENDPOINT=1`. Tests in `tests/test_local_endpoint.py`. `/api/local_ai_models` says only "could not get the models" (the cause is in the log).
 
