@@ -4,7 +4,12 @@ An outside review ("Review do scanner-server", a PDF, in Portuguese, written fro
 commit `55592a2` - nothing was run) found 17 things. This plan says which of them are real in
 today's code, in what order to fix them, what each fix touches, and what needs a decision.
 
-**Status: nothing of this is done yet.** Every claim below was checked against the code of
+**Status (2026-10-16): Phase 1 is implemented and committed locally (six commits, tested, not pushed or
+deployed); Phases 2 and 3 are not started.** Debug mode was adjusted at the person's request: it keeps
+the request log everywhere and the interactive debugger on a server that only this computer can reach
+(or with `SCANNER_LAN_DEBUGGER=1`), instead of removing the debugger.
+
+ Every claim below was checked against the code of
 2026-10-16 (`main` at `34fa73b`) before it went into the plan: all 17 are accurate as written.
 The review also praises what the project does well (idempotent uploads, the two-phase "Add to
 collection", the atomic card-data swap, CSRF and DNS-rebinding defences, the staged OCR → AI
