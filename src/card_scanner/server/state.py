@@ -82,6 +82,7 @@ class Services:
     recommend = None          # recommendations.Recommendations
     default_desk = None       # desks.Desk of the camera on this machine (set in server/desks.py)
     debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
+    debugger_running = False           # ... and whether it includes Werkzeug's interactive debugger (program.debugger_allowed)
     app_mode = False           # started as a desktop program (--app; server/program.py)
     restart_requested = False  # main starts the program again after shutting down
     network_access_running = False  # whether other devices can reach this process (main)
