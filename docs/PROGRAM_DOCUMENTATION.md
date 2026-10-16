@@ -1271,6 +1271,13 @@ One SQLite file, `data/cards_database.db`.
 **`cards`** - Scryfall's "default cards" bulk data (gzipped JSON lines), tokens/emblems/art
 cards excluded. Columns are defined once in `database.CARD_COLUMNS`:
 
+**The download is streamed** (since 2026-10-16; `CardDatabase._stream_cards`, `tests/test_card_data_stream.py`):
+`download_scryfall_data` hands back a generator that decompresses and parses the gzipped JSON lines as they arrive,
+and the import (`populate_database`) inserts them in batches of 5,000 - the file is never held whole. Measured with a
+real download into a throwaway database: 112,899 cards in 10 s, peak memory 44 MB (the old path joined, decompressed
+and parsed everything into one list; the review of 2026-10-16 estimated ~1.5 GB). A file cut off mid-way raises and the
+swap (`replace_table`) does not happen: the old cards stay.
+
 | Group | Columns |
 |---|---|
 | Identity | `id` (Scryfall id), `name`, `flavor_name`, `set_code`, `set_name`, `collector_number`, `rarity`, `released_at` |
