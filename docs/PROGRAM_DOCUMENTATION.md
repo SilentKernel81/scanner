@@ -427,6 +427,12 @@ settings are read from the saved values, so the page still shows them.
   `capture_id`, retried until the server has it, then the local file is deleted. `mode: auto`
   is added or queued for review; `mode: review` is read at once and shown on the page, and the
   client holds its next auto-capture until the page says Add or Skip (`card_under_review`).
+  **A capture the server answers oddly 20 times** (an error page, a 5xx for that picture, a wrong
+  token - anything but "received" or "refused"; no answer at all does not count) is **parked**
+  (`Station.park`, since 2026-10-16): it joins the held captures with its picture and note on disk, the
+  setup page shows it ("the server kept answering with something other than ...") and offers
+  "Send them to this server", the next start tries it again, and the captures behind it go on instead
+  of waiting for ever. `tests/test_station_uploads.py`.
 - **The server or the network goes away**: the station keeps scanning and the captures wait;
   the client reconnects by itself (~5 s after a server restart). Its own state decides
   `auto_capture_enabled`: a connection that drops and comes back goes on scanning; a client
