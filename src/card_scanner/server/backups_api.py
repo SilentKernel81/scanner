@@ -2,7 +2,7 @@
 # FILE: server/backups_api.py
 # Backups: the schedule, create / restore / upload / download, full backups.
 # ============================================================================
-from flask import jsonify, request, send_file
+from flask import abort, jsonify, request, send_file
 import tempfile
 import threading
 import time
@@ -137,6 +137,23 @@ def restore_backup(backup_id):
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(games.active().id)}, namespace='/')
     socketio.emit('arena_updated')   # ... and the restored digital collection
     return jsonify({'success': True, **result, 'backups': backups.list_backups()})
+
+
+BACKUP_UPLOAD_LIMIT = 8 * 1024 ** 3   # a backup with its captures can be gigabytes
+
+
+@app.before_request
+def limit_the_request_body():
+    """
+    The server's request limit (state.py) - 64 MB, for pictures and collection files - is applied
+    before any route runs (Flask only checks when a route reads the body, and several answer
+    "not ready" first); a backup, which holds the captures, is the one upload allowed to be bigger.
+    """
+    if request.endpoint == 'upload_backup':
+        request.max_content_length = BACKUP_UPLOAD_LIMIT
+    limit = request.max_content_length
+    if limit is not None and request.content_length is not None and request.content_length > limit:
+        abort(413)
 
 
 @app.route('/api/backups/upload', methods=['POST'])
