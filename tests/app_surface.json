@@ -557,6 +557,7 @@
   "set_fixed_area",
   "set_game",
   "set_refocus_every",
+  "set_refocus_on_drop",
   "test_prompt",
   "toggle_auto_capture",
   "toggle_debug_mode",

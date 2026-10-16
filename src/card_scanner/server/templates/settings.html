@@ -83,6 +83,16 @@
                                 <div class="hint">With the focus locked: after this many captures it tries a focus one step away and keeps the sharper one. Each check holds the next card back about a second. 0 = never.</div>
                             </div>
                             <div class="input-group">
+                                <label for="refocus-on-drop">Refocus when the cards get blurry</label>
+                                <select id="refocus-on-drop" class="select narrow">
+                                    <option value="0">Off</option>
+                                    <option value="0.5">When they are half as sharp</option>
+                                    <option value="0.35">When they are a third as sharp (recommended)</option>
+                                    <option value="0.2">When they are a fifth as sharp</option>
+                                </select>
+                                <div class="hint">With the focus locked: when the last 3 cards captured are much less sharp than the ones before them, the camera finds the sharpest focus again (about 8 s). It does nothing with the camera's own continuous autofocus, and happens at most once a minute.</div>
+                            </div>
+                            <div class="input-group">
                                 <label for="camera-rotation">Camera rotation</label>
                                 <select id="camera-rotation" class="select narrow">
                                     <option value="0">None</option>
@@ -300,6 +310,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=1"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=2"></script>
 </body>
 </html>
