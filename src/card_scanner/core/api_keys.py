@@ -99,14 +99,22 @@ def check_local_endpoint(value):
         raise ValueError("The local AI endpoint must not contain a user name or password")
     if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
         return
+    own_network_addresses(host)
+
+
+def own_network_addresses(host):
+    """
+    The addresses a host name resolves to, every one of them on the person's own network (see
+    check_local_endpoint); raises ValueError when the name cannot be resolved or any address is outside.
+    """
     try:
         # What the resolver makes of the text - the same call a connection makes - also for 127.1,
         # 0x7f000001 or a decimal number, which ipaddress.ip_address() would not read
         found = {info[4][0] for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)}
     except (socket.gaierror, UnicodeError, OSError):
         raise ValueError(f"The local AI endpoint's host {host} could not be found on this machine's network")
-    outside = []
-    for text in found:
+    inside, outside = [], []
+    for text in sorted(found):
         try:
             address = ipaddress.ip_address(text.split('%')[0])   # a link-local IPv6 address names its interface after a %
         except ValueError:
@@ -114,11 +122,35 @@ def check_local_endpoint(value):
             continue
         if address.version == 6 and address.ipv4_mapped:
             address = address.ipv4_mapped
-        if not _is_own_network(address):
-            outside.append(text)
-    if outside or not found:
-        raise ValueError(f"The local AI endpoint must be on your own network ({host} is {', '.join(sorted(outside)) or 'not an address'}); "
+        (inside if _is_own_network(address) else outside).append(str(address))
+    if outside or not inside:
+        raise ValueError(f"The local AI endpoint must be on your own network ({host} is {', '.join(outside) or 'not an address'}); "
                          "ALLOW_PUBLIC_AI_ENDPOINT=1 in the server's environment allows another address")
+    return inside
+
+
+def pinned_endpoint(url):
+    """
+    (url to connect to, extra headers) for a request to the local AI server, made at the moment of the
+    request. The host is resolved NOW, every address must be on the person's own network, and an http
+    request is sent to that address itself (the name stays in the Host header): a name whose DNS answer
+    changed after the endpoint was saved - to a public server - is refused, and cannot change between the
+    check and the connection. An https endpoint is checked the same way but connects by name (the
+    certificate is checked against it; a short gap remains). ALLOW_PUBLIC_AI_ENDPOINT=1 switches this off.
+    Raises ValueError. (Outside code review, 2026-10-16.)
+    """
+    if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
+        return url, {}
+    parts = urlparse(url)
+    host = parts.hostname
+    if not host:
+        raise ValueError("The local AI endpoint has no host")
+    address = own_network_addresses(host)[0]
+    if parts.scheme != 'http':
+        return url, {}
+    shown = f"[{address}]" if ':' in address else address
+    netloc = shown + (f":{parts.port}" if parts.port else '')
+    return parts._replace(netloc=netloc).geturl(), {'Host': parts.netloc}
 
 
 def save_credential(provider, value):

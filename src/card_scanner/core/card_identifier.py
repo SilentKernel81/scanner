@@ -17,6 +17,7 @@ import requests
 
 from card_scanner import games
 from card_scanner.core import prompts
+from card_scanner.core.api_keys import pinned_endpoint
 from card_scanner.config import Config
 
 # Create AI logger
@@ -299,6 +300,19 @@ class CardIdentifier:
     # Provider requests: send one image + prompt, return the response text
     # ------------------------------------------------------------------------
 
+    @staticmethod
+    def _local(method, url, **kwargs):
+        """
+        A request to the local AI server, to the address its name has right now (api_keys.pinned_endpoint:
+        a name whose DNS answer moved to a public server after the endpoint was saved is refused). No
+        redirects: where one would lead is not what was checked.
+        """
+        try:
+            connect_url, headers = pinned_endpoint(url)
+        except ValueError as e:
+            raise requests.exceptions.ConnectionError(str(e))
+        return getattr(requests, method)(connect_url, headers={**kwargs.pop('headers', {}), **headers}, allow_redirects=False, **kwargs)
+
     # A cloud provider's answer that is worth asking again: rate limit (429) and its own trouble (5xx)
     RETRY_STATUS = (429, 500, 502, 503, 504)
     RETRY_DELAYS = (1.0, 3.0)      # seconds before the second and the third try
@@ -440,8 +454,7 @@ class CardIdentifier:
         }
 
         try:
-            # no redirects: the endpoint was checked to be on the person's own network, where it points to is not
-            response = requests.post(ollama_endpoint, json=payload, timeout=60, allow_redirects=False)
+            response = self._local('post', ollama_endpoint, json=payload, timeout=60)
             response.raise_for_status()
             response_json = response.json()
 
@@ -474,7 +487,7 @@ class CardIdentifier:
             ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
             try:
                 # An empty message list just loads the model
-                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120, allow_redirects=False)
+                self._local('post', ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120)
                 self.log(f"Local model {self.model} loaded")
             except Exception as e:
                 self.log(f"Could not preload local model: {e}", level="warning")
@@ -499,7 +512,7 @@ class CardIdentifier:
         }
 
         try:
-            response = requests.post(self.local_endpoint, json=payload, timeout=60, allow_redirects=False)
+            response = self._local('post', self.local_endpoint, json=payload, timeout=60)
             response.raise_for_status()
             response_json = response.json()
 

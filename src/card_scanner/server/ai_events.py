@@ -6,7 +6,7 @@ from flask import jsonify, request
 from flask_socketio import emit
 import time
 
-from card_scanner.core.api_keys import credential_status, save_credential
+from card_scanner.core.api_keys import credential_status, pinned_endpoint, save_credential
 from card_scanner.config import Config
 from card_scanner import games
 from card_scanner.core import prompts
@@ -60,7 +60,9 @@ def get_local_ai_models():
         logger.info(f"Fetching models from Ollama: {ollama_api}")
 
         # Query Ollama for available models
-        response = requests.get(ollama_api, timeout=5, allow_redirects=False)
+        # To the address the name has now, on the own network only (api_keys.pinned_endpoint)
+        connect_url, headers = pinned_endpoint(ollama_api)
+        response = requests.get(connect_url, headers=headers, timeout=5, allow_redirects=False)
         response.raise_for_status()
 
         data = response.json()
