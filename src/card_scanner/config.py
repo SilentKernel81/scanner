@@ -140,6 +140,11 @@ class Config:
     # sleeved pile, which kept cards waiting for 5-15 s (Pi 5, 2026-10-15)
     AUTO_CAPTURE_MAX_MOVEMENT = float(config.get('auto_capture', 'max_movement', default=0.015))
     AUTO_CAPTURE_REFOCUS_EVERY = int(config.get('auto_capture', 'refocus_every', default=10))
+    # With a locked focus: refocus when the last 3 captured cards were all sharper by less than
+    # this fraction of the recent median (0 = never). 2026-10-15: a webcam's continuous
+    # autofocus left stretches of captures at 1/4 of the usual sharpness that never got near
+    # min_sharpness (250), the only trigger there was
+    AUTO_CAPTURE_REFOCUS_ON_DROP = float(config.get('auto_capture', 'refocus_on_drop', default=0.35))
 
     # Fast scan mode settings
     FAST_SCAN_STABILITY_FRAMES = config.get('fast_scan', 'stability_frames', default=6)

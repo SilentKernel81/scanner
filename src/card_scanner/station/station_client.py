@@ -46,7 +46,7 @@ STATUS_INTERVAL = 0.2    # seconds between status reports
 PREVIEW_INTERVAL = 0.08  # at most ~12 preview frames a second, while the page is watched
 NOTE_SUFFIX = '.upload.json'  # the note beside a capture that is not on the server yet
 # What the server may call and set (remote_scanner.py: METHODS, DECIDED, SENT)
-METHODS = ('set_rotation', 'set_refocus_every', 'set_fixed_area', 'set_detection_enabled',
+METHODS = ('set_rotation', 'set_refocus_every', 'set_refocus_on_drop', 'set_fixed_area', 'set_detection_enabled',
            'set_continuous_autofocus', 'reset_focus', 'detected_area')
 SETTABLE = ('fast_scan_mode', 'required_stable_frames', 'auto_capture_delay', 'debug_trace_enabled',
             'auto_capture_enabled', 'card_under_review', 'capture_pending', 'stable_frames')
@@ -187,6 +187,7 @@ class Station:
             'camera_error': s.camera_error, 'camera_type': s.camera_type,
             'auto_capture_enabled': bool(s.auto_capture_enabled), 'card_under_review': bool(s.card_under_review),
             'capture_pending': bool(s.capture_pending), 'rotation': s.rotation, 'refocus_every': s.refocus_every,
+            'refocus_on_drop': s.refocus_on_drop,
             'fixed_area': s.fixed_area, 'fixed_area_enabled': bool(s.fixed_area_enabled),
             'focus_locked_value': s.focus_locked_value, 'focus_sweep_running': bool(s.focus_sweep_running),
             'focus_probe_running': bool(s.focus_probe_running), 'enable_detection': bool(s.enable_detection),

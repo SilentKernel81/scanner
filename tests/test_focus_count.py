@@ -26,6 +26,10 @@ class FocusCount(unittest.TestCase):
         self.scanner.focus_range = (0, 1000)
         self.scanner.focus_sweep_running = False
         self.scanner.focus_probe_running = False
+        self.scanner.previous_sharpness = None             # what _check_sharpness_drop reads
+        self.scanner.last_focus_sweep = 0.0
+        self.scanner.refocus_on_drop = 0.35
+        self.scanner.capture_sharpness = __import__('collections').deque(maxlen=24)
 
     def test_starting_auto_scanning_starts_the_count_again(self):
         self.scanner.auto_capture_enabled = True
