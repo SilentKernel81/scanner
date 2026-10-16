@@ -90,7 +90,7 @@ function connect() {
 
     // Card reading
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
-    socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running));
+    socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running, data.debugger));
     socket.on('ai_provider_set', data => {
         activeProvider = data.provider; activeModel = data.model;
         notify(data.message || 'AI provider changed', 'success');
@@ -210,7 +210,7 @@ async function loadCameraSettings() {
     // The server's own settings come with the same answer
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
-    applyDebugMode(data.debug_mode, data.debug_mode_running);
+    applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
 }
 
 function showRefocusOnDrop(ratio) {
@@ -680,10 +680,16 @@ function bindData() {
 
 const DEBUG_MODE_DESC = $('debug-mode-desc').textContent;
 
-function applyDebugMode(enabled, running) {
+function applyDebugMode(enabled, running, debuggerRunning) {
     $('toggle-debug-mode').checked = Boolean(enabled);
-    $('debug-mode-desc').textContent = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
+    let text = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
         : `Now ${running ? 'on' : 'off'}: restart Card Scanner to turn it ${enabled ? 'on' : 'off'}. ` + DEBUG_MODE_DESC;
+    // The debugger is half of the mode, and only where nobody else can reach the server
+    if (running) {
+        text += debuggerRunning ? ' The interactive debugger is on (the server listens on this computer only).'
+            : ' The interactive debugger is off: this server can be reached from the network, so only the request log runs.';
+    }
+    $('debug-mode-desc').textContent = text;
 }
 
 function bindServer() {

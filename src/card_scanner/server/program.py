@@ -55,6 +55,18 @@ def network_access():
     return Config.HOST not in LOCAL_HOSTS
 
 
+def debugger_allowed(host):
+    """
+    Whether Debug mode may also turn on Werkzeug's interactive debugger: only when the server
+    listens on this computer alone (loopback), or when the person asked for it on the command line
+    of this very process - the environment variable SCANNER_LAN_DEBUGGER=1. On a server that other
+    devices reach, an error page with a Python console would be one step from running code for
+    anyone on the network (the PIN is written to the log), and the switch that turns it on is
+    reachable from the network too. The request log (Debug mode's other half) is always kept.
+    """
+    return host in LOCAL_HOSTS or os.environ.get('SCANNER_LAN_DEBUGGER') == '1'
+
+
 def listen_host():
     """The address the server listens on (taken when it starts)"""
     if not network_access():

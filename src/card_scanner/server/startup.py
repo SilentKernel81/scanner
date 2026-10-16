@@ -288,6 +288,9 @@ def main():
     services.debug_mode_running = saved_debug_mode()
     services.network_access_running = program.network_access()
     host = program.listen_host()
+    # Debug mode = the request log, and - only where nobody else can reach the server - the
+    # interactive debugger (program.debugger_allowed)
+    services.debugger_running = bool(services.debug_mode_running and program.debugger_allowed(host))
     url = program.local_url(Config.PORT)  # where this computer reaches it: also for an address of its own
     if services.debug_mode_running:
         enable_request_log()
@@ -297,6 +300,9 @@ def main():
     requests_message = "on - requests go to " + Config.shown('logs', 'requests.log')
     print(f"{'✓' if scanner.debug_trace_enabled else '-'} Debug trace: {trace_message if scanner.debug_trace_enabled else 'off'}")
     print(f"{'✓' if services.debug_mode_running else '-'} Debug mode: {requests_message if services.debug_mode_running else 'off'}")
+    if services.debug_mode_running:
+        print("  Interactive debugger: " + ("on" if services.debugger_running else
+              "off - the server is reachable from the network (SCANNER_LAN_DEBUGGER=1 turns it on anyway)"))
 
     print("\n" + "="*60)
     print("Web Interface Starting...")
@@ -332,7 +338,7 @@ def main():
             app,
             host=host,
             port=Config.PORT,
-            debug=services.debug_mode_running,
+            debug=services.debugger_running,
             # Never the reloader: it starts the program a second time, and only one process
             # can open the camera
             use_reloader=False,

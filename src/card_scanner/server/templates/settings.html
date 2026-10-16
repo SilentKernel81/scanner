@@ -296,7 +296,7 @@
                         <label class="switch-row">
                             <span class="switch-text">
                                 <span class="switch-title">Debug mode</span>
-                                <span class="switch-desc" id="debug-mode-desc">The web server's debugger and a request log (data/logs/requests.log). The debugger can run code on the server from a browser on your network: leave it off unless you are looking for a problem. Applies after a restart.</span>
+                                <span class="switch-desc" id="debug-mode-desc">A request log (data/logs/requests.log) and, when the server listens on this computer only, the web server's interactive debugger (an error page with a Python console). A server that other devices can reach never starts the debugger - anyone on the network could use it. Applies after a restart.</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-debug-mode">
                         </label>
@@ -310,6 +310,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=19"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=3"></script>
 </body>
 </html>

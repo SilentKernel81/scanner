@@ -2206,6 +2206,12 @@ on every page. Five categories, a list on the left and one at a time on the righ
 | **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames), under Advanced: Rebuild database schema |
 | **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, under Advanced: Debug mode |
 
+**Debug mode** (Server → Advanced) is two things: the request log (`data/logs/requests.log`) and Werkzeug's
+interactive debugger. Since 2026-10-16 the debugger only runs when the server listens on this computer
+alone (`program.debugger_allowed`; `services.debugger_running`; the page says which is on) or when the
+server is started with `SCANNER_LAN_DEBUGGER=1` - the switch can be reached from the network, and an
+error page with a Python console (its PIN goes to the log) would be one step from running code for
+anyone on it (an outside code review, 2026-10-16; the real server had it on until 2026-10-15).
 Each setting is saved when it is changed, through the routes and Socket.IO events the drawers
 used (nothing new on the server side except the page's route). Not carried over: the
 "Auto-detection" switch (its state was never read back from the camera; the scanner page
@@ -2218,7 +2224,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 | Page → server | Server → page |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Flask's debug mode, for the next start), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
