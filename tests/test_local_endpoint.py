@@ -108,6 +108,55 @@ class Endpoint(unittest.TestCase):
         os.environ.pop('LOCAL_AI_ENDPOINT', None)
 
 
+class Pinned(unittest.TestCase):
+    """The address is checked, and used, at the moment of each request (api_keys.pinned_endpoint)"""
+
+    def setUp(self):
+        os.environ.pop('ALLOW_PUBLIC_AI_ENDPOINT', None)
+        self.answers = {'gpu.example': '192.168.1.23'}
+
+        def resolve(host, port, *args, **kwargs):
+            if host in self.answers:
+                return [(2, 1, 6, '', (self.answers[host], 0))]
+            return real_getaddrinfo(host, port, *args, **kwargs)
+        patch = mock.patch.object(api_keys.socket, 'getaddrinfo', side_effect=resolve)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_an_http_request_goes_to_the_address_with_the_name_as_host(self):
+        url, headers = api_keys.pinned_endpoint('http://gpu.example:11434/api/chat')
+        self.assertEqual((url, headers), ('http://192.168.1.23:11434/api/chat', {'Host': 'gpu.example:11434'}))
+        self.assertEqual(api_keys.pinned_endpoint('http://[fd00::5]:11434/x')[0], 'http://[fd00::5]:11434/x')
+
+    def test_a_name_whose_dns_moved_to_a_public_server_after_saving_is_refused(self):
+        api_keys.check_local_endpoint('http://gpu.example:11434')           # private when it was saved
+        self.answers['gpu.example'] = '8.8.8.8'                              # the attacker changes the DNS answer
+        with self.assertRaises(ValueError):
+            api_keys.pinned_endpoint('http://gpu.example:11434/api/chat')
+
+    def test_the_identifier_sends_to_the_checked_address_and_refuses_a_moved_name(self):
+        from card_scanner.core import card_identifier
+        identifier = card_identifier.CardIdentifier.__new__(card_identifier.CardIdentifier)
+        with mock.patch.object(card_identifier.requests, 'post') as post:
+            identifier._local('post', 'http://gpu.example:11434/api/chat', json={}, timeout=5)
+        args, kwargs = post.call_args
+        self.assertEqual(args[0], 'http://192.168.1.23:11434/api/chat')
+        self.assertEqual(kwargs['headers'], {'Host': 'gpu.example:11434'})
+        self.assertFalse(kwargs['allow_redirects'])
+        self.answers['gpu.example'] = '93.184.216.34'
+        with mock.patch.object(card_identifier.requests, 'post') as post:
+            with self.assertRaises(card_identifier.requests.exceptions.ConnectionError):
+                identifier._local('post', 'http://gpu.example:11434/api/chat', json={}, timeout=5)
+            post.assert_not_called()                                           # nothing was sent
+
+    def test_the_environment_switch_leaves_the_request_alone(self):
+        os.environ['ALLOW_PUBLIC_AI_ENDPOINT'] = '1'
+        try:
+            self.assertEqual(api_keys.pinned_endpoint('http://api.example.com/x'), ('http://api.example.com/x', {}))
+        finally:
+            os.environ.pop('ALLOW_PUBLIC_AI_ENDPOINT')
+
+
 class ModelsRoute(unittest.TestCase):
     def test_a_failure_is_not_described_to_the_caller(self):
         import app as launcher  # noqa: F401 - the server's routes
