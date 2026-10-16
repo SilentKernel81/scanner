@@ -12,6 +12,7 @@ answers one request per line over its stdin/stdout.
 import base64
 import json
 import logging
+import os
 import queue
 import re
 import subprocess
@@ -99,6 +100,22 @@ def parse_magic(lines, width, height):
 PARSERS = {'mtg': parse_magic}
 
 
+# Words that make an environment variable a secret (or an address that leads to one)
+SECRET_WORDS = ('API_KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'PASSWD', 'CREDENTIAL', 'LOCAL_AI_ENDPOINT')
+
+
+def reader_environment(environment=None):
+    """
+    What the OCR reader's process is given: this process's environment without the API keys, the
+    station token and the like. The reader is Node.js with a third-party package (light-ocr) and
+    needs none of them - load_saved_keys() puts every key into os.environ, and a child inherits all
+    of it unless told otherwise. (Outside code review, 2026-10-16.)
+    """
+    environment = os.environ if environment is None else environment
+    return {name: value for name, value in environment.items()
+            if not any(word in name.upper() for word in SECRET_WORDS)}
+
+
 class CardOcr:
     """Runs the light-ocr reader process and parses what it reads"""
 
@@ -151,7 +168,7 @@ class CardOcr:
         try:
             with open(log_dir / 'ocr.log', 'ab') as errors:
                 self.process = subprocess.Popen(
-                    [tool('node'), 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR),
+                    [tool('node'), 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR), env=reader_environment(),
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True)
         except OSError as e:
             return self._failed(f"light-ocr could not be started: {e}")
