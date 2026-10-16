@@ -311,7 +311,7 @@ a phone too; the deck pages are made for a screen with a pointer.
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
 - **Backups** - one is made automatically the first time the server starts each day (the last
-  7 are kept). The gear button opens Settings: **Back up now** keeps your collection, the
+  7 are kept). The **Settings** link in the right corner of the header (Collection and data): **Back up now** keeps your collection, the
   scanned cards and your decks as they are - do it before a big load. **Restore** puts all
   three back as they were; what you had at that moment is backed up first, so a restore can be
   taken back.

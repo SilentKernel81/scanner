@@ -2193,7 +2193,7 @@ it only sees its own camera - see [A page per camera](#a-page-per-camera). The p
 
 `/settings` (`server/pages.py: settings_page`, `templates/settings.html`, `static/js/settings.js`,
 `static/css/settings.css`; since 2026-10-15 - before it each scanner page and the collection page
-had a drawer of its own with a different part of the settings). The header's gear is a link to it
+had a drawer of its own with a different part of the settings). Settings is the last link of the header's lower row, in its right corner (it was a gear button in the top row until 2026-10-16; on a narrow window it stays in the first row, the page's own tabs go below), a link to it
 on every page. Five categories, a list on the left and one at a time on the right (`#cameras`,
 `#sounds`, `#reading`, `#data`, `#server` in the address; `/scan/<id>#settings` and
 `/collection#settings` go to it):

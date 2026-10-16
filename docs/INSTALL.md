@@ -321,7 +321,7 @@ card database**, or the Database counter when it shows a dot).
 ## Backups
 
 - **Your cards** - the collection, the scanned cards and the decks: the collection page's
-  Settings (gear button) makes and restores backups in `data/backups/`. One is made
+  Settings (in the right corner of the header) makes and restores backups in `data/backups/`. One is made
   automatically the first time the server starts each day (the last 7 are kept).
 - **Everything** - card data, settings, stations, API keys, review queue: stop the server and
   copy its `data/` folder.
