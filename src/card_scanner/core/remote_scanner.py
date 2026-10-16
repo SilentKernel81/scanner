@@ -31,10 +31,10 @@ logger = logging.getLogger('card_scanner')
 NAMESPACE = '/station'
 
 # Camera settings kept in the server's settings.json (the client stores nothing)
-CAMERA_SETTINGS = ('focus_value', 'camera_rotation', 'refocus_every', 'fixed_area_enabled', 'fixed_area',
+CAMERA_SETTINGS = ('focus_value', 'camera_rotation', 'refocus_every', 'refocus_on_drop', 'fixed_area_enabled', 'fixed_area',
                    'debug_trace')
 # CardScanner methods the server may call on the client
-METHODS = ('set_rotation', 'set_refocus_every', 'set_fixed_area', 'set_detection_enabled',
+METHODS = ('set_rotation', 'set_refocus_every', 'set_refocus_on_drop', 'set_fixed_area', 'set_detection_enabled',
            'set_continuous_autofocus', 'reset_focus', 'detected_area', 'capture')
 # Attributes the server decides: sent when set, and again to a client that connects
 DECIDED = {'fast_scan_mode': True, 'required_stable_frames': Config.FAST_SCAN_STABILITY_FRAMES,
@@ -116,6 +116,11 @@ class RemoteScanner:
                                int(self.settings.get('refocus_every', Config.AUTO_CAPTURE_REFOCUS_EVERY) or 0))
 
     @property
+    def refocus_on_drop(self):
+        return self._state.get('refocus_on_drop',
+                               float(self.settings.get('refocus_on_drop', Config.AUTO_CAPTURE_REFOCUS_ON_DROP) or 0))
+
+    @property
     def fixed_area(self):
         return self._state.get('fixed_area', self.settings.get('fixed_area'))
 
@@ -162,6 +167,9 @@ class RemoteScanner:
 
     def set_refocus_every(self, captures):
         return self._call('set_refocus_every', captures)
+
+    def set_refocus_on_drop(self, ratio):
+        return self._call('set_refocus_on_drop', ratio)
 
     def set_fixed_area(self, enabled=None, area=None):
         return self._call('set_fixed_area', enabled=enabled, area=area)

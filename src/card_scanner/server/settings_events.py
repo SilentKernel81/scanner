@@ -148,6 +148,7 @@ def get_scan_settings():
         'fixed_area': scanner.fixed_area if scanner else None,
         'camera_rotation': scanner.rotation if scanner else 0,
         'refocus_every': scanner.refocus_every if scanner else Config.AUTO_CAPTURE_REFOCUS_EVERY,
+        'refocus_on_drop': scanner.refocus_on_drop if scanner else Config.AUTO_CAPTURE_REFOCUS_ON_DROP,
         'scan_location': scan_location(),
         'sound': sound_settings(),
         'locations': inventory.locations(games.active_id()) if inventory else [],
@@ -351,6 +352,21 @@ def handle_set_refocus_every(data):
         emit('refocus_every_updated', {'captures': scanner.refocus_every})  # put the field back
         return
     emit_desk('refocus_every_updated', {'captures': scanner.refocus_every})
+
+
+@socketio.on('set_refocus_on_drop')
+def handle_set_refocus_on_drop(data):
+    """Refocus by itself when the last 3 captured cards are this fraction as sharp as before (0 = never); remembered"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    try:
+        scanner.set_refocus_on_drop(data.get('ratio', 0))
+    except (TypeError, ValueError) as e:
+        emit('error', {'message': str(e)})
+        emit('refocus_on_drop_updated', {'ratio': scanner.refocus_on_drop})  # put the field back
+        return
+    emit_desk('refocus_on_drop_updated', {'ratio': scanner.refocus_on_drop})
 
 
 @socketio.on('set_fixed_area')

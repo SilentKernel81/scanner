@@ -48,6 +48,11 @@ auto_capture:
   # about a second; the position moves about one step in 10+ minutes. Also in Settings
   # (saved in data/settings.json, which then wins)
   refocus_every: 10
+  # With a locked focus: when the last 3 captured cards were all sharper than this fraction of
+  # the median of the cards before them (and that median was not a soft one, >= 600), the
+  # station finds the sharpest focus again (~8 s) instead of scanning on blurred. At most
+  # once a minute. 0 = never.
+  refocus_on_drop: 0.35
 
 # Fast Scan Mode Settings
 fast_scan:

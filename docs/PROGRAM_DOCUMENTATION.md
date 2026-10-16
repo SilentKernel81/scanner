@@ -1462,8 +1462,20 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
 - **The lens has play**: the same `focus_absolute` reached from above measured up to 5× blurrier
   than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
   or restored position is approached from 30 below (`_move_focus`).
+- **Refocus when the sharpness drops** (`_check_sharpness_drop`, `auto_capture.refocus_on_drop`, default
+  0.35, since 2026-10-15; with a locked focus only): the sharpness of each captured card is noted
+  (the last 24); when the last 3 were all below that fraction of the median of the ones before them,
+  and that median was at least 600 (a soft baseline, a pile of plain tokens, says nothing), the
+  station refocuses with a sweep (~8 s, as "card out of focus") and starts the history again; not
+  more than once a minute; 0 switches it off. A per-camera setting (`CardScanner.refocus_on_drop`,
+  `set_refocus_on_drop`, the `set_refocus_on_drop` event, Settings → Cameras → Refocus when the
+  cards get blurry; `config.yaml`'s `refocus_on_drop` is the default). Why: on the Pi 5's Anker C200 the camera's own
+  continuous autofocus left stretches of captures at about a quarter of the usual text sharpness
+  (21:16-21:19 about half, 21:35 351 against 1,200-2,200) that never came near `min_sharpness`,
+  the only trigger there was. Tested on synthetic sequences (`tests/test_sharpness_drop.py`); not
+  yet seen to fire on a real pile.
 - **Focus probe while scanning** (`_run_focus_probe`, every `auto_capture.refocus_every`
-  captures, default 10; **Settings → Check the focus every** changes it while scanning): the best position drifts - in one session it moved from 395 to 430 in
+  captures, default 10; **Settings → Cameras → Check the focus every** changes it while scanning; the count starts from zero each time auto scanning is started - `auto_capture_enabled` is a property that resets `captures_since_focus` on off → on - and is not reset by stopping, so a session of 12 cards with a check every 20 has none, and `tests/test_focus_count.py`): the best position drifts - in one session it moved from 395 to 430 in
   about 45 minutes (lens warming up, pile height), and the text in the captures became ~10×
   blurrier while the card as a whole still passed `min_sharpness`, so the automatic refocus
   never started. In the gap after a capture (~1 s, the image is already taken) the probe
@@ -2168,7 +2180,8 @@ does not (`$`, `api`, `valueDialog` with `templates/_value_dialog.html`, the car
 beside the pointer - the scanner's script has its own `$`);
 `static/css/style.css` has the dark / light theme (CSS variables).
 
-**The scanner page**: top bar with counters; search bar and camera on the left, card panel on
+**The scanner page**: top bar with counters; the camera on the left with the manual search
+below it (first the scan, then the search; the search was above the camera until 2026-10-15), card panel on
 the right, activity log below; its settings are on the settings page. It polls `/api/detection_status`
 every 500 ms for the status pill (and `camera_error`, the message over the video), shows
 `/video_feed?station=<id>` (MJPEG: each new frame once), and talks to the server over
@@ -2187,7 +2200,7 @@ on every page. Five categories, a list on the left and one at a time on the righ
 
 | Category | Holds |
 |---|---|
-| **Cameras** | one camera chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Camera autofocus, Check the focus every, Camera rotation, the fixed area's state (it is drawn on the camera's page); under Advanced: Debug trace |
+| **Cameras** | one camera chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings), Camera rotation, the fixed area's state (it is drawn on the camera's page); under Advanced: Debug trace |
 | **Sounds** | Sound effects, Capture beep, Card added, Volume - for every camera |
 | **Card reading** | Read with OCR first, the vision AI (provider, key, model), Prompts (the summary, and a link to the editor) |
 | **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames), under Advanced: Rebuild database schema |

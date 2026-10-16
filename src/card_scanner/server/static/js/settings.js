@@ -85,6 +85,7 @@ function connect() {
         loadCameraSettings();
     });
     socket.on('refocus_every_updated', data => { $('refocus-every').value = String(data.captures); });
+    socket.on('refocus_on_drop_updated', data => showRefocusOnDrop(data.ratio));
     socket.on('fixed_area_updated', () => loadCameraSettings());
 
     // Card reading
@@ -198,6 +199,7 @@ async function loadCameraSettings() {
     $('toggle-auto-add').checked = Boolean(data.auto_add);
     $('toggle-autofocus').checked = Boolean(data.autofocus);
     $('refocus-every').value = String(data.refocus_every);
+    showRefocusOnDrop(data.refocus_on_drop);
     $('camera-rotation').value = String(data.camera_rotation || 0);
     $('toggle-debug-trace').checked = Boolean(data.debug_trace);
     $('fixed-area-state').textContent = data.fixed_area_enabled
@@ -209,6 +211,16 @@ async function loadCameraSettings() {
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
     applyDebugMode(data.debug_mode, data.debug_mode_running);
+}
+
+function showRefocusOnDrop(ratio) {
+    // A value that is not one of the choices (set in config.yaml) is shown as it is
+    const select = $('refocus-on-drop');
+    const value = String(ratio || 0);
+    if (![...select.options].some(option => option.value === value)) {
+        select.add(new Option(`When they are ${Math.round(ratio * 100)}% as sharp (config.yaml)`, value));
+    }
+    select.value = value;
 }
 
 async function saveStation(change) {
@@ -266,6 +278,8 @@ function bindCameras() {
     });
     $('refocus-every').addEventListener('change', event =>
         socket.emit('set_refocus_every', {captures: parseInt(event.target.value) || 0}));
+    $('refocus-on-drop').addEventListener('change', event =>
+        socket.emit('set_refocus_on_drop', {ratio: parseFloat(event.target.value)}));
     $('camera-rotation').addEventListener('change', event =>
         socket.emit('set_camera_rotation', {rotation: parseInt(event.target.value)}));
     $('toggle-debug-trace').addEventListener('change', event => {

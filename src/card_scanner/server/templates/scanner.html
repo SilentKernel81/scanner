@@ -22,41 +22,7 @@
     <main class="container">
         <div class="main-content">
             <div class="column">
-                <section class="panel search-panel">
-                    <div class="search-row">
-                        <div class="input-group search-name">
-                            <label for="card-name">Card name</label>
-                            <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
-                        </div>
-                        <div class="input-group search-set">
-                            <label for="set-code">Set</label>
-                            <input type="text" id="set-code" placeholder="e.g. HOB" maxlength="5" autocapitalize="characters">
-                        </div>
-                        <div class="input-group">
-                            <label for="collector-number">Number</label>
-                            <input type="text" id="collector-number" placeholder="e.g. 123">
-                        </div>
-                        <div class="input-group search-treatment">
-                            <label for="card-treatment">Treatment</label>
-                            <select id="card-treatment">
-                                <option value="">Any</option>
-                                <option value="regular">Regular frame</option>
-                                <option value="borderless">Borderless</option>
-                                <option value="showcase">Showcase</option>
-                                <option value="extendedart">Extended Art</option>
-                                <option value="fullart">Full Art</option>
-                                <option value="retro">Retro Frame</option>
-                                <option value="etched">Etched</option>
-                                <option value="surgefoil">Surge Foil</option>
-                            </select>
-                        </div>
-                        <button class="btn btn-primary" onclick="searchCard()" id="search-btn" disabled>
-                            <svg class="icon"><use href="#i-search"/></svg> Search
-                        </button>
-                    </div>
-                </section>
-
-                {% if station and not station.camera %}
+                    {% if station and not station.camera %}
                 <!-- A station that only sends captured cards (a phone): no live view to show or control -->
                 <section class="panel">
                     <h2 class="section-title"><svg class="icon"><use href="#i-camera"/></svg> {{ station.name }}</h2>
@@ -119,6 +85,41 @@
                         </button>
                     </div>
                     <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
+                </section>
+
+            <!-- Below the camera: first the scan, second the search -->
+            <section class="panel search-panel">
+                    <div class="search-row">
+                        <div class="input-group search-name">
+                            <label for="card-name">Card name</label>
+                            <input type="text" id="card-name" placeholder="Type a name, or capture a card to fill it in">
+                        </div>
+                        <div class="input-group search-set">
+                            <label for="set-code">Set</label>
+                            <input type="text" id="set-code" placeholder="e.g. HOB" maxlength="5" autocapitalize="characters">
+                        </div>
+                        <div class="input-group">
+                            <label for="collector-number">Number</label>
+                            <input type="text" id="collector-number" placeholder="e.g. 123">
+                        </div>
+                        <div class="input-group search-treatment">
+                            <label for="card-treatment">Treatment</label>
+                            <select id="card-treatment">
+                                <option value="">Any</option>
+                                <option value="regular">Regular frame</option>
+                                <option value="borderless">Borderless</option>
+                                <option value="showcase">Showcase</option>
+                                <option value="extendedart">Extended Art</option>
+                                <option value="fullart">Full Art</option>
+                                <option value="retro">Retro Frame</option>
+                                <option value="etched">Etched</option>
+                                <option value="surgefoil">Surge Foil</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="searchCard()" id="search-btn" disabled>
+                            <svg class="icon"><use href="#i-search"/></svg> Search
+                        </button>
+                    </div>
                 </section>
             </div>
 

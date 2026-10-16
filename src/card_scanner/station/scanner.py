@@ -180,15 +180,20 @@ class CardScanner:
         self.last_focus_sweep = 0.0
         self.out_of_focus_since = None
         self.captures_since_focus = 0  # Captures since the last focus sweep / probe (refocus_every)
+        # The sharpness of the last captured cards (their frame's measure, see _is_card_settled):
+        # a drop far below the recent median means the lens has drifted (_check_sharpness_drop)
+        self.capture_sharpness = deque(maxlen=24)
         # Probe the focus every this many captures (0 = never): Settings, else config.yaml
         self.refocus_every = int(self.settings.get('refocus_every', Config.AUTO_CAPTURE_REFOCUS_EVERY) or 0)
+        # Refocus when the last 3 captured cards are this fraction as sharp as the recent ones (0 = never)
+        self.refocus_on_drop = float(self.settings.get('refocus_on_drop', Config.AUTO_CAPTURE_REFOCUS_ON_DROP) or 0)
         self.focus_probe_running = False  # Short focus probe between two drops
         self.focus_probe_direction = 1  # Probe up (+1) or down (-1) next
         self.disturbed_during_focus = False  # A card was dropped while the focus was moving
         self.last_focus_move = 0.0  # When the last sweep / probe ended
 
         # Auto-capture settings (enabled state controlled via UI button)
-        self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
+        self._auto_capture_enabled = False  # Disabled by default, enabled via UI button (auto_capture_enabled)
         self.auto_capture_delay = Config.AUTO_CAPTURE_DELAY
         self.last_auto_capture_time = 0
         self.auto_capture_callback = None
@@ -1747,6 +1752,23 @@ class CardScanner:
             self.focus_sweep_running = False
             self.out_of_focus_since = None
 
+    @property
+    def auto_capture_enabled(self):
+        return self._auto_capture_enabled
+
+    @auto_capture_enabled.setter
+    def auto_capture_enabled(self, enabled):
+        """
+        Starting auto scanning starts the count of captures for the focus check from zero, so a
+        session of N cards gets its check at refocus_every, 2 x refocus_every ... (stopping and
+        starting again used to carry the count over: a second session of 12 cards, with a check
+        every 20, had it at its 8th). The focus itself is not touched.
+        """
+        enabled = bool(enabled)
+        if enabled and not self._auto_capture_enabled:
+            self.captures_since_focus = 0
+        self._auto_capture_enabled = enabled
+
     def set_refocus_every(self, captures):
         """Probe the focus every this many captures while scanning (0 = never); remembered"""
         captures = int(captures)
@@ -1757,9 +1779,49 @@ class CardScanner:
         self.settings.set('refocus_every', captures)
         self.log(f"Focus check while scanning: every {captures} captures" if captures else "Focus check while scanning: off")
 
+    def _check_sharpness_drop(self):
+        """
+        After a capture, with a locked focus: the sharpness of the card just captured is noted;
+        when the last 3 cards were all far less sharp than the ones before them, the lens has
+        drifted - find the sharpest focus again. Cards differ in detail (a plain token is much
+        softer than an illustrated card), so the baseline is a median over many cards, three in
+        a row are needed and it is not tried more than once a minute; a sweep that finds nothing
+        better just locks where it was.
+        """
+        sharpness = self.previous_sharpness
+        if sharpness is not None:
+            self.capture_sharpness.append(float(sharpness))
+        ratio = self.refocus_on_drop
+        if not ratio or self.focus_locked_value is None or self.focus_sweep_running or self.focus_probe_running:
+            return
+        if self.camera_type != 'usb' or not self.focus_range or time.time() - self.last_focus_sweep < 60.0:
+            return
+        history = list(self.capture_sharpness)
+        if len(history) < 8:
+            return
+        recent, before = history[-3:], sorted(history[:-3])
+        median = before[len(before) // 2]
+        if median < 600 or not all(value < ratio * median for value in recent):
+            return
+        self.log(f"The last 3 cards were much blurrier than before (sharpness {', '.join(f'{v:.0f}' for v in recent)} "
+                 f"against {median:.0f}): refocusing", level="warning")
+        self.capture_sharpness.clear()  # the next ones are judged against the new focus
+        self.refocus("sharpness dropped")
+
+    def set_refocus_on_drop(self, ratio):
+        """Refocus when the last 3 captured cards are less than this fraction as sharp as the ones before (0 = never); remembered"""
+        ratio = float(ratio)
+        if not 0 <= ratio <= 0.9:
+            raise ValueError("The sharpness drop must be 0 (off) to 0.9")
+        self.refocus_on_drop = ratio
+        self.capture_sharpness.clear()
+        self.settings.set('refocus_on_drop', ratio)
+        self.log(f"Refocus when cards get blurry: below {ratio:.0%} of the recent sharpness" if ratio else "Refocus when cards get blurry: off")
+
     def _count_capture(self):
         """After a capture (image already taken): probe the focus every refocus_every captures"""
         self.captures_since_focus += 1
+        self._check_sharpness_drop()
         every = self.refocus_every
         if (every and self.captures_since_focus >= every and self.focus_locked_value is not None
                 and self.camera_type == 'usb' and self.focus_range
