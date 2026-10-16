@@ -55,7 +55,8 @@ class Endpoint(unittest.TestCase):
                       'http://192.168.1.23:11434/v1/chat/completions', 'http://10.0.0.5:1234', 'http://172.20.1.1',
                       'http://169.254.10.10', 'http://100.101.102.103:11434',   # Tailscale
                       'http://[fd00::5]:11434', 'http://127.1:11434',            # shortened loopback
-                      'http://ai-server:11434', 'http://ai.local:11434', 'https://box.lan/v1', 'http://host.docker.internal:11434',
+                      'http://ai-server:11434', 'http://ai.local:11434', 'http://box.lan/v1', 'http://host.docker.internal:11434',
+                      'https://192.168.1.23:11434/v1',
                       'http://v6-private.local'):
             api_keys.check_local_endpoint(value)
 
@@ -148,6 +149,16 @@ class Pinned(unittest.TestCase):
             with self.assertRaises(card_identifier.requests.exceptions.ConnectionError):
                 identifier._local('post', 'http://gpu.example:11434/api/chat', json={}, timeout=5)
             post.assert_not_called()                                           # nothing was sent
+
+    def test_https_is_only_accepted_by_ip_address(self):
+        # A name is resolved again when a request connects: it could have moved to a public server by then
+        for value in ('https://gpu.example/v1', 'https://localhost:11434', 'https://ai.local'):
+            with self.assertRaises(ValueError, msg=value):
+                api_keys.check_local_endpoint(value)
+            with self.assertRaises(ValueError, msg=value):
+                api_keys.pinned_endpoint(value)
+        api_keys.check_local_endpoint('https://192.168.1.23:11434/v1')
+        self.assertEqual(api_keys.pinned_endpoint('https://192.168.1.23:11434/v1'), ('https://192.168.1.23:11434/v1', {}))
 
     def test_the_environment_switch_leaves_the_request_alone(self):
         os.environ['ALLOW_PUBLIC_AI_ENDPOINT'] = '1'
