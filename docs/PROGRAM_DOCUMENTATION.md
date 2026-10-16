@@ -2263,6 +2263,19 @@ later, one at a time, each confirmed.
 
 ## Configuration and files
 
+**Where a setting comes from, and which wins** (written 2026-10-16 after an outside review found the
+four sources hard to tell apart). Later in the list wins over earlier, per setting:
+
+| Source | What it holds | Notes |
+|---|---|---|
+| `config.yaml` (shipped, top folder) | every default | never edited per machine (it has no machine's own values and no secret) |
+| the person's `config.yaml` (`USER_DIR`; the same file in a checkout) | only what they change, laid over the shipped one section by section | `${NAME}` in a value is replaced by that environment variable (anywhere in the text) |
+| the environment and `.env` | `SCANNER_*`, `LOCAL_AI_ENDPOINT`, API keys ... | the server reads `.env` when it starts (`server/__init__.py`) and it does not override a variable that is already set |
+| `data/api_keys.env` | keys and the local AI address saved from the Settings page | **overrides** the environment and `.env` (`load_dotenv(override=True)`) |
+| `data/settings.json` | choices made in the web interface, everyone's (provider, OCR first, sounds, backups, capture size, debug mode ...) | where a setting also exists in `config.yaml` (`refocus_every`, `refocus_on_drop`), this wins once it has been set |
+| `data/stations.json` | each camera's own choices on the server (rotation, focus, refocus, debug trace, fixed area) | per station; falls back to `data/settings.json` |
+| a station's own: command line > environment > `data/station.json` > default | the server's address, the station's id / name / token, the camera | `station_setup.resolve`; a value from the command line or the environment is shown as fixed on the setup page |
+
 **Who may use the server** (`server/access.py`, `tests/test_access.py`): there is no login, and
 a browser sends any web page's requests to a local or network address, so a page open in
 another tab could otherwise change the collection or restore a backup. Every request's Host
