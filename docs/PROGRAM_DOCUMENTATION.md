@@ -2276,6 +2276,14 @@ four sources hard to tell apart). Later in the list wins over earlier, per setti
 | `data/stations.json` | each camera's own choices on the server (rotation, focus, refocus, debug trace, fixed area) | per station; falls back to `data/settings.json` |
 | a station's own: command line > environment > `data/station.json` > default | the server's address, the station's id / name / token, the camera | `station_setup.resolve`; a value from the command line or the environment is shown as fixed on the setup page |
 
+**The local AI endpoint** (since 2026-10-16; `api_keys.check_local_endpoint`, `tests/test_local_endpoint.py`) is where every
+card's picture is sent, and the Settings page can change it from any device that reaches the server. It must be
+`http(s)` on the person's own network - loopback, a private address (10/8, 172.16/12, 192.168/16, link-local,
+Tailscale's 100.64/10), `localhost`, a name without dots or ending `.local` / `.lan` / `.home` / `.internal` /
+`.docker` - with no user name in it; another address is refused unless the server's environment has
+`ALLOW_PUBLIC_AI_ENDPOINT=1`. `/api/local_ai_models` says only "could not get the models" (the cause is in the log).
+The address in `config.yaml` or the environment is the owner's and is not checked.
+
 **How much a request may carry** (since 2026-10-16): `MAX_CONTENT_LENGTH` is 64 MB (`server/state.py`) - a
 capture is at most ~30 MB, a collection or Arena file a few MB - and `backups_api.limit_the_request_body`
 refuses a bigger body with 413 before any route runs (Flask only checks when a route reads it, and several
