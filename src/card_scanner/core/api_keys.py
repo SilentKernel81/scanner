@@ -8,6 +8,7 @@ os.environ immediately, so no restart is needed.
 import ipaddress
 import os
 import re
+import socket
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -63,20 +64,28 @@ def credential_status():
     return status
 
 
-# Names that lead to a machine of one's own network (no public name ends like this)
-PRIVATE_NAME_ENDINGS = ('.local', '.lan', '.home', '.home.arpa', '.internal', '.localdomain', '.docker')
 # Tailscale and other carrier-grade-NAT addresses: a private network too
 SHARED_ADDRESS_SPACE = ipaddress.ip_network('100.64.0.0/10')
+
+
+def _is_own_network(address):
+    """Whether one resolved address (an ipaddress object) is loopback, private, link-local or shared (Tailscale)"""
+    return address.is_private or address.is_loopback or address.is_link_local or (
+        address.version == 4 and address in SHARED_ADDRESS_SPACE)
 
 
 def check_local_endpoint(value):
     """
     The local AI endpoint is where every card's picture is sent: it must be a machine of the person's
-    own network - loopback, a private address (10/8, 172.16/12, 192.168/16, link-local, Tailscale's
-    100.64/10), `localhost`, a name without dots or ending in .local / .lan / .home / .internal /
-    .docker. Anything else (a public address, a public name) is refused, unless the environment says
-    ALLOW_PUBLIC_AI_ENDPOINT=1: the settings can be changed by anyone who can reach the server, and
-    an address of someone else would receive a photo of each card. Raises ValueError.
+    own network. The host is RESOLVED, and every address it resolves to must be loopback, private
+    (10/8, 172.16/12, 192.168/16, fc00::/7), link-local or Tailscale's 100.64/10 - judging the text of
+    the name is not enough: `http://134744072` is a name without dots to a reader and 8.8.8.8 to the
+    resolver (an outside review found this, 2026-10-16), and a public DNS name can end in .lan. A name
+    that does not resolve is refused. Anything else is refused unless the environment says
+    ALLOW_PUBLIC_AI_ENDPOINT=1: the settings can be changed by anyone who can reach the server (unless a
+    settings password is set), and an address of someone else would receive a photo of each card.
+    Not covered: a name whose DNS answer changes after it was saved (the check is at saving time), and
+    the owner's own address in config.yaml or the environment (not checked at all). Raises ValueError.
     """
     try:
         parts = urlparse(value)
@@ -91,16 +100,25 @@ def check_local_endpoint(value):
     if os.environ.get('ALLOW_PUBLIC_AI_ENDPOINT') == '1':
         return
     try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        name = host.lower().rstrip('.')
-        if name == 'localhost' or '.' not in name or name.endswith(PRIVATE_NAME_ENDINGS):
-            return
-    else:
-        if address.is_private or address.is_loopback or address.is_link_local or address in SHARED_ADDRESS_SPACE:
-            return
-    raise ValueError(f"The local AI endpoint must be on your own network (not {host}); "
-                     "ALLOW_PUBLIC_AI_ENDPOINT=1 in the server's environment allows another address")
+        # What the resolver makes of the text - the same call a connection makes - also for 127.1,
+        # 0x7f000001 or a decimal number, which ipaddress.ip_address() would not read
+        found = {info[4][0] for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)}
+    except (socket.gaierror, UnicodeError, OSError):
+        raise ValueError(f"The local AI endpoint's host {host} could not be found on this machine's network")
+    outside = []
+    for text in found:
+        try:
+            address = ipaddress.ip_address(text.split('%')[0])   # a link-local IPv6 address names its interface after a %
+        except ValueError:
+            outside.append(text)
+            continue
+        if address.version == 6 and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        if not _is_own_network(address):
+            outside.append(text)
+    if outside or not found:
+        raise ValueError(f"The local AI endpoint must be on your own network ({host} is {', '.join(sorted(outside)) or 'not an address'}); "
+                         "ALLOW_PUBLIC_AI_ENDPOINT=1 in the server's environment allows another address")
 
 
 def save_credential(provider, value):

@@ -440,7 +440,8 @@ class CardIdentifier:
         }
 
         try:
-            response = requests.post(ollama_endpoint, json=payload, timeout=60)
+            # no redirects: the endpoint was checked to be on the person's own network, where it points to is not
+            response = requests.post(ollama_endpoint, json=payload, timeout=60, allow_redirects=False)
             response.raise_for_status()
             response_json = response.json()
 
@@ -473,7 +474,7 @@ class CardIdentifier:
             ollama_endpoint = f"{self.local_endpoint.replace('/v1/chat/completions', '')}/api/chat"
             try:
                 # An empty message list just loads the model
-                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120)
+                requests.post(ollama_endpoint, json={"model": self.model, "messages": [], "keep_alive": self.OLLAMA_KEEP_ALIVE}, timeout=120, allow_redirects=False)
                 self.log(f"Local model {self.model} loaded")
             except Exception as e:
                 self.log(f"Could not preload local model: {e}", level="warning")
@@ -498,7 +499,7 @@ class CardIdentifier:
         }
 
         try:
-            response = requests.post(self.local_endpoint, json=payload, timeout=60)
+            response = requests.post(self.local_endpoint, json=payload, timeout=60, allow_redirects=False)
             response.raise_for_status()
             response_json = response.json()
 

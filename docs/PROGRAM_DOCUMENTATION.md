@@ -2306,12 +2306,14 @@ four sources hard to tell apart). Later in the list wins over earlier, per setti
 | a station's own: command line > environment > `data/station.json` > default | the server's address, the station's id / name / token, the camera | `station_setup.resolve`; a value from the command line or the environment is shown as fixed on the setup page |
 
 **The local AI endpoint** (since 2026-10-16; `api_keys.check_local_endpoint`, `tests/test_local_endpoint.py`) is where every
-card's picture is sent, and the Settings page can change it from any device that reaches the server. It must be
-`http(s)` on the person's own network - loopback, a private address (10/8, 172.16/12, 192.168/16, link-local,
-Tailscale's 100.64/10), `localhost`, a name without dots or ending `.local` / `.lan` / `.home` / `.internal` /
-`.docker` - with no user name in it; another address is refused unless the server's environment has
-`ALLOW_PUBLIC_AI_ENDPOINT=1`. `/api/local_ai_models` says only "could not get the models" (the cause is in the log).
-The address in `config.yaml` or the environment is the owner's and is not checked.
+card's picture is sent, and the Settings page can change it from any device that reaches the server (unless a settings
+password is set). It must be `http(s)` with no user name, and its host is **resolved**: every address it resolves to must
+be loopback, private (10/8, 172.16/12, 192.168/16, fc00::/7), link-local or Tailscale's 100.64/10 - the text of a name proves
+nothing (`http://134744072` is 8.8.8.8 to the resolver, found by the outside review; a public DNS name can end in `.lan`);
+a name that does not resolve is refused. Another address is refused unless the server's environment has
+`ALLOW_PUBLIC_AI_ENDPOINT=1`. The requests to a local server do not follow redirects. Not covered: a name whose DNS answer
+changes after it was saved (the check is at saving time), and the address in `config.yaml` or the environment (the owner's,
+not checked). `/api/local_ai_models` says only "could not get the models" (the cause is in the log).
 
 **How much a request may carry** (since 2026-10-16): `MAX_CONTENT_LENGTH` is 64 MB (`server/state.py`) - a
 capture is at most ~30 MB, a collection or Arena file a few MB - and `backups_api.limit_the_request_body`
