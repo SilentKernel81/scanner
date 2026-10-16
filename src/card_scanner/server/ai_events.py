@@ -60,7 +60,7 @@ def get_local_ai_models():
         logger.info(f"Fetching models from Ollama: {ollama_api}")
 
         # Query Ollama for available models
-        response = requests.get(ollama_api, timeout=5)
+        response = requests.get(ollama_api, timeout=5, allow_redirects=False)
         response.raise_for_status()
 
         data = response.json()
