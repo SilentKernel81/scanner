@@ -3,6 +3,7 @@
 # Database management for card data
 # ============================================================================
 import gzip
+import io
 import re
 import json
 import logging
@@ -339,39 +340,54 @@ class CardDatabase:
         response = requests.get(download_url, headers=headers, stream=True, timeout=60)
         response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
+        # Hand the cards back one at a time, decompressed and parsed as they arrive: the whole file
+        # (a gigabyte or more as Python objects) is never held at once. Before 2026-10-16 the bytes
+        # were joined, decompressed and parsed into one list (~1.5 GB at its peak).
+        return self._stream_cards(response, download_url, total_size, progress_callback)
 
-        # Collect raw bytes and decode once at the end - decoding per chunk
-        # corrupts multi-byte UTF-8 characters split across chunk boundaries
-        chunks = []
-        downloaded = 0
-        last_percent = -1
+    @staticmethod
+    def _stream_cards(response, download_url, total_size, progress_callback=None):
+        """A generator of the cards in a Scryfall bulk download (gzipped or plain JSON Lines, or a JSON array)"""
+        # The file is gzip as it is (not a Content-Encoding the library would undo): read it raw
+        response.raw.decode_content = False
+        counted = {'bytes': 0, 'percent': -1}
 
-        for chunk in response.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                downloaded += len(chunk)
-                chunks.append(chunk)
+        class Counting(io.RawIOBase):
+            """The response's bytes, counted for the progress messages"""
+            def readable(self):
+                return True
 
+            def readinto(self, buffer):
+                data = response.raw.read(len(buffer))
+                buffer[:len(data)] = data
+                counted['bytes'] += len(data)
                 if total_size > 0 and progress_callback:
-                    percent = int(downloaded * 100 / total_size)
-                    if percent != last_percent:
-                        last_percent = percent
+                    percent = int(counted['bytes'] * 100 / total_size)
+                    if percent != counted['percent']:
+                        counted['percent'] = percent
                         progress_callback(f"Download progress: {percent}%")
+                return len(data)
 
-        if progress_callback:
-            progress_callback("Parsing card data...")
+        try:
+            stream = io.BufferedReader(Counting(), buffer_size=1024 * 1024)
+            if stream.peek(2)[:2] == b'\x1f\x8b':  # gzip magic bytes
+                stream = gzip.GzipFile(fileobj=stream)
+            if '.jsonl' in download_url:
+                # Read line by line (a line is a card): decoding the lines whole keeps a multi-byte
+                # character that a chunk boundary would split in one piece
+                for line in stream:
+                    if line.strip():
+                        yield json.loads(line)
+            else:
+                # The older format, one JSON array: no way around reading it whole
+                yield from json.loads(stream.read())
+        finally:
+            response.close()
 
-        data = b''.join(chunks)
-        if data[:2] == b'\x1f\x8b':  # gzip magic bytes
-            data = gzip.decompress(data)
-
-        if '.jsonl' in download_url:
-            return [json.loads(line) for line in data.splitlines() if line.strip()]
-        return json.loads(data)
-    
     def populate_database(self, cards_data, progress_callback=None):
         """Populate database with card data"""
         if progress_callback:
-            progress_callback(f"Populating database with {len(cards_data)} cards...")
+            progress_callback("Populating database with the card data...")
         
         # One refresh at a time: a second one would drop the table the first is filling
         if not self._import_lock.acquire(blocking=False):
