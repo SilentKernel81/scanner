@@ -4,8 +4,11 @@ An outside review ("Review do scanner-server", a PDF, in Portuguese, written fro
 commit `55592a2` - nothing was run) found 17 things. This plan says which of them are real in
 today's code, in what order to fix them, what each fix touches, and what needs a decision.
 
-**Status (2026-10-16): Phase 1 is implemented and committed locally (six commits, tested, not pushed or
-deployed); Phases 2 and 3 are not started.** Debug mode was adjusted at the person's request: it keeps
+**Status (2026-10-16): Phase 1 is deployed. Phase 2 is implemented and committed locally (not pushed or
+deployed): steps 7 (endpoint check; the settings password was not done - decision 2 (b) is still open), 8, 10, 11
+(timers; the inventory modal still rebuilds all rows), 12 and 13. Steps 9 and 14 were measured and dropped: the
+backup fingerprint takes 22 ms on a collection of 9,600 rows plus 2,200 deck cards, and a capture's thumbnail
+8 ms (median; 106 ms worst). Phase 3 is not started.** Debug mode was adjusted at the person's request: it keeps
 the request log everywhere and the interactive debugger on a server that only this computer can reach
 (or with `SCANNER_LAN_DEBUGGER=1`), instead of removing the debugger.
 
