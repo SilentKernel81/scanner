@@ -247,9 +247,10 @@ a {
 .topbar-page {
     margin-left: auto;
 }
-
-.topbar-settings {
+/* Settings: the last link of the header, in its right corner (after the page's own part, which has the auto margin) */
+.topbar-settings-link {
     flex-shrink: 0;
+    margin-left: 12px;
 }
 
 .game-label {
@@ -2175,6 +2176,13 @@ input[type="radio"] {
     .topbar-page {
         width: 100%;
         margin: 0;
+        order: 3;
+    }
+
+    /* Settings stays in the first row, at its right end */
+    .topbar-settings-link {
+        margin-left: auto;
+        order: 2;
     }
 }
 
