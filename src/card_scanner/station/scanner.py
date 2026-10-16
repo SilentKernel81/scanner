@@ -961,13 +961,16 @@ class CardScanner:
     def _serve_release_request(self):
         """The capture thread's half of with_camera_released()"""
         request, self.release_request = self.release_request, None
-        self._close_camera()
         try:
+            self._close_camera()
             request['result'] = request['action']()
         except Exception as e:  # handed back to the caller, which raises it there
             request['error'] = e
         finally:
-            self._open_camera()  # scanning goes on, whatever the action did
+            try:
+                self._open_camera()  # scanning goes on, whatever the action did
+            except Exception as e:
+                logger.error(f"The camera could not be opened again: {e}")
             request['done'].set()
 
     def _read_failed(self, reason="The camera stopped sending images (unplugged?)"):
@@ -1121,7 +1124,10 @@ class CardScanner:
         """Continuously capture frames and perform object detection"""
         while self.running:
             if self.release_request:
-                self._serve_release_request()
+                try:
+                    self._serve_release_request()
+                except Exception as e:  # nothing here may end the capture thread
+                    logger.error(f"Serving a request for the camera failed: {e}")
             if self.reopen_camera:
                 self.reopen_camera = False
                 self._close_camera()
@@ -1590,7 +1596,12 @@ class CardScanner:
         image_path = Config.STATION_CAPTURES_DIR / f"card_{card_number}_{timestamp}.jpg"
 
         card_bgr = cv2.cvtColor(card_image, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(str(image_path), card_bgr)
+        # imwrite answers False (it does not raise) when the disk is full or read-only: the capture
+        # is then not made - no "Card captured", no beep, no upload of a file that is not there
+        if not cv2.imwrite(str(image_path), card_bgr):
+            self.log(f"The capture could not be saved to {image_path} (disk full or read-only?)", level="error")
+            self.last_capture_frame = None
+            return None, None, None
 
         self.log(f"Card captured: {image_path.name}")
         now = time.time()
@@ -1838,13 +1849,15 @@ class CardScanner:
         direction for the next probe; otherwise the next probe tries the other way. A card
         dropped meanwhile spoils the comparison - the probe is then dropped.
         """
-        low, high = self.focus_range
-        start = self.focus_locked_value
-        direction = self.focus_probe_direction
-        if not low <= start + direction * step <= high:
-            direction = -direction
-        probe = start + direction * step
         try:
+            # (all of it inside the try: an error before it left focus_probe_running True for ever,
+            # and no probe, no sweep and no beep after it would ever run again)
+            low, high = self.focus_range
+            start = self.focus_locked_value
+            direction = self.focus_probe_direction
+            if not low <= start + direction * step <= high:
+                direction = -direction
+            probe = start + direction * step
             self.disturbed_during_focus = False
             here = self._measure_focus_sharpness()
             # Approaching from only 15 below keeps the card sharp enough to stay detected
