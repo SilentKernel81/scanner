@@ -13,6 +13,7 @@ from card_scanner import games
 
 from card_scanner.server.state import app, app_settings, identification, inventory, services, socketio, stations
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded_event
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
 from card_scanner.server.captures import scan_location, set_pending_capture
 from card_scanner.server.card_data import start_card_data_update
@@ -278,6 +279,7 @@ def handle_toggle_debug_trace(data):
 
 
 @socketio.on('toggle_debug_mode')
+@guarded_event
 def handle_toggle_debug_mode(data):
     """Flask's debug mode on/off (remembered; the server takes it when it starts)"""
     if not scanner:

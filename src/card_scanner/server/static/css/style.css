@@ -2329,3 +2329,12 @@ input[type="radio"] {
 }
 .data-banner.is-error { background: #fdecea; color: #8a1f17; border-bottom-color: #f2b8b2; }
 .data-banner[hidden] { display: none; }
+
+/* The settings password's question (common.js: passwordDialog), in the shared dialog */
+#dialog-modal .dialog-field {
+    width: 100%;
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    font: inherit;
+}

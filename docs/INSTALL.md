@@ -38,7 +38,12 @@ Files: `deploy/Dockerfile` (target `server`), `deploy/docker-compose.yml`, `depl
   uploaded), next to the compose file. Nothing else needs keeping.
 - **Another user id**: the container runs as 1000:1000, the owner the two folders must have.
   Set `SCANNER_UID` / `SCANNER_GID` in `.env` beside the compose file if yours differ;
-  `SCANNER_PORT` changes the port.
+  `SCANNER_PORT` changes the port. `SCANNER_BIND` (e.g. `127.0.0.1`) publishes it on one address
+  of the machine only - for a server that nothing else on the network needs to reach; unset, it
+  is on every address, which the stations and the phone need.
+- **A password for the risky settings** (optional): Settings -> Server -> *Settings password*, or
+  `SCANNER_SETTINGS_PASSWORD` in `.env`. Everything else stays open - see *Who may use the server*
+  in docs/PROGRAM_DOCUMENTATION.md.
 - **Firewall**: the stations and your browser must reach the port (5000). Ports published by
   Docker usually bypass `ufw`.
 

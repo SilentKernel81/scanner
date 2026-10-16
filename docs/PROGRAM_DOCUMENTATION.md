@@ -2233,7 +2233,7 @@ on every page. Five categories, a list on the left and one at a time on the righ
 | **Sounds** | Sound effects, Capture beep, Card added, Volume - for every camera |
 | **Card reading** | Read with OCR first, the vision AI (provider, key, model), Prompts (the summary, and a link to the editor) |
 | **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames), under Advanced: Rebuild database schema |
-| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, under Advanced: Debug mode |
+| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Advanced: Debug mode |
 
 **Debug mode** (Server → Advanced) is two things: the request log (`data/logs/requests.log`) and Werkzeug's
 interactive debugger. Since 2026-10-16 the debugger only runs when the server listens on this computer
@@ -2330,6 +2330,29 @@ connections follow the same rule (`socket_origin_allowed`). Stations send no `Or
 pass on the Host check alone: a station reaching the server by a host name that is not the
 computer's own (a Docker service name, a reverse proxy) needs it in `flask.allowed_hosts`.
 Never tested with the Android app in server mode reaching the server by a host name.
+
+**The settings password** (since 2026-10-16; `server/lock.py`, `tests/test_settings_lock.py`,
+`scripts/check_settings_lock.py`): the pages have no login, but the few actions that can hurt beyond one
+card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
+`SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
+quit, network access, Debug mode (`toggle_debug_mode`) and, of the backups, restore, upload, download, delete and
+making a *full* backup (it holds the keys). Open: scanning, the cameras and their settings, the collection, the
+decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
+`error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
+password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO
+connection after an unlock (the cookie is read when a connection is made) and asks for the event again; a backup's
+download link asks first (`ensureSettingsUnlocked`), as a refused link would be saved as a file. It is the camera
+station's setup-page mechanism (`station_login.Login`, parametrised): the password only as an scrypt hash in
+`data/settings_login.json`, an HttpOnly SameSite=Strict cookie signed with a random key, 12-hour sessions, wrong
+passwords wait 1, 2, 4 ... 30 s (so a stranger can make the owner wait). The first password can be set by anyone
+who reaches the page; changing or removing it needs the current one. Not covered: the page is plain HTTP, so the
+password crosses the network unencrypted - it keeps out mistakes and the curious, not someone listening. A
+forgotten password: delete `data/settings_login.json` and restart. `scripts/backup.sh` asks for the full backup, which is guarded: it logs in with `SCANNER_SETTINGS_PASSWORD` (the environment, else the checkout's `.env`; `tests/test_backup_script.py`) and says so when the server is locked and it has no password. A new guarded route takes `@guarded`, a new
+guarded event `@guarded_event` (below `@socketio.on`).
+
+**`SCANNER_BIND`** (Docker, `deploy/docker-compose.yml`): the address the port is published on; unset it is every
+address (as before), `127.0.0.1` only this computer. It is read by Compose for the `ports:` line only - the server
+inside the container still listens on all of its addresses.
 
 **Server**
 
