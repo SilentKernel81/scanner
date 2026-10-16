@@ -188,7 +188,7 @@ class CardScanner:
         self.last_focus_move = 0.0  # When the last sweep / probe ended
 
         # Auto-capture settings (enabled state controlled via UI button)
-        self.auto_capture_enabled = False  # Disabled by default, enabled via UI button
+        self._auto_capture_enabled = False  # Disabled by default, enabled via UI button (auto_capture_enabled)
         self.auto_capture_delay = Config.AUTO_CAPTURE_DELAY
         self.last_auto_capture_time = 0
         self.auto_capture_callback = None
@@ -1746,6 +1746,23 @@ class CardScanner:
             self.last_focus_move = self.last_focus_sweep = time.time()
             self.focus_sweep_running = False
             self.out_of_focus_since = None
+
+    @property
+    def auto_capture_enabled(self):
+        return self._auto_capture_enabled
+
+    @auto_capture_enabled.setter
+    def auto_capture_enabled(self, enabled):
+        """
+        Starting auto scanning starts the count of captures for the focus check from zero, so a
+        session of N cards gets its check at refocus_every, 2 x refocus_every ... (stopping and
+        starting again used to carry the count over: a second session of 12 cards, with a check
+        every 20, had it at its 8th). The focus itself is not touched.
+        """
+        enabled = bool(enabled)
+        if enabled and not self._auto_capture_enabled:
+            self.captures_since_focus = 0
+        self._auto_capture_enabled = enabled
 
     def set_refocus_every(self, captures):
         """Probe the focus every this many captures while scanning (0 = never); remembered"""
