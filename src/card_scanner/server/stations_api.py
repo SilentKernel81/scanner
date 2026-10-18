@@ -21,7 +21,7 @@ from card_scanner.server.state import (
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import (
-    desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
+    desk, desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
 )
 from card_scanner.server.captures import (
     announce_and_route, foil_file, remember_outcome, scan_stats, set_pending_capture, station_prefix,
