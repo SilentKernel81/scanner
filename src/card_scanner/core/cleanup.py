@@ -3,8 +3,9 @@ Cleanup utility for scanned card images.
 Automatically removes old scanned images to free up disk space.
 """
 
-import time
 import logging
+import stat
+import time
 from card_scanner.config import Config
 
 logger = logging.getLogger('cleanup')  # the name its log lines always had (the module is card_scanner.core.cleanup)
@@ -129,34 +130,36 @@ def get_images_stats():
     Returns:
         dict: Statistics including file count, total size, oldest file age
     """
-    images_dir = Config.IMAGES_DIR
-
-    if not images_dir.exists():
-        return {
-            'count': 0,
-            'total_size_mb': 0,
-            'oldest_days': 0
-        }
-
+    empty = {'count': 0, 'total_size_mb': 0, 'oldest_days': 0}
     image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
-    image_files = [f for f in images_dir.iterdir()
-                   if f.is_file() and f.suffix.lower() in image_extensions]
+    count = 0
+    total_size = 0
+    oldest_time = None
+    try:
+        for f in Config.IMAGES_DIR.iterdir():
+            if f.suffix.lower() not in image_extensions:
+                continue
+            try:
+                # One look at each file: the clean-up (another thread) may delete it at any
+                # moment, and a file that is gone is simply not counted
+                info = f.stat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            count += 1
+            total_size += info.st_size
+            oldest_time = info.st_mtime if oldest_time is None else min(oldest_time, info.st_mtime)
+    except OSError:
+        return empty  # no folder (yet), or it cannot be read
 
-    if not image_files:
-        return {
-            'count': 0,
-            'total_size_mb': 0,
-            'oldest_days': 0
-        }
-
-    total_size = sum(f.stat().st_size for f in image_files)
-    oldest_time = min(f.stat().st_mtime for f in image_files)
-    oldest_days = (time.time() - oldest_time) / (24 * 60 * 60)
+    if not count:
+        return empty
 
     return {
-        'count': len(image_files),
+        'count': count,
         'total_size_mb': total_size / (1024 * 1024),
-        'oldest_days': oldest_days
+        'oldest_days': (time.time() - oldest_time) / (24 * 60 * 60)
     }
 
 

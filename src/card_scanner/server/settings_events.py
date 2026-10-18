@@ -167,13 +167,19 @@ def capture_copy_info():
     # Every kind of capture file the server keeps, for the Storage card's total: the pictures
     # received from the cameras (scanned_cards/, cleaned after cleanup.days), the small and the
     # large copy kept behind inventory entries, and the camera frames
-    received = get_images_stats()
-    thumbs, thumbs_size = inventory_module.thumbnail_usage()
-    usage = {'received': {'count': received['count'], 'bytes': round(received['total_size_mb'] * 1048576)},
-             'thumbnails': {'count': thumbs, 'bytes': thumbs_size},
-             'large': {'count': count, 'bytes': size},
-             'frames': {'count': kept, 'bytes': frames_size}}
-    usage['total_bytes'] = sum(part['bytes'] for part in usage.values())
+    try:
+        received = get_images_stats()
+        thumbs, thumbs_size = inventory_module.thumbnail_usage()
+        usage = {'received': {'count': received['count'], 'bytes': round(received['total_size_mb'] * 1048576)},
+                 'thumbnails': {'count': thumbs, 'bytes': thumbs_size},
+                 'large': {'count': count, 'bytes': size},
+                 'frames': {'count': kept, 'bytes': frames_size}}
+        usage['total_bytes'] = sum(part['bytes'] for part in usage.values())
+    except Exception as error:
+        # A look at the folders must never fail what is asked of this route (a POST has
+        # already saved its choice by now): the page then shows no total
+        logger.warning(f"Could not measure the capture files: {error}")
+        usage = None
     return {'usage': usage, 'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
             'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1),
             # The camera frames kept for training (Debug trace): whether they stay when their

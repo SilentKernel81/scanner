@@ -631,7 +631,7 @@ function showCaptureUsage(usage) {
 }
 
 function showCaptureCopy(info) {
-    if (info.usage) showCaptureUsage(info.usage);
+    if (info.usage) showCaptureUsage(info.usage); else $('capture-usage').textContent = 'Could not be measured (see the log).';
     $('capture-copy-size').value = info.size;
     $('keep-frames').checked = !!info.keep_frames;
     $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `
