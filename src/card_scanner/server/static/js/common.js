@@ -723,7 +723,7 @@ function captureGridHtml(card, max = Infinity) {
     const more = card.captures.length - shown.length;
     return shown.map(capture => `
         <figure>
-            <img src="${escapeHtml(capture.url)}" alt="${escapeHtml(card.name)}" loading="lazy">
+            <img src="${escapeHtml(capture.url)}" data-full="${escapeHtml(capture.url)}?size=full" alt="${escapeHtml(card.name)}" loading="lazy">
             <figcaption>${escapeHtml(capture.captured_at)}</figcaption>
         </figure>`).join('')
         + (more > 0 ? `<div class="capture-more">+${more} more<br><span>click to see all</span></div>` : '');
@@ -759,3 +759,25 @@ function openCaptures(card) {
 function closeCaptures() {
     document.getElementById('capture-modal').classList.remove('show');
 }
+
+function openCaptureViewer(url, title) {
+    // One capture large: the server answers ?size=full with the large copy kept with it, or
+    // the thumbnail when there is none
+    const image = document.getElementById('capture-viewer-image');
+    image.removeAttribute('src');   // not the previous picture while this one loads
+    image.src = url.includes('?') ? url : `${url}?size=full`;
+    document.getElementById('capture-viewer-title').textContent = title;
+    document.getElementById('capture-viewer').classList.add('show');
+}
+
+function closeCaptureViewer() {
+    document.getElementById('capture-viewer').classList.remove('show');
+}
+
+// A click on a picture in the captures window opens it large
+document.addEventListener('click', event => {
+    const image = event.target.closest('#capture-grid img[data-full]');
+    if (!image) return;
+    const caption = image.parentElement.querySelector('figcaption');
+    openCaptureViewer(image.dataset.full, `${image.alt}${caption ? ' - ' + caption.textContent : ''}`);
+});

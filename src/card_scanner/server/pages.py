@@ -2,7 +2,7 @@
 # FILE: server/pages.py
 # The pages themselves, the camera's live view, thumbnails and the header's numbers.
 # ============================================================================
-from flask import Response, abort, jsonify, render_template, send_from_directory, url_for
+from flask import Response, abort, jsonify, render_template, request, send_from_directory, url_for
 import time
 
 from card_scanner.config import Config
@@ -84,8 +84,14 @@ def generate_frames(camera):
 
 @app.route('/captures/<path:name>')
 def capture_thumbnail(name):
-    """Thumbnail of a capture kept with an inventory entry"""
-    from card_scanner.core.inventory import CAPTURES_DIR
+    """
+    Thumbnail of a capture kept with an inventory entry; with ?size=full its large copy (the
+    capture viewer), or the thumbnail when that capture has none (made before they were kept,
+    or kept at "off")
+    """
+    from card_scanner.core.inventory import CAPTURES_DIR, FULL_CAPTURES_DIR
+    if request.args.get('size') == 'full' and (FULL_CAPTURES_DIR / name).is_file():
+        return send_from_directory(FULL_CAPTURES_DIR, name, max_age=86400)
     return send_from_directory(CAPTURES_DIR, name, max_age=86400)
 
 

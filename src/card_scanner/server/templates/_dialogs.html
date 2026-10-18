@@ -136,6 +136,19 @@
     </div>
 </div>
 
+<!-- One capture large (common.js: openCaptureViewer): its large copy, the thumbnail when it has none -->
+<div id="capture-viewer" class="modal">
+    <div class="modal-content capture-viewer">
+        <div class="modal-header">
+            <h2 id="capture-viewer-title">Capture</h2>
+            <span class="close" onclick="closeCaptureViewer()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <img id="capture-viewer-image" alt="">
+        </div>
+    </div>
+</div>
+
 <!-- Confirmation dialog: in-page, because browsers can silently block native confirm() -->
 <div id="dialog-modal" class="modal">
     <div class="modal-content narrow">

@@ -9,7 +9,7 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=58">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=60">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=27">
 </head>
 <body>
@@ -164,8 +164,8 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=21"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=22"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=6"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=64"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=65"></script>
 </body>
 </html>

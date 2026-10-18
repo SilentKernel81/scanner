@@ -1784,6 +1784,24 @@ input[type="radio"] {
     max-width: 960px;
 }
 
+.capture-grid img[data-full] {
+    cursor: zoom-in;
+}
+
+.capture-viewer {
+    max-width: 760px;
+}
+
+.capture-viewer img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(90vh - 140px);
+    margin: 0 auto;
+    object-fit: contain;
+    border-radius: 6px;
+    background: var(--surface-2);
+}
+
 .capture-grid.large {
     grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
 }
