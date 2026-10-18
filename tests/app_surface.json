@@ -463,6 +463,20 @@
    "get_stats"
   ],
   [
+   "/api/storage/cleanup",
+   [
+    "POST"
+   ],
+   "storage_cleanup"
+  ],
+  [
+   "/api/storage/compress",
+   [
+    "POST"
+   ],
+   "storage_compress"
+  ],
+  [
    "/api/trades",
    [
     "GET",

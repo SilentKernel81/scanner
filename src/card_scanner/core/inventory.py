@@ -71,6 +71,47 @@ def full_capture_usage():
     return folder_usage(FULL_CAPTURES_DIR)
 
 
+def compress_full_captures(height, lock=None, progress=None):
+    """
+    Make the large copies already kept no taller than `height` px (the "Capture size" choice
+    only applies to new captures). A copy is only replaced when the new one is smaller, never
+    made bigger, and by writing a new file beside it and renaming it over: a reader (or a
+    backup's hard link to the old file) sees the old or the new, never half of one. `lock` is
+    held for one file at a time, so a capture arriving is not kept waiting for the whole run.
+    progress(done, total) is called after each file. Returns (files made smaller, bytes freed).
+    """
+    import cv2
+    try:
+        names = sorted(entry.name for entry in os.scandir(FULL_CAPTURES_DIR) if entry.is_file())
+    except OSError:
+        return 0, 0
+    changed = freed = 0
+    for index, name in enumerate(names, 1):
+        path = FULL_CAPTURES_DIR / name
+        temp = FULL_CAPTURES_DIR / f'.compress-{name}'  # still .jpg: imwrite picks the format by it
+        try:
+            with (lock if lock is not None else threading.Lock()):
+                before = path.stat().st_size
+                image = cv2.imread(str(path))
+                if image is None:
+                    continue  # not a picture (or one still being written)
+                if image.shape[0] > height:
+                    image = cv2.resize(image, (round(image.shape[1] * height / image.shape[0]), height),
+                                       interpolation=cv2.INTER_AREA)
+                    if cv2.imwrite(str(temp), image, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY]) \
+                            and temp.stat().st_size < before:
+                        os.replace(temp, path)
+                        changed += 1
+                        freed += before - path.stat().st_size
+        except Exception as e:
+            logger.warning(f"Could not compress the large copy {name}: {e}")
+        finally:
+            temp.unlink(missing_ok=True)
+        if progress:
+            progress(index, len(names))
+    return changed, freed
+
+
 def thumbnail_usage():
     """(number of small copies, bytes they take)"""
     return folder_usage(CAPTURES_DIR)
