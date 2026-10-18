@@ -129,11 +129,17 @@ let valueSuggestions = [];   // the suggestions of the open dialog, for the list
 
 function showValueSuggestions(all = false) {
     // Our own list instead of the browser's <datalist>, whose popup was narrower than the
-    // input and cannot be styled. Narrowed by what is typed (all: every suggestion)
+    // input and cannot be styled. Narrowed by what is typed (all: every suggestion). A suggestion
+    // is a text, or [text, group heading]: a group gets its heading above its first suggestion
     const list = $('value-suggest'), text = $('value-input').value.trim().toLowerCase();
-    const found = valueSuggestions.filter(option => all || !text || option.toLowerCase().includes(text))
-        .filter(option => option.toLowerCase() !== text || all);
-    list.innerHTML = found.map(option => `<button type="button" class="value-suggest-item">${escapeHtml(option)}</button>`).join('');
+    const found = valueSuggestions.filter(([option]) => all || !text || option.toLowerCase().includes(text))
+        .filter(([option]) => option.toLowerCase() !== text || all);
+    let group = '';
+    list.innerHTML = found.map(([option, heading]) => {
+        const title = heading && heading !== group ? `<div class="value-suggest-heading">${escapeHtml(heading)}</div>` : '';
+        group = heading || group;
+        return `${title}<button type="button" class="value-suggest-item">${escapeHtml(option)}</button>`;
+    }).join('');
     list.hidden = found.length === 0;
 }
 
@@ -151,7 +157,7 @@ function valueDialog({title, label, options = [], choices = null, value = ''}) {
             select.innerHTML = optionsHtml(choices);
         } else {
             input.value = value;
-            valueSuggestions = options;
+            valueSuggestions = options.map(option => Array.isArray(option) ? option : [option, '']);
         }
         $('value-suggest').hidden = true;
         $('value-toggle').hidden = !!choices || !options.length;   // the chevron: there is a list to open

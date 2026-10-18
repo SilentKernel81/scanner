@@ -396,6 +396,15 @@ function fillLocationFilter(cards = inventory) {
     $('filter-location').hidden = false;
 }
 
+function groupedLocations() {
+    // For the Move dialog's dropdown, as in the filter above: the boxes and binders first, the
+    // locations named after one of the decks under their own heading
+    const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
+    const places = knownLocations();
+    return [...places.filter(place => !decks.has(place.toLowerCase())),
+            ...places.filter(place => decks.has(place.toLowerCase())).map(place => [place, 'Decks'])];
+}
+
 function knownLocations() {
     return distinct(inventory.map(card => card.location));
 }
@@ -777,7 +786,7 @@ async function bulkAction(action) {
             message: `The selected cards are removed from your inventory. You have ${UNDO_SECONDS} seconds to undo it.`});
         if (!ok) return;
     } else if (action === 'location') {
-        value = await valueDialog({title: `Move ${entries}`, label: 'Location (empty: none)', options: knownLocations()});
+        value = await valueDialog({title: `Move ${entries}`, label: 'Location (empty: none)', options: groupedLocations()});
         if (value === null) return;
     } else if (action === 'add_tag' || action === 'remove_tag') {
         const tags = distinct(inventory.filter(card => action === 'add_tag' || selected.has(card.id)).flatMap(card => card.tags));
