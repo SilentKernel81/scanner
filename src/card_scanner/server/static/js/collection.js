@@ -325,20 +325,22 @@ function fillMulti(id, entries) {
     // `entries`: [[value, label]] or [[value, label, group heading]]. A value ticked earlier that
     // the collection no longer has is let go (not while the collection has not loaded yet)
     const filter = multi[id];
-    filter.options = entries.map(([value, label, heading]) => [value, label ?? value, heading || '']);
+    const options = entries.map(([value, label, heading]) => [value, label ?? value, heading || '']);
+    const unchanged = JSON.stringify(options) === JSON.stringify(filter.options);
+    filter.options = options;
     if (inventory.length) {
         const offered = new Set(filter.options.map(([value]) => value));
         filter.values = new Set([...filter.values].filter(value => offered.has(value)));
         if (!filter.values.size) filter.not = false;
     }
-    renderMulti(id);
+    if (!unchanged) renderMulti(id);
 }
 
 function fillFilterOptions() {
     fillMulti('filter-type', distinct(inventory.map(mainType)).map(value => [value]));
     fillMulti('filter-rarity', distinct(inventory.map(card => card.rarity))
         .sort((a, b) => (RARITY_ORDER[a] ?? 9) - (RARITY_ORDER[b] ?? 9)).map(value => [value]));
-    fillMulti('filter-set', distinct(inventory.map(card => card.set_name)).map(value => [value]));
+    fillSetFilter();
     fillMulti('filter-finish', gameInfo.finishes.map(([key, label]) => [key, label]));
     fillLocationFilter();
     fillSelect('filter-tag', 'Any tag', distinct(inventory.flatMap(card => card.tags)));
@@ -378,7 +380,7 @@ function fillLocationFilter() {
     // Boxes and binders first; the locations named after one of the decks under their own
     // heading at the bottom (a deck's cards are usually kept under the deck's name)
     const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
-    const places = knownLocations();
+    const places = filterLocations();
     const inDecks = places.filter(place => decks.has(place.toLowerCase()));
     // "(none)" is kept as a choice: the cards in no place
     fillMulti('filter-location', [['(none)', '(none)'],
@@ -389,6 +391,28 @@ function fillLocationFilter() {
 
 function knownLocations() {
     return distinct(inventory.map(card => card.location));
+}
+
+function filterLocations() {
+    // Only the places of the cards the set filter lets through (none chosen: all of them),
+    // plus any place already ticked, so a tick never vanishes from its own list
+    return distinct([...inventory.filter(card => passesMulti([card.set_name], multi['filter-set'].values, multi['filter-set'].not))
+                         .map(card => card.location),
+                     ...multi['filter-location'].values].filter(place => place !== '(none)'));
+}
+
+function fillSetFilter() {
+    // Likewise: only the sets of the cards in the chosen locations
+    const where = multi['filter-location'];
+    const cards = inventory.filter(card => passesMulti([card.location || '(none)'], where.values, where.not));
+    fillMulti('filter-set', distinct([...cards.map(card => card.set_name), ...multi['filter-set'].values]).map(value => [value]));
+}
+
+function refreshLinkedFilters() {
+    // The location and set lists narrow each other; called before every filtering (a list is
+    // only drawn again when its choices changed - drawing it loses the Find box being typed in)
+    fillLocationFilter();
+    fillSetFilter();
 }
 
 // Search terms that say where to look: set:HOB, rarity:rare, loc:"Binder 2", -tag:trade.
@@ -489,6 +513,7 @@ function filterByBadge(filter, value) {
 }
 
 function applyFilters() {
+    refreshLinkedFilters();
     const {terms, phrase} = parseSearch($('filter-text').value);
     const setCodes = new Set(inventory.map(card => (card.set_code || '').toLowerCase()).filter(Boolean));
     const textMatches = card =>
