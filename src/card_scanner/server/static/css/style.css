@@ -688,6 +688,29 @@ a {
     gap: 6px;
 }
 
+/* The suggestions under the one-value dialog's input (library.js: showValueSuggestions): in the
+   flow of the dialog (its body scrolls, a floating list would be cut off), as wide as the input */
+.value-suggest {
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+.value-suggest[hidden] { display: none; }
+.value-suggest-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.value-suggest-item:hover { background: var(--accent-soft); }
+
 /* Settings: a station (a camera elsewhere) - name and location, then its count and actions */
 .station {
     display: flex;
