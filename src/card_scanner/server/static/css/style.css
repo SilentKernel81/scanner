@@ -691,7 +691,23 @@ a {
 /* The dropdown under the one-value dialog's input (library.js: showValueSuggestions): floats over
    the dialog, exactly as wide as the input. The dialog's body would cut it off, so it does not scroll here */
 #value-modal .modal-body { overflow: visible; }
-#value-modal .input-group { position: relative; }
+.value-field { position: relative; }
+.value-field input { padding-right: 36px; }
+.value-toggle {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 34px;
+    border: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+}
+.value-toggle:hover { background: var(--accent-soft); }
+.value-toggle[hidden] { display: none; }
 .value-suggest {
     position: absolute;
     top: 100%;

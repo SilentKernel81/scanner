@@ -154,9 +154,9 @@ function valueDialog({title, label, options = [], choices = null, value = ''}) {
             valueSuggestions = options;
         }
         $('value-suggest').hidden = true;
+        $('value-toggle').hidden = !!choices || !options.length;   // the chevron: there is a list to open
         $('value-modal').classList.add('show');
         (choices ? select : input).focus();
-        if (!choices) showValueSuggestions(true);
     });
 }
 
@@ -235,7 +235,13 @@ function bindValueDialog() {
         }
     });
     $('value-input').addEventListener('input', () => showValueSuggestions());
-    $('value-input').addEventListener('focus', () => showValueSuggestions(true));
+    // The list opens on the chevron (or a click in the box, or down); it is closed when the dialog opens
+    $('value-input').addEventListener('click', () => { if ($('value-suggest').hidden) showValueSuggestions(true); });
+    $('value-toggle').addEventListener('mousedown', event => {
+        event.preventDefault();   // the input keeps focus
+        if ($('value-suggest').hidden) showValueSuggestions(true); else $('value-suggest').hidden = true;
+        $('value-input').focus();
+    });
     // mousedown, not click: the input must not lose focus (and the list vanish) before the pick
     $('value-suggest').addEventListener('mousedown', event => {
         const item = event.target.closest('.value-suggest-item');
