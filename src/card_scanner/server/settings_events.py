@@ -8,6 +8,7 @@ from flask_socketio import emit
 from card_scanner.core import frames
 from card_scanner.core import inventory as inventory_module
 from card_scanner.core.card_ocr import CardOcr
+from card_scanner.core.cleanup import get_images_stats
 from card_scanner.config import Config
 from card_scanner import games
 
@@ -163,7 +164,17 @@ def capture_copy_info():
         inventory_module.FULL_CAPTURE_DEFAULT
     count, size = inventory_module.full_capture_usage()
     kept, frames_size = frames.usage()
-    return {'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
+    # Every kind of capture file the server keeps, for the Storage card's total: the pictures
+    # received from the cameras (scanned_cards/, cleaned after cleanup.days), the small and the
+    # large copy kept behind inventory entries, and the camera frames
+    received = get_images_stats()
+    thumbs, thumbs_size = inventory_module.thumbnail_usage()
+    usage = {'received': {'count': received['count'], 'bytes': round(received['total_size_mb'] * 1048576)},
+             'thumbnails': {'count': thumbs, 'bytes': thumbs_size},
+             'large': {'count': count, 'bytes': size},
+             'frames': {'count': kept, 'bytes': frames_size}}
+    usage['total_bytes'] = sum(part['bytes'] for part in usage.values())
+    return {'usage': usage, 'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
             'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1),
             # The camera frames kept for training (Debug trace): whether they stay when their
             # scanned cards are cleared or added to the collection, and what is kept
