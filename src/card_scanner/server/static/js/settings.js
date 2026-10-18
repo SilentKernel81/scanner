@@ -630,7 +630,30 @@ function showCaptureUsage(usage) {
             + `<span>${usage[key].count.toLocaleString()} files, ${formatBytes(usage[key].bytes)}</span></div>`).join('');
 }
 
+let compressWatch = null;   // the timer that asks how far the compression is, while it runs
+
+function showCompress(info) {
+    const state = info.compress || {};
+    $('compress-copies').disabled = !!state.running;
+    if (state.running) {
+        $('compress-hint').textContent = `Compressing... ${state.done} of ${state.total || '?'} copies looked at.`;
+        if (!compressWatch) compressWatch = setInterval(loadCaptureCopy, 2000);
+        return;
+    }
+    if (compressWatch) {
+        // It has just finished: say how it went, once
+        clearInterval(compressWatch);
+        compressWatch = null;
+        if (state.error) notify(`Compressing failed: ${state.error}`, 'error');
+        else notify(`${state.files} large cop${state.files === 1 ? 'y' : 'ies'} made smaller, ${state.megabytes} MB freed`, 'success');
+        $('compress-hint').textContent = state.error ? 'Compressing failed (see the log).'
+            : `Done: ${state.files} made smaller, ${state.megabytes} MB freed. Backups keep the old files until they are deleted.`;
+    }
+}
+
 function showCaptureCopy(info) {
+    if (document.activeElement !== $('cleanup-days')) $('cleanup-days').value = info.cleanup_days;
+    showCompress(info);
     if (info.usage) showCaptureUsage(info.usage); else $('capture-usage').textContent = 'Could not be measured (see the log).';
     $('capture-copy-size').value = info.size;
     $('keep-frames').checked = !!info.keep_frames;
@@ -689,6 +712,25 @@ function bindData() {
         socket.emit('rebuild_database');
     });
 
+    $('cleanup-days').addEventListener('change', event => {
+        const days = parseInt(event.target.value);
+        if (!(days >= 1 && days <= 3650)) { notify('Days: a whole number from 1 to 3650', 'error'); return loadCaptureCopy(); }
+        saveCaptureCopy({cleanup_days: days}, `Received pictures are kept ${days} days`);
+    });
+    $('cleanup-now').addEventListener('click', async () => {
+        $('cleanup-now').disabled = true;
+        const data = await api('/api/storage/cleanup', {method: 'POST', body: {}});
+        $('cleanup-now').disabled = false;
+        if (!data) return;
+        $('cleanup-result').textContent = data.deleted_files
+            ? `Deleted ${data.deleted_files} picture${data.deleted_files === 1 ? '' : 's'}, freed ${data.freed_megabytes} MB.`
+            : `Nothing older than ${data.cleanup_days} days.`;
+        showCaptureCopy(data);
+    });
+    $('compress-copies').addEventListener('click', async () => {
+        const data = await api('/api/storage/compress', {method: 'POST', body: {}});
+        if (data) showCaptureCopy(data);
+    });
     $('capture-copy-size').addEventListener('change', event =>
         saveCaptureCopy({size: event.target.value}, event.target.value === 'off' ? 'No large copies will be kept' : `Large copies will be ${event.target.value}`));
     $('keep-frames').addEventListener('change', event =>
