@@ -333,7 +333,14 @@ function fillMulti(id, entries) {
         filter.values = new Set([...filter.values].filter(value => offered.has(value)));
         if (!filter.values.size) filter.not = false;
     }
-    if (!unchanged) renderMulti(id);
+    if (!unchanged) { renderMulti(id); return; }
+    // Same choices: only the ticks may differ (Clear filters, a tick dropped above); set them on
+    // the boxes already there, so the Find box being typed in is left alone
+    const panel = $(id).querySelector('.multi-panel');
+    panel.querySelectorAll('input[type=checkbox]').forEach(box => {
+        box.checked = 'not' in box.dataset ? filter.not : filter.values.has(box.value);
+    });
+    updateMultiSummary(id);
 }
 
 function fillFilterOptions() {
