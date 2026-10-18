@@ -125,6 +125,17 @@ function bindColorChips(id, colors, changed) {
 // -- One value for a bulk action ----------------------------------------------
 
 let valueResolve = null;
+let valueSuggestions = [];   // the suggestions of the open dialog, for the list under its input
+
+function showValueSuggestions(all = false) {
+    // Our own list instead of the browser's <datalist>, whose popup was narrower than the
+    // input and cannot be styled. Narrowed by what is typed (all: every suggestion)
+    const list = $('value-suggest'), text = $('value-input').value.trim().toLowerCase();
+    const found = valueSuggestions.filter(option => all || !text || option.toLowerCase().includes(text))
+        .filter(option => option.toLowerCase() !== text || all);
+    list.innerHTML = found.map(option => `<button type="button" class="value-suggest-item">${escapeHtml(option)}</button>`).join('');
+    list.hidden = found.length === 0;
+}
 
 function valueDialog({title, label, options = [], choices = null, value = ''}) {
     // Free text with suggestions (options), or one of choices ([[value, label]]); resolves
@@ -140,10 +151,12 @@ function valueDialog({title, label, options = [], choices = null, value = ''}) {
             select.innerHTML = optionsHtml(choices);
         } else {
             input.value = value;
-            $('value-options').innerHTML = options.map(option => `<option value="${escapeHtml(option)}"></option>`).join('');
+            valueSuggestions = options;
         }
+        $('value-suggest').hidden = true;
         $('value-modal').classList.add('show');
         (choices ? select : input).focus();
+        if (!choices) showValueSuggestions(true);
     });
 }
 
@@ -200,6 +213,16 @@ function bindValueDialog() {
     $('value-ok').addEventListener('click', () =>
         closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
     $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
+    $('value-input').addEventListener('input', () => showValueSuggestions());
+    $('value-input').addEventListener('focus', () => showValueSuggestions(true));
+    // mousedown, not click: the input must not lose focus (and the list vanish) before the pick
+    $('value-suggest').addEventListener('mousedown', event => {
+        const item = event.target.closest('.value-suggest-item');
+        if (!item) return;
+        event.preventDefault();
+        $('value-input').value = item.textContent;
+        $('value-suggest').hidden = true;
+    });
 }
 
 function bindCardPreview() {
