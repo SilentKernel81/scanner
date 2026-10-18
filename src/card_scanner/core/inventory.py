@@ -52,11 +52,11 @@ def set_full_capture_size(name):
     return name
 
 
-def full_capture_usage():
-    """(number of large copies, bytes they take) - a look at the folder, for the settings page"""
+def folder_usage(folder):
+    """(number of files, bytes they take) in one folder - a look at it, for the settings page"""
     count = size = 0
     try:
-        with os.scandir(FULL_CAPTURES_DIR) as entries:
+        with os.scandir(folder) as entries:
             for entry in entries:
                 if entry.is_file():
                     count += 1
@@ -64,6 +64,17 @@ def full_capture_usage():
     except OSError:
         pass  # no folder yet: nothing kept
     return count, size
+
+
+def full_capture_usage():
+    """(number of large copies, bytes they take)"""
+    return folder_usage(FULL_CAPTURES_DIR)
+
+
+def thumbnail_usage():
+    """(number of small copies, bytes they take)"""
+    return folder_usage(CAPTURES_DIR)
+
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when

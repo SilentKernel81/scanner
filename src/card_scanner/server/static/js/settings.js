@@ -612,7 +612,26 @@ async function loadDatabaseState() {
     } catch (error) { /* the general text stays */ }
 }
 
+function formatBytes(bytes) {
+    if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
+    return `${(bytes / 1048576).toFixed(bytes >= 10485760 ? 0 : 1)} MB`;
+}
+
+function showCaptureUsage(usage) {
+    // The total, then each kind of file the cameras' captures leave on the server
+    const kinds = [
+        ['received', 'Pictures received from the cameras', 'scanned_cards, removed after a few days'],
+        ['thumbnails', 'Thumbnails of the cards in the lists', 'data/captures'],
+        ['large', 'Large copies kept with each capture', 'data/captures_full'],
+        ['frames', 'Camera frames kept for training', 'data/frames'],
+    ];
+    $('capture-usage').innerHTML = `<div class="storage-total">${formatBytes(usage.total_bytes)}</div>`
+        + kinds.map(([key, label, where]) => `<div class="storage-row" title="${escapeHtml(where)}"><span>${escapeHtml(label)}</span>`
+            + `<span>${usage[key].count.toLocaleString()} files, ${formatBytes(usage[key].bytes)}</span></div>`).join('');
+}
+
 function showCaptureCopy(info) {
+    if (info.usage) showCaptureUsage(info.usage);
     $('capture-copy-size').value = info.size;
     $('keep-frames').checked = !!info.keep_frames;
     $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `

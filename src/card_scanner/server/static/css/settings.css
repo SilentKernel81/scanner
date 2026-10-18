@@ -245,3 +245,24 @@
     flex: 1 1 220px;
     min-width: 0;
 }
+
+/* Storage: how much the capture files take (settings.js: showCaptureUsage) */
+.storage-usage {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.storage-total {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+.storage-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+}

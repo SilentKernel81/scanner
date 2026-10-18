@@ -8,7 +8,7 @@
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=54">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=3">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -239,6 +239,10 @@
                     <div class="settings-card">
                         <h3>Storage</h3>
                         <div class="input-group">
+                            <label>Capture files in use</label>
+                            <div class="storage-usage" id="capture-usage">Loading...</div>
+                        </div>
+                        <div class="input-group">
                             <label for="capture-copy-size">Capture size (all cameras)</label>
                             <select id="capture-copy-size" class="select narrow">
                                 <option value="off">Off - thumbnails only</option>
@@ -325,6 +329,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=21"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=5"></script>
 </body>
 </html>
