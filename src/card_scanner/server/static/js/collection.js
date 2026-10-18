@@ -1401,7 +1401,11 @@ function bindInventoryEvents() {
         if (event.target.closest('.btn-edit')) return editCard(card, knownLocations(), () => shown);
         // No question first: it can be undone
         if (event.target.closest('.btn-delete')) return changeLater([card.id], `Deleting ${card.name}`, {ids: [card.id], action: 'delete', value: ''});
-        if (event.target.closest('.inventory-thumb') && card.captures.length) return openCaptures(card);
+        if (event.target.closest('.inventory-thumb') && card.captures.length) {
+            // One capture: straight to it, large; several: the window of them, a click on one opens it large
+            if (card.captures.length === 1) return openCaptureViewer(card.captures[0].url, `${card.name} - ${card.captures[0].captured_at}`);
+            return openCaptures(card);
+        }
         if (event.target.classList.contains('row-check')) return pick(card.id, event.target.checked, event.shiftKey);
         // Grid: a click on the card selects it, a double click edits it
         if (row.classList.contains('grid-card')) pick(card.id, !selected.has(card.id), event.shiftKey);
@@ -1452,6 +1456,7 @@ function bindInventoryEvents() {
 const OVERLAYS = [
     ['dialog-modal', () => closeDialog(null)],
     ['value-modal', () => closeValueDialog(null)],
+    ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['edit-card-modal', closeEditCard],
 ];

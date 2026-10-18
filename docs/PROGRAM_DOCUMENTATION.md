@@ -1324,7 +1324,7 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
 `scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
 name, at most 1200 px tall (~100-150 KB; the person's choice, below), is kept in `data/captures_full/` for training data later:
-the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
+since 2026-10-18 the capture viewer loads it (`/captures/<name>?size=full`, which answers the thumbnail when the capture has no large copy): a click on the one capture of an entry, or on a picture in the window of several; it goes with the thumbnail when the capture is deleted, it is in
 `scripts/backup.sh`'s archive and, since 2026-10-15, in the app's backups as well - the folder
 `captures_full/` beside `captures/`, as hard links, in the zip of a backup, and brought back by a
 restore and by an uploaded zip, so a standalone program that restores a server's backup has the

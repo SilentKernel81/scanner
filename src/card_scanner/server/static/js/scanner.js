@@ -1448,6 +1448,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Topmost first: Escape closes the first one open, a click on a backdrop closes that one
 const OVERLAYS = [
+    ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['dialog-modal', () => closeDialog(null)],
     ['edit-card-modal', closeEditCard],
