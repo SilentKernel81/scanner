@@ -16,7 +16,7 @@ from card_scanner import games
 
 from card_scanner.server.state import app, app_settings, identification, inventory, maintenance_barrier, services, socketio, stations
 from card_scanner.server.logs import logger
-from card_scanner.server.lock import guarded_event
+from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
 from card_scanner.server.captures import scan_location, set_pending_capture
 from card_scanner.server.card_data import start_card_data_update
@@ -195,6 +195,7 @@ def run_compress(height):
 
 
 @app.route('/api/storage/cleanup', methods=['POST'])
+@guarded
 def storage_cleanup():
     """Delete the received pictures older than the chosen days right now (the Storage card's button)"""
     try:
@@ -207,6 +208,7 @@ def storage_cleanup():
 
 
 @app.route('/api/storage/compress', methods=['POST'])
+@guarded
 def storage_compress():
     """
     Make the large copies already kept as small as the "Capture size" choice says (a thread;
@@ -270,6 +272,10 @@ def set_capture_copy():
         app_settings.set('keep_frames', bool(data['keep_frames']))
         logger.info(f"Camera frames of cleared or added scanned cards: {'kept' if data['keep_frames'] else 'removed with them'}")
     if 'cleanup_days' in data:
+        # How long pictures are kept decides what the (locked) cleanup deletes: locked as well,
+        # whereas the rest of this route (capture size, keeping frames) stays open
+        if not unlocked():
+            return jsonify({'success': False, 'error': LOCKED_MESSAGE, 'locked': True}), 401
         days = data['cleanup_days']
         if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 3650:
             message = 'cleanup_days is a whole number of days, 1 to 3650'
