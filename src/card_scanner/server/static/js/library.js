@@ -212,7 +212,28 @@ function bindValueDialog() {
     // OK and Enter answer the dialog that asks for one value (valueDialog above)
     $('value-ok').addEventListener('click', () =>
         closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
-    $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
+    $('value-input').addEventListener('keydown', event => {
+        const list = $('value-suggest'), items = [...list.querySelectorAll('.value-suggest-item')];
+        const current = items.findIndex(item => item.classList.contains('active'));
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            // Up and down walk the list (down opens it); the walked-to one goes into the input
+            event.preventDefault();
+            if (list.hidden) showValueSuggestions(true);
+            const all = [...list.querySelectorAll('.value-suggest-item')];
+            if (!all.length) return;
+            const next = event.key === 'ArrowDown' ? Math.min(current + 1, all.length - 1) : Math.max(current - 1, 0);
+            all.forEach((item, index) => item.classList.toggle('active', index === next));
+            all[next].scrollIntoView({block: 'nearest'});
+            $('value-input').value = all[next].textContent;
+        } else if (event.key === 'Enter') {
+            // With the list open, Enter takes the highlighted one first; a second Enter confirms
+            if (!list.hidden && current >= 0) { list.hidden = true; return; }
+            $('value-ok').click();
+        } else if (event.key === 'Escape' && !list.hidden) {
+            list.hidden = true;
+            event.stopPropagation();
+        }
+    });
     $('value-input').addEventListener('input', () => showValueSuggestions());
     $('value-input').addEventListener('focus', () => showValueSuggestions(true));
     // mousedown, not click: the input must not lose focus (and the list vanish) before the pick

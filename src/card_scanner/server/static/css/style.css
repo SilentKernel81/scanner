@@ -688,14 +688,23 @@ a {
     gap: 6px;
 }
 
-/* The suggestions under the one-value dialog's input (library.js: showValueSuggestions): in the
-   flow of the dialog (its body scrolls, a floating list would be cut off), as wide as the input */
+/* The dropdown under the one-value dialog's input (library.js: showValueSuggestions): floats over
+   the dialog, exactly as wide as the input. The dialog's body would cut it off, so it does not scroll here */
+#value-modal .modal-body { overflow: visible; }
+#value-modal .input-group { position: relative; }
 .value-suggest {
-    max-height: 180px;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    max-height: 220px;
     overflow-y: auto;
+    margin-top: 2px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: var(--surface);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 .value-suggest[hidden] { display: none; }
 .value-suggest-item {
@@ -709,7 +718,8 @@ a {
     text-align: left;
     cursor: pointer;
 }
-.value-suggest-item:hover { background: var(--accent-soft); }
+.value-suggest-item:hover,
+.value-suggest-item.active { background: var(--accent-soft); }
 
 /* Settings: a station (a camera elsewhere) - name and location, then its count and actions */
 .station {
