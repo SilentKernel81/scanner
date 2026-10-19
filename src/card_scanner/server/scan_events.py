@@ -258,7 +258,8 @@ def handle_review_open(data=None):
 def handle_review_skip(data=None):
     """Drop the open review item without adding anything"""
     if desk().current_review_id is not None:
-        review.remove(desk().current_review_id)
+        with maintenance_barrier:  # not in the middle of a card being sent back to review (inventory_api.py)
+            review.remove(desk().current_review_id)
     desk().current_review_id = desk().current_card_info = desk().review_sid = None
     set_pending_capture(None)
     emit_desk('review_queue_update', {'count': review.count(games.active_id(), desk().review_filter)})

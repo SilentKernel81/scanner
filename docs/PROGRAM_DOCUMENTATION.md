@@ -289,6 +289,33 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
 - **A reviewed capture stays its station's card**, whichever page works through the review:
   the page without a station lists every station's items, and a card added there is counted
   as the capture's station's (`source`), not as nobody's - or its phone could never follow it.
+- **Send to review** (the back-arrow button on an entry of the scanned cards and of the collection;
+  `POST /api/inventory/<id>/to_review`, `?area=`): one copy - the one behind the entry's newest
+  capture - goes back to the review queue when the card or printing it was added as is wrong. The
+  item holds a copy of the capture's large picture (the thumbnail when none) with the entry's
+  printing as the suggestion (`match` "sent back": never confirmed), under the capture's station
+  (nobody's when the registry no longer knows it). The review item is written first, then the
+  copy leaves (`release_for_review`: photo row, station count, quantity - as a station's
+  removal does); if that fails (an open trade holds the copies) the item is taken back, so a
+  failure leaves nothing queued and nothing lost. The item carries **no `capture_key`**: the
+  capture's uid is used up in `applied_captures` (review and scanned cards would refuse it as
+  "applied before"), so the key is noted in `unfollowed_captures` and a phone asking about it is
+  told "cannot be followed", never "gone". An entry with no capture (typed in, imported) has
+  nothing to review by and is refused. What is added from the review always goes into the
+  **scanned cards**: a collection card sent back comes through "Add to collection" again and
+  loses its location, tags and condition. Not offered for the digital (Arena) collection.
+  The page names the copy it showed (`capture`, its picture); only that one is sent, so a request
+  repeated after its answer was lost gets 409 "not here any more" instead of taking another copy.
+  Clearing a camera, skipping a review item and "Add to collection" take `maintenance_barrier` too,
+  so none can run between the item being queued and the copy leaving. **A stop in between is
+  settled at the next start** (two files, two commits): the item is written with `transfer`
+  ("scan:" or "collection:" and the copy's picture file) and stays out of the queue (`review._of`)
+  until the copy has left and the route confirms it (`confirm_transfer`). `finish_interrupted_sends`
+  (inventory_api.py, called by `startup`) looks at each pending item: its picture still in that
+  inventory (`has_picture`) means the copy never left - the item is dropped; gone means it left -
+  the item is confirmed. So the card ends in exactly one place.
+  Tested (storage and route): `tests/test_send_to_review.py`, `tests/test_capture_sync.py`;
+  the browser buttons were not tried in a browser.
 - **The collection is out of reach.** `take_from` copies the photos without the key and deletes
   the rows in the scanned cards: afterwards there is no row to find, in either file. A `DELETE`
   then answers `resolved` and changes nothing.

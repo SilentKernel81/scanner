@@ -658,6 +658,7 @@ function listRowHtml(card) {
                 ${picture && !digital ? `<span class="card-peek" data-image="${escapeHtml(picture)}" title="The card's picture - rest the pointer here to see it large">
                                  <img src="${escapeHtml(picture.replace('/normal/', '/small/'))}" alt="" loading="lazy"></span>` : ''}
                 <button class="btn-trade" title="Set aside for a trade: it stays in your collection until you confirm the trade"><svg class="icon"><use href="#i-swap"/></svg></button>
+                ${card.captures.length && !digital ? `<button class="btn-review" title="Wrong card or printing? Send one copy back to the review queue to search for the right one (it then goes to the scanned cards)"><svg class="icon"><use href="#i-back"/></svg></button>` : ''}
                 <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
                 <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
             </div>
@@ -1398,6 +1399,7 @@ function bindInventoryEvents() {
         if (!card) return;
         if (event.target.closest('.btn-trade')) return setAsideForTrade(card);
         if (inArena()) return;   // Arena view: a row has nothing to click (its buttons are hidden, too)
+        if (event.target.closest('.btn-review')) return sendToReview(card.id, card.name, card.captures[0].url);
         if (event.target.closest('.btn-edit')) return editCard(card, knownLocations(), () => shown);
         // No question first: it can be undone
         if (event.target.closest('.btn-delete')) return changeLater([card.id], `Deleting ${card.name}`, {ids: [card.id], action: 'delete', value: ''});
