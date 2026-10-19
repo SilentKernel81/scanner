@@ -1884,7 +1884,8 @@ input[type="radio"] {
 }
 
 .btn-edit,
-.btn-delete {
+.btn-delete,
+.btn-review {
     display: grid;
     place-items: center;
     width: 32px;
@@ -1898,12 +1899,14 @@ input[type="radio"] {
 }
 
 .btn-edit .icon,
-.btn-delete .icon {
+.btn-delete .icon,
+.btn-review .icon {
     width: 15px;
     height: 15px;
 }
 
-.btn-edit:hover {
+.btn-edit:hover,
+.btn-review:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
     color: var(--accent);
