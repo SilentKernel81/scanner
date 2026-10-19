@@ -1269,7 +1269,7 @@ function inventoryRowHtml(card, index) {
             <div class="inventory-card-actions">
                 ${card.shared ? '<span class="hint" title="Another camera scanned copies into the same entry. Choose All cameras to edit or delete it.">shared</span>' : `
                 ${card.captures && card.captures.length ? `<button class="btn-review" data-id="${card.id}" title="Wrong card or printing? Send one copy back to the review queue to search for the right one">
-                    <svg class="icon"><use href="#i-back"/></svg>
+                    <svg class="icon"><use href="#i-refresh"/></svg>
                 </button>` : ''}
                 <button class="btn-edit" data-id="${card.id}" title="Edit">
                     <svg class="icon"><use href="#i-edit"/></svg>
