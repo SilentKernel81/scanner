@@ -679,10 +679,9 @@ function deleteReviewItem() {
 }
 
 function zoomReviewCapture() {
-    $('capture-title').textContent = 'Capture';
-    $('capture-grid').innerHTML =
-        `<figure><img src="${escapeHtml(reviewItem.image_url)}" alt="Capture"><figcaption>${escapeHtml(reviewItem.captured_at)}</figcaption></figure>`;
-    $('capture-modal').classList.add('show');
+    // The same large viewer as the other pages' captures (common.js: openCaptureViewer); the
+    // item's picture is the capture's large copy when it had one (the route ignores ?size=full)
+    openCaptureViewer(reviewItem.image_url, `Capture - ${reviewItem.captured_at}`);
 }
 
 function hideReviewPanel() {
