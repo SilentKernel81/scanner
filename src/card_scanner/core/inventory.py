@@ -1107,8 +1107,37 @@ class InventoryManager(storage.Transactional):
         return {'row': dict(row), 'entry': dict(entry), 'file': file, 'station': row['station'],
                 'capture_key': row['capture_key']}
 
-    @_writes
     def release_for_review(self, candidate):
+        """The copy of review_candidate leaves the entry (_release_for_review), the commit being
+        synchronous=FULL: the pictures are deleted right after it, and a power cut that took the
+        commit back would leave the row without them (the databases are NORMAL otherwise,
+        storage.connect). The pragma does nothing inside a transaction, hence set out here."""
+        with self._lock:
+            self.conn.execute('PRAGMA synchronous = FULL')
+            try:
+                self._release_for_review(candidate)
+            finally:
+                self.conn.execute('PRAGMA synchronous = NORMAL')
+
+    def release_by_picture(self, file):
+        """Finish a release that was cut short: the copy whose photo row names this picture
+        leaves (its picture is gone already). False when no such copy is here."""
+        with self._lock:
+            row = self.conn.execute(
+                '''SELECT c.id, c.inventory_id, c.file, c.station, c.capture_key, i.quantity, i.card_name
+                   FROM inventory_captures c JOIN inventory i ON i.id = c.inventory_id WHERE c.file = ?''',
+                (file,)).fetchone()
+            if row is None:
+                return False
+            self.release_for_review({'row': dict(row), 'entry': {'card_name': row['card_name']}})
+            return True
+
+    def picture_exists(self, file):
+        """Is the picture file of a copy on the disk (the small one or the large one)?"""
+        return (CAPTURES_DIR / file).exists() or (FULL_CAPTURES_DIR / file).exists()
+
+    @_writes
+    def _release_for_review(self, candidate):
         """
         The copy of review_candidate leaves the entry because it was queued for review: one
         copy, its photo row and its station's count (as when its station removes it). Raises

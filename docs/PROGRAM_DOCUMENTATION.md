@@ -313,7 +313,13 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
   until the copy has left and the route confirms it (`confirm_transfer`). `finish_interrupted_sends`
   (inventory_api.py, called by `startup`) looks at each pending item: its picture still in that
   inventory (`has_picture`) means the copy never left - the item is dropped; gone means it left -
-  the item is confirmed. So the card ends in exactly one place.
+  the item is confirmed. So the card ends in exactly one place. The pending item is made durable
+  before the copy may leave (a power cut, not only a program stop): its picture is fsynced with its
+  folder and its commit alone is `synchronous=FULL` (the databases are NORMAL otherwise) - not
+  tried with an actual power cut. The inventory's release commits `FULL` too, before its pictures
+  are deleted; and if a power cut still took that commit back (the row is there, its picture is
+  gone), the next start finishes the release (`release_by_picture`) and keeps the item - it holds
+  the only picture left.
   Tested (storage and route): `tests/test_send_to_review.py`, `tests/test_capture_sync.py`;
   the browser buttons were not tried in a browser.
 - **The collection is out of reach.** `take_from` copies the photos without the key and deletes

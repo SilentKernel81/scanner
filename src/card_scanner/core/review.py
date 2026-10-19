@@ -8,6 +8,7 @@ camera's page shows its own - with a copy of the capture in data/review/ (scanne
 cleaned after cleanup.days) until resolved.
 """
 import logging
+import os
 import shutil
 import threading
 import uuid
@@ -82,13 +83,28 @@ class ReviewQueue:
         file = None
         if image_path:
             try:
+                # The folders this makes (the first review item of a machine): their names in their
+                # parents must reach the disk too, or a power cut can lose the whole folder
+                missing = [folder for folder in (REVIEW_DIR, *REVIEW_DIR.parents) if not folder.exists()]
                 REVIEW_DIR.mkdir(parents=True, exist_ok=True)
                 file = f"{uuid.uuid4().hex}.jpg"
                 shutil.copyfile(image_path, REVIEW_DIR / file)
+                if transfer:
+                    # The original goes once the item is committed: its copy must be on the disk
+                    # by then, not in the system's cache (a power cut would lose both)
+                    self._flush(REVIEW_DIR / file)
+                    for folder in missing:
+                        self._flush_folder(folder.parent)
             except OSError as e:
                 logger.warning(f"Could not keep the capture for review: {e}")
                 file = None
         with self._lock:
+            if transfer:
+                # The commits are normally synchronous=NORMAL (storage.connect): a power cut may
+                # lose the latest ones. The record of a transfer must survive it - the inventory's
+                # copy is removed right after - so this commit alone is FULL (set between
+                # transactions: the pragma does nothing inside one)
+                self.conn.execute('PRAGMA synchronous = FULL')
             item_id = self.conn.execute(
                 'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
                 'station, capture_key, transfer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -99,7 +115,28 @@ class ReviewQueue:
                 self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                   (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             self.conn.commit()
+            if transfer:
+                self.conn.execute('PRAGMA synchronous = NORMAL')
         return item_id
+
+    @staticmethod
+    def _flush(path):
+        """Make a file written just now (and its name in the folder) reach the disk"""
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        ReviewQueue._flush_folder(path.parent)
+
+    @staticmethod
+    def _flush_folder(folder):
+        """Make the names in a folder (a file or folder just made in it) reach the disk"""
+        descriptor = os.open(folder, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     @staticmethod
     def _of(game, station):
