@@ -783,6 +783,51 @@ class SyncRoute(TemporaryData):
         self.assertEqual(send().status_code, 409)                          # the first answer was lost: a retry
         self.assertEqual((self.review.count(GAME), self.total()), (1, 1))  # one copy went, one stays
 
+    def test_send_to_review_the_item_is_made_durable_before_the_copy_may_leave(self):
+        flushed = []
+        review_store.REVIEW_DIR.mkdir(exist_ok=True)                           # not the first item: no new folder
+        with mock.patch('card_scanner.core.review.os.fsync', side_effect=flushed.append):
+            item = self.review.add(GAME, self.photo, 'Test Card', transfer='scan:x.jpg')
+            self.review.add(GAME, self.photo, 'Other Card')                   # a plain capture: no cost
+        self.assertEqual(len(flushed), 2)                                     # the picture and its folder, once
+        self.assertEqual(self.review.conn.execute('PRAGMA synchronous').fetchone()[0], 1)  # NORMAL again
+        self.assertIsNotNone(self.review.get(item))
+
+    def test_send_to_review_a_folder_made_for_the_first_item_is_flushed_in_its_parent(self):
+        import os
+        review_store.REVIEW_DIR = self.tmp / 'new-parent' / 'review'     # neither folder exists yet
+        opened = []
+        real_open = os.open
+        with mock.patch('card_scanner.core.review.os.open', side_effect=lambda path, *a: opened.append(Path(path)) or real_open(path, *a)):
+            self.review.add(GAME, self.photo, 'Test Card', transfer='scan:x.jpg')
+        # the picture, its folder, the folder's parent (new too) and that one's parent (existing)
+        self.assertIn(self.tmp / 'new-parent', opened)
+        self.assertIn(self.tmp, opened)
+
+    def test_send_to_review_the_release_commits_synchronous_full_and_returns_to_normal(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        seen = []
+        real_committed = type(self.scan)._committed
+        type(self.scan)._committed = lambda manager: (seen.append(manager.conn.execute('PRAGMA synchronous').fetchone()[0]),
+                                                      real_committed(manager))
+        try:
+            self.scan.release_for_review(self.scan.review_candidate(row_id))
+        finally:
+            type(self.scan)._committed = real_committed
+        self.assertEqual(seen, [2])                                           # FULL while the pictures go
+        self.assertEqual(self.scan.conn.execute('PRAGMA synchronous').fetchone()[0], 1)
+
+    def test_send_to_review_a_restored_row_without_its_picture_finishes_the_release_at_start(self):
+        from card_scanner.server.inventory_api import finish_interrupted_sends
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        candidate = self.scan.review_candidate(row_id)
+        self.review.add(GAME, candidate['file'], 'Test Card', transfer=f"scan:{candidate['row']['file']}")
+        # A power cut: the pictures were deleted, but the commit that removed the row was taken back
+        for folder in (inv.CAPTURES_DIR, inv.FULL_CAPTURES_DIR):
+            (folder / candidate['row']['file']).unlink(missing_ok=True)
+        self.assertEqual(finish_interrupted_sends(), (0, 1))
+        self.assertEqual((self.review.count(GAME), self.total()), (1, 0))      # the card in one place: the review
+
     def test_send_to_review_the_digital_collection_is_refused(self):
         self.assertEqual(self.send('arena', 1).status_code, 400)
 

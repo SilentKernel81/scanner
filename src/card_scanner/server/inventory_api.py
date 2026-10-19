@@ -226,10 +226,17 @@ def finish_interrupted_sends():
         source = inventories.get(area_name)
         if source is None or not file:
             continue  # not understood: left alone rather than guessed at
-        if source.has_picture(file):
+        if not source.has_picture(file):
+            review.confirm_transfer(item_id)
+            confirmed += 1
+        elif source.picture_exists(file):
             review.remove(item_id)
             dropped += 1
         else:
+            # The row is there but its picture is gone: the release did commit and delete the
+            # pictures, and a power cut took the commit back. The item holds the only picture
+            # left - the release is finished here, not the item dropped
+            source.release_by_picture(file)
             review.confirm_transfer(item_id)
             confirmed += 1
     if dropped or confirmed:
