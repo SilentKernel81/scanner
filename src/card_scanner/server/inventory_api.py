@@ -15,7 +15,8 @@ from card_scanner.core.database import search_key
 from card_scanner import games
 
 from card_scanner.server.state import (
-    app, app_settings, arena_inventory, deck_store, inventory, review, scan_inventory, socketio, stations, trade_store,
+    app, app_settings, arena_inventory, deck_store, inventory, maintenance_barrier, review, scan_inventory, socketio,
+    stations, trade_store,
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client
@@ -35,7 +36,7 @@ def inventory_area():
 # say something Arena does not, until the next import silently took it back. So these
 # routes refuse it - listing and exporting it is all that is offered.
 CHANGES_AN_INVENTORY = {'delete_inventory_card', 'update_inventory_card', 'bulk_update_inventory',
-                        'remove_inventory_batch', 'import_inventory', 'clear_inventory'}
+                        'remove_inventory_batch', 'import_inventory', 'clear_inventory', 'send_inventory_card_to_review'}
 
 
 @app.before_request
@@ -63,7 +64,10 @@ def scan_to_collection():
                         'decks': [deck['name'] for deck in deck_store.list_decks(game.id)] if game.deck_formats else []})
     location = str((request.get_json(silent=True) or {}).get('location') or '').strip()[:60]
     keys = scan_inventory.capture_keys(game.id, camera)
-    moved = inventory.take_from(scan_inventory, game.id, location=location, station=camera)
+    # Not while a card is being sent back to review (send_inventory_card_to_review): the copy it
+    # is about to release could be moved from under it, and be in the collection and the queue
+    with maintenance_barrier:
+        moved = inventory.take_from(scan_inventory, game.id, location=location, station=camera)
     release_frames(game, keys)
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(game.id)}, namespace='/')
     return jsonify({'success': True, **moved, 'stats': scan_inventory.get_stats(game.id)})
@@ -128,6 +132,110 @@ def delete_inventory_card(row_id):
             return jsonify({'success': False, 'error': 'Failed to delete card'}), 400
 
     return jsonify({'error': 'Inventory not initialized'}), 500
+
+
+@app.route('/api/inventory/<int:row_id>/to_review', methods=['POST'])
+def send_inventory_card_to_review(row_id):
+    """
+    Send one copy of an entry back to the review queue (the entry's card is not the right
+    printing, or not the right card): the picture of its newest capture waits there with the
+    entry's printing as the suggestion, and the reviewer finds the right one - and adds it to the
+    scanned cards, from where it goes to the collection again. Works on the scanned cards and on
+    the collection (?area=). The copy leaves the entry, so it is counted once.
+    """
+    area = inventory_area()
+    game = games.active()
+    # One at a time with a station removing a capture and with the review's own Add: the item
+    # queued here must not be found gone, nor the copy removed twice
+    with maintenance_barrier:
+        # The copy the page showed (its picture file): a repeated request - the first one's answer
+        # was lost - must not take another copy
+        shown = str((request.get_json(silent=True) or {}).get('capture') or '').rsplit('/', 1)[-1] or None
+        candidate = area.review_candidate(row_id, shown)
+        if candidate is None and shown and area.review_candidate(row_id) is not None:
+            return jsonify({'success': False, 'error': 'That copy is not here any more (already sent back, '
+                            'moved or removed) - the list is reloaded'}), 409
+        if candidate is None:
+            return jsonify({'success': False, 'error': 'This card has no capture to review it by (only cards '
+                            'that were scanned have one)'}), 400
+        entry = candidate['entry']
+        if entry['game'] != game.id:
+            # A page left open while the game was switched: its row is another game's, and
+            # queued under this one it could only be re-added to the wrong game
+            return jsonify({'success': False, 'error': 'This card belongs to another game than the one '
+                            'being scanned - switch to its game first (or reload the page)'}), 409
+        card = game.get_card(entry['card_id']) if entry.get('card_id') else None
+        if card:
+            card['match'] = 'sent back'  # not one of the game's confirmed matches: a person decides
+        station = candidate['station'] if candidate['station'] and stations.get(candidate['station']) else None
+        foil = 'foil' if entry['finish'] in ('foil', 'surge') else 'non-foil'
+        # The review item first, then the copy leaves: a failure in between leaves a duplicate
+        # (the item is taken back below), never a card that is nowhere. No capture_key - the
+        # capture's uid is used up in applied_captures and would make the review refuse the item
+        # (and the scanned cards refuse the corrected card later); release_for_review notes it
+        # transfer: the item stays out of the queue until the copy has left (confirmed below) and,
+        # when the program stops in between, the next start settles it (finish_interrupted_sends)
+        area_name = 'scan' if area is scan_inventory else 'collection'
+        item_id = review.add(game.id, candidate['file'], entry['card_name'], entry['card_number'] or '',
+                             entry['set_code'] or '', foil, card, station=station,
+                             transfer=f"{area_name}:{candidate['row']['file']}")
+        # The item must hold its own copy of the picture: review.add keeps an item without one
+        # when the copy fails (full disk), and the original goes with the entry's copy
+        kept = review.get(item_id) if item_id is not None else None
+        if not kept or not review.image_path(kept) or not review.image_path(kept).exists():
+            if item_id is not None:
+                review.remove(item_id)
+            return jsonify({'success': False, 'error': 'Not sent: the capture could not be copied to the '
+                            'review queue (disk full?). The card stays where it is'}), 500
+        try:
+            area.release_for_review(candidate)
+        except Exception as e:
+            # Nothing left the inventory (release_for_review commits last and raises nothing
+            # after it): the card was changed, moved to the collection or deleted meanwhile, or
+            # an open trade holds it. The item is taken back, whatever the reason
+            review.remove(item_id)
+            logger.warning(f"Could not send {entry['card_name']} to review: {e}")
+            # (an open trade holding the copies says so itself: inventory.TRADE_HELD)
+            return jsonify({'success': False, 'error': f'Not sent: {e}'}), 409
+        # The copy has left: the item joins the queue. Failing here leaves it pending - the next
+        # start sees the copy gone and confirms it - never a card that is in neither place
+        try:
+            review.confirm_transfer(item_id)
+        except Exception:
+            logger.exception(f"{entry['card_name']} left the inventory but its review item could not be "
+                             "confirmed - it appears in the queue after the next start")
+    # (the inventory logged "Sent back to review" itself, to the pages)
+    with in_desk(desk_for(station) or desk()):
+        emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter), 'queued': True})
+    return jsonify({'success': True, 'message': f"{entry['card_name']} is waiting in the review queue",
+                    'review_id': item_id})
+
+
+def finish_interrupted_sends():
+    """
+    At start: settle the cards that were being sent back to review when the program stopped
+    (send_inventory_card_to_review writes the review item, then removes the copy, then confirms
+    the item). An item whose copy is still in its inventory never saw the copy leave: it is
+    dropped, the card is where it was. One whose copy is gone is confirmed - it is all that is
+    left of the card. Returns (dropped, confirmed).
+    """
+    inventories = {'scan': scan_inventory, 'collection': inventory}
+    dropped = confirmed = 0
+    for item_id, transfer in review.pending_transfers():
+        area_name, _, file = transfer.partition(':')
+        source = inventories.get(area_name)
+        if source is None or not file:
+            continue  # not understood: left alone rather than guessed at
+        if source.has_picture(file):
+            review.remove(item_id)
+            dropped += 1
+        else:
+            review.confirm_transfer(item_id)
+            confirmed += 1
+    if dropped or confirmed:
+        logger.warning(f"Cards being sent back to review when the program stopped: {confirmed} confirmed, "
+                       f"{dropped} left where they were")
+    return dropped, confirmed
 
 
 def same_printing(entry, card):
@@ -390,7 +498,10 @@ def clear_camera(game, camera):
     if not result['success']:
         return result, 0
     release_frames(game, keys)
-    reviews = review.clear(game.id, camera)
+    # Not while a card is being sent back to review (send_inventory_card_to_review): the item
+    # queued there would be deleted before the copy has left the inventory, and the card be nowhere
+    with maintenance_barrier:
+        reviews = review.clear(game.id, camera)
     with in_desk(desk_for(camera)):
         if desk().current_review_id is not None:  # its page had one open
             desk().current_review_id = desk().review_sid = desk().current_card_info = None

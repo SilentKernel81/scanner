@@ -248,6 +248,13 @@
    "inventory_entry_printings"
   ],
   [
+   "/api/inventory/<int:row_id>/to_review",
+   [
+    "POST"
+   ],
+   "send_inventory_card_to_review"
+  ],
+  [
    "/api/inventory/bulk",
    [
     "POST"

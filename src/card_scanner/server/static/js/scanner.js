@@ -1268,6 +1268,9 @@ function inventoryRowHtml(card, index) {
             </div>
             <div class="inventory-card-actions">
                 ${card.shared ? '<span class="hint" title="Another camera scanned copies into the same entry. Choose All cameras to edit or delete it.">shared</span>' : `
+                ${card.captures && card.captures.length ? `<button class="btn-review" data-id="${card.id}" title="Wrong card or printing? Send one copy back to the review queue to search for the right one">
+                    <svg class="icon"><use href="#i-back"/></svg>
+                </button>` : ''}
                 <button class="btn-edit" data-id="${card.id}" title="Edit">
                     <svg class="icon"><use href="#i-edit"/></svg>
                 </button>
@@ -1344,11 +1347,13 @@ function setupInventoryList() {
     const list = $('inventory-list');
 
     list.addEventListener('click', function(event) {
-        const button = event.target.closest('.btn-edit, .btn-delete, button.inventory-thumb');
+        const button = event.target.closest('.btn-edit, .btn-delete, .btn-review, button.inventory-thumb');
         const card = inventoryEntry(button);
         if (!card) return;
         if (button.classList.contains('inventory-thumb')) {
             openCaptures(card);
+        } else if (button.classList.contains('btn-review')) {
+            sendToReview(card.id, card.name, card.captures[0].url);
         } else if (button.classList.contains('btn-delete')) {
             deleteCard(card.id, card.name);
         } else {

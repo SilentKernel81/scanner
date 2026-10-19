@@ -38,6 +38,7 @@ from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, 
 from card_scanner.server.captures import resume_pending
 from card_scanner.server.card_data import run_update_checks, start_card_data_update
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
+from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
 
 # Routes and Socket.IO events exist once their module has been imported. Every module that
@@ -98,6 +99,7 @@ def initialize_components():
     arena.prepare(services.arena_inventory)   # the table for the wildcards and the import's date
     services.trade_store = Trades(services.inventory)
     services.review = ReviewQueue()
+    finish_interrupted_sends()  # cards being sent back to review when the program stopped
     services.pending = PendingCaptures()
     services.deck_store = DeckManager()
     services.recommend = Recommendations()
