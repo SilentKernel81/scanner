@@ -81,6 +81,18 @@ def trade_card(trade_id, row_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/trades/<int:trade_id>/receives/<int:row_id>', methods=['PUT'])
+def trade_receive(trade_id, row_id):
+    """How many copies of one card an open trade receives (JSON: quantity; 0 takes it out). The
+    cards are someone else's (server/others_api.py): nothing of the collection changes."""
+    try:
+        quantity = int((request.get_json(silent=True) or {}).get('quantity'))
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'quantity must be a number'}), 400
+    trade_store.set_receive_quantity(trade_id, row_id, quantity)
+    return jsonify({'success': True})
+
+
 @app.route('/api/trades/<int:trade_id>/confirm', methods=['POST'])
 def trade_confirm(trade_id):
     """The trade happened: its cards leave the collection, the trade stays as a record"""
@@ -91,7 +103,8 @@ def trade_confirm(trade_id):
 
 @app.route('/api/trades/<int:trade_id>/export/<fmt>')
 def trade_export(trade_id, fmt):
-    """Download a trade's cards (open or confirmed) in one of the game's export formats"""
+    """Download a trade's cards (open or confirmed) in one of the game's export formats;
+    ?side=receive: the cards it receives instead of the ones it gives"""
     game = games.active()
     formats = game.export_formats()
     trade = next((trade for trade in trade_store.list(game.id) if trade['id'] == trade_id), None)
@@ -99,7 +112,7 @@ def trade_export(trade_id, fmt):
         return jsonify({'error': 'Unknown trade or export format'}), 404
     _label, _prefix, writer = formats[fmt]
     text = io.StringIO(newline='')
-    writer(trade['cards'], text)
+    writer(trade['receives'] if request.args.get('side') == 'receive' else trade['cards'], text)
     name = re.sub(r'[^A-Za-z0-9_-]+', '_', trade['name']).strip('_') or 'trade'
     return Response(text.getvalue(), mimetype='text/csv',
-                    headers={'Content-Disposition': f'attachment; filename="trade_{name}_{fmt}.csv"'})
+                    headers={'Content-Disposition': f'attachment; filename="trade_{name}{"_receive" if request.args.get("side") == "receive" else ""}_{fmt}.csv"'})

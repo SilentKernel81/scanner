@@ -37,8 +37,12 @@ BACKUP_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 # inventory_batches: which copies came together (an "Add to collection", an import); a backup
 # made before it gets the one batch each entry itself knows of when it is restored
 # trades / trade_cards: the cards set aside for a trade name their entries (used in the
-# collection; the scanned cards' file has the tables too, empty)
-INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_batches', 'inventory_sources', 'trades', 'trade_cards')
+# collection; the scanned cards' file has the tables too, empty); trade_receives: what a trade
+# receives, someone else's cards kept as they were (they belong to the trade, so they go with it).
+# The imported collections themselves (core/others.py, data/others.db) and the buy list are not
+# part of these backups: they are not the person's cards
+INVENTORY_TABLES = ('inventory', 'inventory_captures', 'inventory_batches', 'inventory_sources', 'trades', 'trade_cards',
+                    'trade_receives')
 DECK_TABLES = ('decks', 'deck_cards')
 # The digital collection (MTG Arena; core/arena.py): its cards and what is known of the
 # account. It has no captures, stations or trades. It could be imported again - but only
@@ -60,6 +64,7 @@ RESTORABLE = {
     'trades': '1',
     'trade_cards': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades) AND (inventory_id IS NULL '
                    'OR inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0))',
+    'trade_receives': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades)',
     'arena_account': '1',
     'decks': '1',
     'deck_cards': "quantity > 0 AND board IN ('commander', 'main', 'side') AND deck_id IN (SELECT id FROM decks)",

@@ -101,6 +101,28 @@
    "upload_backup"
   ],
   [
+   "/api/buy_list",
+   [
+    "DELETE",
+    "GET"
+   ],
+   "buy_list"
+  ],
+  [
+   "/api/buy_list/<int:row_id>",
+   [
+    "PUT"
+   ],
+   "buy_list_card"
+  ],
+  [
+   "/api/buy_list/export/<fmt>",
+   [
+    "GET"
+   ],
+   "buy_list_export"
+  ],
+  [
    "/api/capture_copy",
    [
     "GET",
@@ -313,6 +335,48 @@
    "set_network_access"
   ],
   [
+   "/api/others",
+   [
+    "GET"
+   ],
+   "other_collections"
+  ],
+  [
+   "/api/others/<int:collection_id>",
+   [
+    "DELETE"
+   ],
+   "delete_other_collection"
+  ],
+  [
+   "/api/others/<int:collection_id>/buy",
+   [
+    "POST"
+   ],
+   "buy_from_other_collection"
+  ],
+  [
+   "/api/others/<int:collection_id>/cards",
+   [
+    "GET"
+   ],
+   "other_collection_cards"
+  ],
+  [
+   "/api/others/<int:collection_id>/receive",
+   [
+    "POST"
+   ],
+   "receive_from_other_collection"
+  ],
+  [
+   "/api/others/import",
+   [
+    "POST"
+   ],
+   "import_other_collection"
+  ],
+  [
    "/api/precons",
    [
     "GET"
@@ -519,6 +583,13 @@
     "GET"
    ],
    "trade_export"
+  ],
+  [
+   "/api/trades/<int:trade_id>/receives/<int:row_id>",
+   [
+    "PUT"
+   ],
+   "trade_receive"
   ],
   [
    "/capture_images/<path:name>",

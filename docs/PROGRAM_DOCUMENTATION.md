@@ -111,6 +111,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `database.py` | server | Scryfall download and import, schema / migrations, searches, printing lookup, match confidence |
 | `games/` | server | Card games: `base.Game` (the interface the app uses), `mtg.Magic` (Scryfall data, matching, finishes, exports); `games.active()` is the game being scanned |
 | `card_search.py` | server | Magic search helpers combining name, number, set and treatment |
+| `others.py` | server | Other people's collections imported to trade with or buy from (`Others`), and the buy list - their own file `data/others.db`; see [Other people's collections](#other-peoples-collections) |
 | `trades.py` | server | Cards of the collection set aside for a trade until it is confirmed (`Trades`); the tables and the triggers that keep the copies are in `inventory.py` |
 | `inventory.py` | server | Inventory table for every game: schema + migration, add (merging duplicates), undo, edit / split, bulk edits, locations and tags, which station scanned what, move to the collection, CSV import / export |
 | `decks.py`, `games/mtg_decks.py` | server | Decks (`decks`, `deck_cards`): lists of card names; formats, deck checks, text decklists |
@@ -1793,6 +1794,58 @@ again, its cards back - and a backup from before trades restores with none.
 
 Never tested: two browsers changing one trade at the same moment (each change is one
 transaction under the collection's lock, so the second sees the first's result or is refused).
+
+### Other people's collections
+
+Added 2026-10-19 (not deployed when this was written). On the **Trades** tab, *Other people's
+collections* imports someone else's collection file under a name - to browse it, to put its cards
+in a trade as something the trade **receives**, or on a **buy list** - without touching the user's
+collection.
+
+- **Apart from everything the user owns.** `core/others.py` (`Others`) keeps them in
+  `data/others.db`: `other_collections` (a name per game, unique in any case), `other_cards`
+  (the printing, quantity, condition, finish and price of each row; rows of the same card in a
+  file are added up) and `buy_list`. An id there is **not** an id of the collection: the only
+  routes that take one are in `server/others_api.py`, which never calls an inventory, and the
+  routes that change the collection take none of them. A card leaves as a snapshot in the shape
+  the pages and exporters know (`others.card_dict`, JSON in `trade_receives` / `buy_list`), so
+  **deleting an import changes no trade and no buy list**.
+- **Formats** (`others_api.read_collection_file`): the app's own export (`inventory.read_collection_csv`
+  - the loop `import_csv` reads with, now shared, nothing written), Moxfield and **ManaBox**
+  (`Magic.import_rows`; the printing by ManaBox's Scryfall id when the row has one and it is that
+  card, else by set code + number, else by name). The ManaBox reader was written from what its
+  export is known to look like (Name, Set code, Collector number, Foil normal / foil / etched,
+  Quantity, Scryfall ID, Condition near_mint ...) and **was never tried on a real ManaBox file**;
+  it also means the user's own *Import* accepts ManaBox. Any other file is refused with the list
+  of formats. A name already in use asks to replace (its cards are swapped in one edit) - and a
+  replacement is refused, the old cards kept, when any row of the file cannot be used (cards not
+  found, rows without a name or with an unknown finish), as the inventory's own replace does.
+  Receiving refuses cards of another game than the active one (a page left open while the game
+  was switched), in the route and in `Trades.receive`.
+- **Receiving.** `Trades.receive` puts cards in the open trade with that name (made when there
+  is none - a trade can receive without giving anything). The copies add up to what the other
+  person has (`most`) and no more. A trade lists both sides and both values (`receives`,
+  `receive_quantity`, `receive_value`); `trade_receives` (collection file, `ON DELETE CASCADE`)
+  is in the backups with the trade (`backups.INVENTORY_TABLES`). **Confirming a trade adds
+  nothing to the collection** - the received cards stay in its record, and the user adds them
+  by hand (a choice made with the user, 2026-10-19). `GET /api/trades/<id>/export/<fmt>?side=receive`
+  downloads the received cards.
+- **Buy list.** One list, grouped by seller, with copies capped at what the seller has, totals,
+  and an export (whole or one seller, `GET /api/buy_list/export/<fmt>?seller=`). Kept until the
+  user empties it.
+- **Backups.** `others.db` is in the *full* backup (`backups_api.full_backup`) but not in the
+  collection's, scanned cards' or decks' backups: it is not the user's cards.
+- **Routes:** `GET /api/others`, `POST /api/others/import` (multipart: file, name, replace),
+  `DELETE /api/others/<id>`, `GET /api/others/<id>/cards?q=&sort=&page=&size=`,
+  `POST /api/others/<id>/receive` (name, items [{row, quantity}]), `POST /api/others/<id>/buy`,
+  `GET` / `DELETE /api/buy_list`, `PUT /api/buy_list/<row>`, `GET /api/buy_list/export/<fmt>`,
+  `PUT /api/trades/<id>/receives/<row>`. The page: `collection.js` (`loadOthers`, `openOther`,
+  `loadOtherCards`, `loadBuyList`, `receiveCardHtml`).
+- **Tested:** `tests/test_others.py` (the store, receiving, the buy list, both import formats
+  through the routes, ManaBox rows, the full backup) and `tests/test_trades.py` (backups with
+  and without `trade_receives`); the page was tried in headless Chromium against a throwaway
+  server (import, browse, search, buy, receive with the dialog, steps) - not against real data,
+  not on a phone, and no ManaBox file.
 
 ### Backups
 

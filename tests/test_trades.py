@@ -224,10 +224,24 @@ class TradesInBackups(TradeData):
         self.assertEqual(self.trades.list(GAME), [])
         self.assertEqual(self.owned(), {'Test Card': 3, 'Other Card': 1})
 
+    def test_a_backup_from_before_receiving_leaves_a_trade_receiving_nothing(self):
+        self.trades.add(GAME, 'Jo', [self.card])
+        backup = self.backup()                                   # a trade, no received card
+        source = sqlite3.connect(str(self.tmp / 'backups' / backup / 'backup.db'))
+        for table in ('collection_trade_receives', 'scanned_trade_receives'):
+            source.execute(f'DROP TABLE {table}')                # as a backup made before receiving
+        source.commit()
+        source.close()
+        self.trades.receive(GAME, 'Jo', 'Sam', [{'card': {'name': 'X', 'game': GAME}, 'key': 'x', 'quantity': 1, 'most': 2}])
+        self.restore(backup)
+        trade = self.trades.list(GAME)[0]
+        self.assertEqual((trade['name'], trade['receives']), ('Jo', []))
+
     def test_a_backup_from_before_trades(self):
         backup = self.backup()
         source = sqlite3.connect(str(self.tmp / 'backups' / backup / 'backup.db'))
-        for table in ('collection_trades', 'collection_trade_cards', 'scanned_trades', 'scanned_trade_cards'):
+        for table in ('collection_trades', 'collection_trade_cards', 'scanned_trades', 'scanned_trade_cards',
+                      'collection_trade_receives', 'scanned_trade_receives'):
             source.execute(f'DROP TABLE {table}')
         source.commit()
         source.close()

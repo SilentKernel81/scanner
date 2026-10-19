@@ -16,7 +16,8 @@ they build on each other - a module imports only from those above it:
                      add_automatically / queue_for_review) and the captures waiting to be read
     card_data        updates of the card database
     pages            the pages, the live view, thumbnails, the header's numbers
-    decks_api, deck_ideas_api, inventory_api, trades_api, backups_api      the collection page
+    decks_api, deck_ideas_api, inventory_api, trades_api, others_api, backups_api      the collection page
+                     (others_api: other people's collections to trade with or buy from, the buy list)
     arena_api        the digital collection (MTG Arena): importing an export (after inventory_api)
     stations_api     the stations' routes; a station's capture arriving
     scan_events, settings_events, ai_events                                the scanner page

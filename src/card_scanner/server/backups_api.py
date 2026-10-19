@@ -10,11 +10,12 @@ import time
 from card_scanner.core import backups
 from card_scanner.config import Config
 from card_scanner import games
+from card_scanner.core.others import OTHERS_FILE
 from card_scanner.core.pending import PENDING_FILE
 from card_scanner.core.review import REVIEW_DIR
 
 from card_scanner.server.state import (
-    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, app_settings, arena_inventory, database, deck_store, inventory,
+    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, app_settings, arena_inventory, database, deck_store, inventory, others,
     maintenance_barrier,
     pending, review, scan_inventory, socketio,
 )
@@ -75,9 +76,11 @@ def full_backup():
     """Everything the server keeps, at one moment (backups.create_full): the manifest"""
     pictures = 'SELECT file FROM inventory_captures'
     return backups.create_full(
-        managers=[inventory, scan_inventory, arena_inventory, deck_store, review, pending, database],  # the order take_from locks in
+        managers=[inventory, scan_inventory, arena_inventory, deck_store, review, pending, database, others],  # the order take_from locks in
         barrier=maintenance_barrier,
-        databases=[Config.DATABASE_FILE, SCAN_INVENTORY_FILE, ARENA_INVENTORY_FILE, PENDING_FILE],
+        # others.db: other people's collections and the buy list - in this snapshot, never in
+        # the collection's backups (core/others.py)
+        databases=[Config.DATABASE_FILE, SCAN_INVENTORY_FILE, ARENA_INVENTORY_FILE, PENDING_FILE, OTHERS_FILE],
         linked=[('captures', inventory_captures_dir(), Config.DATABASE_FILE, pictures),
                 ('captures', inventory_captures_dir(), SCAN_INVENTORY_FILE, pictures),
                 # The large copies: none for the captures made before they were kept
