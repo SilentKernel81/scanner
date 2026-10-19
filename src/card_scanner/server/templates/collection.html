@@ -10,7 +10,7 @@
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=61">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=28">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=31">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -122,7 +122,7 @@
                 <div class="section-head">
                     <h2>Trades</h2>
                 </div>
-                <p class="hint">Cards set aside for a trade stay in your collection, marked, until you confirm the trade - only then are they removed. To start one, tick cards on the Inventory tab and press <strong>Set aside for trade</strong>.</p>
+                <p class="hint">Cards set aside for a trade stay in your collection, marked, until you confirm the trade - only then are they removed. To start one, tick cards on the Inventory tab and press <strong>Set aside for trade</strong>. A trade can also list cards you would <strong>receive</strong> from someone's imported collection (below); those are only a record - confirming adds nothing to your collection.</p>
             </div>
             <!-- Cards no deck uses and EDHREC does not suggest for a commander (collection.js: findSpareCards) -->
             <details class="panel spare-panel" id="spare-panel">
@@ -137,6 +137,46 @@
                     <button class="btn btn-small" id="spare-aside" disabled>Set aside for a trade</button>
                 </div>
                 <div class="trade-cards" id="spare-list"></div>
+            </details>
+            <!-- Other people's collections: imported to trade with or buy from, kept apart from this one (collection.js: loadOthers) -->
+            <details class="panel others-panel" id="others-panel">
+                <summary class="spare-title">Other people's collections</summary>
+                <p class="hint">Import someone else's collection file (this app's export, Moxfield or ManaBox) under their name to browse it. From there, <strong>Receive</strong> puts a card in a trade as something you would get, and <strong>Buy</strong> puts it on your buy list. Nothing here is part of your collection or its backups - delete an import when you are done; what a trade or the buy list took from it stays.</p>
+                <div class="filter-row">
+                    <input type="text" id="others-name" class="text-input" maxlength="60" placeholder="Whose collection is it?" title="A name for this collection, for example the person's">
+                    <button class="btn btn-small btn-primary" id="others-import" title="Choose a .csv file: this app's export, Moxfield's or ManaBox's">Import a CSV…</button>
+                    <input type="file" id="others-file" accept=".csv" style="display: none;">
+                </div>
+                <div id="others-list"></div>
+                <div id="others-browse" hidden>
+                    <div class="filter-row">
+                        <strong id="others-title"></strong>
+                        <input type="search" id="others-search" class="text-input" placeholder="Search name, set, type, rarity">
+                        <select id="others-sort" class="select" title="Order of the cards">
+                            <option value="name">Name</option>
+                            <option value="price">Value of all its copies</option>
+                            <option value="price_each">Price of one</option>
+                            <option value="set">Set and number</option>
+                            <option value="quantity">Most copies</option>
+                        </select>
+                        <span class="summary" id="others-summary"></span>
+                        <span class="spacer"></span>
+                        <button class="btn btn-small" id="others-prev">Previous</button>
+                        <button class="btn btn-small" id="others-next">Next</button>
+                        <button class="btn btn-small btn-ghost" id="others-close">Close</button>
+                    </div>
+                    <div class="trade-cards" id="others-cards"></div>
+                </div>
+            </details>
+            <!-- The cards to buy, from all the imported collections (collection.js: loadBuyList) -->
+            <details class="panel others-panel" id="buy-panel">
+                <summary class="spare-title">Buy list <span class="summary" id="buy-summary"></span></summary>
+                <div class="filter-row">
+                    <select id="buy-export" class="select" title="Download the whole list as a file for another site or app"></select>
+                    <span class="spacer"></span>
+                    <button class="btn btn-small btn-ghost" id="buy-clear">Empty the list</button>
+                </div>
+                <div id="buy-list"></div>
             </details>
             <div id="trades-open"></div>
             <h3 class="section-title" id="trades-done-title" hidden>Confirmed trades</h3>
@@ -166,6 +206,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=24"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=6"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=70"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=72"></script>
 </body>
 </html>

@@ -94,7 +94,7 @@ function showTab(tab) {
     document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== `tab-${tab}`; });
     if (tab === 'stats') renderStats();
-    if (tab === 'trades') loadTrades();
+    if (tab === 'trades') { loadTrades(); loadOthers(); loadBuyList(); }
 }
 
 // ============================================================================
@@ -1082,14 +1082,39 @@ function tradeCardHtml(card, open) {
         </div>`;
 }
 
+function receiveCardHtml(card, open) {
+    // A card the trade receives from someone's imported collection: only a record, no entry here
+    const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+                   card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, `from ${card.seller}`].filter(Boolean);
+    return `
+        <div class="trade-row" data-receive-row="${card.row}">
+            <span class="trade-qty"><strong>${card.quantity}×</strong>${open && card.most > card.quantity ? ` <span class="hint">of ${card.most}</span>` : ''}</span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span></span>
+            <span class="summary">${money(card.price * card.quantity)}</span>
+            ${open ? `<span class="trade-steps">
+                <button class="mini-btn" data-receive-step="-1" title="One copy less" ${card.quantity < 2 ? 'disabled' : ''}>−</button>
+                <button class="mini-btn" data-receive-step="1" title="One copy more" ${card.quantity >= card.most ? 'disabled' : ''}>+</button>
+                <button class="mini-btn" data-receive-step="0" title="Take it out of the trade">×</button>
+            </span>` : ''}
+        </div>`;
+}
+
 function tradeHtml(trade) {
     const open = trade.status === 'open';
-    const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong> · `
+    const receives = trade.receives || [];
+    const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong>`
+        + (receives.length ? ` · receives ${plural(trade.receive_quantity, 'card')} · <strong>${money(trade.receive_value)}</strong>` : '') + ' · '
         + (open ? `since ${escapeHtml(trade.created_at.slice(0, 10))}` : `confirmed ${escapeHtml((trade.closed_at || '').slice(0, 10))}`);
-    const exports = `<select class="select trade-export" title="Download this trade's cards as a file for another site or app">
-        ${optionsHtml([['', 'Export…'], ...gameInfo.exports])}</select>`;
-    const cards = trade.cards.map(card => tradeCardHtml(card, open)).join('')
-        || '<div class="hint">No cards in this trade.</div>';
+    const exports = (trade.cards.length || !receives.length ? `<select class="select trade-export" title="Download the cards you give as a file for another site or app">
+        ${optionsHtml([['', receives.length ? 'Export what I give…' : 'Export…'], ...gameInfo.exports])}</select>` : '')
+        + (receives.length ? `<select class="select trade-export" data-side="receive" title="Download the cards you would receive as a file for another site or app">
+        ${optionsHtml([['', 'Export what I receive…'], ...gameInfo.exports])}</select>` : '');
+    const given = trade.cards.map(card => tradeCardHtml(card, open)).join('')
+        || (receives.length ? '<div class="hint">None of your cards.</div>' : '<div class="hint">No cards in this trade.</div>');
+    // Both sides are named only when the trade receives something
+    const cards = receives.length
+        ? `<div class="trade-side-title">You give</div>${given}<div class="trade-side-title">You receive</div>${receives.map(card => receiveCardHtml(card, open)).join('')}`
+        : given;
     if (!open) {
         return `
             <details class="panel trade" data-trade="${trade.id}">
@@ -1111,7 +1136,7 @@ function tradeHtml(trade) {
                 ${exports}
                 <button class="btn btn-small" data-trade-action="rename">Rename</button>
                 <button class="btn btn-small" data-trade-action="cancel" title="The trade is off: its cards simply stay in your collection">Cancel trade</button>
-                <button class="btn btn-small btn-primary" data-trade-action="confirm" title="The trade happened: remove its cards from your collection" ${trade.cards.length ? '' : 'disabled'}>Confirm trade</button>
+                <button class="btn btn-small btn-primary" data-trade-action="confirm" title="The trade happened: remove the cards you give from your collection (what you receive is only a record)" ${trade.cards.length || receives.length ? '' : 'disabled'}>Confirm trade</button>
             </div>
             <div class="trade-cards">${cards}</div>
         </div>`;
@@ -1267,7 +1292,9 @@ async function tradeAction(trade, action) {
     let request = null;
     if (action === 'confirm') {
         const ok = await confirmDialog({title: `Confirm the trade "${trade.name}"?`, confirmText: 'Confirm trade', danger: true,
-            message: `Its ${plural(trade.quantity, 'card')} (${money(trade.value)}) are removed from your collection. This can't be undone.`});
+            message: (trade.quantity ? `Its ${plural(trade.quantity, 'card')} (${money(trade.value)}) are removed from your collection. This can't be undone.`
+                                     : 'None of your cards are in it, so nothing leaves your collection.')
+                + (trade.receives.length ? ` What you receive (${plural(trade.receive_quantity, 'card')}, ${money(trade.receive_value)}) is only kept in the record: add those cards to your collection yourself.` : '')});
         if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST'});
     } else if (action === 'cancel') {
         // Not confirmDialog: its "Cancel" beside "Cancel trade" says nothing
@@ -1290,6 +1317,229 @@ async function tradeAction(trade, action) {
     loadInventory();
 }
 
+// -- Other people's collections and the buy list ---------------------------------------------------
+// Kept on the server apart from this collection (/api/others, /api/buy_list): a row here is
+// not an entry of the collection, and nothing below changes the collection.
+
+let otherCollections = [];     // GET /api/others
+let othersView = null;         // the collection being browsed: {id, name, q, sort, page, total}
+const OTHERS_PAGE = 40;
+
+async function loadOthers() {
+    const data = await api('/api/others');
+    if (!data) return;
+    otherCollections = data.collections;
+    if (othersView && !otherCollections.some(item => item.id === othersView.id)) closeOthers();
+    renderOthersList();
+}
+
+function renderOthersList() {
+    $('others-list').innerHTML = otherCollections.map(item => `
+        <div class="trade-row others-collection" data-collection="${item.id}">
+            <span class="trade-card"><span class="result-name">${escapeHtml(item.name)}</span>
+                <span class="result-sub">${escapeHtml(item.format || '')} · ${escapeHtml(item.imported_at.slice(0, 10))}</span></span>
+            <span class="summary">${entriesText(item.entries)} · ${plural(item.cards, 'card')} · <strong>${money(item.value)}</strong></span>
+            <button class="btn btn-small" data-others-action="browse">Browse</button>
+            <button class="btn btn-small btn-ghost" data-others-action="delete" title="Forget this import - what a trade or the buy list took from it stays">Delete</button>
+        </div>`).join('') || '<div class="hint">No collection imported yet.</div>';
+}
+
+async function importOther(file) {
+    if (!file) return;
+    let name = $('others-name').value.trim();
+    if (!name) name = await valueDialog({title: 'Whose collection is it?', label: 'Name', value: file.name.replace(/\.csv$/i, '')});
+    if (!name) return;
+    const same = otherCollections.find(item => item.name.toLowerCase() === name.toLowerCase());
+    if (same && !await confirmDialog({title: `Replace the collection of ${same.name}?`, confirmText: 'Replace',
+        message: `Its ${plural(same.cards, 'card')} imported on ${same.imported_at.slice(0, 10)} are swapped for this file's. Trades and the buy list keep what they took.`})) return;
+    const body = new FormData();
+    body.append('file', file);
+    body.append('name', name);
+    if (same) body.append('replace', 'true');
+    const data = await api('/api/others/import', {method: 'POST', body});
+    if (!data) return;
+    notify(`${data.name}: ${plural(data.cards, 'card')} (${data.format})` + (data.not_found_count ? ` - ${data.not_found_count} not found in the card data` : ''),
+           data.not_found_count ? 'warning' : 'success');
+    $('others-name').value = '';
+    await loadOthers();
+    openOther(data.id, data.name);
+}
+
+function openOther(id, name) {
+    othersView = {id, name, q: '', sort: 'name', page: 0, total: 0};
+    $('others-search').value = '';
+    $('others-sort').value = 'name';
+    $('others-browse').hidden = false;
+    loadOtherCards();
+}
+
+function closeOthers() {
+    othersView = null;
+    $('others-browse').hidden = true;
+}
+
+let othersAsked = 0;   // the number of the latest request for a page of cards: older answers are dropped
+
+async function loadOtherCards() {
+    if (!othersView) return;
+    const view = othersView, asked = ++othersAsked;
+    const data = await api(`/api/others/${view.id}/cards?q=${encodeURIComponent(view.q)}&sort=${view.sort}&page=${view.page}&size=${OTHERS_PAGE}`);
+    if (!data || view !== othersView || asked !== othersAsked) return;
+    view.total = data.total;
+    $('others-title').textContent = view.name;
+    const first = view.page * OTHERS_PAGE;
+    $('others-summary').textContent = data.total ? `${first + 1}–${first + data.cards.length} of ${data.total.toLocaleString()}` : 'No card matches';
+    $('others-prev').disabled = view.page === 0;
+    $('others-next').disabled = first + OTHERS_PAGE >= data.total;
+    $('others-cards').innerHTML = data.cards.map(card => {
+        const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+                       card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition].filter(Boolean);
+        return `
+        <div class="trade-row others-row" data-row="${card.row}" data-max="${card.quantity}">
+            <span class="trade-qty"><strong>${card.quantity}×</strong></span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span></span>
+            <span class="summary">${money(card.price)}${card.quantity > 1 ? ' each' : ''}</span>
+            ${card.quantity < 2 ? '<input type="hidden" class="others-qty" value="1"><span></span>'
+                : `<input type="number" class="text-input others-qty" min="1" max="${card.quantity}" value="1" title="How many copies">`}
+            <button class="btn btn-small" data-others-action="receive" title="Put it in a trade as a card you would receive">Receive</button>
+            <button class="btn btn-small" data-others-action="buy" title="Put it on the buy list">Buy</button>
+        </div>`;
+    }).join('') || '<div class="empty-state">Nothing here.</div>';
+}
+
+async function otherCardAction(button) {
+    const row = button.closest('.others-row');
+    const copies = Math.max(1, Math.min(parseInt(row.querySelector('.others-qty').value) || 1, parseInt(row.dataset.max)));
+    const items = [{row: parseInt(row.dataset.row), quantity: copies}];
+    if (button.dataset.othersAction === 'buy') {
+        const data = await api(`/api/others/${othersView.id}/buy`, {method: 'POST', body: {items}});
+        if (data) notify('On the buy list', 'success');
+        return loadBuyList();
+    }
+    const open = trades.filter(trade => trade.status === 'open').map(trade => trade.name);
+    const name = await valueDialog({title: 'Receive in a trade',
+        label: open.length ? 'Trade (one of the open ones, or a new name)' : `Name of the trade (who it is with)`,
+        options: open, value: open.length === 1 ? open[0] : othersView.name});
+    if (!name) return;
+    const data = await api(`/api/others/${othersView.id}/receive`, {method: 'POST', body: {name, items}});
+    if (!data) return;
+    notify(`"${data.name}" now receives it from ${data.seller}`, 'success');
+    loadTrades();
+}
+
+async function otherCollectionAction(button) {
+    const item = otherCollections.find(entry => entry.id === parseInt(button.closest('[data-collection]').dataset.collection));
+    if (!item) return;
+    if (button.dataset.othersAction === 'browse') return openOther(item.id, item.name);
+    const ok = await confirmDialog({title: `Delete the collection of ${item.name}?`, confirmText: 'Delete', danger: true,
+        message: `The imported file's ${plural(item.cards, 'card')} are forgotten. Cards a trade or the buy list took from it stay there. Your collection is not touched.`});
+    if (!ok) return;
+    if (await api(`/api/others/${item.id}`, {method: 'DELETE'})) notify('Deleted', 'success');
+    loadOthers();
+}
+
+let buyList = [];   // GET /api/buy_list: cards with 'seller', 'row', 'quantity', 'most'
+
+async function loadBuyList() {
+    const data = await api('/api/buy_list');
+    if (!data) return;
+    buyList = data.cards;
+    renderBuyList();
+}
+
+function renderBuyList() {
+    const value = buyList.reduce((sum, card) => sum + card.price * card.quantity, 0);
+    $('buy-summary').textContent = buyList.length ? `· ${plural(buyList.reduce((sum, card) => sum + card.quantity, 0), 'card')} · ${money(value)}` : '';
+    $('buy-export').innerHTML = optionsHtml([['', 'Export…'], ...gameInfo.exports]);
+    $('buy-export').hidden = !buyList.length;
+    $('buy-clear').hidden = !buyList.length;
+    const sellers = [...new Set(buyList.map(card => card.seller))];
+    $('buy-list').innerHTML = sellers.map(seller => {
+        const cards = buyList.filter(card => card.seller === seller);
+        return `<div class="trade-side-title">${escapeHtml(seller)} <span class="summary">${plural(cards.reduce((sum, card) => sum + card.quantity, 0), 'card')} · ${
+            money(cards.reduce((sum, card) => sum + card.price * card.quantity, 0))}</span>
+            <button class="btn btn-small btn-ghost" data-buy-seller="${escapeHtml(seller)}" title="Download only this seller's cards">Export</button></div>`
+            + cards.map(card => `
+        <div class="trade-row" data-buy-row="${card.row}">
+            <span class="trade-qty"><strong>${card.quantity}×</strong>${card.most > card.quantity ? ` <span class="hint">of ${card.most}</span>` : ''}</span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(
+                [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+                 card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition].filter(Boolean).join(' · '))}</span></span>
+            <span class="summary">${money(card.price * card.quantity)}</span>
+            <span class="trade-steps">
+                <button class="mini-btn" data-buy-step="-1" title="One copy less" ${card.quantity < 2 ? 'disabled' : ''}>−</button>
+                <button class="mini-btn" data-buy-step="1" title="One copy more" ${card.quantity >= card.most ? 'disabled' : ''}>+</button>
+                <button class="mini-btn" data-buy-step="0" title="Take it off the list">×</button>
+            </span>
+        </div>`).join('');
+    }).join('') || '<div class="hint">Nothing on the buy list. Press <strong>Buy</strong> on a card of an imported collection.</div>';
+}
+
+function downloadFile(href) {
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+function bindOthersEvents() {
+    $('others-import').addEventListener('click', () => $('others-file').click());
+    $('others-file').addEventListener('change', event => {
+        const file = event.target.files[0];
+        event.target.value = '';   // the same file can be chosen again
+        importOther(file);
+    });
+    $('others-list').addEventListener('click', event => {
+        const button = event.target.closest('[data-others-action]');
+        if (button) otherCollectionAction(button);
+    });
+    $('others-cards').addEventListener('click', event => {
+        const button = event.target.closest('[data-others-action]');
+        if (button) otherCardAction(button);
+    });
+    $('others-search').addEventListener('input', debounce(() => {
+        if (!othersView) return;
+        othersView.q = $('others-search').value;
+        othersView.page = 0;
+        loadOtherCards();
+    }, 250));
+    $('others-sort').addEventListener('change', () => {
+        if (!othersView) return;
+        othersView.sort = $('others-sort').value;
+        othersView.page = 0;
+        loadOtherCards();
+    });
+    $('others-prev').addEventListener('click', () => { if (othersView && othersView.page > 0) { othersView.page--; loadOtherCards(); } });
+    $('others-next').addEventListener('click', () => { if (othersView) { othersView.page++; loadOtherCards(); } });
+    $('others-close').addEventListener('click', closeOthers);
+
+    $('buy-export').addEventListener('change', event => {
+        if (event.target.value) downloadFile(`/api/buy_list/export/${encodeURIComponent(event.target.value)}`);
+        event.target.value = '';
+    });
+    $('buy-clear').addEventListener('click', async () => {
+        const ok = await confirmDialog({title: 'Empty the buy list?', confirmText: 'Empty it', danger: true,
+            message: 'Every card on it is taken off. The imported collections are not touched.'});
+        if (ok && await api('/api/buy_list', {method: 'DELETE'})) loadBuyList();
+    });
+    $('buy-list').addEventListener('click', async event => {
+        const seller = event.target.closest('[data-buy-seller]');
+        if (seller) {
+            // One seller's part, in the format chosen above (the first real one when none is)
+            const format = $('buy-export').value || (gameInfo.exports[0] && gameInfo.exports[0][0]);
+            return format && downloadFile(`/api/buy_list/export/${encodeURIComponent(format)}?seller=${encodeURIComponent(seller.dataset.buySeller)}`);
+        }
+        const step = event.target.closest('[data-buy-step]');
+        const card = step && buyList.find(item => item.row === parseInt(step.closest('[data-buy-row]').dataset.buyRow));
+        if (!card) return;
+        const by = parseInt(step.dataset.buyStep);
+        await api(`/api/buy_list/${card.row}`, {method: 'PUT', body: {quantity: by ? card.quantity + by : 0}});
+        loadBuyList();
+    });
+}
+
 function bindTradeEvents() {
     $('tab-trades').addEventListener('click', async event => {
         const panel = event.target.closest('[data-trade]');
@@ -1297,6 +1547,14 @@ function bindTradeEvents() {
         if (!trade) return;
         const action = event.target.closest('[data-trade-action]');
         if (action) return tradeAction(trade, action.dataset.tradeAction);
+        const receiveStep = event.target.closest('[data-receive-step]');
+        if (receiveStep) {
+            const received = trade.receives.find(item => item.row === parseInt(receiveStep.closest('[data-receive-row]').dataset.receiveRow));
+            if (!received) return;
+            const by = parseInt(receiveStep.dataset.receiveStep);
+            await api(`/api/trades/${trade.id}/receives/${received.row}`, {method: 'PUT', body: {quantity: by ? received.quantity + by : 0}});
+            return loadTrades();
+        }
         const step = event.target.closest('[data-step]');
         const row = event.target.closest('[data-row]');
         const card = row && trade.cards.find(item => item.row === parseInt(row.dataset.row));
@@ -1311,7 +1569,8 @@ function bindTradeEvents() {
         const select = event.target.closest('.trade-export');
         if (!select || !select.value) return;
         const link = document.createElement('a');
-        link.href = `/api/trades/${select.closest('[data-trade]').dataset.trade}/export/${encodeURIComponent(select.value)}`;
+        link.href = `/api/trades/${select.closest('[data-trade]').dataset.trade}/export/${encodeURIComponent(select.value)}`
+            + (select.dataset.side === 'receive' ? '?side=receive' : '');
         link.download = '';
         document.body.appendChild(link);
         link.click();
@@ -1475,6 +1734,7 @@ function bindEvents() {
         renderStats();
     });
     bindTradeEvents();
+    bindOthersEvents();
     bindSwitch('collection-kind', button => showCollection(button.dataset.collection));
     $('arena-import').addEventListener('click', () => $('arena-file-input').click());
     $('arena-file-input').addEventListener('change', event => {

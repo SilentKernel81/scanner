@@ -41,6 +41,12 @@ The project is developed entirely with AI (this assistant, directed by the user)
 documentation says so (README.md, *How this project was built*): keep that statement true and
 in place, and keep marking in the docs what was measured and what was never tested.
 
+**The license is PolyForm Noncommercial 1.0.0** (since 2026-10-19; MIT before, and copies of those
+versions stay MIT): free for personal and other noncommercial use, no resale or commercial use.
+The source is public but this is *source-available*, not open source - never describe the
+project as "open source" (README, docs, videos, store texts). The Android app's repo has the
+same license; the standalone `scanner` mirror gets it by merging `server/main`.
+
 **How everything works is documented in [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md)**
 (stations, detection, auto-capture rules, matching, foil logic, schema, events, measured
 thresholds) - read the relevant section before changing behavior, and keep it up to date.
@@ -82,7 +88,7 @@ page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts;
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
 the two routes, through Flask's test client; also the route of "Send to review");
-`tests/test_send_to_review.py` sending one copy of an entry back to the review queue (storage); `tests/test_deck_cover.py` a deck's cover (the
+`tests/test_send_to_review.py` sending one copy of an entry back to the review queue (storage); `tests/test_others.py` other people's collections, receiving in a trade, the buy list; `tests/test_deck_cover.py` a deck's cover (the
 table's new column on an old file, which card is shown when); `tests/test_arena_export.py` the
 list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_arena_collection.py`
 the digital collection (reading an Arena export, finding its cards, replacing whole, backups)
@@ -137,7 +143,8 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | Card data: schema, updates, search, printing match, confidence | `database.py`: `CARD_COLUMNS`, `replace_table`, `card_data_info`, `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match`; `Game.check_for_update`; `server/card_data.py`: `start_card_data_update`, `check_card_data_updates` |
 | Inventory: add / merge / undo / split / export, locations, tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `desk().pending_capture`, `card['capture']`; `scan_location` |
 | Scanned cards by camera (filter, per-camera move, clear) | `inventory.py`: `inventory_sources`, `_station_rows`, `_move_sources`, `stations_by_entry`, `get_all_cards(station)`, `get_stats(station)`, `take_from(station)`, `clear_inventory(station)`; `server/captures.py`: `scan_camera`, `scan_stats`; `scanner.js`: `scannedCamera`, `loadInventoryCameras`; `common.js`: `addScannedToCollection(camera)` |
-| Trades: cards set aside until a trade is confirmed | `trades.py`: `Trades` (`add`, `set_quantity`, `confirm`, `cancel`, `by_entry`); `inventory.py`: `TRADES_TABLE`, `TRADE_CARDS_TABLE`, `TRADE_TRIGGERS`, `TRADE_HELD`; `server/trades_api.py`: `trade_list`, `trade_item`, `trade_confirm`, `trade_export`, `write_refused`; `collection.js`: `loadTrades`, `renderTrades`, `setAsideForTrade` |
+| Trades: cards set aside until a trade is confirmed (and cards it receives from someone's imported collection) | `trades.py`: `Trades` (`add`, `receive`, `set_receive_quantity`, `set_quantity`, `confirm`, `cancel`, `by_entry`); `inventory.py`: `TRADE_RECEIVES_TABLE`; `inventory.py`: `TRADES_TABLE`, `TRADE_CARDS_TABLE`, `TRADE_TRIGGERS`, `TRADE_HELD`; `server/trades_api.py`: `trade_list`, `trade_item`, `trade_confirm`, `trade_export`, `write_refused`; `collection.js`: `loadTrades`, `renderTrades`, `setAsideForTrade` |
+| Other people's collections to trade with / buy from, the buy list (`data/others.db`, apart from the collection) | `others.py`: `Others` (`import_collection`, `cards`, `buy`, `buy_list`), `card_dict`; `server/others_api.py`: `read_collection_file`, `chosen_cards`; `inventory.py`: `read_collection_csv`; `games/mtg.py`: `import_rows` (Moxfield, ManaBox); `collection.js`: `loadOthers`, `loadBuyList`; `tests/test_others.py` |
 | Backups of the collection, scanned cards and decks | `backups.py`: `create` (`keep`), `create_scheduled`, `restore` (`RESTORABLE`), `archive` / `add_archive`, `list_backups`, `INVENTORY_TABLES` (`data/backups/<date_time>/`); `server/backups_api.py`: `collection_backups`, `restore_backup`; `collection.js`: `openSettings`, `renderBackups` |
 | Everything at one moment (all database files + pictures) | `backups.py`: `create_full`; `server/backups_api.py`: `full_backup`; `server/state.py`: `maintenance_barrier`; `scripts/backup.sh` |
 | Database connections, migrations, measurements | `storage.py`: `connect`, `rebuild`, `schema_migrations`; `scripts/benchmark_db.py` (on copies only) |
@@ -298,6 +305,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   existing table is a named migration through `storage.rebuild` (backup, one transaction,
   counts compared) with the new definition also in the `CREATE TABLE` for new files; try it
   on a copy of the real databases before deploying.
+- **Other people's collections are not the collection.** `others.py` / `others_api.py` keep them (and the buy list) in `data/others.db` with ids of their own; no route that changes the collection takes one, and nothing in `others_api.py` calls an inventory. A trade *receives* a snapshot of their card (`trade_receives`), never an entry: confirming adds nothing to the collection. Keep it that way - an `others` id given to an inventory route would change another card.
 - **Copies a trade holds stay.** Triggers on `inventory` refuse to delete an entry an open
   trade holds copies of, or to lower it below them (`TRADE_HELD`): new code that removes or
   moves copies needs no check of its own, but must roll back when the statement fails

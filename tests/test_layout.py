@@ -48,7 +48,7 @@ SHARED = {'paths', 'config', 'config_loader', 'settings'}
 STATION = {'station_client', 'station_setup', 'station_login', 'scanner', 'object_detector', 'corner_net'}
 CORE = {'identification', 'card_ocr', 'card_identifier', 'prompts', 'api_keys',
         'database', 'card_search', 'setup_database',
-        'inventory', 'decks', 'trades', 'backups', 'storage', 'pending', 'review', 'cleanup',
+        'inventory', 'decks', 'trades', 'others', 'backups', 'storage', 'pending', 'review', 'cleanup',
         'stations', 'remote_scanner', 'recommendations', 'arena', 'frames'}
 # What an import began with before the package existed: any of these at the start of an
 # import now is one the move forgot
