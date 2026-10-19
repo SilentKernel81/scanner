@@ -658,7 +658,7 @@ function listRowHtml(card) {
                 ${picture && !digital ? `<span class="card-peek" data-image="${escapeHtml(picture)}" title="The card's picture - rest the pointer here to see it large">
                                  <img src="${escapeHtml(picture.replace('/normal/', '/small/'))}" alt="" loading="lazy"></span>` : ''}
                 <button class="btn-trade" title="Set aside for a trade: it stays in your collection until you confirm the trade"><svg class="icon"><use href="#i-swap"/></svg></button>
-                ${card.captures.length && !digital ? `<button class="btn-review" title="Wrong card or printing? Send one copy back to the review queue to search for the right one (it then goes to the scanned cards)"><svg class="icon"><use href="#i-back"/></svg></button>` : ''}
+                ${card.captures.length && !digital ? `<button class="btn-review" title="Wrong card or printing? Send one copy back to the review queue to search for the right one (it then goes to the scanned cards)"><svg class="icon"><use href="#i-refresh"/></svg></button>` : ''}
                 <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
                 <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
             </div>

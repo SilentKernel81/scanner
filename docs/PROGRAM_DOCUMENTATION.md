@@ -289,7 +289,7 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
 - **A reviewed capture stays its station's card**, whichever page works through the review:
   the page without a station lists every station's items, and a card added there is counted
   as the capture's station's (`source`), not as nobody's - or its phone could never follow it.
-- **Send to review** (the back-arrow button on an entry of the scanned cards and of the collection;
+- **Send to review** (the circular-arrow button on an entry of the scanned cards and of the collection;
   `POST /api/inventory/<id>/to_review`, `?area=`): one copy - the one behind the entry's newest
   capture - goes back to the review queue when the card or printing it was added as is wrong. The
   item holds a copy of the capture's large picture (the thumbnail when none) with the entry's
