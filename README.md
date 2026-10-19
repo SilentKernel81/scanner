@@ -573,8 +573,11 @@ What that means if you use it:
 
 ## License
 
-[MIT](LICENSE) - free to use, modify and share, including commercially, as long as the
-copyright notice is kept.
+[PolyForm Noncommercial 1.0.0](LICENSE) - free for personal use, hobby projects, study, research
+and non-profit use. You may change it for yourself and share it with others under the same terms.
+You may **not** sell it or use it commercially without the author's permission. The source is
+public (*source-available*); it is not under an OSI open-source license. Versions published
+before 2026-10-19 were released under the MIT license, and copies of those stay under it.
 
 ## Acknowledgments
 

@@ -41,6 +41,12 @@ The project is developed entirely with AI (this assistant, directed by the user)
 documentation says so (README.md, *How this project was built*): keep that statement true and
 in place, and keep marking in the docs what was measured and what was never tested.
 
+**The license is PolyForm Noncommercial 1.0.0** (since 2026-10-19; MIT before, and copies of those
+versions stay MIT): free for personal and other noncommercial use, no resale or commercial use.
+The source is public but this is *source-available*, not open source - never describe the
+project as "open source" (README, docs, videos, store texts). The Android app's repo has the
+same license; the standalone `scanner` mirror gets it by merging `server/main`.
+
 **How everything works is documented in [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md)**
 (stations, detection, auto-capture rules, matching, foil logic, schema, events, measured
 thresholds) - read the relevant section before changing behavior, and keep it up to date.
