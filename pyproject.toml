@@ -20,7 +20,7 @@ version = "0.0.0"
 description = "Camera-based scanner for Magic: The Gathering cards: a server (collection, decks, OCR, AI) and camera stations"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE"]
 authors = [{ name = "SilentKernel" }]
 
