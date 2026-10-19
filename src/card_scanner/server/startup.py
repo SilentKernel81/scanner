@@ -29,6 +29,7 @@ from card_scanner.core.review import ReviewQueue
 from card_scanner.settings import Settings
 from card_scanner.core.stations import Stations
 from card_scanner.core.trades import Trades
+from card_scanner.core.others import Others
 
 from card_scanner.server.state import (
     ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, services, socketio,
@@ -46,7 +47,7 @@ from card_scanner.server.settings_events import cleanup_days, run_image_cleanup,
 # from this list is a set of routes that silently does not exist (tests/test_app_surface.py
 # notices).
 from card_scanner.server import (  # noqa: F401
-    lock, pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, backups_api, stations_api,
+    lock, pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, others_api, backups_api, stations_api,
     scan_events, settings_events, ai_events, card_data, program,
 )
 
@@ -98,6 +99,7 @@ def initialize_components():
     services.arena_inventory = InventoryManager(db_file=ARENA_INVENTORY_FILE)
     arena.prepare(services.arena_inventory)   # the table for the wildcards and the import's date
     services.trade_store = Trades(services.inventory)
+    services.others = Others()   # other people's collections, in a file of their own (data/others.db)
     services.review = ReviewQueue()
     finish_interrupted_sends()  # cards being sent back to review when the program stopped
     services.pending = PendingCaptures()

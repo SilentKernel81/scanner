@@ -213,16 +213,26 @@ class Magic(Game):
     def export_formats(self):
         return {'moxfield': ('Moxfield', 'moxfield_export', write_moxfield), **super().export_formats()}
 
-    import_formats = ('Moxfield',)
+    import_formats = ('Moxfield', 'ManaBox')
 
     def import_rows(self, columns, rows):
         # Moxfield's collection CSV: Count, Name, Edition (set code), Condition, Foil
         # (foil / etched / empty), Collector Number, Tags
-        if not {'count', 'name', 'edition'} <= columns:
-            return None
+        if {'count', 'name', 'edition'} <= columns:
+            return self._collection_rows('Moxfield', rows, count='count', edition='edition', number='collector number')
+        # ManaBox's: Name, Set code, Set name, Collector number, Foil (normal / foil / etched),
+        # Rarity, Quantity, ManaBox ID, Scryfall ID, ..., Condition (near_mint, lightly_played ...).
+        # Written from what its exports are known to look like - not tried on a file of the app
+        if {'name', 'set code', 'collector number', 'quantity'} <= columns and ('scryfall id' in columns or 'foil' in columns):
+            return self._collection_rows('ManaBox', rows, count='quantity', edition='set code', number='collector number')
+        return None
+
+    def _collection_rows(self, format_name, rows, count, edition, number):
+        """The entries of another app's collection file, its columns named; the printing by the
+        file's Scryfall id when it has one (ManaBox), else by set code + collector number, else by name"""
         # `unnamed`: rows that hold something but no card name - cannot be matched, so a
         # replacement must not go ahead without them (see import_inventory)
-        result = {'format': 'Moxfield', 'entries': [], 'by_name': 0, 'not_found': [], 'unnamed': 0}
+        result = {'format': format_name, 'entries': [], 'by_name': 0, 'not_found': [], 'unnamed': 0}
         front = lambda card_name: search_key(card_name.split(' // ')[0])
         for row in rows:
             name = (row.get('name') or '').strip()
@@ -230,16 +240,23 @@ class Magic(Game):
                 if any((value or '').strip() for value in row.values()):
                     result['unnamed'] += 1
                 continue
+            card = None
+            scryfall_id = (row.get('scryfall id') or '').strip()
+            if scryfall_id:
+                card = self.db.get_card_by_id(scryfall_id)
+                if card and front(card['name']) != front(name):
+                    card = None  # an id that belongs to another card is not trusted
             # The printing by set code + collector number; a card the database has under
             # another number (or a row without one) is still taken, by its name
-            edition, number = (row.get('edition') or '').strip(), (row.get('collector number') or '').strip()
-            card = self.db.get_card_by_set_number(edition, number, exact=True)
-            if card and front(card['name']) != front(name):
-                # A set and number that belong to another card: never taken on the numbers alone
-                card = None
+            set_code, collector = (row.get(edition) or '').strip(), (row.get(number) or '').strip()
+            if not card:
+                card = self.db.get_card_by_set_number(set_code, collector, exact=True)
+                if card and front(card['name']) != front(name):
+                    # A set and number that belong to another card: never taken on the numbers alone
+                    card = None
             if not card:
                 # Written another way ("007" for 7) - only when it is the card the row names
-                card = self.db.get_card_by_set_number(edition, number)
+                card = self.db.get_card_by_set_number(set_code, collector)
                 if card and front(card['name']) != front(name):
                     card = None
             if not card:
@@ -249,15 +266,18 @@ class Magic(Game):
                     continue
                 result['by_name'] += 1
             try:
-                quantity = max(1, int(float(row.get('count') or 1)))
+                quantity = max(1, int(float(row.get(count) or 1)))
             except ValueError:
                 quantity = 1
-            # Moxfield has no surge foil: it is the foil of a surge foil printing (write_moxfield)
-            finish = 'regular' if not (row.get('foil') or '').strip() \
+            # Moxfield has no surge foil: it is the foil of a surge foil printing (write_moxfield);
+            # ManaBox says "normal" for a card that is not foil
+            foil = (row.get('foil') or '').strip().lower()
+            finish = 'regular' if foil in ('', 'normal', 'nonfoil', 'false') \
                 else 'surge' if 'Surge Foil' in (card.get('treatments') or []) else 'foil'
+            condition = (row.get('condition') or '').strip().lower().replace('_', ' ')
             result['entries'].append({
                 'fields': self.inventory_fields(card, finish), 'finish': finish, 'quantity': quantity,
-                'condition': MOXFIELD_CONDITIONS.get((row.get('condition') or '').strip().lower(), 'Near Mint'),
+                'condition': MOXFIELD_CONDITIONS.get(condition, 'Near Mint'),
                 'tags': row.get('tags') or row.get('tag') or '',
             })
         return result

@@ -51,7 +51,8 @@ class Trades:
         """
         A game's trades, the open ones first, then the confirmed ones (newest first):
         {'id', 'name', 'status' ('open' / 'done'), 'created_at', 'closed_at', 'cards': [...],
-        'quantity', 'value'}. A card is the inventory row as the page and the exporters know it,
+        'quantity', 'value', and what it receives: 'receives' (receives()), 'receive_quantity',
+        'receive_value'}. A card is the inventory row as the page and the exporters know it,
         with 'quantity' the copies in the trade, 'row' (the trade's row, to change it) and - in
         an open trade - 'entry_quantity' and 'most' (how many the trade could hold).
         """
@@ -63,6 +64,10 @@ class Trades:
                 trade['cards'] = self.cards(trade['id'])
                 trade['quantity'] = sum(card['quantity'] for card in trade['cards'])
                 trade['value'] = round(sum(card['price'] * card['quantity'] for card in trade['cards']), 2)
+                # What it receives (someone else's cards, receive())
+                trade['receives'] = self.receives(trade['id'])
+                trade['receive_quantity'] = sum(card['quantity'] for card in trade['receives'])
+                trade['receive_value'] = round(sum(card['price'] * card['quantity'] for card in trade['receives']), 2)
         return trades
 
     def cards(self, trade_id):
@@ -81,6 +86,14 @@ class Trades:
                 cards.append(card)
         return sorted(cards, key=lambda card: (card['name'].lower(), card['set_name'], card['number']))
 
+    def receives(self, trade_id):
+        """The cards a trade receives, as they were put in (card_dict of core/others.py, with 'row' -
+        the trade's row -, 'quantity' here, 'most' the other person has, 'seller' whose)"""
+        with self._lock:
+            return [{**json.loads(row['card']), 'row': row['id'], 'quantity': row['quantity'], 'most': row['most'],
+                     'seller': row['source']} for row in self.conn.execute(
+                'SELECT * FROM trade_receives WHERE trade_id = ? ORDER BY source COLLATE NOCASE, id', (trade_id,))]
+
     def by_entry(self, game):
         """{inventory id: [{'id', 'name', 'quantity'}]}: the open trades holding copies of each entry"""
         result = {}
@@ -96,6 +109,60 @@ class Trades:
     # Changing
     # ------------------------------------------------------------------------
 
+    def _open_trade(self, game, name):
+        """The open trade with this name (any case), made when there is none: (id, its name, made now)"""
+        name = ' '.join(str(name or '').split())[:60]
+        if not name:
+            raise TradeError('The trade needs a name')
+        trade = self.conn.execute("SELECT id, name FROM trades WHERE game = ? AND status = 'open' AND name = ? COLLATE NOCASE",
+                                  (game, name)).fetchone()
+        if trade:
+            return trade['id'], trade['name'], False
+        return self.conn.execute("INSERT INTO trades (game, name, status, created_at) VALUES (?, ?, 'open', ?)",
+                                 (game, name, now())).lastrowid, name, True
+
+    def receive(self, game, name, source, cards):
+        """
+        Cards of someone else's collection (source: its name) that the open trade with this name
+        receives - made when there is none; it can receive without giving anything. cards:
+        [{'card' (card_dict of core/others.py), 'key', 'quantity', 'most'}]; the copies add to
+        what the trade receives of that card from that source, never above `most` (what the other
+        person has). Nothing of the collection is touched. Returns {'trade', 'name', 'cards'}.
+        """
+        def change():
+            # Cards of another game are not put in this game's trade (a page left open while the
+            # game was switched): the snapshot says whose game it is (core/others.py: card_dict)
+            if any(item['card'].get('game') != game for item in cards):
+                raise TradeError('These cards are of another game than the trade')
+            trade_id, trade_name, _made = self._open_trade(game, name)
+            copies = 0
+            for item in cards:
+                quantity = max(1, int(item['quantity']))
+                most = max(1, int(item['most']))
+                self.conn.execute('''
+                    INSERT INTO trade_receives (trade_id, source, key, card, quantity, most) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(trade_id, source, key) DO UPDATE SET
+                        quantity = MIN(quantity + excluded.quantity, excluded.most), most = excluded.most''',
+                                  (trade_id, source, item['key'], json.dumps(item['card']), min(quantity, most), most))
+                copies += quantity
+            return {'trade': trade_id, 'name': trade_name, 'cards': copies}
+        return self._writing(change)
+
+    def set_receive_quantity(self, trade_id, row_id, quantity):
+        """How many copies of one received card an open trade holds; 0 takes the card out"""
+        def change():
+            self._trade(trade_id)
+            row = self.conn.execute('SELECT * FROM trade_receives WHERE id = ? AND trade_id = ?', (row_id, trade_id)).fetchone()
+            if not row:
+                raise TradeError('This card is not in the trade any more')
+            if quantity <= 0:
+                self.conn.execute('DELETE FROM trade_receives WHERE id = ?', (row_id,))
+            elif quantity > row['most']:
+                raise TradeError(f"{row['source']} has only {row['most']} of it")
+            else:
+                self.conn.execute('UPDATE trade_receives SET quantity = ? WHERE id = ?', (quantity, row_id))
+        return self._writing(change)
+
     def add(self, game, name, entry_ids):
         """
         Set entries aside for the open trade with this name (made when there is none): every
@@ -107,14 +174,7 @@ class Trades:
             raise TradeError('The trade needs a name')
 
         def change():
-            trade = self.conn.execute("SELECT id, name FROM trades WHERE game = ? AND status = 'open' AND name = ? COLLATE NOCASE",
-                                      (game, name)).fetchone()
-            if trade:
-                trade_id, trade_name = trade['id'], trade['name']
-            else:
-                trade_id, trade_name = self.conn.execute(
-                    "INSERT INTO trades (game, name, status, created_at) VALUES (?, ?, 'open', ?)",
-                    (game, name, now())).lastrowid, name
+            trade_id, trade_name, made = self._open_trade(game, name)
             cards = skipped = 0
             for entry_id in dict.fromkeys(entry_ids):
                 entry = self.inventory._get_row(entry_id)
@@ -126,7 +186,7 @@ class Trades:
                                      ON CONFLICT(trade_id, inventory_id) DO UPDATE SET quantity = quantity + excluded.quantity''',
                                   (trade_id, entry_id, free))
                 cards += free
-            if not cards and not trade:
+            if not cards and made:
                 raise TradeError('None of these cards has a copy that is not in a trade already')
             return {'trade': trade_id, 'name': trade_name, 'cards': cards, 'skipped': skipped}
         return self._writing(change)

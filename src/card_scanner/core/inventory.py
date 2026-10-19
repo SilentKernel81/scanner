@@ -238,6 +238,21 @@ TRADE_CARDS_TABLE = '''
         UNIQUE (trade_id, inventory_id)
     )
 '''
+# What a trade receives: cards of someone else's collection (core/others.py), as they were when
+# they were put in (JSON) - not entries of this inventory, so nothing here is held or checked
+# against the collection. `most`: how many the other person has.
+TRADE_RECEIVES_TABLE = '''
+    CREATE TABLE IF NOT EXISTS trade_receives (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id INTEGER NOT NULL REFERENCES trades(id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        key TEXT NOT NULL,
+        card TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity > 0),
+        most INTEGER NOT NULL,
+        UNIQUE (trade_id, source, key)
+    )
+'''
 TRADE_HELD = 'These copies are set aside for a trade: take them out of the trade first'
 TRADE_TRIGGERS = (
     f'''CREATE TRIGGER IF NOT EXISTS trade_keeps_entry BEFORE DELETE ON inventory
@@ -349,6 +364,61 @@ class _Columns(dict):
 
     def get(self, column, default=None):
         return super().get(column.strip().lower(), default)
+
+
+def read_collection_csv(reader, game, finishes, imported_at, stats, log):
+    """
+    The rows of a CSV in the app's own columns (see InventoryManager.import_csv) as inventory
+    values, nothing written: the rows that cannot be used are counted in stats ('skipped' for
+    no name or set, 'errors' for the rest) and said to log. Also what an imported collection of
+    someone else is read with (core/others.py).
+    """
+    accepted = []
+    for row_number, row in enumerate(reader, start=2):
+        try:
+            # Headers as the format check reads them: "card name " is "Card Name"
+            row = _Columns(row)
+            name = (row.get('Card Name') or '').strip()
+            set_name = (row.get('Set') or '').strip()
+            if not name or not set_name:
+                log(f"Row {row_number}: skipped - missing name or set", level="warning")
+                stats['skipped'] += 1
+                continue
+            finish = (row.get('Finish') or '').strip().lower()
+            if not finish:
+                yes = lambda column: (row.get(column) or '').strip().lower() in ('yes', 'true', '1')
+                finish = 'surge' if yes('Surge') else 'foil' if yes('Foil') else finishes[0]
+            if finish not in finishes:
+                log(f"Row {row_number}: unknown finish '{finish}'", level="warning")
+                stats['errors'] += 1
+                continue
+            try:
+                quantity = max(1, int(row.get('Quantity') or 1))
+            except ValueError:
+                quantity = 1
+            try:
+                price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
+            except ValueError:
+                price = 0.0
+            timestamp = (row.get('Timestamp') or '').strip()
+            accepted.append({
+                'game': game, 'card_id': (row.get('Card ID') or '').strip() or None,
+                'card_name': name, 'set_name': set_name,
+                'set_code': (row.get('Set Code') or '').strip() or None, 'card_number': (row.get('Card Number') or '').strip(),
+                'rarity': (row.get('Rarity') or '').strip(), 'type_line': (row.get('Type') or '').strip(),
+                'mana_cost': (row.get('Mana Cost') or '').strip(), 'colors': (row.get('Colors') or '').strip(),
+                'color_identity': (row.get('Color Identity') or '').strip(), 'price_usd': price,
+                'quantity': quantity, 'condition': (row.get('Condition') or '').strip() or 'Near Mint',
+                'finish': finish,
+                'timestamp': timestamp if TIMESTAMP.match(timestamp) else now(),
+                'location': (row.get('Location') or '').strip(),
+                'tags': ', '.join(clean_tags(row.get('Tags') or '')),
+                'added_at': imported_at,
+            })
+        except Exception as e:
+            log(f"Row {row_number}: error importing card - {e}", level="error")
+            stats['errors'] += 1
+    return accepted
 
 
 def _writes(method):
@@ -480,6 +550,7 @@ class InventoryManager(storage.Transactional):
                 storage.record(self.conn, BATCHES_MIGRATION, 'new file' if new_file else 'from added_at / added_quantity')
             self.conn.execute(TRADES_TABLE)
             self.conn.execute(TRADE_CARDS_TABLE)
+            self.conn.execute(TRADE_RECEIVES_TABLE)
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_trade_cards_entry ON trade_cards(inventory_id)')
             self.conn.execute(PENDING_MOVES_TABLE)
             if 'station' not in {row['name'] for row in self.conn.execute('PRAGMA table_info(pending_moves)')}:
@@ -1734,52 +1805,8 @@ class InventoryManager(storage.Transactional):
         # The whole file is read before anything is changed: replacing the inventory with a
         # file none of whose rows can be used once left it empty
         batch, imported_at = self.new_batch()  # the whole file is one batch
-        accepted = []
         with open(csv_file_path, newline='') as f:
-            for row_number, row in enumerate(csv.DictReader(f), start=2):
-                try:
-                    # Headers as the format check reads them: "card name " is "Card Name"
-                    row = _Columns(row)
-                    name = (row.get('Card Name') or '').strip()
-                    set_name = (row.get('Set') or '').strip()
-                    if not name or not set_name:
-                        self.log(f"Row {row_number}: skipped - missing name or set", level="warning")
-                        stats['skipped'] += 1
-                        continue
-                    finish = (row.get('Finish') or '').strip().lower()
-                    if not finish:
-                        yes = lambda column: (row.get(column) or '').strip().lower() in ('yes', 'true', '1')
-                        finish = 'surge' if yes('Surge') else 'foil' if yes('Foil') else finishes[0]
-                    if finish not in finishes:
-                        self.log(f"Row {row_number}: unknown finish '{finish}'", level="warning")
-                        stats['errors'] += 1
-                        continue
-                    try:
-                        quantity = max(1, int(row.get('Quantity') or 1))
-                    except ValueError:
-                        quantity = 1
-                    try:
-                        price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
-                    except ValueError:
-                        price = 0.0
-                    timestamp = (row.get('Timestamp') or '').strip()
-                    accepted.append({
-                        'game': game, 'card_id': (row.get('Card ID') or '').strip() or None,
-                        'card_name': name, 'set_name': set_name,
-                        'set_code': (row.get('Set Code') or '').strip() or None, 'card_number': (row.get('Card Number') or '').strip(),
-                        'rarity': (row.get('Rarity') or '').strip(), 'type_line': (row.get('Type') or '').strip(),
-                        'mana_cost': (row.get('Mana Cost') or '').strip(), 'colors': (row.get('Colors') or '').strip(),
-                        'color_identity': (row.get('Color Identity') or '').strip(), 'price_usd': price,
-                        'quantity': quantity, 'condition': (row.get('Condition') or '').strip() or 'Near Mint',
-                        'finish': finish,
-                        'timestamp': timestamp if TIMESTAMP.match(timestamp) else now(),
-                        'location': (row.get('Location') or '').strip(),
-                        'tags': ', '.join(clean_tags(row.get('Tags') or '')),
-                        'added_at': imported_at,
-                    })
-                except Exception as e:
-                    self.log(f"Row {row_number}: error importing card - {e}", level="error")
-                    stats['errors'] += 1
+            accepted = read_collection_csv(csv.DictReader(f), game, finishes, imported_at, stats, self.log)
         if replace_existing and not accepted:
             return {**stats, 'success': False, 'error': 'No row of the file could be imported - the inventory was not replaced'}
         if replace_existing and (stats['skipped'] or stats['errors']):

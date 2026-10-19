@@ -82,6 +82,7 @@ class Services:
     scan_inventory = None      # what the scanner page adds to, until it is moved to the collection
     arena_inventory = None     # the digital collection (MTG Arena): filled by imports only, never by a camera
     trade_store = None        # trades.Trades: the collection's cards set aside for a trade
+    others = None             # others.Others: other people's collections (imported to trade or buy), the buy list
     review = None             # review.ReviewQueue
     deck_store = None         # decks.DeckManager
     recommend = None          # recommendations.Recommendations
@@ -108,6 +109,7 @@ inventory = LocalProxy(lambda: services.inventory)
 scan_inventory = LocalProxy(lambda: services.scan_inventory)
 arena_inventory = LocalProxy(lambda: services.arena_inventory)
 trade_store = LocalProxy(lambda: services.trade_store)
+others = LocalProxy(lambda: services.others)
 review = LocalProxy(lambda: services.review)
 deck_store = LocalProxy(lambda: services.deck_store)
 recommend = LocalProxy(lambda: services.recommend)
