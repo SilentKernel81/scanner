@@ -636,6 +636,201 @@ class SyncRoute(TemporaryData):
         sender, settled_number, outcome = self.pending.settled(f'phone-a-{number}')   # a repeated upload
         self.assertEqual((settled_number, outcome['sync_key']), (number, uid))
 
+    # --- Send to review (inventory_api.py: send_inventory_card_to_review) ---
+
+    def send(self, area, row_id):
+        """"Send to review" on an entry of the scanned cards (scan) or the collection"""
+        self.stations.capture('phone-a', 'Phone A')      # a station the registry knows
+        # The game is a stand-in: no card database here, so its lookup finds no card to suggest
+        game = mock.Mock(id=GAME, get_card=lambda card_id: None)
+        with mock.patch('card_scanner.server.inventory_api.games.active', return_value=game):
+            return self.client.post(f'/api/inventory/{row_id}/to_review?area={area}')
+
+    def test_send_to_review_the_item_waits_with_the_entry_as_suggestion_and_the_copy_is_gone(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo,
+                                    capture_key='uid-1', quiet=True)
+        answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        item = self.review.get(answer.get_json()['review_id'])
+        self.assertEqual((item['ai_name'], item['ai_number'], item['ai_set'], item['station']),
+                         ('Test Card', '1', 'tst', 'phone-a'))
+        self.assertIsNone(item['capture_key'])                 # its uid is used up: the item has none
+        self.assertTrue(review_store.ReviewQueue.image_path(item).exists())   # its own copy of the picture
+        self.assertEqual(self.total(), 0)
+
+    def test_send_to_review_the_phone_is_told_it_cannot_follow_the_capture_not_that_it_is_gone(self):
+        number, uid = self.scanned()
+        row_id = self.scan.get_all_cards(GAME)[0]['id']
+        self.assertEqual(self.send('scan', row_id).status_code, 200)
+        answer = self.client.get(f'/api/stations/phone-a/captures/{number}/sync')
+        self.assertNotEqual(answer.get_json().get('state'), 'resolved', answer.get_json())
+        self.assertEqual(answer.status_code, 409)
+
+    def test_send_to_review_a_card_without_a_capture_is_refused_and_nothing_is_queued(self):
+        row_id = self.collection.add_card(CARD, GAME, 'regular', quiet=True)
+        answer = self.send('collection', row_id)
+        self.assertEqual(answer.status_code, 400)
+        self.assertEqual(self.review.count(GAME), 0)
+
+    def test_send_to_review_a_failed_release_takes_the_item_back(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        with mock.patch.object(type(self.scan), 'release_for_review', side_effect=sqlite3.IntegrityError('held')):
+            answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 409)
+        self.assertEqual((self.review.count(GAME), self.total()), (0, 1))   # a duplicate never stays, nor a loss
+
+    def test_send_to_review_a_picture_that_could_not_be_copied_keeps_the_card_where_it_is(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        with mock.patch('card_scanner.core.review.shutil.copyfile', side_effect=OSError('disk full')):
+            answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 500)
+        self.assertEqual((self.review.count(GAME), self.total()), (0, 1))
+        self.assertEqual(len(list(inv.CAPTURES_DIR.glob('*.jpg'))), 1)    # the original picture is still there
+
+    def test_send_to_review_a_copy_moved_to_the_collection_meanwhile_takes_the_item_back(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        real_release = type(self.scan).release_for_review
+
+        def moved_first(manager, candidate):
+            # the item is queued; the copy goes to the collection before the release
+            self.collection.take_from(self.scan, GAME, station='phone-a')
+            return real_release(manager, candidate)
+
+        with mock.patch.object(type(self.scan), 'release_for_review', moved_first):
+            answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 409)
+        self.assertEqual(self.review.count(GAME), 0)           # not a second copy waiting
+        self.assertEqual(sum(card['quantity'] for card in self.collection.get_all_cards(GAME)), 1)
+
+    def test_send_to_review_a_file_that_cannot_be_deleted_after_the_change_keeps_the_item(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        with mock.patch.object(Path, 'unlink', side_effect=PermissionError('no')):
+            answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 200, answer.get_json())      # the change committed: not a failure
+        self.assertEqual((self.review.count(GAME), self.total()), (1, 0))
+
+    def test_send_to_review_clearing_the_camera_waits_for_a_card_being_sent(self):
+        import threading
+        from card_scanner.server import inventory_api
+        row_id = self.collection.add_card(CARD, GAME, 'regular', capture=self.photo, quiet=True)
+        started, finished = threading.Event(), threading.Event()
+        real_release = type(self.collection).release_for_review
+
+        def slow_release(manager, candidate):
+            started.set()                      # the item is queued, the copy has not left yet
+            self.assertFalse(finished.wait(0.3), 'the clear did not wait for the barrier')
+            return real_release(manager, candidate)
+
+        def clear():
+            started.wait()
+            inventory_api.clear_camera(mock.Mock(id=GAME), 'phone-a')
+            finished.set()
+
+        thread = threading.Thread(target=clear)
+        thread.start()
+        with mock.patch.object(type(self.collection), 'release_for_review', slow_release):
+            answer = self.send('collection', row_id)
+        thread.join(5)
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        self.assertEqual(self.total(), 0)
+        # the clear came after the send, so it removed the item of its own camera - on purpose;
+        # the point is that it never ran between the item and the release
+        self.assertTrue(finished.is_set())
+
+    def test_send_to_review_a_card_of_another_game_is_refused_and_stays(self):
+        row_id = self.scan.add_card(CARD, 'other-game', 'regular', source='phone-a', capture=self.photo, quiet=True)
+        answer = self.send('scan', row_id)
+        self.assertEqual(answer.status_code, 409)
+        self.assertEqual((self.review.count(GAME), self.review.count('other-game')), (0, 0))
+        self.assertEqual(self.scan.get_entry(row_id)['quantity'], 1)
+
+    def test_send_to_review_an_item_waiting_for_its_copy_to_leave_is_not_in_the_queue(self):
+        item = self.review.add(GAME, self.photo, 'Test Card', transfer='scan:x.jpg')
+        self.assertEqual((self.review.count(GAME), self.review.first(GAME)[0]), (0, None))
+        self.review.confirm_transfer(item)
+        self.assertEqual(self.review.count(GAME), 1)
+
+    def test_send_to_review_a_stop_before_the_copy_left_drops_the_item_at_the_next_start(self):
+        from card_scanner.server.inventory_api import finish_interrupted_sends
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        candidate = self.scan.review_candidate(row_id)
+        # what the route did up to the stop: the item written, pending; the copy still here
+        self.review.add(GAME, candidate['file'], 'Test Card', transfer=f"scan:{candidate['row']['file']}")
+        self.assertEqual(finish_interrupted_sends(), (1, 0))
+        self.assertEqual((self.review.count(GAME), self.review.pending_transfers(), self.total()), (0, [], 1))
+
+    def test_send_to_review_a_stop_after_the_copy_left_confirms_the_item_at_the_next_start(self):
+        from card_scanner.server.inventory_api import finish_interrupted_sends
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        candidate = self.scan.review_candidate(row_id)
+        self.review.add(GAME, candidate['file'], 'Test Card', transfer=f"scan:{candidate['row']['file']}")
+        self.scan.release_for_review(candidate)                  # the copy left; the stop came before the confirmation
+        self.assertEqual(finish_interrupted_sends(), (0, 1))
+        self.assertEqual((self.review.count(GAME), self.total()), (1, 0))      # exactly one of the card
+
+    def test_send_to_review_the_same_request_twice_takes_one_copy(self):
+        self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, capture_key='a', quiet=True)
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, capture_key='b', quiet=True)
+        shown = self.scan.review_candidate(row_id)['file'].name           # what the page showed
+        game = mock.Mock(id=GAME, get_card=lambda card_id: None)
+        self.stations.capture('phone-a', 'Phone A')
+
+        def send():
+            with mock.patch('card_scanner.server.inventory_api.games.active', return_value=game):
+                return self.client.post(f'/api/inventory/{row_id}/to_review?area=scan', json={'capture': f'/captures/{shown}'})
+
+        self.assertEqual(send().status_code, 200)
+        self.assertEqual(send().status_code, 409)                          # the first answer was lost: a retry
+        self.assertEqual((self.review.count(GAME), self.total()), (1, 1))  # one copy went, one stays
+
+    def test_send_to_review_the_item_is_made_durable_before_the_copy_may_leave(self):
+        flushed = []
+        review_store.REVIEW_DIR.mkdir(exist_ok=True)                           # not the first item: no new folder
+        with mock.patch('card_scanner.core.review.os.fsync', side_effect=flushed.append):
+            item = self.review.add(GAME, self.photo, 'Test Card', transfer='scan:x.jpg')
+            self.review.add(GAME, self.photo, 'Other Card')                   # a plain capture: no cost
+        self.assertEqual(len(flushed), 2)                                     # the picture and its folder, once
+        self.assertEqual(self.review.conn.execute('PRAGMA synchronous').fetchone()[0], 1)  # NORMAL again
+        self.assertIsNotNone(self.review.get(item))
+
+    def test_send_to_review_a_folder_made_for_the_first_item_is_flushed_in_its_parent(self):
+        import os
+        review_store.REVIEW_DIR = self.tmp / 'new-parent' / 'review'     # neither folder exists yet
+        opened = []
+        real_open = os.open
+        with mock.patch('card_scanner.core.review.os.open', side_effect=lambda path, *a: opened.append(Path(path)) or real_open(path, *a)):
+            self.review.add(GAME, self.photo, 'Test Card', transfer='scan:x.jpg')
+        # the picture, its folder, the folder's parent (new too) and that one's parent (existing)
+        self.assertIn(self.tmp / 'new-parent', opened)
+        self.assertIn(self.tmp, opened)
+
+    def test_send_to_review_the_release_commits_synchronous_full_and_returns_to_normal(self):
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        seen = []
+        real_committed = type(self.scan)._committed
+        type(self.scan)._committed = lambda manager: (seen.append(manager.conn.execute('PRAGMA synchronous').fetchone()[0]),
+                                                      real_committed(manager))
+        try:
+            self.scan.release_for_review(self.scan.review_candidate(row_id))
+        finally:
+            type(self.scan)._committed = real_committed
+        self.assertEqual(seen, [2])                                           # FULL while the pictures go
+        self.assertEqual(self.scan.conn.execute('PRAGMA synchronous').fetchone()[0], 1)
+
+    def test_send_to_review_a_restored_row_without_its_picture_finishes_the_release_at_start(self):
+        from card_scanner.server.inventory_api import finish_interrupted_sends
+        row_id = self.scan.add_card(CARD, GAME, 'regular', source='phone-a', capture=self.photo, quiet=True)
+        candidate = self.scan.review_candidate(row_id)
+        self.review.add(GAME, candidate['file'], 'Test Card', transfer=f"scan:{candidate['row']['file']}")
+        # A power cut: the pictures were deleted, but the commit that removed the row was taken back
+        for folder in (inv.CAPTURES_DIR, inv.FULL_CAPTURES_DIR):
+            (folder / candidate['row']['file']).unlink(missing_ok=True)
+        self.assertEqual(finish_interrupted_sends(), (0, 1))
+        self.assertEqual((self.review.count(GAME), self.total()), (1, 0))      # the card in one place: the review
+
+    def test_send_to_review_the_digital_collection_is_refused(self):
+        self.assertEqual(self.send('arena', 1).status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

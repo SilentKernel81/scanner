@@ -81,7 +81,8 @@ events against the recorded list (`tests/app_surface.json`); `tests/test_station
 page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts;
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
-the two routes, through Flask's test client); `tests/test_deck_cover.py` a deck's cover (the
+the two routes, through Flask's test client; also the route of "Send to review");
+`tests/test_send_to_review.py` sending one copy of an entry back to the review queue (storage); `tests/test_deck_cover.py` a deck's cover (the
 table's new column on an old file, which card is shown when); `tests/test_arena_export.py` the
 list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_arena_collection.py`
 the digital collection (reading an Arena export, finding its cards, replacing whole, backups)
@@ -131,7 +132,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
 | What becomes of a read card: lookup, automatic add, review, events | `server/captures.py`: `announce_and_route`, `route_identified` (returns the outcome), `search_and_emit_card`, `add_automatically`, `queue_for_review`; `server/desks.py`: `queue_changed`; `server/settings_events.py`: `set_auto_add`; `Game.suggested_finish` |
 | Stations: registry, per-station settings, list / rename / forget | `stations.py`: `Stations`, `StationSettings` (`data/stations.json`); `server/stations_api.py`: `station_list`, `station_item`, `station_undo`; `server/inventory_api.py`: `clear_camera`; `scanner.js`: `loadStations`, `renderStations` |
 | The server's stand-in for a station's camera; the stations' connection | `remote_scanner.py`: `RemoteScanner` (`METHODS`, `DECIDED`, `SENT`, `REPORTED`, `CAMERA_SETTINGS`), `CameraHub` (namespace `/station`) |
-| Review queue (per station and game) | `review.py` (`review_queue`, `data/review/`, `ANY`, `clear`); `server/scan_events.py`: `review_open` / `review_skip` / `review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
+| Review queue (per station and game) | `review.py` (`review_queue`, `data/review/`, `ANY`, `clear`); an entry sent back to it: `server/inventory_api.py`: `send_inventory_card_to_review`, `inventory.py`: `review_candidate`, `release_for_review` (no capture_key: it is noted in `unfollowed_captures`); `common.js`: `sendToReview`; `server/scan_events.py`: `review_open` / `review_skip` / `review_close`; `scanner.js`: `renderReview`, `reviewSearch` |
 | Card games (the active one drives search, finishes, exports / imports) | `games/`: `base.Game`, `mtg.Magic`, `games.active()`; plan in `docs/plans/MULTI_GAME_IMPLEMENTATION_PLAN.md` |
 | Card data: schema, updates, search, printing match, confidence | `database.py`: `CARD_COLUMNS`, `replace_table`, `card_data_info`, `search_card_exact`, `search_card`, `find_printings`, `CONFIRMED_MATCHES`, `search_key`, `names_match`; `Game.check_for_update`; `server/card_data.py`: `start_card_data_update`, `check_card_data_updates` |
 | Inventory: add / merge / undo / split / export, locations, tags, bulk edits, capture thumbnails | `inventory.py` (`KEY_COLUMNS`, `update_card`, `bulk_update`, `inventory_captures`, `data/captures/`); capture → add: `desk().pending_capture`, `card['capture']`; `scan_location` |

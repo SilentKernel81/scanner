@@ -447,6 +447,30 @@ a {
     display: block;
 }
 
+/* Where a camera-less station's live view would be: the card it sent last */
+.last-capture {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    border-radius: var(--radius);
+    background: #000;
+    overflow: hidden;
+}
+
+.last-capture img {
+    max-width: 100%;
+    max-height: min(62vh, 620px);
+    object-fit: contain;
+    display: block;
+}
+
+.last-capture-empty {
+    padding: 24px;
+    color: #aaa;
+    text-align: center;
+}
+
 /* Shown instead of the image while there is no camera */
 .camera-missing {
     position: absolute;
@@ -493,7 +517,7 @@ a {
 }
 
 .status-icon {
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1;
 }
 
@@ -663,6 +687,65 @@ a {
     flex-direction: column;
     gap: 6px;
 }
+
+/* The dropdown under the one-value dialog's input (library.js: showValueSuggestions): floats over
+   the dialog, exactly as wide as the input. The dialog's body would cut it off, so it does not scroll here */
+#value-modal .modal-body { overflow: visible; }
+.value-field { position: relative; }
+.value-field input { padding-right: 36px; }
+.value-toggle {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 34px;
+    border: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+}
+.value-toggle:hover { background: var(--accent-soft); }
+.value-toggle[hidden] { display: none; }
+.value-suggest {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 2px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+.value-suggest[hidden] { display: none; }
+.value-suggest-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.value-suggest-heading {
+    margin-top: 4px;
+    padding: 4px 12px 2px;
+    border-top: 1px solid var(--border);
+    color: var(--text-subtle);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.value-suggest-item:hover,
+.value-suggest-item.active { background: var(--accent-soft); }
 
 /* Settings: a station (a camera elsewhere) - name and location, then its count and actions */
 .station {
@@ -1288,7 +1371,7 @@ input[type="radio"] {
     border-radius: var(--radius-sm);
     background: var(--accent-soft);
     color: var(--accent);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 550;
 }
 
@@ -1648,7 +1731,7 @@ input[type="radio"] {
 
 .capture-grid figcaption {
     margin-top: 3px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
 }
@@ -1667,7 +1750,7 @@ input[type="radio"] {
 }
 
 .capture-more span {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     color: var(--text-muted);
 }
@@ -1699,6 +1782,24 @@ input[type="radio"] {
 
 .capture-modal {
     max-width: 960px;
+}
+
+.capture-grid img[data-full] {
+    cursor: zoom-in;
+}
+
+.capture-viewer {
+    max-width: 760px;
+}
+
+.capture-viewer img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(90vh - 140px);
+    margin: 0 auto;
+    object-fit: contain;
+    border-radius: 6px;
+    background: var(--surface-2);
 }
 
 .capture-grid.large {
@@ -1750,7 +1851,7 @@ input[type="radio"] {
     border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
 }
 
@@ -1773,7 +1874,7 @@ input[type="radio"] {
 
 .inventory-price-each,
 .inventory-timestamp {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-subtle);
 }
 
@@ -1783,7 +1884,8 @@ input[type="radio"] {
 }
 
 .btn-edit,
-.btn-delete {
+.btn-delete,
+.btn-review {
     display: grid;
     place-items: center;
     width: 32px;
@@ -1797,12 +1899,14 @@ input[type="radio"] {
 }
 
 .btn-edit .icon,
-.btn-delete .icon {
+.btn-delete .icon,
+.btn-review .icon {
     width: 15px;
     height: 15px;
 }
 
-.btn-edit:hover {
+.btn-edit:hover,
+.btn-review:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
     color: var(--accent);
@@ -2053,7 +2157,7 @@ input[type="radio"] {
 }
 
 .prompt-test .test-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 650;
     text-transform: uppercase;
     letter-spacing: 0.06em;

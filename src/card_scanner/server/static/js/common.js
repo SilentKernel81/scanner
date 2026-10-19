@@ -402,6 +402,39 @@ document.addEventListener('keydown', event => {
     stepEditCard(event.key === 'ArrowLeft' ? -1 : 1);
 });
 
+async function sendToReview(rowId, cardName, capture) {
+    // One copy goes back to the review queue with its capture (the "wrong card or printing"
+    // button of an entry): the printing it was added as is only the suggestion there. Asked
+    // first, since the copy leaves this list - and a collection card comes back through the
+    // scanned cards, without its location, tags and condition
+    const scanned = typeof inventoryArea === 'string' && inventoryArea === 'scan';
+    const ok = await confirmDialog({
+        title: `Send ${cardName} back to review?`,
+        message: `One copy leaves ${scanned ? 'the scanned cards' : 'your collection'} and waits in the review queue with its `
+            + 'capture, where you can search for the right printing. Added from there, it goes into the scanned cards'
+            + (scanned ? '.' : ' - move it to the collection again after (its location, tags and condition are not kept).'),
+        confirmText: 'Send to review'
+    });
+    if (!ok) return;
+    try {
+        // capture: the copy that is shown (its picture) - the one that goes, however often this is sent
+        const response = await fetch(`/api/inventory/${rowId}/to_review${areaQuery()}`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({capture})});
+        const data = await response.json();
+        if (!data.success) {
+            notify(data.error || 'Not sent', 'error');
+            if (response.status === 409) inventoryChanged();   // the list was out of date
+            return;
+        }
+        notify(data.message, 'success');
+        inventoryChanged();
+    } catch (error) {
+        // The answer may have been lost after the card was sent: show what is there now
+        notify(`No answer (${error.message}) - the list is reloaded, check whether the card was sent`, 'error');
+        inventoryChanged();
+    }
+}
+
 async function deleteCard(rowId, cardName) {
     const ok = await confirmDialog({
         title: 'Delete card?',
@@ -723,7 +756,7 @@ function captureGridHtml(card, max = Infinity) {
     const more = card.captures.length - shown.length;
     return shown.map(capture => `
         <figure>
-            <img src="${escapeHtml(capture.url)}" alt="${escapeHtml(card.name)}" loading="lazy">
+            <img src="${escapeHtml(capture.url)}" data-full="${escapeHtml(capture.url)}?size=full" alt="${escapeHtml(card.name)}" loading="lazy">
             <figcaption>${escapeHtml(capture.captured_at)}</figcaption>
         </figure>`).join('')
         + (more > 0 ? `<div class="capture-more">+${more} more<br><span>click to see all</span></div>` : '');
@@ -759,3 +792,25 @@ function openCaptures(card) {
 function closeCaptures() {
     document.getElementById('capture-modal').classList.remove('show');
 }
+
+function openCaptureViewer(url, title) {
+    // One capture large: the server answers ?size=full with the large copy kept with it, or
+    // the thumbnail when there is none
+    const image = document.getElementById('capture-viewer-image');
+    image.removeAttribute('src');   // not the previous picture while this one loads
+    image.src = url.includes('?') ? url : `${url}?size=full`;
+    document.getElementById('capture-viewer-title').textContent = title;
+    document.getElementById('capture-viewer').classList.add('show');
+}
+
+function closeCaptureViewer() {
+    document.getElementById('capture-viewer').classList.remove('show');
+}
+
+// A click on a picture in the captures window opens it large
+document.addEventListener('click', event => {
+    const image = event.target.closest('#capture-grid img[data-full]');
+    if (!image) return;
+    const caption = image.parentElement.querySelector('figcaption');
+    openCaptureViewer(image.dataset.full, `${image.alt}${caption ? ' - ' + caption.textContent : ''}`);
+});

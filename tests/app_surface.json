@@ -248,6 +248,13 @@
    "inventory_entry_printings"
   ],
   [
+   "/api/inventory/<int:row_id>/to_review",
+   [
+    "POST"
+   ],
+   "send_inventory_card_to_review"
+  ],
+  [
    "/api/inventory/bulk",
    [
     "POST"
@@ -283,6 +290,13 @@
     "PUT"
    ],
    "update_inventory_card"
+  ],
+  [
+   "/api/last_capture",
+   [
+    "GET"
+   ],
+   "last_capture"
   ],
   [
    "/api/local_ai_models",
@@ -456,6 +470,20 @@
    "get_stats"
   ],
   [
+   "/api/storage/cleanup",
+   [
+    "POST"
+   ],
+   "storage_cleanup"
+  ],
+  [
+   "/api/storage/compress",
+   [
+    "POST"
+   ],
+   "storage_compress"
+  ],
+  [
    "/api/trades",
    [
     "GET",
@@ -491,6 +519,13 @@
     "GET"
    ],
    "trade_export"
+  ],
+  [
+   "/capture_images/<path:name>",
+   [
+    "GET"
+   ],
+   "capture_image"
   ],
   [
    "/captures/<path:name>",

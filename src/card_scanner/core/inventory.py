@@ -52,11 +52,11 @@ def set_full_capture_size(name):
     return name
 
 
-def full_capture_usage():
-    """(number of large copies, bytes they take) - a look at the folder, for the settings page"""
+def folder_usage(folder):
+    """(number of files, bytes they take) in one folder - a look at it, for the settings page"""
     count = size = 0
     try:
-        with os.scandir(FULL_CAPTURES_DIR) as entries:
+        with os.scandir(folder) as entries:
             for entry in entries:
                 if entry.is_file():
                     count += 1
@@ -64,6 +64,58 @@ def full_capture_usage():
     except OSError:
         pass  # no folder yet: nothing kept
     return count, size
+
+
+def full_capture_usage():
+    """(number of large copies, bytes they take)"""
+    return folder_usage(FULL_CAPTURES_DIR)
+
+
+def compress_full_captures(height, lock=None, progress=None):
+    """
+    Make the large copies already kept no taller than `height` px (the "Capture size" choice
+    only applies to new captures). A copy is only replaced when the new one is smaller, never
+    made bigger, and by writing a new file beside it and renaming it over: a reader (or a
+    backup's hard link to the old file) sees the old or the new, never half of one. `lock` is
+    held for one file at a time, so a capture arriving is not kept waiting for the whole run.
+    progress(done, total) is called after each file. Returns (files made smaller, bytes freed).
+    """
+    import cv2
+    try:
+        names = sorted(entry.name for entry in os.scandir(FULL_CAPTURES_DIR) if entry.is_file())
+    except OSError:
+        return 0, 0
+    changed = freed = 0
+    for index, name in enumerate(names, 1):
+        path = FULL_CAPTURES_DIR / name
+        temp = FULL_CAPTURES_DIR / f'.compress-{name}'  # still .jpg: imwrite picks the format by it
+        try:
+            with (lock if lock is not None else threading.Lock()):
+                before = path.stat().st_size
+                image = cv2.imread(str(path))
+                if image is None:
+                    continue  # not a picture (or one still being written)
+                if image.shape[0] > height:
+                    image = cv2.resize(image, (round(image.shape[1] * height / image.shape[0]), height),
+                                       interpolation=cv2.INTER_AREA)
+                    if cv2.imwrite(str(temp), image, [cv2.IMWRITE_JPEG_QUALITY, FULL_CAPTURE_QUALITY]) \
+                            and temp.stat().st_size < before:
+                        os.replace(temp, path)
+                        changed += 1
+                        freed += before - path.stat().st_size
+        except Exception as e:
+            logger.warning(f"Could not compress the large copy {name}: {e}")
+        finally:
+            temp.unlink(missing_ok=True)
+        if progress:
+            progress(index, len(names))
+    return changed, freed
+
+
+def thumbnail_usage():
+    """(number of small copies, bytes they take)"""
+    return folder_usage(CAPTURES_DIR)
+
 
 # One row per card + set + number + condition + finish + location, per game. Rows are
 # addressed by id. tags: "trade, keep" - not part of the key (see clean_tags). timestamp: when
@@ -351,8 +403,13 @@ class InventoryManager(storage.Transactional):
         rolled back, their rows are there again and still need the files"""
         doomed, self._doomed = self._doomed, []
         for file in doomed:
-            (CAPTURES_DIR / file).unlink(missing_ok=True)
-            (FULL_CAPTURES_DIR / file).unlink(missing_ok=True)
+            # The change is committed: a file that cannot be deleted is a leftover (the
+            # clean-up of unused pictures can find it), never a reason to report the change failed
+            for folder in (CAPTURES_DIR, FULL_CAPTURES_DIR):
+                try:
+                    (folder / file).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.warning(f"Could not delete the picture {folder / file}: {e}")
 
     def _rollback(self):
         self.conn.rollback()
@@ -995,6 +1052,124 @@ class InventoryManager(storage.Transactional):
         with self._lock:
             return {row['capture_key'] for row in self.conn.execute(query, values)}
 
+    def _give_up_copy(self, row):
+        """
+        One copy of an entry leaves, together with its photo row (row: id, inventory_id,
+        station, quantity of the entry - as captured_copy and review_candidate read it). The
+        station gives up the copy it scanned. After a split its row beside this entry may be
+        missing (which station owns a moved copy is worked out from the newest photos,
+        _move_sources): then the stations together must still not claim more copies than are
+        left. Not committed - the caller does (inside a @_writes method or its own lock).
+        """
+        entry, station = row['inventory_id'], row['station']
+        self._delete_captures('id = ?', (row['id'],))
+        had = self.conn.execute('SELECT quantity FROM inventory_sources WHERE inventory_id = ? AND station = ?',
+                                (entry, station)).fetchone() if station else None
+        if had:
+            self._set_source(entry, station, had['quantity'] - 1)
+        self._trim_sources(entry, row['quantity'] - 1)
+        self._take_copies(entry, 1)  # the entry itself goes with its last copy
+        # The station's Undo would take another copy of this entry if it pointed here
+        last = self.last_added.get(station)
+        if last and (last[0] == entry or last[2] == row['id']):
+            self.last_added.pop(station, None)
+
+    def has_picture(self, file):
+        """Is there a copy here whose photo row names this picture file? (a card sent back to review
+        names its copy by the file - unique, unlike a row id that may be used again)"""
+        with self._lock:
+            return self.conn.execute('SELECT 1 FROM inventory_captures WHERE file = ?', (file,)).fetchone() is not None
+
+    def review_candidate(self, row_id, file=None):
+        """
+        The copy "Send to review" would send back (read only): the newest capture of the entry
+        - the one a lowered quantity would drop first - as {'row' (for release_for_review), 'entry',
+        'file' (the best picture of it that exists, a Path), 'station', 'capture_key'}, or None:
+        no such entry, or no picture of any copy (then there is nothing to review it by).
+        file: the copy the person was shown (its picture file, as the list gave it): only that
+        one is sent, so a request repeated after its answer was lost finds the copy gone (None)
+        instead of taking another. Without it, the newest.
+        """
+        with self._lock:
+            entry = self._get_row(row_id)
+            if not entry:
+                return None
+            row = self.conn.execute(
+                f'''SELECT c.id, c.inventory_id, c.file, c.station, c.capture_key, i.quantity FROM inventory_captures c
+                   JOIN inventory i ON i.id = c.inventory_id WHERE c.inventory_id = ?{' AND c.file = ?' if file else ''}
+                   ORDER BY c.id DESC LIMIT 1''', (row_id, file) if file else (row_id,)).fetchone()
+        if row is None:
+            return None
+        # The large copy when there is one: the reviewer compares it with the printings
+        file = next((path for path in (FULL_CAPTURES_DIR / row['file'], CAPTURES_DIR / row['file']) if path.exists()), None)
+        if file is None:
+            return None
+        return {'row': dict(row), 'entry': dict(entry), 'file': file, 'station': row['station'],
+                'capture_key': row['capture_key']}
+
+    def release_for_review(self, candidate):
+        """The copy of review_candidate leaves the entry (_release_for_review), the commit being
+        synchronous=FULL: the pictures are deleted right after it, and a power cut that took the
+        commit back would leave the row without them (the databases are NORMAL otherwise,
+        storage.connect). The pragma does nothing inside a transaction, hence set out here."""
+        with self._lock:
+            self.conn.execute('PRAGMA synchronous = FULL')
+            try:
+                self._release_for_review(candidate)
+            finally:
+                self.conn.execute('PRAGMA synchronous = NORMAL')
+
+    def release_by_picture(self, file):
+        """Finish a release that was cut short: the copy whose photo row names this picture
+        leaves (its picture is gone already). False when no such copy is here."""
+        with self._lock:
+            row = self.conn.execute(
+                '''SELECT c.id, c.inventory_id, c.file, c.station, c.capture_key, i.quantity, i.card_name
+                   FROM inventory_captures c JOIN inventory i ON i.id = c.inventory_id WHERE c.file = ?''',
+                (file,)).fetchone()
+            if row is None:
+                return False
+            self.release_for_review({'row': dict(row), 'entry': {'card_name': row['card_name']}})
+            return True
+
+    def picture_exists(self, file):
+        """Is the picture file of a copy on the disk (the small one or the large one)?"""
+        return (CAPTURES_DIR / file).exists() or (FULL_CAPTURES_DIR / file).exists()
+
+    @_writes
+    def _release_for_review(self, candidate):
+        """
+        The copy of review_candidate leaves the entry because it was queued for review: one
+        copy, its photo row and its station's count (as when its station removes it). Raises
+        when it cannot (an open trade holds the copies: the trigger refuses) - the whole change is
+        rolled back then. Its capture's key, if it has one, is noted as not followable: the review
+        item that now holds the card is not under that key (the key is used up in applied_captures,
+        and the card added from the review would be refused as added before), so a phone asking
+        about the capture must be told "cannot be followed", never "gone".
+        """
+        with self._lock:
+            # The candidate was read some time ago (the review's picture was copied since, and an
+            # edit of the entry does not wait for it): read the copy again, joined to the entry it
+            # is in now. A copy that left the entry (split, merged, moved) or went is not this
+            # candidate any more - releasing it would take the wrong copy - and the change is refused
+            was = candidate['row']
+            row = self.conn.execute(
+                '''SELECT c.id, c.inventory_id, c.station, c.capture_key, i.quantity FROM inventory_captures c
+                   JOIN inventory i ON i.id = c.inventory_id WHERE c.id = ?''', (was['id'],)).fetchone()
+            if row is None or row['inventory_id'] != was['inventory_id']:
+                raise ValueError('The card was changed meanwhile - try again')
+            self._give_up_copy(row)  # with the entry's quantity and the station as they are now
+            if row['capture_key']:
+                self.conn.execute('INSERT OR IGNORE INTO unfollowed_captures (key, station, noted_at) VALUES (?, ?, ?)',
+                                  (row['capture_key'], row['station'], now()))
+            self._commit()
+        # Committed: nothing after this may raise - the caller takes any exception for "the copy
+        # did not leave" and takes the review item back (a failing log callback must not)
+        try:
+            self.log(f"Sent back to review: {candidate['entry']['card_name']}")
+        except Exception:
+            logger.exception('Could not log a card sent back to review')
+
     def captured_copy(self, capture_key, station, remove=False):
         """
         Where the copy of one capture is (a phone asks about its scans; server/stations_api.py:
@@ -1026,22 +1201,7 @@ class InventoryManager(storage.Transactional):
                 return 'unfollowed', None  # not this station's to ask about or remove
             if not remove:
                 return 'scanned', row['card_name']
-            entry = row['inventory_id']
-            self._delete_captures('id = ?', (row['id'],))
-            # The station gives up the copy it scanned. After a split its row beside this
-            # entry may be missing (which station owns a moved copy is worked out from the
-            # newest photos, _move_sources): then the stations together must still not claim
-            # more copies than are left
-            had = self.conn.execute('SELECT quantity FROM inventory_sources WHERE inventory_id = ? AND station = ?',
-                                    (entry, station)).fetchone()
-            if had:
-                self._set_source(entry, station, had['quantity'] - 1)
-            self._trim_sources(entry, row['quantity'] - 1)
-            self._take_copies(entry, 1)  # the entry itself goes with its last copy
-            # The station's Undo would take another copy of this entry if it pointed here
-            last = self.last_added.get(station)
-            if last and (last[0] == entry or last[2] == row['id']):
-                self.last_added.pop(station, None)
+            self._give_up_copy(row)
             self._commit()
         self.log(f"Removed from the scanned cards: {row['card_name']} (its capture was removed at the station)")
         return 'removed', row['card_name']

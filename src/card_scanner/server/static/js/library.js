@@ -125,6 +125,23 @@ function bindColorChips(id, colors, changed) {
 // -- One value for a bulk action ----------------------------------------------
 
 let valueResolve = null;
+let valueSuggestions = [];   // the suggestions of the open dialog, for the list under its input
+
+function showValueSuggestions(all = false) {
+    // Our own list instead of the browser's <datalist>, whose popup was narrower than the
+    // input and cannot be styled. Narrowed by what is typed (all: every suggestion). A suggestion
+    // is a text, or [text, group heading]: a group gets its heading above its first suggestion
+    const list = $('value-suggest'), text = $('value-input').value.trim().toLowerCase();
+    const found = valueSuggestions.filter(([option]) => all || !text || option.toLowerCase().includes(text))
+        .filter(([option]) => option.toLowerCase() !== text || all);
+    let group = '';
+    list.innerHTML = found.map(([option, heading]) => {
+        const title = heading && heading !== group ? `<div class="value-suggest-heading">${escapeHtml(heading)}</div>` : '';
+        group = heading || group;
+        return `${title}<button type="button" class="value-suggest-item">${escapeHtml(option)}</button>`;
+    }).join('');
+    list.hidden = found.length === 0;
+}
 
 function valueDialog({title, label, options = [], choices = null, value = ''}) {
     // Free text with suggestions (options), or one of choices ([[value, label]]); resolves
@@ -140,8 +157,10 @@ function valueDialog({title, label, options = [], choices = null, value = ''}) {
             select.innerHTML = optionsHtml(choices);
         } else {
             input.value = value;
-            $('value-options').innerHTML = options.map(option => `<option value="${escapeHtml(option)}"></option>`).join('');
+            valueSuggestions = options.map(option => Array.isArray(option) ? option : [option, '']);
         }
+        $('value-suggest').hidden = true;
+        $('value-toggle').hidden = !!choices || !options.length;   // the chevron: there is a list to open
         $('value-modal').classList.add('show');
         (choices ? select : input).focus();
     });
@@ -199,7 +218,44 @@ function bindValueDialog() {
     // OK and Enter answer the dialog that asks for one value (valueDialog above)
     $('value-ok').addEventListener('click', () =>
         closeValueDialog($('value-select').hidden ? $('value-input').value.trim() : $('value-select').value));
-    $('value-input').addEventListener('keydown', event => { if (event.key === 'Enter') $('value-ok').click(); });
+    $('value-input').addEventListener('keydown', event => {
+        const list = $('value-suggest'), items = [...list.querySelectorAll('.value-suggest-item')];
+        const current = items.findIndex(item => item.classList.contains('active'));
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            // Up and down walk the list (down opens it); the walked-to one goes into the input
+            event.preventDefault();
+            if (list.hidden) showValueSuggestions(true);
+            const all = [...list.querySelectorAll('.value-suggest-item')];
+            if (!all.length) return;
+            const next = event.key === 'ArrowDown' ? Math.min(current + 1, all.length - 1) : Math.max(current - 1, 0);
+            all.forEach((item, index) => item.classList.toggle('active', index === next));
+            all[next].scrollIntoView({block: 'nearest'});
+            $('value-input').value = all[next].textContent;
+        } else if (event.key === 'Enter') {
+            // With the list open, Enter takes the highlighted one first; a second Enter confirms
+            if (!list.hidden && current >= 0) { list.hidden = true; return; }
+            $('value-ok').click();
+        } else if (event.key === 'Escape' && !list.hidden) {
+            list.hidden = true;
+            event.stopPropagation();
+        }
+    });
+    $('value-input').addEventListener('input', () => showValueSuggestions());
+    // The list opens on the chevron (or a click in the box, or down); it is closed when the dialog opens
+    $('value-input').addEventListener('click', () => { if ($('value-suggest').hidden) showValueSuggestions(true); });
+    $('value-toggle').addEventListener('mousedown', event => {
+        event.preventDefault();   // the input keeps focus
+        if ($('value-suggest').hidden) showValueSuggestions(true); else $('value-suggest').hidden = true;
+        $('value-input').focus();
+    });
+    // mousedown, not click: the input must not lose focus (and the list vanish) before the pick
+    $('value-suggest').addEventListener('mousedown', event => {
+        const item = event.target.closest('.value-suggest-item');
+        if (!item) return;
+        event.preventDefault();
+        $('value-input').value = item.textContent;
+        $('value-suggest').hidden = true;
+    });
 }
 
 function bindCardPreview() {

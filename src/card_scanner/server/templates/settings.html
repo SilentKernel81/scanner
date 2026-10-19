@@ -7,8 +7,8 @@
     <title>Settings - Card Scanner</title>
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=54">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=61">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=3">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -239,6 +239,10 @@
                     <div class="settings-card">
                         <h3>Storage</h3>
                         <div class="input-group">
+                            <label>Capture files in use</label>
+                            <div class="storage-usage" id="capture-usage">Loading...</div>
+                        </div>
+                        <div class="input-group">
                             <label for="capture-copy-size">Capture size (all cameras)</label>
                             <select id="capture-copy-size" class="select narrow">
                                 <option value="off">Off - thumbnails only</option>
@@ -247,6 +251,18 @@
                                 <option value="large">Large - 1200 px tall, about 145 KB each</option>
                             </select>
                             <div class="hint" id="capture-copy-hint">Loading...</div>
+                        </div>
+                        <div class="input-group">
+                            <label for="cleanup-days">Keep the pictures received from the cameras for (days)</label>
+                            <input type="number" id="cleanup-days" class="text-input narrow" min="1" max="3650" step="1">
+                            <div class="hint">Older ones are deleted when the server starts and once a day. The thumbnails and large copies kept with the collection's cards are not touched.</div>
+                            <button type="button" id="cleanup-now" class="btn btn-block">Clean up now</button>
+                            <div class="hint" id="cleanup-result"></div>
+                        </div>
+                        <div class="input-group">
+                            <label>Large copies</label>
+                            <button type="button" id="compress-copies" class="btn btn-block">Compress large copies</button>
+                            <div class="hint" id="compress-hint">Makes the copies already kept as small as the capture size above (only ever smaller). Backups keep the old files until they are deleted.</div>
                         </div>
                         <label class="switch-row">
                             <span class="switch-text">
@@ -324,7 +340,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=21"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=24"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=8"></script>
 </body>
 </html>

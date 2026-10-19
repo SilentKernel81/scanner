@@ -2,7 +2,8 @@
 # FILE: server/lock.py
 # The settings password: an optional lock on the few actions that can hurt
 # beyond one card - the AI keys and endpoint, restarting or stopping the server,
-# who may reach it, debug mode, and the backups (restore, upload, download, delete).
+# who may reach it, debug mode, the backups (restore, upload, download, delete) and what the
+# Storage card deletes or shrinks (clean up, compress, how many days pictures are kept).
 #
 # The pages have no login by design (the cameras, the phone and the other
 # computers just work), so anyone who can reach the server could do these.

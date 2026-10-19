@@ -26,6 +26,18 @@ GUARDED = [('post', '/api/restart'), ('post', '/api/quit'), ('post', '/api/netwo
            ('delete', '/api/backups/x'), ('post', '/api/backups/full')]
 
 
+class FakeSettings:
+    """The server's saved settings (data/settings.json) as a dictionary of what was saved"""
+    def __init__(self):
+        self.saved = {}
+
+    def get(self, key, default=None):
+        return self.saved.get(key, default)
+
+    def set(self, key, value):
+        self.saved[key] = value
+
+
 class SettingsLock(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -63,6 +75,45 @@ class SettingsLock(unittest.TestCase):
             self.assertEqual(answer.status_code, 401, path)
             self.assertTrue(answer.get_json()['locked'], path)
         self.stopped.assert_not_called()       # the locked restart did nothing
+
+    def test_the_storage_actions_are_locked_and_start_nothing(self):
+        # Cleaning up, compressing and the days pictures are kept: refused before anything runs
+        # (the real actions are stubbed: none may run here either way)
+        events = sys.modules['card_scanner.server.settings_events']
+        settings = FakeSettings()
+        with mock.patch.object(events, 'app_settings', settings), \
+                mock.patch.object(events, 'run_image_cleanup') as cleanup, \
+                mock.patch.object(events.threading, 'Thread') as thread:
+            self.set_password()
+            stranger = app.test_client()
+            for path, body in (('/api/storage/cleanup', {}), ('/api/storage/compress', {}),
+                               ('/api/capture_copy', {'cleanup_days': 1})):
+                answer = stranger.post(path, json=body, base_url=BASE)
+                self.assertEqual(answer.status_code, 401, path)
+                self.assertTrue(answer.get_json()['locked'], path)
+            cleanup.assert_not_called()
+            thread.assert_not_called()
+            self.assertEqual(settings.saved, {})
+            # The rest of the capture settings stays open
+            answer = stranger.post('/api/capture_copy', json={'keep_frames': True}, base_url=BASE)
+            self.assertEqual(answer.status_code, 200, answer.get_json())
+            self.assertEqual(settings.saved, {'keep_frames': True})
+
+    def test_the_storage_actions_work_for_an_unlocked_browser(self):
+        events = sys.modules['card_scanner.server.settings_events']
+        settings = FakeSettings()
+        with mock.patch.object(events, 'app_settings', settings), \
+                mock.patch.object(events, 'run_image_cleanup', return_value=(3, 1.5)) as cleanup, \
+                mock.patch.object(events.threading, 'Thread') as thread:
+            answer = self.call('post', '/api/storage/cleanup', json={})
+            self.assertEqual((answer.status_code, answer.get_json()['deleted_files']), (200, 3))
+            cleanup.assert_called_once()
+            self.assertEqual(self.call('post', '/api/capture_copy', json={'cleanup_days': 3}).status_code, 200)
+            self.assertEqual(settings.saved, {'cleanup_days': 3})
+            self.assertEqual(self.call('post', '/api/capture_copy', json={'cleanup_days': 0}).status_code, 400)
+            self.assertEqual(self.call('post', '/api/storage/compress', json={}).status_code, 200)
+            thread.assert_called_once()
+            events.compress_state['running'] = False   # the stubbed thread never ends it
 
     def test_the_listings_and_scanning_stay_open(self):
         self.set_password()

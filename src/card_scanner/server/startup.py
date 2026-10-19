@@ -15,7 +15,7 @@ except ImportError:  # not on Linux or macOS: no lock, as before
     fcntl = None
 
 from card_scanner.core import arena
-from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
+from card_scanner.core.cleanup import get_images_stats
 from card_scanner.config import Config
 from card_scanner.core.database import CardDatabase
 from card_scanner.core.decks import DeckManager
@@ -38,7 +38,8 @@ from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, 
 from card_scanner.server.captures import resume_pending
 from card_scanner.server.card_data import run_update_checks, start_card_data_update
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
-from card_scanner.server.settings_events import saved_debug_mode
+from card_scanner.server.inventory_api import finish_interrupted_sends
+from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
 
 # Routes and Socket.IO events exist once their module has been imported. Every module that
 # defines some is named here - also those this file uses nothing else of. A module missing
@@ -98,6 +99,7 @@ def initialize_components():
     arena.prepare(services.arena_inventory)   # the table for the wildcards and the import's date
     services.trade_store = Trades(services.inventory)
     services.review = ReviewQueue()
+    finish_interrupted_sends()  # cards being sent back to review when the program stopped
     services.pending = PendingCaptures()
     services.deck_store = DeckManager()
     services.recommend = Recommendations()
@@ -121,39 +123,33 @@ def initialize_components():
 
 
 def run_cleanup_background():
-    """Run cleanup in a background thread"""
+    """Clean away old received pictures: a few seconds after start, then once a day (a server
+    that stays up for weeks would otherwise only clean at its next restart). The days kept are
+    the person's choice (Settings > Storage), read at every run"""
     if not Config.CLEANUP_ENABLED:
         logger.info("Background cleanup disabled in configuration")
         return
 
     def cleanup_task():
-        try:
-            # Wait a few seconds after startup before cleaning
-            time.sleep(5)
+        time.sleep(5)  # a few seconds after startup
+        while True:
+            try:
+                days = cleanup_days()
+                logger.info(f"Starting background cleanup of scanned images (keeping last {days} days)...")
+                stats_before = get_images_stats()
+                if stats_before['count'] > 0:
+                    logger.info(f"Images before cleanup: {stats_before['count']} files, {stats_before['total_size_mb']:.2f} MB, oldest: {stats_before['oldest_days']:.1f} days")
+                    files_deleted, space_freed = run_image_cleanup()
+                    if files_deleted > 0:
+                        logger.info(f"Cleanup complete: Deleted {files_deleted} old images, freed {space_freed:.2f} MB")
+                    else:
+                        logger.info("Cleanup complete: No old images to remove")
+                else:
+                    logger.info("No images found to clean up")
+            except Exception as e:
+                logger.error(f"Error during background cleanup: {e}")
+            time.sleep(24 * 60 * 60)
 
-            logger.info(f"Starting background cleanup of scanned images (keeping last {Config.CLEANUP_DAYS} days)...")
-
-            # Get stats before cleanup
-            stats_before = get_images_stats()
-            if stats_before['count'] > 0:
-                logger.info(f"Images before cleanup: {stats_before['count']} files, {stats_before['total_size_mb']:.2f} MB, oldest: {stats_before['oldest_days']:.1f} days")
-            else:
-                logger.info("No images found to clean up")
-                return
-
-            # Clean up images older than configured days
-            with maintenance_barrier:  # not while a full backup is collecting the pictures
-                files_deleted, space_freed = cleanup_old_images(days_to_keep=Config.CLEANUP_DAYS)
-
-            if files_deleted > 0:
-                logger.info(f"Cleanup complete: Deleted {files_deleted} old images, freed {space_freed:.2f} MB")
-            else:
-                logger.info("Cleanup complete: No old images to remove")
-
-        except Exception as e:
-            logger.error(f"Error during background cleanup: {e}")
-
-    # Start cleanup in background thread
     cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
     cleanup_thread.start()
     logger.info("Background cleanup thread started")

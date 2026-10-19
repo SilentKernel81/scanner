@@ -45,10 +45,26 @@ function setButton(id, text, disabled = false) {
 socket.on('connect', function() {
     audioManager.ensureAudioContext();
     loadStats();
+    if (STATION && !STATION.camera) {
+        fetch('/api/last_capture').then(r => r.json()).then(d => showLastCapture(d.url)).catch(() => {});
+    }
     // The server closes a review when its page disconnects: open it again
     if (reviewItem) openReview();
     startDetectionPolling();
     loadScanSettings();
+});
+
+// A camera-less station (a phone) has no live view: its page shows the card it sent last
+function showLastCapture(url) {
+    const image = document.getElementById('last-capture-image');
+    if (!image || !url) return;
+    image.src = url;
+    image.hidden = false;
+    document.getElementById('last-capture-empty').hidden = true;
+}
+
+socket.on('capture_received', function(data) {
+    showLastCapture(data.url);
 });
 
 socket.on('log', function(data) {
@@ -663,10 +679,9 @@ function deleteReviewItem() {
 }
 
 function zoomReviewCapture() {
-    $('capture-title').textContent = 'Capture';
-    $('capture-grid').innerHTML =
-        `<figure><img src="${escapeHtml(reviewItem.image_url)}" alt="Capture"><figcaption>${escapeHtml(reviewItem.captured_at)}</figcaption></figure>`;
-    $('capture-modal').classList.add('show');
+    // The same large viewer as the other pages' captures (common.js: openCaptureViewer); the
+    // item's picture is the capture's large copy when it had one (the route ignores ?size=full)
+    openCaptureViewer(reviewItem.image_url, `Capture - ${reviewItem.captured_at}`);
 }
 
 function hideReviewPanel() {
@@ -1252,6 +1267,9 @@ function inventoryRowHtml(card, index) {
             </div>
             <div class="inventory-card-actions">
                 ${card.shared ? '<span class="hint" title="Another camera scanned copies into the same entry. Choose All cameras to edit or delete it.">shared</span>' : `
+                ${card.captures && card.captures.length ? `<button class="btn-review" data-id="${card.id}" title="Send it back to review">
+                    <svg class="icon"><use href="#i-refresh"/></svg>
+                </button>` : ''}
                 <button class="btn-edit" data-id="${card.id}" title="Edit">
                     <svg class="icon"><use href="#i-edit"/></svg>
                 </button>
@@ -1328,11 +1346,13 @@ function setupInventoryList() {
     const list = $('inventory-list');
 
     list.addEventListener('click', function(event) {
-        const button = event.target.closest('.btn-edit, .btn-delete, button.inventory-thumb');
+        const button = event.target.closest('.btn-edit, .btn-delete, .btn-review, button.inventory-thumb');
         const card = inventoryEntry(button);
         if (!card) return;
         if (button.classList.contains('inventory-thumb')) {
             openCaptures(card);
+        } else if (button.classList.contains('btn-review')) {
+            sendToReview(card.id, card.name, card.captures[0].url);
         } else if (button.classList.contains('btn-delete')) {
             deleteCard(card.id, card.name);
         } else {
@@ -1432,6 +1452,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Topmost first: Escape closes the first one open, a click on a backdrop closes that one
 const OVERLAYS = [
+    ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['dialog-modal', () => closeDialog(null)],
     ['edit-card-modal', closeEditCard],

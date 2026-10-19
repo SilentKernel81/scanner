@@ -3,7 +3,7 @@
 # Stations: cameras elsewhere that capture cards and send them here (stations.py).
 # ============================================================================
 import cv2
-from flask import jsonify, request
+from flask import jsonify, request, url_for
 import hmac
 import json
 import numpy as np
@@ -21,7 +21,7 @@ from card_scanner.server.state import (
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import (
-    desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
+    desk, desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
 )
 from card_scanner.server.captures import (
     announce_and_route, foil_file, remember_outcome, scan_stats, set_pending_capture, station_prefix,
@@ -185,6 +185,9 @@ def station_capture(station_id):
     save_upload(image_path, data, image)
     keep_camera_frame(station_id, number, capture_id, image_path.name)
     game_id = games.active_id()
+    # A camera-less station's page shows its last picture where a camera's live view would be
+    desk().last_capture = image_path.name
+    emit_desk('capture_received', {'url': url_for('capture_image', name=image_path.name), 'number': number})
 
     # From here on desk() is this station's (the URL names it, and it exists now).
     # station_client.py's mode 'review': the card is shown on the station's page, not added

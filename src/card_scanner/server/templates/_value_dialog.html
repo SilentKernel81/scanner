@@ -10,9 +10,12 @@
             <div class="modal-body">
                 <div class="input-group">
                     <label for="value-input" id="value-label"></label>
-                    <input type="text" id="value-input" list="value-options" maxlength="60" autocomplete="off">
+                    <div class="value-field">
+                        <input type="text" id="value-input" maxlength="60" autocomplete="off">
+                        <button type="button" id="value-toggle" class="value-toggle" tabindex="-1" aria-label="Show the choices" hidden>&#9662;</button>
+                        <div id="value-suggest" class="value-suggest" hidden></div>
+                    </div>
                     <select id="value-select" hidden></select>
-                    <datalist id="value-options"></datalist>
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-primary" id="value-ok">OK</button>

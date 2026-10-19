@@ -289,6 +289,39 @@ phone. The Android app asks `GET .../sync` about every 10 s for each row that ha
 - **A reviewed capture stays its station's card**, whichever page works through the review:
   the page without a station lists every station's items, and a card added there is counted
   as the capture's station's (`source`), not as nobody's - or its phone could never follow it.
+- **Send to review** (the circular-arrow button on an entry of the scanned cards and of the collection;
+  `POST /api/inventory/<id>/to_review`, `?area=`): one copy - the one behind the entry's newest
+  capture - goes back to the review queue when the card or printing it was added as is wrong. The
+  item holds a copy of the capture's large picture (the thumbnail when none) with the entry's
+  printing as the suggestion (`match` "sent back": never confirmed), under the capture's station
+  (nobody's when the registry no longer knows it). The review item is written first, then the
+  copy leaves (`release_for_review`: photo row, station count, quantity - as a station's
+  removal does); if that fails (an open trade holds the copies) the item is taken back, so a
+  failure leaves nothing queued and nothing lost. The item carries **no `capture_key`**: the
+  capture's uid is used up in `applied_captures` (review and scanned cards would refuse it as
+  "applied before"), so the key is noted in `unfollowed_captures` and a phone asking about it is
+  told "cannot be followed", never "gone". An entry with no capture (typed in, imported) has
+  nothing to review by and is refused. What is added from the review always goes into the
+  **scanned cards**: a collection card sent back comes through "Add to collection" again and
+  loses its location, tags and condition. Not offered for the digital (Arena) collection.
+  The page names the copy it showed (`capture`, its picture); only that one is sent, so a request
+  repeated after its answer was lost gets 409 "not here any more" instead of taking another copy.
+  Clearing a camera, skipping a review item and "Add to collection" take `maintenance_barrier` too,
+  so none can run between the item being queued and the copy leaving. **A stop in between is
+  settled at the next start** (two files, two commits): the item is written with `transfer`
+  ("scan:" or "collection:" and the copy's picture file) and stays out of the queue (`review._of`)
+  until the copy has left and the route confirms it (`confirm_transfer`). `finish_interrupted_sends`
+  (inventory_api.py, called by `startup`) looks at each pending item: its picture still in that
+  inventory (`has_picture`) means the copy never left - the item is dropped; gone means it left -
+  the item is confirmed. So the card ends in exactly one place. The pending item is made durable
+  before the copy may leave (a power cut, not only a program stop): its picture is fsynced with its
+  folder and its commit alone is `synchronous=FULL` (the databases are NORMAL otherwise) - not
+  tried with an actual power cut. The inventory's release commits `FULL` too, before its pictures
+  are deleted; and if a power cut still took that commit back (the row is there, its picture is
+  gone), the next start finishes the release (`release_by_picture`) and keeps the item - it holds
+  the only picture left.
+  Tested (storage and route): `tests/test_send_to_review.py`, `tests/test_capture_sync.py`;
+  the browser buttons were not tried in a browser.
 - **The collection is out of reach.** `take_from` copies the photos without the key and deletes
   the rows in the scanned cards: afterwards there is no row to find, in either file. A `DELETE`
   then answers `resolved` and changes nothing.
@@ -406,7 +439,7 @@ keeps it; nothing has to be configured on the server to add a camera.
 | `status` (every 0.2 s) | The scanner's state and `get_detection_status()`; the answer says whether the preview is being watched |
 | `preview` | The annotated live view as JPEG (`get_stream_jpeg`), at most ~12 a second and only while a page shows `/video_feed` (measured: 12 fps, 66-81 KB a frame over Wi-Fi). A card the station finds by its outline has no border: it is tinted, see-through, orange while it settles, green when ready, blue while held, and a capture washes it a stronger green that fades down to the tint in 0.6 s (`_mark_auto_card` / `_wash_card`, drawn into the picture by the station - the page has only the beep). The fixed area keeps its rectangle (the area that was drawn, green / orange / blue by state) and gets the same wash at a capture. The app does the same on its own overlay. On the page the camera's frame has the shape of the picture it shows (`updateVideoFrame` sets `--picture-aspect` from the stream's size every second; `.video-container` is as wide as the panel but at most `--frame-max-height`, 62% of the window's height or 620 px): a camera cropped to the box gives a smaller, upright frame - the same for every camera cropped alike, and with no bars - and an uncropped webcam fills the panel as a 16:9 one. (Until 2026-10-15 a portrait picture switched the frame to a 9:16 box, which left bars above and below a 4:5 picture.) |
 | `setting` | A camera setting the scanner changed (a focus sweep's result, ...): saved on the server |
-| `log`, `captured` | The scanner's log lines, shown on the station's page; the capture beep (`auto_capture_triggered` to its pages) |
+| `log`, `captured` | The scanner's log lines, shown on the station's page only (lines no station owns - backups, card data, the collection - go to pages that show no station: room `general`); `capture_received` (`url`, `number`: a camera-less station's page, a phone, shows the picture it sent last where a camera's live view would be; `/api/last_capture` gives the current one on load); the capture beep (`auto_capture_triggered` to its pages) |
 
 | Server → client | |
 |---|---|
@@ -1324,7 +1357,7 @@ the printing's price in that finish (`Game.get_card` + `inventory_fields`); rows
 `inventory_id`, `file` (a thumbnail in `data/captures/`, 400 px tall, ~25 KB - the captures in
 `scanned_cards/` are deleted after `cleanup.days`; since 2026-10-14 a large copy of the same
 name, at most 1200 px tall (~100-150 KB; the person's choice, below), is kept in `data/captures_full/` for training data later:
-the pages never load it, it goes with the thumbnail when the capture is deleted, it is in
+since 2026-10-18 the capture viewer loads it (`/captures/<name>?size=full`, which answers the thumbnail when the capture has no large copy): a click on the one capture of an entry, or on a picture in the window of several; it goes with the thumbnail when the capture is deleted, it is in
 `scripts/backup.sh`'s archive and, since 2026-10-15, in the app's backups as well - the folder
 `captures_full/` beside `captures/`, as hard links, in the zip of a backup, and brought back by a
 restore and by an uploaded zip, so a standalone program that restores a server's backup has the
@@ -2344,7 +2377,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`, and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO
@@ -2370,7 +2403,7 @@ inside the container still listens on all of its addresses.
 | `.env` (beside `deploy/docker-compose.yml`) | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); `VISION_AI_PROVIDER`, `LOCAL_AI_ENDPOINT`, `SCANNER_STATION_TOKEN`; for Docker also `SCANNER_PORT`, `SCANNER_UID`, `SCANNER_GID` |
 | `data/secret_key` | Signs Flask's cookies: a random key made on first start (mode 600) unless `flask.secret_key` is set |
 | `data/api_keys.env` | Keys and local endpoint entered in Settings (`api_keys.py`, mode 600); overrides `.env`. The page only ever receives masked keys (`/api/ai_credentials`) - the web interface has no login |
-| `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), the size of the large copy kept with each capture (`capture_copy_size`: `off` / `small` 600 px / `medium` 900 px / `large` 1200 px - the default - `GET` / `POST /api/capture_copy`: a choice of the server for every camera, on the collection page's Settings under Storage as "Capture size (all cameras)", with the number and size of the copies kept so far; measured on 40 captures at JPEG 85: ~56, ~100 and ~145 KB each; it applies to new captures, existing copies stay), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
+| `data/settings.json` | Choices made in the web interface that are everyone's: AI provider / model, OCR first, the game, automatic backups (`backup_every_hours`, `backup_keep`), sound on / off, the capture beep and the card-added ding each on / off (`sound_capture`, `sound_added`) and volume (`POST /api/sound`), the size of the large copy kept with each capture how long the pictures received from the cameras are kept (`cleanup_days`, whole days, 1 to 3650, default `cleanup.days` of config.yaml; `POST /api/capture_copy` with `cleanup_days`; the server deletes older ones a few seconds after it starts and then every 24 hours, and `POST /api/storage/cleanup` does it at once - the Storage card's "Clean up now"), `POST /api/storage/compress` (the card's "Compress large copies": a thread makes the large copies already kept no taller than the chosen capture size - never bigger, a new file renamed over the old one so a backup's hard link keeps the old picture, one file at a time under `maintenance_barrier`; refused when the size is Off or one is running; `compress` in `/api/capture_copy` says how far it is), (`capture_copy_size`: `off` / `small` 600 px / `medium` 900 px / `large` 1200 px - the default - `GET` / `POST /api/capture_copy`: a choice of the server for every camera, on the collection page's Settings under Storage as "Capture size (all cameras)", with the number and size of the copies kept so far, and above it "Capture files in use": the total and the files of each kind the captures leave (`usage` in the answer: the pictures received in `scanned_cards/`, the thumbnails in `data/captures`, the large copies, the camera frames - a look at the folders each time the page asks, nothing stored); measured on 40 captures at JPEG 85: ~56, ~100 and ~145 KB each; it applies to new captures, existing copies stay), debug mode (`debug_mode`: Flask's debugger, and every request in `data/logs/requests.log`; taken when the server starts, always without the reloader). Also the camera settings of a camera on the server itself - which a new station inherits until it has its own |
 | `data/stations.json` | The stations: name, location, capture count, last seen, `camera` (it connects as a camera station), and `settings` - each station's `focus_value`, `camera_rotation`, `refocus_every`, `fixed_area`, `fixed_area_enabled`, `debug_trace`, `auto_add` |
 | `data/prompts.json` | Prompt instructions edited in Settings, per game / kind / model (`prompts.py`) |
 | `data/cards_database.db` | Card data (`cards`, `card_data_info`), the collection (`inventory`, `inventory_captures`, `inventory_sources`, and the trades: `trades`, `trade_cards`), decks (`decks`, `deck_cards`), the review queue (`review_queue`), and the captures already applied to it (`applied_captures`) |

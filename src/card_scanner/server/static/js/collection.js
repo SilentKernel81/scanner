@@ -325,13 +325,22 @@ function fillMulti(id, entries) {
     // `entries`: [[value, label]] or [[value, label, group heading]]. A value ticked earlier that
     // the collection no longer has is let go (not while the collection has not loaded yet)
     const filter = multi[id];
-    filter.options = entries.map(([value, label, heading]) => [value, label ?? value, heading || '']);
+    const options = entries.map(([value, label, heading]) => [value, label ?? value, heading || '']);
+    const unchanged = JSON.stringify(options) === JSON.stringify(filter.options);
+    filter.options = options;
     if (inventory.length) {
         const offered = new Set(filter.options.map(([value]) => value));
         filter.values = new Set([...filter.values].filter(value => offered.has(value)));
         if (!filter.values.size) filter.not = false;
     }
-    renderMulti(id);
+    if (!unchanged) { renderMulti(id); return; }
+    // Same choices: only the ticks may differ (Clear filters, a tick dropped above); set them on
+    // the boxes already there, so the Find box being typed in is left alone
+    const panel = $(id).querySelector('.multi-panel');
+    panel.querySelectorAll('input[type=checkbox]').forEach(box => {
+        box.checked = 'not' in box.dataset ? filter.not : filter.values.has(box.value);
+    });
+    updateMultiSummary(id);
 }
 
 function fillFilterOptions() {
@@ -370,21 +379,30 @@ async function loadDeckList() {
     const data = await api('/api/decks');
     if (!data) return;
     deckList = data.decks;
-    fillLocationFilter();
+    refreshLinkedFilters();
     renderSpareLocations();   // the trade tab's location list is grouped by the decks too
 }
 
-function fillLocationFilter() {
+function fillLocationFilter(cards = inventory) {
     // Boxes and binders first; the locations named after one of the decks under their own
     // heading at the bottom (a deck's cards are usually kept under the deck's name)
     const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
-    const places = knownLocations();
+    const places = distinct([...cards.map(card => card.location), ...multi['filter-location'].values].filter(place => place !== '(none)'));
     const inDecks = places.filter(place => decks.has(place.toLowerCase()));
     // "(none)" is kept as a choice: the cards in no place
     fillMulti('filter-location', [['(none)', '(none)'],
                                   ...places.filter(place => !inDecks.includes(place)).map(place => [place, place]),
                                   ...inDecks.map(place => [place, place, 'Decks'])]);
     $('filter-location').hidden = false;
+}
+
+function groupedLocations() {
+    // For the Move dialog's dropdown, as in the filter above: the boxes and binders first, the
+    // locations named after one of the decks under their own heading
+    const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
+    const places = knownLocations();
+    return [...places.filter(place => !decks.has(place.toLowerCase())),
+            ...places.filter(place => decks.has(place.toLowerCase())).map(place => [place, 'Decks'])];
 }
 
 function knownLocations() {
@@ -488,7 +506,9 @@ function filterByBadge(filter, value) {
     window.scrollTo(0, 0);
 }
 
-function applyFilters() {
+function makeFilterTest() {
+    // The filters as one test: (card, skip) says whether the card passes all of them, except
+    // the one named `skip` (the lists to choose from are made of the cards every OTHER filter lets by)
     const {terms, phrase} = parseSearch($('filter-text').value);
     const setCodes = new Set(inventory.map(card => (card.set_code || '').toLowerCase()).filter(Boolean));
     const textMatches = card =>
@@ -505,18 +525,18 @@ function applyFilters() {
     const added = $('filter-added').value;
     const free = $('filter-free').checked;
     const min = digital ? NaN : parseFloat($('filter-price-min').value), max = digital ? NaN : parseFloat($('filter-price-max').value);
-    const rows = inventory.filter(card => {
+    return (card, skip = '') => {
         // "Not" turns the text search around: the cards that don't have the text anywhere
         if ((phrase || terms.length) && textMatches(card) === textNot) return false;
-        const pass = (id, values) => passesMulti(values, multi[id].values, multi[id].not);
+        const pass = (id, values) => id === skip || passesMulti(values, multi[id].values, multi[id].not);
         if (!pass('filter-type', [mainType(card)])) return false;
         if (!pass('filter-rarity', [card.rarity])) return false;
         if (!pass('filter-set', [card.set_name])) return false;
         if (!pass('filter-finish', [card.finish])) return false;
         if (!digital && !pass('filter-location', [card.location || '(none)'])) return false;
-        if (tag && !card.tags.includes(tag)) return false;
+        if (tag && skip !== 'filter-tag' && !card.tags.includes(tag)) return false;
         if (!digital && !pass('filter-tags', card.tags)) return false;
-        if (added && !batchPart(card, added)) return false;
+        if (added && skip !== 'filter-added' && !batchPart(card, added)) return false;
         if (free && card.decks.length) return false;
         if (!isNaN(min) && card.price < min) return false;
         if (!isNaN(max) && card.price > max) return false;
@@ -526,7 +546,34 @@ function applyFilters() {
             if (filterColors.has('C') ? identity.length > 0 : ![...filterColors].every(color => identity.includes(color))) return false;
         }
         return true;
-    });
+    };
+}
+
+function refreshLinkedFilters() {
+    // Every list narrows the others: each offers what the cards that pass all the OTHER filters
+    // have (a chosen location shows only its sets, a chosen set only its locations...). What is
+    // chosen stays in its own list. A list is drawn again only when its choices changed -
+    // drawing it loses the Find box being typed in
+    const test = makeFilterTest();
+    const cardsFor = id => inventory.filter(card => test(card, id));
+    const chosen = id => [...multi[id].values];
+    const listOf = (id, values) => fillMulti(id, distinct([...values, ...chosen(id)]).map(value => [value]));
+    listOf('filter-type', cardsFor('filter-type').map(mainType));
+    fillMulti('filter-rarity', distinct([...cardsFor('filter-rarity').map(card => card.rarity), ...chosen('filter-rarity')])
+        .sort((a, b) => (RARITY_ORDER[a] ?? 9) - (RARITY_ORDER[b] ?? 9)).map(value => [value]));
+    listOf('filter-set', cardsFor('filter-set').map(card => card.set_name));
+    const finishes = new Set([...cardsFor('filter-finish').map(card => card.finish), ...chosen('filter-finish')]);
+    fillMulti('filter-finish', gameInfo.finishes.filter(([key]) => finishes.has(key)).map(([key, label]) => [key, label]));
+    fillLocationFilter(cardsFor('filter-location'));
+    listOf('filter-tags', cardsFor('filter-tags').flatMap(card => card.tags));
+    fillSelect('filter-tag', 'Any tag', distinct([...cardsFor('filter-tag').flatMap(card => card.tags), $('filter-tag').value].filter(Boolean)));
+}
+
+function applyFilters() {
+    refreshLinkedFilters();
+    const test = makeFilterTest();
+    const added = $('filter-added').value;
+    const rows = inventory.filter(card => test(card));
     $('batch-remove').hidden = !added;
     // Filters come back on the next visit: show what narrows the list, each to be taken off
     const chips = activeFilters();
@@ -610,7 +657,8 @@ function listRowHtml(card) {
             <div class="inventory-card-actions">
                 ${picture && !digital ? `<span class="card-peek" data-image="${escapeHtml(picture)}" title="The card's picture - rest the pointer here to see it large">
                                  <img src="${escapeHtml(picture.replace('/normal/', '/small/'))}" alt="" loading="lazy"></span>` : ''}
-                <button class="btn-trade" title="Set aside for a trade: it stays in your collection until you confirm the trade"><svg class="icon"><use href="#i-swap"/></svg></button>
+                <button class="btn-trade" title="Set aside for trading"><svg class="icon"><use href="#i-swap"/></svg></button>
+                ${card.captures.length && !digital ? `<button class="btn-review" title="Send it back to review"><svg class="icon"><use href="#i-refresh"/></svg></button>` : ''}
                 <button class="btn-edit" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>
                 <button class="btn-delete" title="Delete"><svg class="icon"><use href="#i-trash"/></svg></button>
             </div>
@@ -739,7 +787,7 @@ async function bulkAction(action) {
             message: `The selected cards are removed from your inventory. You have ${UNDO_SECONDS} seconds to undo it.`});
         if (!ok) return;
     } else if (action === 'location') {
-        value = await valueDialog({title: `Move ${entries}`, label: 'Location (empty: none)', options: knownLocations()});
+        value = await valueDialog({title: `Move ${entries}`, label: 'Location (empty: none)', options: groupedLocations()});
         if (value === null) return;
     } else if (action === 'add_tag' || action === 'remove_tag') {
         const tags = distinct(inventory.filter(card => action === 'add_tag' || selected.has(card.id)).flatMap(card => card.tags));
@@ -1351,10 +1399,15 @@ function bindInventoryEvents() {
         if (!card) return;
         if (event.target.closest('.btn-trade')) return setAsideForTrade(card);
         if (inArena()) return;   // Arena view: a row has nothing to click (its buttons are hidden, too)
+        if (event.target.closest('.btn-review')) return sendToReview(card.id, card.name, card.captures[0].url);
         if (event.target.closest('.btn-edit')) return editCard(card, knownLocations(), () => shown);
         // No question first: it can be undone
         if (event.target.closest('.btn-delete')) return changeLater([card.id], `Deleting ${card.name}`, {ids: [card.id], action: 'delete', value: ''});
-        if (event.target.closest('.inventory-thumb') && card.captures.length) return openCaptures(card);
+        if (event.target.closest('.inventory-thumb') && card.captures.length) {
+            // One capture: straight to it, large; several: the window of them, a click on one opens it large
+            if (card.captures.length === 1) return openCaptureViewer(card.captures[0].url, `${card.name} - ${card.captures[0].captured_at}`);
+            return openCaptures(card);
+        }
         if (event.target.classList.contains('row-check')) return pick(card.id, event.target.checked, event.shiftKey);
         // Grid: a click on the card selects it, a double click edits it
         if (row.classList.contains('grid-card')) pick(card.id, !selected.has(card.id), event.shiftKey);
@@ -1405,6 +1458,7 @@ function bindInventoryEvents() {
 const OVERLAYS = [
     ['dialog-modal', () => closeDialog(null)],
     ['value-modal', () => closeValueDialog(null)],
+    ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['edit-card-modal', closeEditCard],
 ];

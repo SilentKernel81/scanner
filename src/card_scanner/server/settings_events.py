@@ -2,18 +2,21 @@
 # FILE: server/settings_events.py
 # Settings of a camera and of scanning: toggles, the game, focus, rotation, fixed area, sound.
 # ============================================================================
+import threading
+
 from flask import jsonify, request
 from flask_socketio import emit
 
 from card_scanner.core import frames
 from card_scanner.core import inventory as inventory_module
 from card_scanner.core.card_ocr import CardOcr
+from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
 from card_scanner.config import Config
 from card_scanner import games
 
-from card_scanner.server.state import app, app_settings, identification, inventory, services, socketio, stations
+from card_scanner.server.state import app, app_settings, identification, inventory, maintenance_barrier, services, socketio, stations
 from card_scanner.server.logs import logger
-from card_scanner.server.lock import guarded_event
+from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
 from card_scanner.server.captures import scan_location, set_pending_capture
 from card_scanner.server.card_data import start_card_data_update
@@ -157,13 +160,96 @@ def get_scan_settings():
     })
 
 
+def cleanup_days():
+    """How many days the pictures received from the cameras (scanned_cards/) are kept: the
+    person's choice (Settings > Storage), else cleanup.days of config.yaml"""
+    days = app_settings.get('cleanup_days', None) if app_settings else None
+    return days if isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= 3650 else Config.CLEANUP_DAYS
+
+
+def run_image_cleanup():
+    """Delete the received pictures older than cleanup_days() (at start-up, once a day, and the
+    button's). Not while a full backup is collecting the pictures. Returns (files, megabytes freed)"""
+    with maintenance_barrier:
+        return cleanup_old_images(days_to_keep=cleanup_days())
+
+
+# The compression of the large copies, started by the Storage card's button and run in its own
+# thread (thousands of pictures take minutes); the page asks /api/capture_copy while it runs
+compress_state = {'running': False, 'done': 0, 'total': 0, 'files': 0, 'megabytes': 0.0, 'error': None}
+compress_lock = threading.Lock()
+
+
+def run_compress(height):
+    def progress(done, total):
+        compress_state.update(done=done, total=total)
+    try:
+        files, freed = inventory_module.compress_full_captures(height, lock=maintenance_barrier, progress=progress)
+        compress_state.update(files=files, megabytes=round(freed / 1048576, 1))
+        logger.info(f"Large copies compressed to {height} px: {files} made smaller, {freed / 1048576:.1f} MB freed")
+    except Exception as error:
+        compress_state['error'] = str(error)
+        logger.error(f"Compressing the large copies failed: {error}")
+    finally:
+        compress_state['running'] = False
+
+
+@app.route('/api/storage/cleanup', methods=['POST'])
+@guarded
+def storage_cleanup():
+    """Delete the received pictures older than the chosen days right now (the Storage card's button)"""
+    try:
+        files, megabytes = run_image_cleanup()
+    except Exception as error:
+        logger.error(f"Cleanup failed: {error}")
+        return jsonify({'success': False, 'error': str(error), 'message': str(error)}), 500
+    logger.info(f"Cleanup on request: {files} old image(s) deleted, {megabytes:.2f} MB freed (keeping {cleanup_days()} days)")
+    return jsonify({'success': True, **capture_copy_info(), 'deleted_files': files, 'freed_megabytes': round(megabytes, 1)})
+
+
+@app.route('/api/storage/compress', methods=['POST'])
+@guarded
+def storage_compress():
+    """
+    Make the large copies already kept as small as the "Capture size" choice says (a thread;
+    the page watches /api/capture_copy). Refused while one runs, and when the size is Off.
+    """
+    height = inventory_module.FULL_CAPTURE_HEIGHT
+    if height <= 0:
+        message = "Capture size is Off: choose a size first"
+        return jsonify({'success': False, 'error': message, 'message': message}), 400
+    with compress_lock:
+        if compress_state['running']:
+            return jsonify({'success': False, 'error': 'Already running', 'message': 'Already running'}), 409
+        compress_state.update(running=True, done=0, total=0, files=0, megabytes=0.0, error=None)
+    threading.Thread(target=run_compress, args=(height,), daemon=True).start()
+    return jsonify({'success': True, **capture_copy_info()})
+
+
 def capture_copy_info():
     """The large copy kept with each capture: what is chosen, the choices (px), and what is kept so far"""
     chosen = app_settings.get('capture_copy_size', inventory_module.FULL_CAPTURE_DEFAULT) if app_settings else \
         inventory_module.FULL_CAPTURE_DEFAULT
     count, size = inventory_module.full_capture_usage()
     kept, frames_size = frames.usage()
-    return {'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
+    # Every kind of capture file the server keeps, for the Storage card's total: the pictures
+    # received from the cameras (scanned_cards/, cleaned after cleanup.days), the small and the
+    # large copy kept behind inventory entries, and the camera frames
+    try:
+        received = get_images_stats()
+        thumbs, thumbs_size = inventory_module.thumbnail_usage()
+        usage = {'received': {'count': received['count'], 'bytes': round(received['total_size_mb'] * 1048576)},
+                 'thumbnails': {'count': thumbs, 'bytes': thumbs_size},
+                 'large': {'count': count, 'bytes': size},
+                 'frames': {'count': kept, 'bytes': frames_size}}
+        usage['total_bytes'] = sum(part['bytes'] for part in usage.values())
+    except Exception as error:
+        # A look at the folders must never fail what is asked of this route (a POST has
+        # already saved its choice by now): the page then shows no total
+        logger.warning(f"Could not measure the capture files: {error}")
+        usage = None
+    return {'usage': usage, 'cleanup_days': cleanup_days(), 'cleanup_every_day': Config.CLEANUP_ENABLED,
+            'compress': dict(compress_state), 'size': chosen if chosen in inventory_module.FULL_CAPTURE_SIZES else inventory_module.FULL_CAPTURE_DEFAULT,
             'sizes': inventory_module.FULL_CAPTURE_SIZES, 'count': count, 'megabytes': round(size / 1048576, 1),
             # The camera frames kept for training (Debug trace): whether they stay when their
             # scanned cards are cleared or added to the collection, and what is kept
@@ -185,7 +271,18 @@ def set_capture_copy():
         # Keep the camera frames of scanned cards that are cleared or added to the collection
         app_settings.set('keep_frames', bool(data['keep_frames']))
         logger.info(f"Camera frames of cleared or added scanned cards: {'kept' if data['keep_frames'] else 'removed with them'}")
-    if 'size' in data or 'keep_frames' not in data:
+    if 'cleanup_days' in data:
+        # How long pictures are kept decides what the (locked) cleanup deletes: locked as well,
+        # whereas the rest of this route (capture size, keeping frames) stays open
+        if not unlocked():
+            return jsonify({'success': False, 'error': LOCKED_MESSAGE, 'locked': True}), 401
+        days = data['cleanup_days']
+        if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 3650:
+            message = 'cleanup_days is a whole number of days, 1 to 3650'
+            return jsonify({'success': False, 'error': message, 'message': message}), 400
+        app_settings.set('cleanup_days', days)
+        logger.info(f"Received pictures are kept {days} days")
+    if 'size' in data or not ({'keep_frames', 'cleanup_days'} & set(data)):
         size = data.get('size')
         if size not in inventory_module.FULL_CAPTURE_SIZES:
             message = f"size is one of {', '.join(inventory_module.FULL_CAPTURE_SIZES)}"

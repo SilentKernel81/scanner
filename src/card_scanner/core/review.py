@@ -8,6 +8,7 @@ camera's page shows its own - with a copy of the capture in data/review/ (scanne
 cleaned after cleanup.days) until resolved.
 """
 import logging
+import os
 import shutil
 import threading
 import uuid
@@ -43,7 +44,8 @@ class ReviewQueue:
                     match TEXT,             -- how it was matched (Game.confirmed_matches)
                     created_at TEXT NOT NULL,
                     station TEXT,           -- stations.py id the capture came from (NULL: nobody's - see _of)
-                    capture_key TEXT        -- the uid of the capture it is (pending.py); see by_capture
+                    capture_key TEXT,       -- the uid of the capture it is (pending.py); see by_capture
+                    transfer TEXT           -- a card sent back from an inventory: which copy, until it has left (see add)
                 )''')
             columns = {row['name'] for row in self.conn.execute('PRAGMA table_info(review_queue)')}
             if 'station' not in columns:
@@ -53,6 +55,11 @@ class ReviewQueue:
             # that are there already have none: a phone asking about them is told so
             if 'capture_key' not in columns:
                 self.conn.execute('ALTER TABLE review_queue ADD COLUMN capture_key TEXT')
+            # A card sent back to review from an inventory (2026-10-19), written before its copy
+            # leaves the inventory: hidden from the pages until it has (_of), and settled by the
+            # next start if the program stopped in between (server/inventory_api.py)
+            if 'transfer' not in columns:
+                self.conn.execute('ALTER TABLE review_queue ADD COLUMN transfer TEXT')
             self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_review_capture_key '
                               'ON review_queue(capture_key) WHERE capture_key IS NOT NULL')
             # Captures that were queued here already (add's capture_key; pending.py)
@@ -61,9 +68,13 @@ class ReviewQueue:
             self.conn.commit()
 
     def add(self, game, image_path, name='', number='', set_code='', foil='unknown', card=None, station=None,
-            capture_key=None):
+            capture_key=None, transfer=None):
         """Queue a capture; returns the item id. capture_key: the capture's uid (pending.py) -
-        noted in the same commit; a capture queued here before is not queued again (None)."""
+        noted in the same commit; a capture queued here before is not queued again (None).
+        transfer: the item is a card sent back from an inventory, and names its copy there
+        ('<inventory>:<the copy's picture file>'): the item stays out of the queue (count, first)
+        until confirm_transfer - the copy has left the inventory - so it cannot be resolved while
+        the card is still in both places; pending_transfers lists the ones a crash cut short."""
         if capture_key:
             with self._lock:
                 if self.conn.execute('SELECT 1 FROM applied_captures WHERE key = ?', (capture_key,)).fetchone():
@@ -72,24 +83,60 @@ class ReviewQueue:
         file = None
         if image_path:
             try:
+                # The folders this makes (the first review item of a machine): their names in their
+                # parents must reach the disk too, or a power cut can lose the whole folder
+                missing = [folder for folder in (REVIEW_DIR, *REVIEW_DIR.parents) if not folder.exists()]
                 REVIEW_DIR.mkdir(parents=True, exist_ok=True)
                 file = f"{uuid.uuid4().hex}.jpg"
                 shutil.copyfile(image_path, REVIEW_DIR / file)
+                if transfer:
+                    # The original goes once the item is committed: its copy must be on the disk
+                    # by then, not in the system's cache (a power cut would lose both)
+                    self._flush(REVIEW_DIR / file)
+                    for folder in missing:
+                        self._flush_folder(folder.parent)
             except OSError as e:
                 logger.warning(f"Could not keep the capture for review: {e}")
                 file = None
         with self._lock:
+            if transfer:
+                # The commits are normally synchronous=NORMAL (storage.connect): a power cut may
+                # lose the latest ones. The record of a transfer must survive it - the inventory's
+                # copy is removed right after - so this commit alone is FULL (set between
+                # transactions: the pragma does nothing inside one)
+                self.conn.execute('PRAGMA synchronous = FULL')
             item_id = self.conn.execute(
                 'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
-                'station, capture_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'station, capture_key, transfer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (game, file, name or '', number or '', set_code or '', foil or 'unknown',
                  card['id'] if card else None, card.get('match') if card else None,
-                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key)).lastrowid
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key, transfer)).lastrowid
             if capture_key:
                 self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                   (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             self.conn.commit()
+            if transfer:
+                self.conn.execute('PRAGMA synchronous = NORMAL')
         return item_id
+
+    @staticmethod
+    def _flush(path):
+        """Make a file written just now (and its name in the folder) reach the disk"""
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        ReviewQueue._flush_folder(path.parent)
+
+    @staticmethod
+    def _flush_folder(folder):
+        """Make the names in a folder (a file or folder just made in it) reach the disk"""
+        descriptor = os.open(folder, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     @staticmethod
     def _of(game, station):
@@ -102,10 +149,10 @@ class ReviewQueue:
         camera's page instead, and are gone from all of them once one resolves them.
         """
         if station is ANY:
-            return 'game = ?', (game,)
+            return 'game = ? AND transfer IS NULL', (game,)
         if station is None:
-            return 'game = ? AND station IS NULL', (game,)
-        return 'game = ? AND (station = ? OR station IS NULL)', (game, station)
+            return 'game = ? AND station IS NULL AND transfer IS NULL', (game,)
+        return 'game = ? AND (station = ? OR station IS NULL) AND transfer IS NULL', (game, station)
 
     def count(self, game, station=ANY):
         where, values = self._of(game, station)
@@ -143,6 +190,18 @@ class ReviewQueue:
             if row['file']:
                 (REVIEW_DIR / row['file']).unlink(missing_ok=True)
         return len(rows)
+
+    def confirm_transfer(self, item_id):
+        """The copy of a card sent back has left its inventory: the item is in the queue now"""
+        with self._lock:
+            self.conn.execute('UPDATE review_queue SET transfer = NULL WHERE id = ?', (item_id,))
+            self.conn.commit()
+
+    def pending_transfers(self):
+        """[(item id, transfer)] of the cards sent back whose copy has not been confirmed gone"""
+        with self._lock:
+            return [(row['id'], row['transfer']) for row in
+                    self.conn.execute('SELECT id, transfer FROM review_queue WHERE transfer IS NOT NULL')]
 
     def by_capture(self, capture_key):
         """The item a capture is waiting as (its uid, pending.py), or None: resolved - added from
