@@ -140,6 +140,21 @@ printing_check:
   # off. Still log-only: nothing is added, changed or sent to review by it
   lookup: ai_cases
 
+# How a card is read (core/identification.py; docs/plans/READING_REFACTOR_PLAN.md, phase 3).
+#   cascade  (the default, as it always was): light-ocr reads the whole card; the vision AI is asked for what OCR cannot confirm
+#   evidence: for a card the full-card OCR did NOT confirm, the picture (a fingerprint matched against every printing, needs the image index of
+#            printing_check) and the strip's collector line decide first - the vision AI is asked only when they do not decide, and its answer is
+#            checked against the picture. Cards OCR confirms are read as before. NEVER TRIED ON LIVE SCANS: leave on cascade until the shadow log
+#            (scripts/printing_check_report.py) meets the exit criteria in docs/PROGRAM_DOCUMENTATION.md ("Printing check")
+# data/settings.json's "reading_mode" (set on the machine, then restart) wins over this default - no rebuild of the image needed
+reading:
+  mode: cascade
+  # evidence mode: also add a card when only the picture decided (the strip did not name a printing the picture agrees with). OFF by default: those
+  # cards go to the AI as before. Guarded when on (the best match must be 0.5 similar and the strip must not name a printing the image index lacks), none
+  # wrong on 128 AI-read pictures - but a printing newer than the index with an unreadable strip can still be added that way (4% in a simulation,
+  # a stale index makes it likelier), so turning it on is a separate decision from turning evidence mode on
+  accept_image_alone: false
+
 # Cleanup Settings
 cleanup:
   enabled: true

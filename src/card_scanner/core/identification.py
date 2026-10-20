@@ -10,6 +10,13 @@ OCR confirms never waits behind a slow AI answer (full-art cards, which only the
 the whole AI stage). What was read is handed back by one more thread, one card at a time, so
 looking a card up and adding it holds up neither stage. identify() runs both stages in the
 caller's thread.
+
+reading.mode (config.yaml, data/settings.json): 'cascade' is what is described above. 'evidence' puts
+the picture and the strip in front of the AI (printing_check.live_read): for a card the full-card OCR
+did not confirm, a fingerprint of the picture matched against every printing and the strip's
+collector line decide first; the AI is asked only when they do not, and its answer is checked
+against the picture. A card OCR confirms is read exactly as before. Phase 3 of
+docs/plans/READING_REFACTOR_PLAN.md; never tried on live scans, off by default.
 """
 
 import contextlib
@@ -22,12 +29,16 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
+from card_scanner.core.printing_check import EVIDENCE_READER
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
 
 # What the AI stage is asked for a card
 IDENTIFY, FOIL = 'identify', 'foil'
+
+# How a card is read (reading.mode)
+CASCADE, EVIDENCE = 'cascade', 'evidence'
 
 
 class Job:
@@ -48,6 +59,10 @@ class Job:
 
 class Identification:
     """The OCR reader, the vision AI and the queues in front of them"""
+
+    # Set by the server once the printing check exists (see __init__); a default here so that an Identification made without __init__ (tests of
+    # one stage) reads in 'cascade' mode like any other
+    evidence = None
 
     def __init__(self, settings, log_callback=None, ai_workers=None):
         self.settings = settings
@@ -82,11 +97,22 @@ class Identification:
         if self.ocr_enabled:
             self.card_ocr.warm_up()
 
+        # The printing check (core/printing_check.py: the image index and the reading by picture and strip), given by the server after both exist;
+        # None: reading.mode 'evidence' has nothing to read with and every card is read as in 'cascade'
+        self.evidence = None
+
         self._ocr_queue = queue.Queue()
         self._ai_queue = queue.Queue()
         self._done_queue = queue.Queue()
         self._threads = []
         self._running = False
+
+    @property
+    def reading_mode(self):
+        """'cascade' or 'evidence' (reading.mode; the person's data/settings.json 'reading_mode' wins over config.yaml; anything else is cascade)"""
+        settings = getattr(self, 'settings', None)
+        mode = str((settings.get('reading_mode', Config.READING_MODE) if settings else Config.READING_MODE) or '').strip().lower()
+        return EVIDENCE if mode == EVIDENCE else CASCADE
 
     def log(self, message, level="info"):
         """Send log message to both file logger and UI callback"""
@@ -192,7 +218,56 @@ class Identification:
 
     @staticmethod
     def _said_by_ocr(ocr_info):
-        return f"✓ Card identified by OCR: {ocr_info['name']} #{ocr_info['collector_number']}"
+        how = 'picture and strip' if ocr_info.get('reader') == EVIDENCE_READER else 'OCR'
+        return f"✓ Card identified by {how}: {ocr_info['name']} #{ocr_info['collector_number']}"
+
+    def _read_by_picture(self, image, foil_image):
+        """
+        reading.mode 'evidence': the card read by its picture and its strip (printing_check.live_read) - (card_info, what the AI is still needed
+        for) like _read_with_ocr, or None when they do not decide (review, no image index, OCR off, or any failure): the card then goes on to the AI
+        as in 'cascade'. Never loses a card: whatever goes wrong here is a reason to ask the AI, which is what would have happened anyway.
+        """
+        if self.reading_mode != EVIDENCE or self.evidence is None or not self.ocr_enabled:
+            return None             # (the strip is read by the OCR reader: with OCR switched off there is no strip)
+        try:
+            reading = self.evidence.live_read(image, foil_image, self.card_ocr, self.foil_marker, Config.READING_ACCEPT_IMAGE_ALONE)
+        except Exception as e:
+            self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
+            return None
+        if reading is None:
+            return None
+        card = reading['card']
+        # The finish, as the 'foil' field the server's finish rule (Game.suggested_finish) has always taken: an unread marker stays 'unknown'
+        foil = {'foil': 'foil', 'regular': 'non-foil'}.get(reading['finish']['finish'], 'unknown')
+        info = {'name': card['name'], 'collector_number': card['number'], 'set_code': card['set_code'], 'foil': foil,
+                'printing_id': card['id'], 'reader': EVIDENCE_READER}
+        self.log(f"Picture and strip: {card['name']} [{card['set_code']} {card['number']}] ({reading['path']}, "
+                 f"{'strip ' + reading['strip']['set'] + ' ' + reading['strip']['number'] if reading['strip']['number'] else 'no strip'})")
+        if foil == 'unknown' and self._ai_foil_check(foil_image):
+            return info, FOIL       # as for an OCR-confirmed card whose marker nothing read: the AI's foil check
+        self.log(self._said_by_ocr(info), level="success")
+        return info, None
+
+    def _checked_against_picture(self, image, card_info):
+        """
+        reading.mode 'evidence': the vision AI's answer against the picture. An answer whose printing the picture clearly does NOT look like (the
+        check's 'disagree': the AI misread about 12% of the cards it was asked about in the experiment) is not added: its number and set are dropped,
+        so the card goes to the review queue under the name the AI gave. Any other verdict, no index, or a failure here leaves the answer as it was.
+        """
+        if self.reading_mode != EVIDENCE or self.evidence is None or not card_info or not card_info.get('name'):
+            return card_info
+        try:
+            found = games.active().identify(card_info['name'], card_info.get('collector_number'), card_info.get('set_code'))
+            if not found or not found.get('id'):
+                return card_info
+            if self.evidence.verdict_of(image, found['id']) != 'disagree':
+                return card_info
+        except Exception as e:
+            self.log(f"The AI's answer could not be checked against the picture ({e})", level="warning")
+            return card_info
+        self.log(f"The AI's answer {card_info['name']} [{card_info.get('set_code') or '?'} {card_info.get('collector_number') or '?'}] "
+                 f"does not look like the picture - sent to review", level="warning")
+        return {**card_info, 'collector_number': '', 'set_code': ''}
 
     def _read_with_ocr(self, image, foil_image):
         """
@@ -215,6 +290,10 @@ class Identification:
             if ocr_info and self.card_identifier:
                 self.log("OCR read is not a confirmed match - asking the vision AI")
 
+        # reading.mode 'evidence': the picture and the strip decide before the AI is asked (None: they did not)
+        by_picture = self._read_by_picture(image, foil_image)
+        if by_picture:
+            return by_picture
         if self.card_identifier:
             return ocr_info, IDENTIFY
         if not ocr_info:
@@ -262,7 +341,8 @@ class Identification:
             else:
                 self.log(f"✓ Card identified: {name} (no collector number)", level="success")
             card_info['foil'] = foil
-            return card_info
+            # (the flat card, like the reading by picture: a fixed area's `image` is the area as drawn, which the index never saw)
+            return self._checked_against_picture(foil_image if foil_image is not None else image, card_info)
 
         self.log("Vision AI could not identify card", level="warning")
         if ocr_info:

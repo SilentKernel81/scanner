@@ -62,6 +62,12 @@ game sits behind one interface (`games/`), so another could be added.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
+- **Reading by picture and collector line before the vision AI** (`reading.mode: evidence`, since
+  2026-10-20; **off by default and never run on live scans**): for a card the full-card OCR cannot
+  confirm, the fingerprint of the picture and the strip's collector number and set decide first, the
+  AI is asked only when they do not, and its answer is checked against the picture. On the
+  experiment's pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (84% if the picture alone may also add, which is off by default), none wrong. Needs the image
+  index; switched on in `data/settings.json`, not in the pages.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (`scripts/build_image_index.py`, about 15 MB) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another

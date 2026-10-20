@@ -1,6 +1,6 @@
 # Plan: reading a card from several pieces of evidence, with one decision
 
-Written 2026-10-20. **Status: phase 1 is done, phases 2a and 2b are built (the pure decision, shown unchanged on 444 pictures; the finish as log-only evidence); phases 3-7 wait for the gates written below.**
+Written 2026-10-20. **Status: phase 1 is done, phases 2a and 2b are built (the pure decision, shown unchanged on 444 pictures; the finish as log-only evidence); phase 3 is built behind a setting (`reading.mode: evidence`, off by default, never run live - see "Phase 3 as built"); phases 3-7 wait for the gates written below.**
 The measurements behind this plan are in [IMAGE_MATCH_EXPERIMENT.md](IMAGE_MATCH_EXPERIMENT.md). The exit criteria for dropping the vision AI are written once,
 in [PROGRAM_DOCUMENTATION.md](../PROGRAM_DOCUMENTATION.md) ("Printing check"); this plan points at them and does not restate them, so the two cannot drift apart.
 
@@ -73,6 +73,18 @@ re-exports `AGREE_BELOW`, `IMAGE_LEAD`); `Identification` (`submit`, `identify`,
 - **No behaviour change is shown picture by picture**: the previous lookup and the new one run on the same pictures (the AI-read ones and a sample of the OCR-confirmed ones),
   and the path, the printing and the comparison with the resolved card are compared for each one. Equal totals would not be enough: they can hide swapped answers.
 - The existing tests pass **unchanged** (an expectation that has to change means the behaviour changed).
+
+## Phase 3 as built (2026-10-20)
+
+`reading.mode` (`cascade` default / `evidence`) in `config.yaml`, overridable in `data/settings.json` without a rebuild. In `evidence` the decision drives add / review for a card the
+full-card OCR did **not** confirm, in front of the AI: `PrintingCheck.live_read` -> `Identification._read_by_picture`; the AI keeps the cards the picture cannot decide, and **its answer is
+checked against the picture** (`disagree` -> review). The decided printing is carried by id (the lookup by name and number fails for 14% of printings: `verify_roundtrip.py`). Details and
+numbers: PROGRAM_DOCUMENTATION.md, "Reading mode: evidence". Deliberately **not** in this step:
+- the single worker pool replacing the OCR and AI workers (restructuring, no decision changes - its own step);
+- a rule for an OCR-confirmed card the picture contradicts (the Secret Lair case stays as OCR reads it);
+- a page switch for the mode;
+- the picture alone adding a card is OFF by default (`reading.accept_image_alone: false`): a printing newer than the index whose strip is unreadable could be added by it even after the two guards (4% in a simulation on 428 pictures; with it off, 0 of 428) - the strip-confirmed decisions alone give 58.6% of the AI-read cards and none wrong;
+- the shadow log cannot judge the mode's own adds (it would compare the choice with itself): the exit criteria stay measured in `cascade`.
 
 ## What stays decided against
 

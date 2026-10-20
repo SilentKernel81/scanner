@@ -1,6 +1,6 @@
 # Deploy plan: the foil-marker network, the printing check and the lookup
 
-Prepared 2026-10-20. **Nothing in this plan has been run.** It covers the server only (`user@192.168.1.23`, `~/scanner-server`).
+Prepared 2026-10-20, updated the same day for phase 2 of the reading refactor (commit `b9a4169`, which is what this plan now deploys). **Nothing in this plan has been run.** It covers the server only (`user@192.168.1.23`, `~/scanner-server`).
 The camera stations (the Pis, the phone) are not touched: their code did not change, and they reconnect by themselves.
 
 ## What goes live, and how risky each part is
@@ -10,20 +10,23 @@ The camera stations (the Pis, the phone) are not touched: their code did not cha
 | Foil-marker network | `874520a` | **Changes a decision**: where the OCR left the ★/• unread, a small network reads it before the AI's foil check. Measured: 394 of 394 right on held-out cards, 15 of 15 on the Deadpool rescan | Low-medium: real behaviour change, never tried on live scans. Wrong finish on a card the OCR missed (the AI used to be asked) |
 | Printing check (shadow) | `6a462ff` | Only writes `data/logs/printing_check.jsonl`; changes nothing | Low: one background thread, bounded queue, never raises |
 | The lookup (shadow) | `a84dcb9` | Also log-only. For cards the AI handles, a second light-ocr process reads the strip | Low-medium: **a second OCR process on the GPU next to Ollama** (see "The question that needs an answer first") |
+| Reading refactor, phase 2 | `b9a4169` | The lookup's decision moved into `core/reading/` (shown identical on 444 pictures), plus a new `finish` field in the shadow log (the finish the picture and strip would give, beside the server's own). Log-only; the shadow reader loads its own 310 KB foil network (OpenCV on the CPU) | Low: no schema, config key or route added; the extra work is one small network run per lookup capture |
+| Reading mode `evidence` (phase 3) | after `b9a4169` | **Ships OFF** (`reading.mode: cascade` in the shipped `config.yaml`): the deployed server reads exactly as before. When switched on it replaces the vision AI for cards the OCR did not confirm | Off: none beyond the code being present. On: **a real behaviour change, never run on live scans** - a wrong add goes into the collection. Not part of this deploy's go-live; see "Trying the evidence mode" below; the picture-alone path inside it is a second, separate switch, also off |
 
-Not in the server: `scripts/experiments/` (49 files) - the plan leaves them out of the copy. The new data artifacts are inert without the code: `data/image_index/`
+Not in the server: `scripts/experiments/` (52 files) - the plan leaves them out of the copy. The new data artifacts are inert without the code: `data/image_index/`
 (15 MB) and `data/logs/printing_check.jsonl`.
 
 **No data migration** (checked: no `CREATE TABLE`, `ALTER TABLE` or migration in the changes since `04cf82e`), **nothing deleted or moved away**
-(so nothing to delete by hand on the server). Sixteen server-relevant files differ from the commit before my work: 3 new modules
-(`foil_marker.py`, `image_index.py`, `printing_check.py`), `foil_net.onnx`, 2 scripts and 11 small edits (`identification.py`, `captures.py`,
-`startup.py`, `state.py`, `config.py`, `card_ocr.py`, `database.py`, `config.yaml`, `.gitignore`, `CLAUDE.md`).
+(so nothing to delete by hand on the server). About twenty server-relevant files differ from the commit before my work: 3 new modules
+(`foil_marker.py`, `image_index.py`, `printing_check.py`), the new package `core/reading/` (`__init__.py`, `evidence.py`, `decide.py`), `foil_net.onnx`, 2 scripts, the test
+files, and the small edits (`identification.py`, `captures.py`, `startup.py`, `state.py`, `config.py`, `card_ocr.py`, `database.py`, `config.yaml`, `.gitignore`, `CLAUDE.md`, the docs).
+The server image copies the whole tree (`COPY . .`), so the new package needs no line of its own in the Dockerfile; only the station images name modules.
 
 ## Decisions I need from you
 
 1. **Lookup mode.** `ai_cases` (default, ~3% of captures, the cards the AI is needed for) or `all` (every capture, one more small OCR request each; much faster evidence, but
    against easy cards). I recommend `ai_cases`.
-2. **Exclude `scripts/experiments/` from the copy** (49 tracked files that would end up in the image). I recommend yes.
+2. **Exclude `scripts/experiments/` from the copy** (52 tracked files that would end up in the image; the commands below already leave them out, the new comparison scripts too). I recommend yes.
 3. **Rehearse first** on a copy of the data (the plan's step 5), as for the earlier deploys that changed behaviour. I recommend yes: it is where the GPU question gets answered.
 4. **When.** At a quiet moment: the container restarts (~20-40 s for the OCR models) and the stations queue captures meanwhile ("a station keeps scanning while the server is away").
 
@@ -31,7 +34,7 @@ Not in the server: `scripts/experiments/` (49 files) - the plan leaves them out 
 
 - **My notes of the server's state stop at 2026-10-15** (main at `003a0fe`), and that hash is not an ancestor of today's `main`: it cannot say what is on
   the server. The server's data folder has `others.db` and `settings_login.json` (features committed after 10-15), so it is newer than the notes.
-  **So the plan starts by comparing checksums** (step 1) instead of assuming. If that shows much more than the 16 files, the server was behind: stop and decide.
+  **So the plan starts by comparing checksums** (step 1) instead of assuming. If that shows much more than the files listed below, the server was behind: stop and decide.
 - The container runs as **uid 1000** (`user: "${SCANNER_UID:-1000}"`); `HOME=/tmp`; `data/` is a volume. Files rsynced by `user` (uid 1000?) are readable and writable by it - step 1 checks.
 - `config.yaml` is **baked into the image** (`COPY . .`): there is no environment switch for the new settings, so changing one means editing the file and rebuilding.
 - The deploy procedure is the one in my notes (`git ls-files | rsync -rlpt --checksum --files-from=-`, `build` before `up`, both GPU files, `-l` for the `deploy/.env` link).
@@ -53,7 +56,7 @@ Run from the repo on the laptop. `rsync --dry-run` changes nothing; the rest onl
 
 ```bash
 cd ~/Projects/scanner-server
-# a) what differs from the server's copy (expected: about the 16 files above; more = the server was behind)
+# a) what differs from the server's copy (expected: about the twenty files above; more = the server was behind)
 git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | LC_ALL=C sort \
   | rsync -rlpt --checksum --dry-run --itemize-changes --files-from=- ./ user@192.168.1.23:scanner-server/ | grep -v "^\.d"
 # b) does the server's folder hold files the repo no longer has? (rsync never deletes them; a stray .py in the top folder is imported ahead of src/)
@@ -85,7 +88,7 @@ git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | rsync -rlpt
 
 ```bash
 ssh user@192.168.1.23 'cd ~/scanner-rehearsal && sudo docker build -f deploy/Dockerfile --target server -t mtg-scanner-server:rehearsal .'
-ssh user@192.168.1.23 'sudo docker run --rm --entrypoint python mtg-scanner-server:rehearsal -c "import app, card_scanner.config as c, card_scanner.core.foil_marker as f, card_scanner.core.printing_check; print(c.__file__, f.MODEL_FILE.exists())"'
+ssh user@192.168.1.23 'sudo docker run --rm --entrypoint python mtg-scanner-server:rehearsal -c "import app, card_scanner.config as c, card_scanner.core.foil_marker as f, card_scanner.core.printing_check, card_scanner.core.reading.decide; print(c.__file__, f.MODEL_FILE.exists())"'
 #   expect: /app/src/card_scanner/config.py True
 ```
 
@@ -115,6 +118,9 @@ for f in /tmp/rehearsal/pictures/phone-0240eb84_10[3-5]*.jpg; do
 - **GPU memory**: `nvidia-smi` before the rehearsal, with the live container and Ollama running, and while the lookup's second reader is up (a `ps` inside the container shows two `server.mjs`):
   enough free memory left? the live container's OCR unaffected? Note the numbers;
 - two minutes after the last capture the second reader is gone (one `server.mjs`);
+- the lookup's records in `printing_check.jsonl` carry a `finish` field: `{printing, decision, source, symbol, net, server, same}`. Look at the Deadpool ones by eye:
+  a foil-only printing should give `decision: foil, source: printing`; for a printing that exists both ways, `source` is `symbol` or `network`, and `same: false`
+  (the server filed an unread marker as regular) is the case worth noting. This is the first time the field runs on real pictures;
 - `curl` of `/api/stats` and `/api/decks` on port 5002 equal the live server's (the code did not change data);
 - the time of the OCR stage in the log is as before (the lookup must not slow the live reader).
 
@@ -161,9 +167,18 @@ Do not run `docker image prune` afterwards (it removed the previous image once, 
 There is no data migration, so **a rollback is code only**: restore the code backup of step 2 (`tar xzf ~/scanner-backups/code-<time>.tar.gz -C ~`), `build`, `up -d` with both files.
 The data backup is a precaution; the new `data/image_index/` and `data/logs/printing_check.jsonl` are inert and can stay.
 
+## Trying the evidence mode (separate from this deploy, and only on the rehearsal copy first)
+
+The mode is off in what is deployed. To try it, on the **rehearsal container's own copy of the data** (never the live `data/`): put `"reading_mode": "evidence"` into that copy's
+`data/settings.json` and restart the rehearsal container (no rebuild). Send the Deadpool pictures and a dozen ordinary ones as in step 5, then check by eye: every `added` card is the
+right printing (the Deadpool foil / confetti ones the picture's, not the printed line's), `picture+strip` shows in `data/logs/scanned_cards.log`, the cards it could not decide
+went to the AI, and the time per card is not worse (the mode adds about 60 ms in the OCR worker on the laptop - **not measured next to Ollama on the server**). Switching it on for
+the live server is the owner's decision after the exit criteria are met, with the same two-line change in the live `data/settings.json` and a container restart; **to switch it off again**, delete
+that line (or set `cascade`) and restart - nothing else changed on disk (no schema, nothing to undo; cards it added stay as added).
+
 ## After the deploy
 
-- Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`a84dcb9`) and the backup names.
+- Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`b9a4169`) and the backup names.
 - **The index must be rebuilt after each card data update** (a new set's printings are `not_indexed` until then):
   `sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml exec server python scripts/build_image_index.py` - it downloads only the new printings from
   Scryfall (10 requests a second at most), can be stopped and run again, and a second one at the same time is refused. The report's `not_indexed` count says when it is due.

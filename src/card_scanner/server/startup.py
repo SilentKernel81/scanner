@@ -114,6 +114,8 @@ def initialize_components():
         services.database, Config.DATA_DIR / 'image_index', Config.DATA_DIR / 'logs' / 'printing_check.jsonl', Config.PRINTING_CHECK_MODE,
         Config.PRINTING_CHECK_LOOKUP, strip_reader=StripReader(lambda: services.identification.ocr_enabled, foil_net=foil_marker.load(Config.OCR_FOIL_MARKER)),
         finish_for=lambda card, foil: games.active().suggested_finish(card, foil))
+    # reading.mode 'evidence' reads a card by its picture and strip with the printing check's image index (the live reading's counterpart of its lookup)
+    services.identification.evidence = services.printing_check
 
     # The automatic backup of the collection, scanned cards and decks, if one is due
     # (run_backup_schedule asks again while the app runs)

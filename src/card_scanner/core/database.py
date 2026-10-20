@@ -82,7 +82,9 @@ PROMO_TYPE_LABELS = {
 
 
 # Matches that identify the exact printing (safe to add to the inventory without review)
-CONFIRMED_MATCHES = {'set_number', 'name_number', 'name_set_digit'}
+# 'picture' is not a search: it is the printing the picture and the strip decided on (printing_check.live_read, reading.mode 'evidence'), fetched by its
+# id - Game.card_by_printing tags it, and nothing else produces it
+CONFIRMED_MATCHES = {'set_number', 'name_number', 'name_set_digit', 'picture'}
 
 
 def collector_number_variants(collector_number):

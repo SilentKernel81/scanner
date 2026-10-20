@@ -88,6 +88,10 @@ class Game:
         """
         raise NotImplementedError
 
+    def card_by_printing(self, printing_id):
+        """The card of a printing the picture and the strip decided on, tagged as a confirmed match, or None (a game without one answers None)"""
+        return None
+
     def confirmed_read(self, name, number=None, set_code=None):
         """
         Whether a read identifies an exact printing (is_confirmed) - asked about the OCR read

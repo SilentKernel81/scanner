@@ -55,6 +55,14 @@ from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_fin
 logger = logging.getLogger('ai')
 
 DISAGREE_FROM = 0.06
+# Guards for a decision made by the picture ALONE (live_read, reading.mode 'evidence'). The lead over the second printing is relative: with an index that
+# lacks the card's printing (newer than the index, or a stale index) an unrelated best match can still lead. Measured with
+# scripts/experiments/image_match/calibrate_uncovered.py on 428 real pictures, each also with its own printing removed from the index (every add is then wrong):
+# the lead alone still added 36%; the strip rule below brought that to 5.4% at no cost to covered cards; adding this floor, 4.0% at -1.1 points of covered
+# cards (they go to the AI). A higher floor costs more than it helps: a covered camera picture is only 0.66 similar to Scryfall's scan (median), and the
+# same-art reprints of an uncovered one stay in the index and score high.
+IMAGE_MIN_SIMILARITY = 0.5
+EVIDENCE_READER = 'picture+strip'     # what a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
@@ -311,14 +319,8 @@ class PrintingCheck:
         strip = strip or self._strip_evidence(rgb, search)
         number, set_code = strip['number'], strip['set']
         # The evidence as plain data (core/reading/evidence.py), every lookup done here - and then a pure function decides
-        cards = {}
-        candidates = []
-        for row, similarity in zip(top, sims):
-            printing_id = index.ids[int(row)]
-            card = cards[printing_id] = self.database.get_card_by_id(printing_id) or {}
-            candidates.append({'id': printing_id, 'similarity': float(similarity), 'set': card.get('set_code'), 'number': card.get('number'),
-                               'oracle_id': card.get('oracle_id'), 'finishes': card.get('finishes') or []})
-        decision = decide_printing({'rotated': bool(search['rotated']), 'candidates': candidates}, {'number': number, 'set': set_code})
+        picture, cards = self._picture_evidence(search)
+        decision = decide_printing(picture, {'number': number, 'set': set_code})
         printing = None
         if decision['printing_id'] is not None:
             card = cards[decision['printing_id']]
@@ -328,6 +330,76 @@ class PrintingCheck:
         return {'path': decision['path'], 'printing': printing, 'strip': {'number': number, 'set': set_code} if number or set_code else None,
                 'lead': round(lead, 4) if lead is not None else None, 'rotated': search['rotated'],
                 'against_resolved': self._against(resolved_id, printing)}
+
+    def _picture_evidence(self, search):
+        """
+        What the picture says, as plain data (evidence.Picture), and the card dicts behind its candidates ({printing id: card}; {} for a
+        printing the card database does not have). Every database read the decision needs is done here.
+        """
+        index = search['index']
+        cards, candidates = {}, []
+        for row, similarity in zip(search['top'], search['sims']):
+            printing_id = index.ids[int(row)]
+            card = cards[printing_id] = self.database.get_card_by_id(printing_id) or {}
+            candidates.append({'id': printing_id, 'similarity': float(similarity), 'set': card.get('set_code'), 'number': card.get('number'),
+                               'oracle_id': card.get('oracle_id'), 'finishes': card.get('finishes') or []})
+        return {'rotated': bool(search['rotated']), 'candidates': candidates}, cards
+
+    # ------------------------------------------------------------------ the live reading (reading.mode: evidence)
+
+    def live_read(self, image, card_image, ocr, foil_net=None, accept_image_alone=False):
+        """
+        The reading of a capture by its picture and its strip - the live counterpart of lookup, used by Identification only in reading.mode
+        'evidence' (docs/plans/READING_REFACTOR_PLAN.md, phase 3), for a card the full-card OCR did not confirm, in place of asking the vision AI.
+        image: the capture (RGB); card_image: the flat card (the perspective-corrected one when there is one, else image). BOTH the fingerprint and
+        the strip are made of the flat card: a fixed area's `image` is the area as drawn, not a card, and the index was built from whole-card pictures
+        (the shadow log hashes the saved capture file, so its numbers for such a station carry that difference). ocr: the LIVE reader (here the read IS the live path - the shadow lookup's isolated reader exists to protect
+        the live one from shadow work); foil_net: the foil network, asked only where the OCR read no symbol.
+        Returns None when the picture cannot speak (no index, nothing found, or a candidate the card database does not have) and for a decision
+        of 'review' - the caller then goes on as it always did; or {'path', 'card' (the database's card of the decided printing), 'strip',
+        'finish' (decide_finish's answer), 'similarity', 'lead'}. 'image' (the picture alone; OFF unless asked for: a Codex review of 2026-10-20 - a printing newer than the index with an unreadable strip can still be added by it) is returned only with accept_image_alone.
+        Raises nothing the caller must handle except what the OCR reader raises.
+        """
+        card_image = image if card_image is None else card_image
+        search = self._search(card_image)
+        if search is None:
+            return None
+        upright = cv2.rotate(card_image, cv2.ROTATE_180) if search['rotated'] else card_image
+        strip = read_strip_evidence(ocr, upright, foil_net)
+        picture, cards = self._picture_evidence(search)
+        decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
+        if decision['path'] == 'review' or (decision['path'] == 'image' and not accept_image_alone):
+            return None
+        card = cards.get(decision['printing_id'])
+        if not card:                                   # an indexed printing the card database no longer has: not a card to add
+            return None
+        if decision['path'] == 'image' and (decision['similarity'] < IMAGE_MIN_SIMILARITY or self._names_unindexed(search['index'], strip)):
+            return None                                # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
+        return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
+                'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
+                'similarity': decision['similarity'], 'lead': decision['lead']}
+
+    def _names_unindexed(self, index, strip):
+        """
+        Whether the strip names a printing the card database has and the image index LACKS: then the picture cannot have seen that printing, and its best
+        match is another card's (or another printing's) - no add by the picture alone. Fails closed: if the card database cannot say, True.
+        """
+        if not (strip['number'] and strip['set']):
+            return False
+        try:
+            named = self.database.get_card_by_set_number(strip['set'], strip['number'])
+        except Exception as e:
+            logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
+            return True
+        return bool(named) and index.row(named['id']) is None
+
+    def verdict_of(self, image, printing_id):
+        """
+        'agree' / 'weak' / 'disagree' / 'not_indexed' for a capture and a printing the server was told (the vision AI's answer, looked up),
+        or None without an index. The check of an AI answer against the picture in reading.mode 'evidence'.
+        """
+        result = self.check(image, printing_id)
+        return result['verdict'] if result else None
 
     def _against(self, resolved_id, printing):
         """How the lookup's printing stands to the one the server resolved (see lookup)"""
@@ -368,6 +440,8 @@ class PrintingCheck:
         foil: the marker the server read for the capture ('foil', 'non-foil', 'unknown'; None = not given), for the comparison of the finish.
         Returns at once and never raises: the capture goes on whatever happens here.
         """
+        if reader == EVIDENCE_READER:
+            return          # the picture and the strip chose this printing: comparing the picture with it would only compare it with itself
         resolved = card if card and card.get('id') else None
         lookup = self.wants_lookup(reader, resolved)
         if self.mode != 'shadow' or not image_path or (resolved is None and not lookup):

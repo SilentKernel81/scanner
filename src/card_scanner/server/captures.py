@@ -86,13 +86,14 @@ def station_prefix(station):
 
 
 def route_identified(image_path, card_name, collector_number, set_code, processing_time=None, foil='unknown',
-                     fast=False, reader=None, game_id=None, station=None, captured_at=None):
+                     fast=False, reader=None, game_id=None, station=None, captured_at=None, printing_id=None):
     """
     After the AI (or OCR - reader says which read the card): look the card up and add it automatically, show it, or queue it for review.
     While a review is open, a card captured meanwhile (manual capture, auto scanning without
     automatic adds) waits in the queue instead of taking the reviewed card's place and capture.
     game_id: the game being scanned when the card was captured.
     station, captured_at: for a capture sent by a station (always fast: added or queued).
+    printing_id: the printing the picture and the strip decided on (reading.mode 'evidence'): that card is used as it is, not looked up again by name.
     Returns what became of it: {'status': 'added' (+ 'card') | 'review' (+ 'reason') | 'shown'}
     """
     if game_id and game_id != games.active_id():
@@ -111,7 +112,7 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
     if card_name and card_name.strip():
         return search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=fast,
                                     set_code=set_code, image_path=image_path, foil=foil, reader=reader,
-                                    station=station, captured_at=captured_at)
+                                    station=station, captured_at=captured_at, printing_id=printing_id)
     # Nothing was read (the AI gave no answer): the printing check's lookup still shows what the picture and the strip would have answered
     if printing_check and image_path:
         printing_check.observe(image_path, None, station, reader or get_ai_model_info())
@@ -164,7 +165,7 @@ def add_automatically(game, card, image_path, foil, station=None, captured_at=No
 
 
 def search_and_emit_card(card_name, collector_number, processing_time=None, was_fast_scan_mode=False, set_code=None,
-                         image_path=None, foil='unknown', reader=None, station=None, captured_at=None):
+                         image_path=None, foil='unknown', reader=None, station=None, captured_at=None, printing_id=None):
     """
     Search for card in database and emit results to client
 
@@ -176,6 +177,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
         was_fast_scan_mode: Whether this was a fast scan auto-add
         reader: what read the card when it wasn't the vision AI ("light-ocr")
         station, captured_at: for a capture sent by a station (see route_identified)
+        printing_id: a printing already decided on by the picture and the strip (see route_identified)
 
     Returns:
         dict: what became of the card (see route_identified)
@@ -190,7 +192,8 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     # Search database
     game = games.active()
     read_by = reader or get_ai_model_info()
-    db_card_info = game.identify(card_name, collector_number, set_code, ai_model=read_by)
+    # A printing the picture and the strip decided on is taken by its id: the lookup by name and number is for what was only read
+    db_card_info = (printing_id and game.card_by_printing(printing_id)) or game.identify(card_name, collector_number, set_code, ai_model=read_by)
 
     # Shadow mode of the printing check: does the picture look like the printing just resolved? It only
     # writes down where it does not (data/logs/printing_check.jsonl), in the background, and changes nothing
@@ -264,7 +267,8 @@ def announce_and_route(image_path, card_info, card_number, game_id, processing_t
     }, namespace='/', to=to or desk().room)
     outcome = route_identified(image_path, info.get('name', ''), info.get('collector_number', ''),
                                info.get('set_code', ''), processing_time, info.get('foil', 'unknown'), fast=fast,
-                               reader=info.get('reader'), game_id=game_id, station=station, captured_at=captured_at)
+                               reader=info.get('reader'), game_id=game_id, station=station, captured_at=captured_at,
+                               printing_id=info.get('printing_id'))
     outcome['read'] = {'name': info.get('name', ''), 'number': info.get('collector_number', ''),
                        'set': info.get('set_code', ''), 'foil': info.get('foil', 'unknown'),
                        'reader': info.get('reader') or get_ai_model_info()} if info else None

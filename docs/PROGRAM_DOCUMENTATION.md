@@ -1487,6 +1487,59 @@ Raspberry Pi, a Docker image with the index in its data volume, a card data upda
 the index (`not_indexed`), foil and confetti-foil copies as ordinary captures (the check does not look at the finish; the rescan's were
 only checked against the right printing), a quiet server's timing, and the false-alarm rate on live scans - that is what shadow mode is for.
 
+
+## Reading mode: evidence (phase 3 of the reading refactor; off by default, never tried live)
+
+`reading.mode` in `config.yaml` (`cascade` by default), overridden by `reading_mode` in `data/settings.json` (set on the machine and restart the container; no image
+rebuild). **`cascade` is exactly the reading described above and below this section**; nothing in this section runs in it (the foil-marker tests, which predate the mode,
+pass unedited, and `cascade` never calls the code of this section - a test pins that).
+
+**`evidence`** changes only the card the full-card OCR did *not* confirm - the card that would have gone to the vision AI. A card OCR confirms is read as before.
+For such a card, in `Identification._read_with_ocr` (so also in `identify()`, which the synchronous station route uses):
+1. `PrintingCheck.live_read` fingerprints the capture (both orientations), takes the five nearest printings of the image index, reads the strip of the flat card with the
+   **live** OCR reader (one more small request; here the read is the live path, unlike the shadow lookup's isolated reader) and applies `decide_printing` (rule A2).
+2. `strong` (the strip names a printing the picture agrees with) or, only when `reading.accept_image_alone: true` (**off by default**, see below), `image` (the picture alone leads
+   clearly; otherwise those cards go to the AI): the card is returned with its **printing id**, `reader: picture+strip`, and a `foil` field from `decide_finish` (printing's finishes, then the symbol, then the
+   network; an unknown finish still gets the AI's foil check where that was possible, and otherwise stays `unknown`, which `Game.suggested_finish` files as regular, as before).
+3. `review`, no index, a printing the card data lacks, OCR switched off, or any failure: the card goes to the vision AI as in `cascade`. **The AI's answer is then checked
+   against the picture** (`PrintingCheck.verdict_of`): if the picture clearly looks like another printing (`disagree`), its number and set are dropped and the card goes to
+   the review queue under the name the AI gave; any other verdict, or a failed check, leaves the answer alone.
+
+**Which picture.** Both the fingerprint and the strip are made of the *flat card* (the station's perspective-corrected picture; the capture itself when there is no separate one), and so is
+the check of the AI's answer: a fixed area's capture is the area as drawn, not a card, and the index was built from whole-card pictures. The shadow log, by contrast, hashes the saved capture
+file, so its numbers for a fixed-area station carry that difference. `verify_live_read.py` uses flat-card pictures only: **a fixed-area station was never tried with this mode.**
+
+**A printing the index lacks (Codex review, 2026-10-20).** The lead of the best match over the second is *relative*: with an index that lacks the card's printing (a set newer than the
+index, or a stale index) an unrelated best match can still lead, and the picture alone would add it. Two guards apply to a decision by the picture alone (not to `strong`, whose printing
+the strip names and the picture confirms): the best match must be at least `IMAGE_MIN_SIMILARITY` (0.5) similar in absolute terms, and the strip must not name a printing the card
+database has but the index lacks (if the card database cannot say, the picture alone is not enough). Measured with `scripts/experiments/image_match/calibrate_uncovered.py` on 428 real
+pictures, each also with its own printing removed from the index (every add is then wrong): the lead alone still added **36%** of those; the strip rule brought it to 5.4% at no cost to
+covered cards; adding the floor, **4.0%**, at 1.1 points of covered cards (which go to the AI). A higher floor costs more than it helps - a covered camera picture is only 0.66 similar to
+Scryfall's scan (median), and the same-art reprints of an uncovered printing stay in the index and score high - so the floor is a backstop, not the protection. **Residual risk, and why the picture alone is OFF by default** (second Codex review, same day): with the two guards, a printing newer than the index whose strip is unreadable can still be added by
+the picture alone (4% in that simulation), and a stale index makes that likelier. So `reading.accept_image_alone` defaults to **false** (config, `Config`, and the `live_read` signature): such cards
+go to the AI as before, and only the decisions the strip confirms are made without it. With that default the same simulation added **0 of 428** pictures whose printing was not indexed, while
+359 of 428 covered ones (83.9%) were still decided by picture and strip, none wrong. Turning the picture alone on is a separate decision (it was 24 more of the 128 AI-read cards); rebuild the
+index after every card data update either way (`not_indexed` in the report says when).
+
+**The decided printing travels by its id.** `route_identified` / `search_and_emit_card` take `printing_id` and use `Game.card_by_printing` (tag `picture`, in
+`CONFIRMED_MATCHES`) instead of looking the card up again by name and number. Measured with `scripts/experiments/image_match/verify_roundtrip.py`: on a seeded sample of 3,000
+printings, 14% do not come back as themselves, confirmed, from `identify(name, number, set)` - promos and special numbers (`CMR-77`, `245p`, `4g`, `185★`, `UU04a`) - so the cheaper
+route (hand the server the database's name, number and set) would have added another printing or sent a right one to review. Nothing else produces the `picture` tag.
+
+**Not recorded in the shadow log.** `PrintingCheck.observe` ignores a card whose reader is `picture+strip` (comparing the picture with the printing it chose would only
+compare the choice with itself). **The exit criteria's evidence is therefore collected in `cascade` mode only**: with the mode on, the shadow log covers just the cards the AI
+still handles and says nothing about the cards the mode adds itself. What the mode adds is in the scanned-cards log (`ai_model` = `picture+strip`) and the app log
+(`Picture and strip: ...`); the collection itself is the test (cards added with the wrong printing).
+
+*Measured* (`verify_live_read.py --no-image-alone`, the shipped default, with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
+(58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
+guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
+(median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker - not measured on the server with Ollama resident. *Never run on live scans.*
+
+*Not done yet* (deferred on purpose): the single worker pool that would replace the OCR and AI workers (a restructuring that changes no decision, and the riskiest part of the live
+path); a rule for an OCR-confirmed card whose picture says `disagree` (the Secret Lair case: it is added as the OCR read it, as before); a Settings page switch for the mode; flagging an
+unsure finish in the review screen (phase 4).
+
 ## Database
 
 One SQLite file, `data/cards_database.db`.
