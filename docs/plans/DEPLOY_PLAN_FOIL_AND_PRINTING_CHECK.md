@@ -1,6 +1,6 @@
 # Deploy plan: the foil-marker network, the printing check and the lookup
 
-Prepared 2026-10-20, updated the same day for phases 2 and 3 of the reading refactor (commit `70ecda7`, which is what this plan now deploys; `b9a4169` was phase 2). **Nothing in this plan has been run.** It covers the server only (`user@192.168.1.23`, `~/scanner-server`).
+Prepared 2026-10-20, updated the same day for phases 2 to 4 of the reading refactor (commit `883870b`, which is what this plan now deploys; `b9a4169` was phase 2, `70ecda7` phase 3). **Nothing in this plan has been run.** It covers the server only (`user@192.168.1.23`, `~/scanner-server`).
 The camera stations (the Pis, the phone) are not touched: nothing in `station/` changed, and they reconnect by themselves. (One of the four modules the station images share, `config.py`, gained 13 lines of constants and no imports; it only matters if a station image is rebuilt later, which this plan does not do.)
 
 ## What goes live, and how risky each part is
@@ -11,18 +11,19 @@ The camera stations (the Pis, the phone) are not touched: nothing in `station/` 
 | Printing check (shadow) | `6a462ff` | Only writes `data/logs/printing_check.jsonl`; changes nothing | Low: one background thread, bounded queue, never raises |
 | The lookup (shadow) | `a84dcb9` | Also log-only. For cards the AI handles, a second light-ocr process reads the strip | Low-medium: **a second OCR process on the GPU next to Ollama** (see "The question that needs an answer first") |
 | Reading refactor, phase 2 | `b9a4169` | The lookup's decision moved into `core/reading/` (shown identical on 444 pictures), plus a new `finish` field in the shadow log (the finish the picture and strip would give, beside the server's own). Log-only; the shadow reader loads its own 310 KB foil network (OpenCV on the CPU) | Low: no schema, config key or route added; the extra work is one small network run per lookup capture |
-| Reading mode `evidence` (phase 3) | `70ecda7` | **Ships OFF** (`reading.mode: cascade` in the shipped `config.yaml`): the deployed server reads exactly as before. When switched on it replaces the vision AI for cards the OCR did not confirm | Off: the code is present **in the live path** (`identification.py` `_read_with_ocr` / `_ask_ai`, the routing in `captures.py`, `CONFIRMED_MATCHES`, `Game.card_by_printing`) but `cascade` never reaches it - the existing tests pass unedited and a test pins that; step 5's rehearsal still checks that ordinary captures are read and answered exactly as before. On: **a real behaviour change, never run on live scans** - a wrong add goes into the collection. Not part of this deploy's go-live; see "Trying the evidence mode" below; the picture-alone path inside it is a second, separate switch, also off |
+| Reading mode `evidence` (phase 3), the Settings switch, the review screen's candidates (phase 4) | `70ecda7`, `27ebb48` | **Ships OFF** (`reading.mode: cascade` in the shipped `config.yaml`): the deployed server reads exactly as before. When switched on it replaces the vision AI for cards the OCR did not confirm | Off: the code is present **in the live path** (`identification.py` `_read_with_ocr` / `_ask_ai`, the routing in `captures.py`, `CONFIRMED_MATCHES`, `Game.card_by_printing`) but `cascade` never reaches it - the existing tests pass unedited and a test pins that; step 5's rehearsal still checks that ordinary captures are read and answered exactly as before. On: **a real behaviour change, never run on live scans** - a wrong add goes into the collection. **New since the first version of this plan: the Settings page can turn it on** (Settings > Card reading, with a confirmation) - anyone who can reach the server can, unless the settings password is set (the event is guarded); set one before it is reachable beyond the house, or ignore the section. Not part of this deploy's go-live; see "Trying the evidence mode" below; the picture-alone path inside it is a second, separate switch, also off |
 
-Not in the server: `scripts/experiments/` (56 files) - the plan leaves them out of the copy. The new data artifacts are inert without the code: `data/image_index/`
+Not in the server: `scripts/experiments/` (60 files) - the plan leaves them out of the copy. The new data artifacts are inert without the code: `data/image_index/`
 (15 MB for the generation the manifest names; the folder also keeps the previous generation, about 29 MB in all - the rsync commands copy both) and `data/logs/printing_check.jsonl`.
 
 **No data migration** (checked: no `CREATE TABLE`, `ALTER TABLE` or migration in the changes since `04cf82e`), **nothing deleted or moved away**
-(so nothing to delete by hand on the server; `git diff --name-status` finds no deleted or renamed file). Counted on 2026-10-20 against `04cf82e` (the commit before this work), the
-list the rsync commands send holds **35 files that differ**: 21 of code, config and scripts - new: `foil_marker.py`, `foil_net.onnx`, `image_index.py`, `printing_check.py`, the package
-`core/reading/` (`__init__.py`, `evidence.py`, `decide.py`), `scripts/build_image_index.py`, `scripts/printing_check_report.py`; edited: `identification.py`, `captures.py`, `startup.py`,
-`state.py`, `config.py`, `card_ocr.py`, `database.py`, `games/base.py`, `games/mtg.py`, `config.yaml`, `.gitignore` - and the rest tests and docs (`CLAUDE.md` among them). Phase 3 itself touched
-`identification.py`, `printing_check.py`, `captures.py`, `startup.py`, `database.py`, `games/base.py`, `games/mtg.py`, `config.py` and `config.yaml`. These counts are against the repository's history, not against the
-server's copy: step 1a is what says how the server differs.
+(so nothing to delete by hand on the server; `git diff --name-status` finds no deleted or renamed file). Counted on 2026-10-20 against `04cf82e` (the commit before this work), at `883870b`, the list the rsync commands send holds **47 files that differ**: 29 of code, config, pages and scripts and the rest tests and docs
+(`CLAUDE.md` among them). New: `foil_marker.py`, `foil_net.onnx`, `image_index.py`, `printing_check.py`, the package `core/reading/` (`__init__.py`, `evidence.py`, `decide.py`), `scripts/build_image_index.py`,
+`scripts/printing_check_report.py`, `scripts/check_review_page.py`. Edited: `identification.py`, `captures.py`, `startup.py`, `state.py`, `config.py`, `card_ocr.py`, `database.py`, `games/base.py`, `games/mtg.py`,
+`config.yaml`, `.gitignore`, and - **the pages, new since the plan was first written** - `server/scan_events.py`, `server/settings_events.py`, `server/templates/scanner.html`, `server/templates/settings.html`,
+`static/js/scanner.js`, `static/js/settings.js`, `static/css/style.css`. A server serves its templates from memory, so the container's restart picks the pages up; a browser may hold the old scripts for a moment
+(their `?v=` numbers were raised). The changes since the plan first said "no new route" are one new guarded Socket.IO event (`set_reading_mode`) and a field in two existing answers (`/api/scan_settings`, `review_item`);
+the recorded surface (`tests/app_surface.json`) has them. These counts are against the repository's history, not against the server's copy: step 1a is what says how the server differs.
 The server image copies the whole tree (`COPY . .`), so the new package needs no line of its own in the Dockerfile; only the station images name modules.
 
 ## Decisions made (2026-10-20)
@@ -65,7 +66,7 @@ Run from the repo on the laptop. `rsync --dry-run` changes nothing; the rest onl
 
 ```bash
 cd ~/Projects/scanner-server
-# a) what differs from the server's copy (expected: about the 35 files above; more = the server was behind)
+# a) what differs from the server's copy (expected: about the 47 files above; more = the server was behind)
 git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | LC_ALL=C sort \
   | rsync -rlpt --checksum --dry-run --itemize-changes --files-from=- ./ user@192.168.1.23:scanner-server/ | grep -v "^\.d"
 # b) does the server's folder hold files the repo no longer has? (rsync never deletes them; a stray .py in the top folder is imported ahead of src/)
@@ -162,6 +163,7 @@ Do not run `docker image prune` afterwards (it removed the previous image once, 
 4. One real scan of a foil card; its finish and, in the log, how it was read (`Foil marker read by ...` when the OCR missed the marker).
 5. After some captures: `sudo docker exec mtg-scanner-server python scripts/printing_check_report.py`. The first lines show it works (cards looked at, agree / disagree).
 6. `nvidia-smi` and `docker stats`: the memory and CPU are as the rehearsal showed.
+7. The pages: Settings > Card reading shows "Read by the picture first (experimental)" **off**, with the image index's number of printings; open a review item (or scan a card that goes to review): with the index it shows "The picture looks like".
 
 ## The switches, if something misbehaves
 
@@ -169,6 +171,7 @@ Do not run `docker image prune` afterwards (it removed the previous image once, 
 |---|---|---|
 | The printing check / the lookup (any problem) | `ssh ... 'mv ~/scanner-server/data/image_index ~/scanner-server/data/image_index.off'` | **Nothing else, at once**: without an index it does nothing (the next capture notices; no restart) |
 | The foil network gives wrong finishes | `ocr.foil_marker: false` in `~/scanner-server/config.yaml`, then build + `up -d` | a rebuild (2-3 min); or the rollback below |
+| The evidence mode misbehaves (a wrong printing added) | Settings > Card reading > turn "Read by picture and collector line first" off (the next card takes it), or `"reading_mode": "cascade"` in `data/settings.json` | **Nothing else, at once** - no rebuild, no restart; cards it added stay as added |
 | The second OCR process is a problem | `printing_check.lookup: off` (same way), or the index switch above | a rebuild, or the index switch |
 
 ## Rollback
@@ -186,7 +189,7 @@ the live server is the owner's decision after the exit criteria are met, with th
 
 ## After the deploy
 
-- Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`70ecda7`) and the backup names.
+- Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
 - **The index must be rebuilt after each card data update** (a new set's printings are `not_indexed` until then):
   `sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml exec server python scripts/build_image_index.py` - it downloads only the new printings from
   Scryfall (10 requests a second at most), can be stopped and run again, and a second one at the same time is refused. The report's `not_indexed` count says when it is due.
