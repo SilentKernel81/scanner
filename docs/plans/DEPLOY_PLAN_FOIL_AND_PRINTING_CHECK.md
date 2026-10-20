@@ -137,6 +137,19 @@ for f in /tmp/rehearsal/pictures/phone-0240eb84_10[3-5]*.jpg; do
 Clean up: `sudo docker rm -f rehearsal; sudo docker rmi mtg-scanner-server:rehearsal; rm -rf /tmp/rehearsal ~/scanner-rehearsal`.
 If the GPU does not have room: decide between `lookup: off`, the shadow reader on the CPU, or `ocr.foil_marker` only. **Do not go to step 6 until the numbers are in.**
 
+### Done locally first (2026-10-20), on a copy, without Docker
+
+A server run from the checkout (`venv/bin/python app.py`) on a COPY of the card database and the image index, port 5012, the laptop's own Ollama (`qwen3.5:4b`) as the vision AI, and
+`scripts/experiments/image_match/rehearse_local.py` sending 39 pictures as a station would (the 15 Deadpool captures, 12 OCR-confirmed, 12 that the AI had to read), first in `cascade`, then
+switched to `evidence` through the Settings page's own event. **Passed**: no failed request and no traceback in either log; in `cascade` the server read exactly as before; in `evidence` every add with a known
+truth was the right printing (23 of 23 and 24 of 24); 8 cards were read by `picture+strip` in 0.24-0.45 s (the AI takes 1.7-2.4 s); a card the AI had misread and sent to review was added right by the picture
+(`The Arkenstone`); two Deadpool cards the AI had resolved to the wrong card (`Worn Powerstone`) were added in `cascade` and sent to review in `evidence` (the AI's answer checked against the picture);
+`picture+strip` never appears in the shadow log; the `finish` field was written for the 40 lookups (11 say `same: false`: nine are Secret Lair cards the server had resolved to a wrong printing and so filed
+as regular, two are a real conflict between the server's read of the marker and the strip's); the mode survived a restart; the Settings page shows the new section; a review item opens with its five
+candidates, the right Deadpool printings first. **Not answered** (laptop, a 6 GB GPU and a 4B model): a second OCR process next to the server's Ollama model, the Docker image and its volumes, and the server's own
+state - those are this plan's steps 1, 4 and 5. **Known and not fixed:** three Deadpool cards (`Lightning Bolt`, read as `Lightning` #042 and confirmed as `Lightning Strike`) are still added wrongly in `evidence`
+mode - an OCR-confirmed card whose picture is another CARD is not caught, only another printing of the same card (PROGRAM_DOCUMENTATION.md); in `cascade` it is the same, plus the two `Worn Powerstone`.
+
 ## Step 6 - the real deploy
 
 ```bash
