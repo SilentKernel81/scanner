@@ -31,6 +31,8 @@ data/web_cache.db*
 data/arena_inventory.db*
 data/frames/
 data/captures_full/
+# The image index (a fingerprint of every printing's picture, built by scripts/build_image_index.py)
+data/image_index/
 # SQLite's files beside a database in use
 *.db-journal
 *.db-wal

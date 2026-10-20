@@ -126,6 +126,14 @@ ocr:
   # 46-85 ms in the experiment; a quiet server's whole read was not measured
   foil_marker: true
 
+# Printing check (core/printing_check.py): does the picture look like the printing the server just
+# resolved? A Secret Lair card prints the set and number of the card it is made from, and the AI
+# sometimes names a card the picture is not. shadow: written down in data/logs/printing_check.jsonl
+# (python scripts/printing_check_report.py sums it up), nothing is changed; off. It needs an image
+# index of Scryfall's pictures: python scripts/build_image_index.py (about 15 MB); without one it does nothing
+printing_check:
+  mode: shadow
+
 # Cleanup Settings
 cleanup:
   enabled: true

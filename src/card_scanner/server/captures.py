@@ -15,7 +15,7 @@ from card_scanner.core import frames
 
 from card_scanner.server.state import (
     app_settings, capture_outcomes, capture_outcomes_lock, identification, maintenance_barrier,
-    pending, review, scan_inventory, seen_captures, socketio, stations,
+    pending, printing_check, review, scan_inventory, seen_captures, socketio, stations,
 )
 from card_scanner.server.logs import logger, scanned_cards_logger
 from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client, queue_changed, scanner
@@ -188,6 +188,11 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     game = games.active()
     read_by = reader or get_ai_model_info()
     db_card_info = game.identify(card_name, collector_number, set_code, ai_model=read_by)
+
+    # Shadow mode of the printing check: does the picture look like the printing just resolved? It only
+    # writes down where it does not (data/logs/printing_check.jsonl), in the background, and changes nothing
+    if printing_check and db_card_info and image_path:
+        printing_check.observe(image_path, db_card_info, station)
 
     # Adding automatically, only cards whose exact printing was confirmed are added
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review

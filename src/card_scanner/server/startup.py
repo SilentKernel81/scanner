@@ -23,6 +23,7 @@ from card_scanner import games
 from card_scanner.core.identification import Identification
 from card_scanner.core.inventory import InventoryManager
 from card_scanner.core.pending import PendingCaptures
+from card_scanner.core.printing_check import PrintingCheck
 from card_scanner.core.recommendations import Recommendations
 from card_scanner.core.remote_scanner import CameraHub, RemoteScanner
 from card_scanner.core.review import ReviewQueue
@@ -105,6 +106,10 @@ def initialize_components():
     services.pending = PendingCaptures()
     services.deck_store = DeckManager()
     services.recommend = Recommendations()
+    # Does a capture look like the printing the server resolved for it? Shadow mode: writes down where it
+    # does not, changes nothing (core/printing_check.py). Without an image index (scripts/build_image_index.py) it does nothing.
+    services.printing_check = PrintingCheck(services.database, Config.DATA_DIR / 'image_index',
+                                            Config.DATA_DIR / 'logs' / 'printing_check.jsonl', Config.PRINTING_CHECK_MODE)
 
     # The automatic backup of the collection, scanned cards and decks, if one is due
     # (run_backup_schedule asks again while the app runs)

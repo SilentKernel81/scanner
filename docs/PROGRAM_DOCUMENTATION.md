@@ -102,6 +102,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
+| `image_index.py`, `printing_check.py` | server | The printing check, shadow mode (see *Printing check*): a 96-byte fingerprint of every printing's picture (`hash_card`, `ImageIndex`, the builder `build`) and the check that a capture looks like the printing the server resolved (`PrintingCheck`) |
 | `foil_marker.py`, `foil_net.onnx` | server | The foil marker (★ / •) read from the set line by a small network where OCR left it unread (`FoilMarker`, `load`); the network is the file beside the module, run with OpenCV's dnn (310 KB) |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | server | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
@@ -1344,6 +1345,82 @@ The web page combines this with the printing's `finishes` in `suggestedFinish()`
 The suggested finish is pre-filled with quantity 1 and the reason is shown ("Foil: ★ next to
 the set code"). Automatic adds use the same suggestion. Cards printed before the marker existed
 (roughly 2020) rely on step 1–2 only.
+
+## Printing check (shadow mode)
+
+*Since 2026-10-20. Research behind it: `docs/plans/IMAGE_MATCH_EXPERIMENT.md`. It changes nothing: it only writes down where
+the picture does not look like the printing the server added.*
+
+**Why.** The collector line does not always name the printing: a Secret Lair card prints the set and number of the card it is
+made from, so the server resolves the base printing (the owner's Deadpool cards were all added as the base printing, 0 of 15
+right); and the vision AI misread at least 12% of the cards it handled (a name and a number that agree with each other and with
+nothing in the picture). The picture is the one piece of evidence that goes through neither the OCR nor the AI.
+
+**The fingerprint** (`image_index.hash_card`, descriptor `phash_rgb_v1`): a perceptual hash of the whole card, per colour. The edge is
+cut off a little, the picture is scaled to 224 x 312, each colour channel is stretched to its 2nd - 98th percentile, scaled to 64 x 64,
+and the lowest 16 x 16 frequencies of its discrete cosine transform become one bit each (above or below their median):
+3 x 256 bits = 96 bytes. Two pictures are compared by the number of bits that differ; `similarity` = 1 - 2 x differing / 768. The
+same function makes the fingerprints of Scryfall's pictures and of a capture. It is bit for bit what the experiment's code made
+(600 of 600 printings identical, with OpenCV 4.14 and 5.0; `tests/test_printing_check.py` pins it on a synthetic card), so the
+experiment's numbers apply.
+
+**The index** (`data/image_index/`: `manifest.json` and a pair of `hashes-<generation>.bin` / `ids-<generation>.txt`; about 15 MB for the
+112,765 printings, twice that while the previous generation is kept; not in git, not in a backup):
+built by `python scripts/build_image_index.py` - pictures are taken from a folder given with `--images` first (the experiment's cache has
+them all), the rest downloaded from Scryfall at the card database's `image_uri` (8 requests at a time, never two started less than 0.1 s
+apart, one 429 / 403 is waited out and a refusal that goes on stops the run), hashed and thrown away. A first build from nothing downloads
+~12 GB and takes hours; a later run only does the printings added since (new sets), so it belongs after a card data update. It
+checkpoints every 5,000 printings and can be stopped and run again. **Publishing is one step** (found by a review on 2026-10-20: the
+first version replaced three files one after the other): each build writes its own pair of files, nothing pointing at them yet, then
+replaces `manifest.json` with one rename - it names the current pair and holds the SHA-256 of both. A build that is interrupted anywhere
+leaves the previous generation current and whole (the next build clears what was left); a reader loading while one is published gets
+one generation or the other, never a mix; two files that do not belong together fail the checksums even when their counts agree. The
+generation before the current one is kept until the next publication, so a slow reader still finds its files. **Two writers are kept
+apart** (a second review, the same day: two overlapping builds each cleaned up the other's files, the ones the manifest named included):
+publishing takes an exclusive `flock` on the folder (`.publishing`) from the lookup of the previous generation to the end of the clean-up
+- seconds, never while pictures are hashed - and a build holds another one (`.building`) for its whole run, so a second build is refused
+(`BuildRunning`: "another build of the image index is running") instead of repeating hours of work and leaving out what the first added.
+The server loads the
+index when first needed and again when the manifest changes; **without an index the check does nothing** (said once in the log).
+
+**The rule** (`PrintingCheck.check`). The capture is fingerprinted twice, upright and turned 180 degrees (a card put in upside down
+matched a wrong card with a clear lead for 2% of the pictures in the experiment), and compared with every printing; the better
+orientation counts. With R the printing the server resolved, `gap` = similarity of the best match - similarity of R:
+
+| gap | verdict | meaning |
+|---|---|---|
+| below 0.02 (`AGREE_BELOW`) | `agree` | R looks like the picture as well as the best match: a reprint with the same art has almost the same fingerprint |
+| from 0.06 (`DISAGREE_FROM`) | `disagree` | the picture looks like something else. `kind`: `other_card` (the best match is another card: probably a misread) or `same_card` (another printing of the same card: the printed line named the wrong printing) |
+| between | `weak` | written down, not counted |
+| - | `not_indexed` | R is a printing newer than the index |
+
+The thresholds are from `scripts/experiments/image_match/calibrate_gap.py`, on the colour hash: among 10,677 pictures whose labels are not
+known to be wrong, the gap was 0 for 95% of them and 0.036 at the 99th percentile; the 20 labels known to be wrong (the AI's misreads
+among the hard cases, five Deadpool photos filed under the wrong entry) all had 0.089 or more. At 0.06, 0.68% of the right labels would
+have been flagged (some of those are probably labels that were wrong too: the labels came from the OCR and the AI) and all 20 wrong ones
+caught. **20 known-wrong cases is a small sample: the thresholds are a first guess for shadow mode to check, not a result.**
+
+Checked with the shipped code and the real index (112,765 printings, built from the experiment's picture cache) on the owner's Deadpool
+Secret Lair rescan - 15 captures of physical copies whose version is known: the right printing `agree`d 15 of 15 (gap 0.000), and the
+printing the server had added at scan time for five of them (Lightning Strike [Game Night 2019, 42], Worn Powerstone [Starter Commander
+Deck, 288]) `disagree`d 5 of 5, gaps 0.23 to 0.51, kind `other_card` (the printed line names another card than the one in the picture).
+One check took 74 ms (median) and 192 ms (95th percentile) on the development laptop with a GPU training run beside it, and 24 ms and
+47 ms with only the training's evaluation running (a quiet server was not measured); it runs on the background thread, so a capture
+does not wait for it.
+
+**Shadow mode** (`printing_check.mode: shadow` in `config.yaml`, the default; `off`). `search_and_emit_card` hands each capture and
+the card it resolved to `PrintingCheck.observe`, which returns at once: the work is on one background thread behind a queue of 200
+(more are dropped), and nothing it does can fail or delay a capture. Every card looked at is one line of
+`data/logs/printing_check.jsonl` (time, station, picture, verdict, kind, gap, lead, orientation, the printing resolved and the one the picture
+looks like; renamed to `.1` beyond 10 MB), and a `disagree` also a line in the log. `python scripts/printing_check_report.py` sums it up:
+how many cards, how many agreed, the latest disagreements.
+
+**What happens after shadow mode is not decided.** The experiment's rule would, for a printing the picture disagrees with, use the
+picture's printing or send the card to review; that needs the shadow log looked at on real scans first (are the disagreements the AI's
+misreads and the Secret Lair cards, or something else?), and its own tests. **Never tried:** the Android app (it has no index), a
+Raspberry Pi, a Docker image with the index in its data volume, a card data update followed by a rebuild, cards of sets newer than
+the index (`not_indexed`), foil and confetti-foil copies as ordinary captures (the check does not look at the finish; the rescan's were
+only checked against the right printing), a quiet server's timing, and the false-alarm rate on live scans - that is what shadow mode is for.
 
 ## Database
 

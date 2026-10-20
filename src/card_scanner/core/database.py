@@ -741,6 +741,12 @@ class CardDatabase:
         labels.extend(label for promo, label in PROMO_TYPE_LABELS.items() if promo in card['promo_types'])
         return labels
 
+    def printing_images(self):
+        """(Scryfall id, picture address) of every printing, in id order: what the image index
+        (core/image_index.py) is built from. The address is None for a printing without a picture."""
+        with self._lock:
+            return [(row['id'], row['image_uri']) for row in self.conn.execute('SELECT id, image_uri FROM cards ORDER BY id')]
+
     def get_card_by_id(self, card_id):
         """Get a single printing by its Scryfall id"""
         with self._lock:

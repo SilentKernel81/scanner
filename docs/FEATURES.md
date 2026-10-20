@@ -62,6 +62,13 @@ game sits behind one interface (`games/`), so another could be added.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
+- **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
+  printing's picture (`scripts/build_image_index.py`, about 15 MB) lets the server ask whether
+  a capture looks like the printing it just added - the Secret Lair cards that print another
+  printing's set and number, and cards the AI misread. For now it only writes down where it
+  disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it
+  does nothing. Thresholds from 20 known-wrong labels, never run on live scans, a Pi or the
+  Android app.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
   the printing, finish and quantity, and add it. Scanning goes on meanwhile.

@@ -173,6 +173,10 @@ class Config:
     # The foil marker read by a small network where OCR left it unread (core/foil_marker.py)
     OCR_FOIL_MARKER = config.get('ocr', 'foil_marker', default=True)
 
+    # The printing check (core/printing_check.py): 'shadow' writes down where a capture does not look like the
+    # printing the server resolved and changes nothing; 'off'. It needs an image index (scripts/build_image_index.py)
+    PRINTING_CHECK_MODE = str(config.get('printing_check', 'mode', default='shadow')).strip().lower()
+
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')
     LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL') or config.get('vision_ai', 'local', 'model', default='llava:13b')
