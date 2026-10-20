@@ -27,7 +27,7 @@ from common import HOME, OUT, TRUTH  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('base')
-ap.add_argument('--mode', choices=['cascade', 'evidence'], required=True)
+ap.add_argument('--mode', choices=['cascade', 'evidence', 'default'], required=True, help="'default': do not touch the server's mode - see what it does by itself")
 ap.add_argument('--alone', action='store_true', help='evidence mode: also add what the picture alone decided')
 ap.add_argument('--ordinary', type=int, default=12)
 ap.add_argument('--hard', type=int, default=12)
@@ -48,20 +48,25 @@ for _ in range(360):
 else:
     sys.exit('the server did not answer')
 
-# ---- the mode, through the Settings page's own event
-client = socketio.Client()
-answers = []
-client.on('reading_mode_changed', lambda data: answers.append(data))
-client.on('error', lambda data: answers.append({'error': data}))
-client.connect(BASE)
-client.emit('set_reading_mode', {'mode': arguments.mode, 'accept_image_alone': bool(arguments.alone)})
-for _ in range(50):
-    if answers:
-        break
-    time.sleep(0.1)
-client.disconnect()
-print('the server says:', answers[-1] if answers else 'NO ANSWER')
-assert answers and answers[-1].get('mode') == arguments.mode, 'the mode was not taken'
+# ---- the mode, through the Settings page's own event (or left alone: --mode default)
+if arguments.mode == 'default':
+    status = requests.get(BASE + '/api/scan_settings', timeout=10).json()['reading']
+    print('the server, left as it is:', status)
+    arguments.mode, arguments.alone = status['mode'], status['accept_image_alone']      # what it is doing, for the report
+else:
+    client = socketio.Client()
+    answers = []
+    client.on('reading_mode_changed', lambda data: answers.append(data))
+    client.on('error', lambda data: answers.append({'error': data}))
+    client.connect(BASE)
+    client.emit('set_reading_mode', {'mode': arguments.mode, 'accept_image_alone': bool(arguments.alone)})
+    for _ in range(50):
+        if answers:
+            break
+        time.sleep(0.1)
+    client.disconnect()
+    print('the server says:', answers[-1] if answers else 'NO ANSWER')
+    assert answers and answers[-1].get('mode') == arguments.mode, 'the mode was not taken'
 
 # ---- the pictures
 rows = json.loads((OUT / 'phash_rgb_card' / 'rows.json').read_text())

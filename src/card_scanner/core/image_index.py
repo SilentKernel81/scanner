@@ -282,8 +282,17 @@ def _one_build_at_a_time(function):
     return wrapper
 
 
+class BuildResult(tuple):
+    """
+    What build returns: (printings in the index, new ones, left out for want of a picture) - a plain 3-tuple to every caller that unpacks or compares it - and
+    `reason`, how the run ended: 'done', 'cancelled' (the caller asked it to stop) or 'refused' (Scryfall kept refusing: what was done is written, and the
+    run is to be tried again later). A run that ended early is NOT a failure of what it wrote, but a caller that says "done" for it says something false.
+    """
+    reason = 'done'
+
+
 @_one_build_at_a_time
-def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=None, log=print):
+def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=None, log=print, progress=None, cancel=None):
     """
     Builds (or completes) the index of a folder from a list of (Scryfall id, picture address). One build at a time per folder
     (BuildRunning for a second); writing the result is one more, short lock (`write`: two writers must not clean up each other's files).
@@ -293,7 +302,10 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     no download); fetch: download what is missing from Scryfall - 8 requests at a time but never
     two started less than 0.1 s apart, one 429 / 403 is waited out, a refusal that goes on stops the
     run (what was done is written first: it resumes). limit: stop after this many new ones (a trial).
-    Returns (printings in the index, new ones, left out for want of a picture).
+    progress(done, total): called after every printing, from the calling thread (the Settings page's button shows it); cancel: a threading.Event -
+    once it is set no further request is sent - also not by a worker that is waiting out a 429 or its turn (those waits end within a quarter of a second; a request already on its
+    way is waited for, at most its 60 s time-out) - what was done is written and the run ends (the same state as after a refusal: run it again and it resumes).
+    Returns a BuildResult: (printings in the index, new ones, left out for want of a picture), and .reason ('done', 'cancelled', 'refused').
     """
     existing = ImageIndex.load(directory)
     have = dict(zip(existing.ids, existing.hashes)) if existing else {}
@@ -304,6 +316,21 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     gate, next_start, stopped = threading.Lock(), [0.0], threading.Event()
     image_dir = Path(image_dir) if image_dir else None
 
+    def cancelled():
+        return cancel is not None and cancel.is_set()
+
+    def pause(seconds):
+        """
+        Wait - but not through a stop: a cancel, or the run stopping itself, ends the wait within a quarter of a second. (The waits here are the
+        0.1 s between requests and what Scryfall asks after a 429 / 403: a minute or more, during which a Stop must not be ignored.)
+        """
+        end = time.monotonic() + seconds
+        while not (stopped.is_set() or cancelled()):
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            stopped.wait(min(0.25, left))
+
     def picture(printing, address):
         """The picture's bytes: from the folder, else from Scryfall; None if there is none"""
         if image_dir and (image_dir / f'{printing}.jpg').is_file():
@@ -312,17 +339,21 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             return None
         import requests            # only to download: a build from a folder of pictures needs no network
         for attempt in range(4):
-            if stopped.is_set():
+            if stopped.is_set() or cancelled():
+                stopped.set()
                 raise Stopped()
             with gate:             # requests may overlap, but never two start less than REQUEST_GAP apart
-                time.sleep(max(0.0, next_start[0] - time.monotonic()))
+                pause(max(0.0, next_start[0] - time.monotonic()))
                 next_start[0] = time.monotonic() + REQUEST_GAP
+            if stopped.is_set() or cancelled():      # a stop that came while this one waited for its turn: no request is sent after it
+                stopped.set()
+                raise Stopped()
             try:
                 answer = requests.get(address, headers=HEADERS, timeout=60)
             except requests.RequestException:
                 return None
             if answer.status_code in (429, 403):
-                time.sleep(int(answer.headers.get('Retry-After', 0) or 0) or 60 * (attempt + 1))
+                pause(int(answer.headers.get('Retry-After', 0) or 0) or 60 * (attempt + 1))      # interruptible: the loop's first line then stops
                 continue
             return answer.content if answer.ok else None
         stopped.set()
@@ -330,6 +361,9 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
 
     def one(item):
         printing, address = item
+        if cancel is not None and cancel.is_set():
+            stopped.set()                  # asked to stop: nothing more is fetched, and what is done is written below
+            return printing, None
         try:
             data = picture(printing, address)
         except Stopped:
@@ -341,19 +375,26 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     with ThreadPoolExecutor(workers) as pool:
         for n, (printing, fingerprint) in enumerate(pool.map(one, todo), 1):
             if fingerprint is None:
-                skipped += 1
+                if not (cancel is not None and cancel.is_set()):      # one left undone on request is not "without a picture"
+                    skipped += 1
             else:
                 have[printing] = fingerprint
                 new += 1
+            if progress is not None:
+                progress(n, len(todo))
             if n % 5000 == 0:      # a checkpoint: a stopped or crashed run keeps what it did
                 write(directory, *_in_order(printings, have))
                 log(f"{n} of {len(todo)} done ({new} new, {skipped} without a picture)")
     ids, hashes = _in_order(printings, have)
     write(directory, ids, hashes)
-    if stopped.is_set():
+    if cancel is not None and cancel.is_set():
+        log("Stopped on request. What was done is written; run it again and it resumes")
+    elif stopped.is_set():
         log("Scryfall kept refusing: stopped. What was done is written; run it again later, it resumes")
     log(f"Index written: {len(ids)} printings ({new} new, {skipped} left out for want of a picture)")
-    return len(ids), new, skipped
+    result = BuildResult((len(ids), new, skipped))
+    result.reason = 'cancelled' if cancelled() else 'refused' if stopped.is_set() else 'done'
+    return result
 
 
 def _in_order(printings, have):
@@ -374,9 +415,11 @@ def main(argv=None):
     parser.add_argument('--folder', default=str(Config.DATA_DIR / 'image_index'), help="where the index is written")
     arguments = parser.parse_args(argv)
     try:
-        build(CardDatabase().printing_images(), arguments.folder, arguments.images, not arguments.no_fetch, limit=arguments.limit)
+        result = build(CardDatabase().printing_images(), arguments.folder, arguments.images, not arguments.no_fetch, limit=arguments.limit)
     except BuildRunning as e:
         raise SystemExit(f"{e}. Wait for it to finish (or stop it), then run this again.")
+    if result.reason == 'refused':
+        raise SystemExit("Scryfall kept refusing, so the index is incomplete: what was done is written. Run this again later and it goes on from there.")
 
 
 if __name__ == '__main__':

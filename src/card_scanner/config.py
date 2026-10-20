@@ -180,8 +180,8 @@ class Config:
     # answer before the AI is switched off): 'ai_cases' (read by the AI, or not read), 'all', 'off'
     PRINTING_CHECK_LOOKUP = str(config.get('printing_check', 'lookup', default='ai_cases')).strip().lower()
 
-    # How a card is read (core/identification.py): 'cascade' (OCR, then the vision AI) or 'evidence' (the picture and the strip decide before the AI is asked)
-    READING_MODE = str(config.get('reading', 'mode', default='cascade')).strip().lower()
+    # How a card is read (core/identification.py): 'evidence' (the default: OCR, then the picture and the collector line, and the vision AI LAST) or 'cascade' (OCR, then the vision AI, as before the picture matching existed)
+    READING_MODE = str(config.get('reading', 'mode', default='evidence')).strip().lower()
     READING_ACCEPT_IMAGE_ALONE = bool(config.get('reading', 'accept_image_alone', default=False))
 
     # Local AI settings

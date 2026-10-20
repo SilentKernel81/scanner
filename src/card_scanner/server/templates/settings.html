@@ -164,14 +164,14 @@
                         </label>
                     </div>
                     <div class="settings-card" id="reading-evidence-card">
-                        <h3>Read by the picture first (experimental)</h3>
-                        <p class="hint">For a card OCR could not confirm: a fingerprint of the picture, matched against every printing, and the collector line decide before the vision AI is
-                            asked, and the AI's answer is checked against the picture. Needs the image index and OCR. <strong>Never tried on live scans</strong> - leave it off until you have
-                            looked at the shadow log (docs/PROGRAM_DOCUMENTATION.md, "Printing check").</p>
+                        <h3>The picture before the vision AI</h3>
+                        <p class="hint">The vision AI is the last step. OCR reads the card; for what OCR could not confirm, a fingerprint of the picture (matched against every printing) and the
+                            collector line decide next; only what is still open is asked of the AI, and its answer is checked against the picture. Needs OCR and the picture index (Storage > Picture
+                            index; without it cards are read by OCR and then the AI, as before). Turn it off to go back to that.</p>
                         <label class="switch-row">
                             <span class="switch-text">
-                                <span class="switch-title">Read by picture and collector line first</span>
-                                <span class="switch-desc" id="reading-evidence-desc">Off: OCR, then the vision AI, as always</span>
+                                <span class="switch-title">Picture and collector line before the vision AI</span>
+                                <span class="switch-desc" id="reading-evidence-desc">On: OCR, then the picture and the collector line, then the vision AI</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-reading-evidence">
                         </label>
@@ -262,6 +262,13 @@
                         <div class="input-group">
                             <label>Capture files in use</label>
                             <div class="storage-usage" id="capture-usage">Loading...</div>
+                        </div>
+                        <div class="input-group">
+                            <label>Picture index</label>
+                            <div class="storage-usage" id="index-status">Loading...</div>
+                            <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
+                            <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
+                            <div class="hint" id="index-hint">A fingerprint of every printing's picture, for reading a card by its picture (Card reading) and for the check against what was read. After a card database update, press this: only the new pictures are downloaded from Scryfall (a few seconds for a handful). The first time it downloads the pictures of the whole game, about 12 GB, and takes hours; it can be stopped and goes on where it stopped.</div>
                         </div>
                         <div class="input-group">
                             <label for="capture-copy-size">Capture size (all cameras)</label>
@@ -362,6 +369,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=24"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=9"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=12"></script>
 </body>
 </html>

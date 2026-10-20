@@ -62,21 +62,24 @@ game sits behind one interface (`games/`), so another could be added.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
-- **Reading by picture and collector line before the vision AI** (`reading.mode: evidence`, since
-  2026-10-20; **off by default and never run on live scans**): for a card the full-card OCR cannot
-  confirm, the fingerprint of the picture and the strip's collector number and set decide first, the
-  AI is asked only when they do not, and its answer is checked against the picture. On the
-  experiment's pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (84% if the picture alone may also add, which is off by default), none wrong. Needs the image
-  index; switched on in Settings > Card reading (with a warning), and it takes effect on the next card.
+- **The vision AI is the last step** (`reading.mode: evidence`, the default since 2026-10-20; the AI
+  was there because OCR once read poorly): for a card the full-card OCR cannot confirm, the
+  fingerprint of the picture and the strip's collector number and set decide first, the AI is asked
+  only when they do not, and its answer is checked against the picture. On the experiment's
+  pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (81% if the
+  picture alone may also add, which is off by default), none wrong. Needs the picture index
+  (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
+  turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
+  copy of the real data).
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
-  printing's picture (`scripts/build_image_index.py`, about 15 MB) lets the server ask whether
+  printing's picture (Settings > Storage > Picture index, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
   printing's set and number, and cards the AI misread. For now it only writes down where it
   disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it
   does nothing. For the cards the vision AI handles it also writes down what the picture and the
   collector line alone would have answered, beside the AI's answer: the evidence for dropping the AI
   later (on the experiment's pictures: 84% added by themselves, none wrong, 16% would go to
-  review). Thresholds from 20 known-wrong labels, never run on live scans, a Pi or the Android app.
+  review). Thresholds from 20 known-wrong labels; deployed on the server on 2026-10-20 but not yet judged on live scans; never tried on a Pi or the Android app.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
   the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read.

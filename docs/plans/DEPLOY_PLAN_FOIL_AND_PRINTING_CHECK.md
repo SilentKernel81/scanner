@@ -32,6 +32,8 @@ The server image copies the whole tree (`COPY . .`), so the new package needs no
 - **Nothing is pushed or deployed until the reading refactor is finished** (phases 3 and 4 are being completed first, the Android part last); this plan waits for that, and will be re-checked
   against the final commit before it is used.
 - Still open, below: excluding `scripts/experiments/`, rehearsing first, and timing.
+- **The vision AI is the last step, by default (the owner, 2026-10-20):** `reading.mode` is `evidence` from the next deploy on - it turns itself on where no `reading_mode` is saved (production has none), and
+  without the picture index (or the printing check) it is the cascade. Earlier parts of this plan, written when the mode was off by default, describe how it was first deployed (off) and how to turn it off again.
 
 ## Decisions I need from you
 
@@ -192,9 +194,9 @@ Do not run `docker image prune` afterwards (it removed the previous image once, 
 There is no data migration, so **a rollback is code only**: restore the code backup of step 2 (`tar xzf ~/scanner-backups/code-<time>.tar.gz -C ~`), `build`, `up -d` with both files.
 The data backup is a precaution; the new `data/image_index/` and `data/logs/printing_check.jsonl` are inert and can stay.
 
-## Trying the evidence mode (separate from this deploy, and only on the rehearsal copy first)
+## Trying the evidence mode (written when it was off by default; since 2026-10-20 it is the default, and this is how to turn it off or on)
 
-The mode is off in what is deployed. To try it, on the **rehearsal container's own copy of the data** (never the live `data/`): turn on Settings > Card reading > "Read by picture and collector line first" on the
+The mode was off in the first deploy. To try it, on the **rehearsal container's own copy of the data** (never the live `data/`): turn on Settings > Card reading > "Read by picture and collector line first" on the
 rehearsal's page (port 5002; or put `"reading_mode": "evidence"` into that copy's `data/settings.json` and restart it) - no rebuild either way. Send the Deadpool pictures and a dozen ordinary ones as in step 5, then check by eye: every `added` card is the
 right printing (the Deadpool foil / confetti ones the picture's, not the printed line's), `picture+strip` shows in `data/logs/scanned_cards.log`, the cards it could not decide
 went to the AI, and the time per card is not worse (the mode adds about 60 ms in the OCR worker on the laptop - **not measured next to Ollama on the server**). Switching it on for

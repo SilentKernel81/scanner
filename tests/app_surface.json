@@ -249,6 +249,27 @@
    "get_games"
   ],
   [
+   "/api/image_index",
+   [
+    "GET"
+   ],
+   "image_index_state"
+  ],
+  [
+   "/api/image_index/stop",
+   [
+    "POST"
+   ],
+   "image_index_stop"
+  ],
+  [
+   "/api/image_index/update",
+   [
+    "POST"
+   ],
+   "image_index_update"
+  ],
+  [
    "/api/import_inventory",
    [
     "POST"

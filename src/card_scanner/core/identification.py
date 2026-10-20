@@ -16,7 +16,7 @@ the picture and the strip in front of the AI (printing_check.live_read): for a c
 did not confirm, a fingerprint of the picture matched against every printing and the strip's
 collector line decide first; the AI is asked only when they do not, and its answer is checked
 against the picture. A card OCR confirms is read exactly as before. Phase 3 of
-docs/plans/READING_REFACTOR_PLAN.md; never tried on live scans, off by default.
+docs/plans/READING_REFACTOR_PLAN.md; the default since 2026-10-20 - the vision AI was only ever there because OCR was weak, so it is the last step.
 """
 
 import contextlib
@@ -303,7 +303,8 @@ class Identification:
             ocr_info = self.card_ocr.read_card(image, games.active_id())
             confirmed, ocr_card = False, None
             if ocr_info:
-                if self.reading_mode == EVIDENCE:
+                if self.reading_mode == EVIDENCE and self.evidence is not None:
+                    # (no printing check - a server without the image index machinery, a test of one stage - is the cascade, whatever the setting says)
                     # the same look-up as confirmed_read, keeping the card: its printing is what the picture is asked about
                     ocr_card = games.active().confirmed_card(ocr_info['name'], ocr_info['collector_number'], ocr_info['set_code'])
                     confirmed = ocr_card is not None

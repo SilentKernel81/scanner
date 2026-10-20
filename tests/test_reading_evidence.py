@@ -285,13 +285,18 @@ class InIdentification(unittest.TestCase):
         self.ident.settings = mock.Mock(get=lambda key, default=None: mode if key == 'reading_mode' else default)
 
     # ----- the mode
-    def test_the_mode_is_cascade_unless_evidence_is_asked_for(self):
+    def test_the_mode_is_evidence_by_default_and_anything_unclear_is_the_cascade(self):
+        # (changed 2026-10-20: the picture and the strip before the vision AI is the DESIGN - the AI was only ever there because OCR was weak - so it is the
+        # default; a choice that is not understood falls to the old reading, never to the new one)
         for given, want in (('evidence', 'evidence'), (' Evidence ', 'evidence'), ('cascade', 'cascade'), ('nonsense', 'cascade'), (None, 'cascade'), ('', 'cascade')):
             self.mode(given)
             self.assertEqual(self.ident.reading_mode, want, repr(given))
         self.ident.settings = None
         self.assertEqual(self.ident.reading_mode, identification.Config.READING_MODE)       # config.yaml's default
-        self.assertEqual(identification.Config.READING_MODE, 'cascade')                     # ... which is the old behaviour
+        self.assertEqual(identification.Config.READING_MODE, 'evidence')
+        self.ident.settings = mock.Mock(get=lambda key, default=None: default)             # nothing chosen: the default
+        self.assertEqual(self.ident.reading_mode, 'evidence')
+        self.assertFalse(self.ident.accept_image_alone)                                    # ... and the picture alone is still off
 
     # ----- a card the OCR did not confirm
     def test_a_decided_card_is_returned_with_its_printing_and_never_goes_to_the_ai(self):
@@ -343,6 +348,14 @@ class InIdentification(unittest.TestCase):
         self.ident.card_identifier = object()
         self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
         self.assertEqual(self.ident.evidence.reads, [])
+
+    def test_without_the_printing_check_the_default_reads_as_the_cascade_to_the_last_call(self):
+        # the default mode is 'evidence', so a server without the printing check (and every test of one stage) must not reach for what only evidence needs
+        self.ident.evidence = None
+        self.confirmed_ocr()
+        self.game.confirmed_card = None                                          # evidence's look-up: calling it would fail
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['collector_number'], task), ('242', None))        # read by confirmed_read, as in the cascade
 
     def test_without_the_printing_check_it_is_cascade(self):
         self.ident.evidence = None

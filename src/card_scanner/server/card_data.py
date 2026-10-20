@@ -2,14 +2,17 @@
 # FILE: server/card_data.py
 # Card data: updating and rebuilding the card database from the web interface.
 # ============================================================================
+from flask import jsonify
 from flask_socketio import emit
 import threading
 import time
 
 from card_scanner import games
 
-from card_scanner.server.state import database, socketio
+from card_scanner.core import image_index
+from card_scanner.server.state import app, database, printing_check, socketio
 from card_scanner.server.logs import logger
+from card_scanner.server.lock import guarded
 
 
 # Newer card data found by the update check: game id -> message (shown on the page)
@@ -158,3 +161,99 @@ def handle_rebuild_database():
     rebuild_thread.start()
 
     logger.info("Database rebuild thread started")
+
+
+# ============================================================================
+# The picture index (core/image_index.py): a fingerprint of every printing's picture, for reading a card by its picture.
+# It is extended from Scryfall's pictures when the person asks (Settings > Storage), after a card database update: only the printings
+# that are new since are downloaded (a few seconds for a handful, hours the first time: about 12 GB for the whole game). One build at a
+# time; it can be stopped, and started again where it stopped. The readers (printing_check.index) follow the new index by themselves.
+# ============================================================================
+
+index_state = {'running': False, 'stopping': False, 'done': 0, 'total': 0, 'error': None, 'result': None}
+index_lock = threading.Lock()
+index_cancel = threading.Event()
+
+
+def index_status():
+    """
+    What the Settings page shows of the picture index: how many printings of the card database have a picture and how many of those are in the
+    index (the rest is what the button would download), whether a build is running and how far it is, and how the last one ended.
+    """
+    printings = database.printing_images() if database else []
+    pictured = [printing for printing, address in printings if address]
+    index = printing_check.index() if printing_check else None
+    indexed = sum(1 for printing in pictured if index is not None and index.row(printing) is not None)
+    with index_lock:
+        state = dict(index_state)
+    return {'printings': len(pictured), 'indexed': indexed, 'missing': len(pictured) - indexed, 'built': index.built if index is not None else None,
+            'running': state['running'], 'stopping': state['stopping'], 'done': state['done'], 'total': state['total'], 'error': state['error'],
+            'result': state['result']}
+
+
+def start_index_update():
+    """Extend the picture index in the background; False when a build is running already"""
+    with index_lock:
+        if index_state['running']:
+            return False
+        index_state.update(running=True, stopping=False, done=0, total=0, error=None, result=None)
+        index_cancel.clear()
+
+    def progress(done, total):
+        with index_lock:
+            index_state.update(done=done, total=total)
+
+    def task():
+        error = result = None
+        try:
+            logger.info("Picture index: extending it from Scryfall's pictures")
+            built = image_index.build(database.printing_images(), printing_check.index_folder, fetch=True, log=logger.info,
+                                      progress=progress, cancel=index_cancel)
+            kept, new, skipped = built
+            reason = getattr(built, 'reason', 'done')          # image_index.BuildResult: 'done', 'cancelled' or 'refused'
+            result = {'printings': kept, 'new': new, 'skipped': skipped, 'stopped': reason == 'cancelled'}
+            if reason == 'refused':
+                # Scryfall kept answering 403 / 429: what was done is kept (build wrote it), but this is not "updated" - it is to be tried again later
+                error = (f"Scryfall kept refusing requests (a rate limit), so the build stopped after adding {new} new "
+                         f"picture{'' if new == 1 else 's'}. What was done is kept - press the button again later and it goes on from there")
+        except image_index.BuildRunning as e:
+            error = f"{e} - wait for it to finish (a build started from the command line, perhaps)"
+        except Exception as e:
+            logger.exception(f"Picture index: the build failed: {e}")
+            error = str(e)
+        finally:
+            with index_lock:
+                index_state.update(running=False, stopping=False, error=error, result=result)
+
+    threading.Thread(target=task, daemon=True, name='index-build').start()
+    return True
+
+
+@app.route('/api/image_index')
+def image_index_state():
+    """The picture index: its coverage of the card database, and a running build's progress"""
+    return jsonify({'success': True, **index_status()})
+
+
+@app.route('/api/image_index/update', methods=['POST'])
+@guarded
+def image_index_update():
+    """Download the pictures of the printings that are not in the index yet and fingerprint them (background; the state says how far)"""
+    if not database or not printing_check:
+        return jsonify({'success': False, 'message': 'Card data or the printing check is not ready'}), 503
+    if not start_index_update():
+        return jsonify({'success': False, 'message': 'The picture index is being built already'}), 409
+    return jsonify({'success': True, **index_status()})
+
+
+@app.route('/api/image_index/stop', methods=['POST'])
+@guarded
+def image_index_stop():
+    """Stop a running build after the printing it is on: what was done is kept, the next update goes on from there"""
+    with index_lock:
+        running = index_state['running']
+        if running:
+            index_state['stopping'] = True
+    if running:
+        index_cancel.set()
+    return jsonify({'success': True, **index_status()})

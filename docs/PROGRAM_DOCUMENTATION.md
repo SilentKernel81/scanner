@@ -1376,7 +1376,17 @@ built by `python scripts/build_image_index.py` - pictures are taken from a folde
 them all), the rest downloaded from Scryfall at the card database's `image_uri` (8 requests at a time, never two started less than 0.1 s
 apart, one 429 / 403 is waited out and a refusal that goes on stops the run), hashed and thrown away. A first build from nothing downloads
 ~12 GB and takes hours; a later run only does the printings added since (new sets), so it belongs after a card data update. It
-checkpoints every 5,000 printings and can be stopped and run again. **Publishing is one step** (found by a review on 2026-10-20: the
+checkpoints every 5,000 printings and can be stopped and run again.
+**The same run is a button** (since 2026-10-20): Settings > Storage > *Picture index* shows how many printings of the card database the index covers
+("Covers 112,765 of 112,818 printings - 53 to add") and downloads the missing ones in the background (`server/card_data.py`: `index_status`,
+`start_index_update`; `GET /api/image_index`, `POST /api/image_index/update` and `/stop`, the last two behind the settings password). The page asks for the
+progress every two seconds while it runs (so it shows after a reload), a Stop button keeps what is done (`build`'s `cancel`; the next press goes on
+from there; it is heard within a quarter of a second even while the workers wait out a 429 - the waits are interruptible and no request is sent after it (a review of
+2026-10-20 found the first version ignored it for minutes) - except that a request already on its way is waited for, 60 s at most), a second start is refused (409) and a build started from the command line holds the same lock (said in the page). It is a button, not
+automatic: after a card database update the page says the index can be updated, and the person presses it. The running server follows the new
+generation by itself. Not done: re-fetching a picture Scryfall replaced (a placeholder that later got its real scan) - every printing's picture
+address has a version stamp, but all 112,765 carry one (many were re-stamped in July with no change in the art), so the stamp cannot tell; Scryfall's
+`image_status` would, and the card database does not keep it yet. **Publishing is one step** (found by a review on 2026-10-20: the
 first version replaced three files one after the other): each build writes its own pair of files, nothing pointing at them yet, then
 replaces `manifest.json` with one rename - it names the current pair and holds the SHA-256 of both. A build that is interrupted anywhere
 leaves the previous generation current and whole (the next build clears what was left); a reader loading while one is published gets
@@ -1493,12 +1503,15 @@ the index (`not_indexed`), foil and confetti-foil copies as ordinary captures (t
 only checked against the right printing), a quiet server's timing, and the false-alarm rate on live scans - that is what shadow mode is for.
 
 
-## Reading mode: evidence (phase 3 of the reading refactor; off by default, never tried live)
+## Reading mode: evidence - the picture before the vision AI (phase 3 of the reading refactor; the default since 2026-10-20)
 
-`reading.mode` in `config.yaml` (`cascade` by default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode` and
-`reading_accept_image_alone`; the next card takes it - no restart and no image rebuild). The page asks for confirmation when either switch is turned on and says what the mode needs
-(the image index with its number of printings, and OCR switched on; without them every card is read as before). **`cascade` is exactly the reading described above and below this section**; nothing in this section runs in it (the foil-marker tests, which predate the mode,
-pass unedited, and `cascade` never calls the code of this section - a test pins that).
+**Why it is the default.** The vision AI was in this project from the start because the OCR then did not read well enough. light-ocr does now, and the picture of a card can be matched against every
+printing, so the AI is the **last** step - kept as the fallback until it can be removed. What waits for the exit criteria (see *Printing check*) is *removing* it, not its place in the order.
+
+`reading.mode` in `config.yaml` (`evidence`, the default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode` and
+`reading_accept_image_alone`; the next card takes it - no restart and no image rebuild). The page says what the mode needs (the picture index with its number of printings - Settings > Storage - and OCR switched on;
+**without them every card is read as in `cascade`**, so a new installation behaves as before until its index is built); asking for the picture alone to add cards asks for confirmation. **`cascade` is exactly the reading as it was before the picture matching existed**: OCR, then the vision AI; nothing in this section runs in it (the foil-marker tests, which predate the mode,
+pass unedited, and `cascade` never calls the code of this section - a test pins that). A `reading_mode` that is not understood is `cascade`, not `evidence`.
 
 **`evidence`** changes only the card the full-card OCR did *not* confirm - the card that would have gone to the vision AI. A card OCR confirms is read as before.
 For such a card, in `Identification._read_with_ocr` (so also in `identify()`, which the synchronous station route uses):
@@ -1540,7 +1553,7 @@ still handles and says nothing about the cards the mode adds itself. What the mo
 *Measured* (`verify_live_read.py --no-image-alone`, the shipped default, with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
 (58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
 guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
-(median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker - not measured on the server with Ollama resident. *Never run on live scans.*
+(median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker. On the server, rehearsed on a copy of the real data with the real 9B model (0.18-0.41 s per card read this way, GPU peak 11.2 of 16.4 GB with two OCR readers up); *not yet run on live scans: the first live evidence is what the collection and `scanned_cards.log` (`ai_model` = `picture+strip`) show*.
 
 **An OCR-confirmed card is asked one thing** (`Identification._contradicted_by_picture`, `PrintingCheck.contradicts`; 2026-10-20): whether the picture clearly looks like *another printing of
 the same card* than the one the OCR read (the Secret Lair case: the card prints the set and number of the card it is made from). If so, the OCR read is no longer a confirmed read: its
@@ -2694,7 +2707,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`, and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO

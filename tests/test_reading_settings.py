@@ -70,9 +70,9 @@ class TheEvent(unittest.TestCase):
         self.client.emit('set_reading_mode', payload)
         return {e['name']: e['args'][0] for e in self.client.get_received()}
 
-    def test_the_default_is_cascade_and_the_picture_alone_is_off(self):
+    def test_the_default_is_evidence_and_the_picture_alone_is_off(self):
         status = settings_events.reading_status()
-        self.assertEqual((status['mode'], status['accept_image_alone']), ('cascade', False))
+        self.assertEqual((status['mode'], status['accept_image_alone']), ('evidence', False))
 
     def test_evidence_is_remembered_and_the_next_card_takes_it(self):
         got = self.emit({'mode': 'evidence'})
@@ -82,6 +82,7 @@ class TheEvent(unittest.TestCase):
         self.assertFalse(self.ident.accept_image_alone)
         self.emit({'mode': 'cascade'})
         self.assertEqual(self.ident.reading_mode, 'cascade')
+        self.assertEqual(self.settings.saved['reading_mode'], 'cascade')           # turning it OFF is remembered too: the default would turn it on again
 
     def test_the_picture_alone_is_its_own_switch_and_only_true_is_true(self):
         self.emit({'accept_image_alone': True})
