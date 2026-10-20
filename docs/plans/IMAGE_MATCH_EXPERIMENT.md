@@ -163,8 +163,9 @@ On Scryfall (set `sld`) regular and foil are the same entry `IFIYW-n` (1-5) and 
 
 ## Provisional recommendation
 
-**Build it - as a hash + strip + foil-crop pipeline, no AI call and no neural network for the lookup.** *Provisional until the
-fine-tune bar below has been tried, the hard cases are re-labelled and orientation is checked.*
+**Build it - as a hash + strip + foil-crop pipeline, no AI call and no neural network for the lookup.** *Provisional only until the
+printing check (shadow mode, built) has run on live scans; the fine-tune bar was tried and passed on thin evidence, and is not adopted
+(see below).*
 - Lookup: the 96-byte colour hash of the warped card against the printings (10.8 MB for 112,765), the five nearest as candidates.
 - Printing: the strip read (number + set); accept it when it names one of the candidates with the same art as the best match.
 - Foil: the marker when read, the classifier otherwise; a printing that exists in one finish needs neither.
@@ -196,7 +197,35 @@ of the visual classes (a *new set* test). It must be compared with the **colour 
 3. on the corrected hard cases (`hard_rescore.py`, against the frozen printing ids of `truth/hard_truth.json`): review rate not higher
    than the hash's (14.8%) and no wrong addition.
 If any fails, the report says "not worth it" (a valid outcome: it costs a 12 MB model and ~10 ms a card on the phone, against a model-free
-11 MB hash). *Result: to be filled in.*
+11 MB hash).
+
+**Result (2026-10-20, one run of 8 epochs, 11,232 steps, 2 h 8 min on an RTX 3050): the bar as written is PASSED - on thin evidence.**
+The network exports to a 13.1 MB ONNX that OpenCV 4.14's dnn runs with exact parity to torch (cosine 1.000000), 10 ms a picture on this CPU.
+
+| | colour hash | fine-tune |
+|---|---|---|
+| collection photos (4,725): top-1 / top-5 / wrong card | 91.5 / 99.8 / 0.3% | 91.6 / 99.2 / 1.4% |
+| scanned pictures (5,972): top-1 / top-5 / wrong card | 91.1 / 98.2 / 2.3% | 92.3 / 98.5 / 2.1% |
+| frames (576, 158 printings): top-1 / top-5 | 89.2 / 95.8 | 93.1 / 95.7 |
+| rule A2 + image alone, review rate: collection / scanned | 1.06% / 2.19% | 1.88% / 1.74% |
+| wrong additions: collection / scanned | 6 / 28 | 9 / 33 |
+| held-out "new set" cards (2,668): top-1 / top-5 | 90.6 / 99.3 | 90.6 / 99.3 |
+| trained-on cards (8,605): top-1 | 91.4 | 92.5 |
+| corrected hard cases (128): review rate / right card | 14.8% / 96.1% | 6.2% / 98.4% |
+
+How it passed: point 1 holds only through its alternative clause (frame top-1 +3.9 points, over the 3 the bar asked for); the review rate
+got WORSE on the collection photos (1.06% -> 1.88%, wrong additions 6 -> 9, wrong-card 0.3% -> 1.4%) and better by 0.45 on the scanned ones.
+Point 2 holds because there is no loss on unseen cards - and no gain either: the held-out top-1 is identical (90.6%), so what it learned
+did not carry over to cards it had not seen (it did a little on the ones it trained on, +1.1). Point 3 holds with a real gain (review
+14.8% -> 6.2%, 0 wrong additions, the right card 96.1% -> 98.4%) on 128 pictures, i.e. a handful of cards. The frames set is small (576
+pictures: a standard error of about 1.3 points on 3.9), and its "or" clause was written so that a gain there could count.
+During training the quick check stayed level with the hash (67.5% against 68.2%) and did not predict this result.
+
+**Assessment: not adopted for now.** What it buys is on the dim, glared pictures (the hard cases, the camera frames); on the 10,697 collection
+and scanned pictures it is not better, and it is worse on the collection's wrong-card rate. It costs a 13 MB model and a runtime on every
+station and phone, against a 96-byte hash with no model, and a new index (128 numbers a printing: 58 MB in float32, ~14 MB in int8) that
+must be rebuilt with the model. If the shadow log (printing check) shows the hash failing on dim or glared captures, the fine-tune is the
+refinement to try - perhaps only for the captures where the hash is unsure.
 
 ## Not tested / open
 
