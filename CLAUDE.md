@@ -50,7 +50,8 @@ same license; the standalone `scanner` mirror gets it by merging `server/main`.
 **How everything works is documented in [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md)**
 (stations, detection, auto-capture rules, matching, foil logic, schema, events, measured
 thresholds) - read the relevant section before changing behavior, and keep it up to date.
-User docs: [README.md](README.md); installation: [docs/INSTALL.md](docs/INSTALL.md); manual test list:
+User docs: [README.md](README.md); what the program does: [docs/FEATURES.md](docs/FEATURES.md) (add a line there
+when a feature is added, with what was never tried); installation: [docs/INSTALL.md](docs/INSTALL.md); manual test list:
 [docs/TEST_CASES.md](docs/TEST_CASES.md).
 
 ## Common Commands
