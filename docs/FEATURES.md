@@ -6,6 +6,10 @@ version; [PROGRAM_DOCUMENTATION.md](PROGRAM_DOCUMENTATION.md) says how each part
 what was measured and what was never tried; [TEST_CASES.md](TEST_CASES.md) is the list to check
 by hand. Where something here was written but never tried on a real file or machine, it says so.
 
+The screenshots are of the author's own collection. The trade, the person it is with ("Sam")
+and the cards in that person's collection are made-up examples, and the station's address is an
+invented one.
+
 The program has two parts: **camera stations** (find and capture the card) and **one server**
 (read it, match it, keep the collection and the decks). Magic: The Gathering only; the card
 game sits behind one interface (`games/`), so another could be added.
@@ -38,6 +42,10 @@ game sits behind one interface (`games/`), so another could be added.
 - **Runs as** a Docker container (plain, or with the Raspberry Pi camera libraries), from a
   Python environment, or beside the server as one program on a single machine.
 
+*A station's setup page: the server it reports to, its name, and the cameras it found.*
+
+![A station's setup page](images/station-setup.jpg)
+
 ## 2. Reading and matching (the server)
 
 - **OCR first:** a local text reader gets the name, collector number and set code in about
@@ -60,6 +68,15 @@ game sits behind one interface (`games/`), so another could be added.
 - **Card data updates** (download and safe replacement) and a check for new data.
 - **Sounds:** a beep per capture and a sound when a card is added; the volume and each sound
   can be changed.
+
+*The review queue: the capture beside the card the program suggests, with the printing to correct.
+This one was sent back from the collection.*
+
+![The review queue](images/review-queue.jpg)
+
+*Settings, card reading: OCR first, and which vision AI to ask when OCR is not sure.*
+
+![Settings, card reading](images/settings-card-reading.jpg)
 
 ## 3. The collection
 
@@ -85,6 +102,18 @@ game sits behind one interface (`games/`), so another could be added.
 - **Safe by design:** a change is whole or not at all; moving cards to the collection survives
   a crash; the database enforces that an entry never has zero copies.
 
+*The collection as a list, with the photo of each card beside its entry.*
+
+![The collection as a list](images/collection-list.jpg)
+
+*The same collection as card images (a card set aside for a trade is marked).*
+
+![The collection as card images](images/collection-grid.jpg)
+
+*Statistics, here by number of cards (the page can show value too).*
+
+![Statistics](images/statistics.jpg)
+
 ## 4. Decks
 
 - **A deck builder** for 12 formats: Commander, Standard, Pioneer, Modern, Legacy, Vintage,
@@ -102,6 +131,14 @@ game sits behind one interface (`games/`), so another could be added.
   preconstructed decks, *What can I build?* from your collection, and a list of spare cards
   that no deck uses and EDHREC does not suggest.
 
+*The deck list.*
+
+![The deck list](images/decks.jpg)
+
+*One deck: checks, mana curve, card types, and the cards by type.*
+
+![A deck](images/deck.jpg)
+
 ## 5. Trades, other people's collections and a buy list
 
 - **Trades:** set cards aside for a named trade (they stay in your collection, marked, until
@@ -116,6 +153,18 @@ game sits behind one interface (`games/`), so another could be added.
 - **A buy list:** cards of an imported collection grouped by seller, copies capped at what the
   seller has, totals, and an export (all or one seller).
 
+*An open trade: the cards given and the cards received from someone else's collection.*
+
+![A trade](images/trades.jpg)
+
+*Browsing an imported collection: Receive puts a card in a trade, Buy puts it on the buy list.*
+
+![Browsing another collection](images/other-collections.jpg)
+
+*The buy list, grouped by seller.*
+
+![The buy list](images/buy-list.jpg)
+
 ## 6. MTG Arena
 
 - **Your Arena collection** read from an exporter's files and kept as a read-only copy beside
@@ -123,6 +172,10 @@ game sits behind one interface (`games/`), so another could be added.
 - **Arena decks** imported next to the paper ones (and replaced by the next import), checked
   against what you own in Arena.
 - **A decklist for Arena's Import button** from any deck.
+
+*The digital (MTG Arena) collection, kept beside the paper one.*
+
+![The Arena collection](images/arena.jpg)
 
 ## 7. Running it, keeping it safe
 

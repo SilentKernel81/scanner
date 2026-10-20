@@ -89,6 +89,22 @@ section by section, and says what was never tried.
   as a station: the phone finds and captures, the server does the rest. It also works on its
   own, without a server.
 
+## Screenshots
+
+<p>
+<img src="docs/images/collection-grid.jpg" width="49%" alt="The collection as card images">
+<img src="docs/images/deck.jpg" width="49%" alt="A deck with its checks, mana curve and cards">
+</p>
+<p>
+<img src="docs/images/trades.jpg" width="49%" alt="A trade: the cards given and the cards received from someone else's collection">
+<img src="docs/images/other-collections.jpg" width="49%" alt="Browsing someone else's imported collection">
+</p>
+
+Left to right: the collection, a deck, a trade, and another person's imported collection. The
+[full list of features](docs/FEATURES.md) has more screenshots (the review queue, statistics,
+the buy list, a station's setup page, the Arena collection). They show the author's own
+collection; the trade and the person it is with are made-up examples.
+
 ## Requirements
 
 | Part | Needs |
