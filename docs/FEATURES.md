@@ -55,7 +55,10 @@ game sits behind one interface (`games/`), so another could be added.
   Ollama. The prompts can be edited per model and tested; API keys are stored masked and the
   browser can only replace or remove them.
 - **Foil detection** from the star / dot next to the set code, combined with which finishes
-  each printing exists in (a printing that exists only in foil is known for certain).
+  each printing exists in (a printing that exists only in foil is known for certain). Where the
+  OCR does not read the marker, a small network reads it from the set line (`foil_net.onnx`,
+  since 2026-10-20) before the vision AI is asked; measured on 13 recent sets only, never tried
+  on a Pi or in the Android app.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.

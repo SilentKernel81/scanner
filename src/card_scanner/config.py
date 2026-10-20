@@ -170,6 +170,8 @@ class Config:
 
     # light-ocr reader (card_ocr.py): auto (GPU when available), cpu or webgpu
     OCR_PROVIDER = config.get('ocr', 'provider', default='auto')
+    # The foil marker read by a small network where OCR left it unread (core/foil_marker.py)
+    OCR_FOIL_MARKER = config.get('ocr', 'foil_marker', default=True)
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

@@ -102,6 +102,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
+| `foil_marker.py`, `foil_net.onnx` | server | The foil marker (★ / •) read from the set line by a small network where OCR left it unread (`FoilMarker`, `load`); the network is the file beside the module, run with OpenCV's dnn (310 KB) |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
 | `prompts.py` | server | Built-in prompts and the ones edited in Settings (`data/prompts.json`), per model |
 | `stations.py` | server | The stations (`data/stations.json`): name, location, counters, and each one's settings (`StationSettings`) |
@@ -1129,9 +1130,12 @@ the server) and has two stages, each behind its own queue:
    GPU). A confirmed read with its foil marker is done here.
 2. **Vision AI** - `vision_ai.workers` (default 3) at once, for what OCR passes on: a read that
    isn't a confirmed match (or no read at all - full-art and borderless cards), and the foil
-   marker of a confirmed card when OCR missed it.
+   marker of a confirmed card when OCR and the foil-marker network both missed it.
 
-So a card OCR confirms never waits behind a slow AI answer. Results are handed back by one more
+So a card OCR confirms never waits behind a slow AI answer. (One small exception since 2026-10-20: for a card the AI identifies,
+the foil-marker network is tried first, and that second OCR request on the strip is made from the AI worker's thread; the reader
+takes one request at a time, so the OCR stage can wait for it for the length of one read - about 0.1-0.2 s. For a card OCR confirms,
+the read is made in the OCR stage.) Results are handed back by one more
 thread, one card at a time, in the order they are settled - not the order captured.
 `Identification.identify()` runs both stages in the caller's thread (a capture sent with
 `mode: review`: manual capture, and auto scanning that waits for Add / Skip). A capture of a game that is no longer the active one is
@@ -1154,7 +1158,8 @@ With *Read with OCR first* on (Settings; `ocr_first` in `data/settings.json`, on
    and the set line (`HOB·EN`), including the symbol between set and language code.
 2. `Game.confirmed_read()` looks the read up. If it identifies the exact printing (a confirmed
    match - for set + number that includes the name agreeing), the card is done without the AI.
-   Only when OCR read no `★`/`•` is the AI's foil check still asked.
+   When OCR read no `★`/`•`, the small foil-marker network reads it from the set line (see
+   *Foil and finish*); only what it is not sure of is asked of the AI's foil check.
 3. Otherwise the vision AI identifies the card as before. If the AI fails too, or none is
    configured, what OCR read is used (it usually still finds the card by name for review).
 
@@ -1300,7 +1305,34 @@ With *OCR first*, a marker light-ocr read is used instead: a `*`/`★` is foil, 
 regular. On the 747 scans that agreed with the AI on 524 of the 526 OCR-confirmed cards where
 OCR read a marker, and on the two others the corner crops show a star (the AI said dot). OCR
 reads no symbol on about a third of the foils (and some regular cards), so a missing one
-counts as unknown and the AI is asked as above.
+counts as unknown - and, since 2026-10-20, a small network reads it before the AI is asked:
+
+**The foil-marker network** (`core/foil_marker.py`, `core/foil_net.onnx`; `ocr.foil_marker` in `config.yaml`, on by default;
+`tests/test_foil_marker.py`). When OCR confirmed a card but read no marker (or the AI is about to identify a card and OCR
+read none), `FoilMarker.read()` cuts the bottom-left strip of the flat card (lowest 14% x left 62%, enlarged to 1,000 px high if
+smaller), has the OCR reader read the strip again, finds the set line with `parse_magic`'s rules, cuts that line (a quarter of its
+height of margin) to a 32 x 128 grey crop and asks a four-block convolutional network (about 100k parameters, run with OpenCV's
+dnn like the corner network). It answers *foil* at a probability of 0.9 or more, *non-foil* at 0.1 or less, and *unknown* in between
+or when no set line was found - then the AI's foil check follows as before. The OCR's own marker is always asked first,
+and a star or dot that the second OCR request (on the strip) reads itself stands: the network is not asked then (it was never
+wrong on a symbol OCR read, 99.9%; on its own it was wrong on two of five confetti-foil cards). An earlier version let the network
+overrule such a symbol - found by a review on 2026-10-20, fixed the same day (`symbol_read`, with tests for both contradictions).
+
+What was measured (`docs/plans/IMAGE_MATCH_EXPERIMENT.md`, section 5; 10,501 set lines of 13 recent sets from the owner's
+collection; tested on cards the network was not trained on - the split is by card): where OCR had left the marker unread, right
+97.6% (381 cards; 97.1% on collection photos the owner had confirmed); the whole answer - the OCR's marker when read, else the
+network at 0.9 - answered 99.6% of the cards that need one and was right 99.5%; a guess from the set alone got 48.8% on those cards,
+so it reads the symbol, not the set. Checked again with the shipped module (the strip OCR's own symbol first, the network for
+what is left) and the real OCR reader on 400 held-out cards whose printing exists in both finishes: answered 394 (98.5%), right
+on all 394; a read took 169 ms (median) and 264 ms (95th percentile) - measured while the GPU was busy with training, so probably
+slow - and it runs only for cards whose marker the full-card OCR did not read. On the owner's Deadpool Secret Lair rescan (15 cards,
+finish known from the physical copies) it answered all 15 and was right on all 15: the strip OCR read the symbol on 14 of them;
+the network alone would have been wrong on two of the confetti-foil copies.
+
+**Never tested:** other sets and older cards (which print no marker at all), other cameras, a Raspberry Pi or a phone's speed,
+the Android app (it does not have this network), and the network trained on all the cards (the shipped file was trained on 80%,
+so that its numbers above are the measured ones). The labels were not independent: for the cards whose marker OCR had read, the
+stored finish came from that marker.
 
 The web page combines this with the printing's `finishes` in `suggestedFinish()`:
 

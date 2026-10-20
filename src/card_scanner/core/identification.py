@@ -19,7 +19,7 @@ import threading
 import time
 
 from card_scanner import games
-from card_scanner.core import prompts
+from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
 from card_scanner.config import Config
@@ -75,6 +75,9 @@ class Identification:
                     self.log("Continuing without AI identification", level="warning")
 
         self.card_ocr = CardOcr(log_callback=log_callback)
+        # The small network that reads the foil marker where the OCR could not (None: switched off
+        # in config.yaml, or its file did not load - the OCR's marker and the AI's check as before)
+        self.foil_marker = foil_marker.load(Config.OCR_FOIL_MARKER)
         self.ocr_enabled = bool(settings.get('ocr_first', True))
         if self.ocr_enabled:
             self.card_ocr.warm_up()
@@ -162,6 +165,31 @@ class Identification:
         return bool(self.card_identifier and foil_image is not None and Config.VISION_AI_DETECT_FOIL
                     and prompts.has('foil', games.active_id()))
 
+    def _read_foil_locally(self, image, foil_image=None):
+        """
+        The foil marker read by the small network (core/foil_marker.py) from the set line of the
+        flat card: 'foil', 'non-foil', or 'unknown' - not sure, no set line found, no network, or
+        OCR off (it needs the OCR reader to find the line). Never raises: a failure here is not
+        a reason to lose the card, the OCR's marker and the AI's check still follow.
+        Which picture: the network cuts the strip where a FLAT card has its set line, so it reads
+        foil_image - the perspective-corrected card, the same picture the AI's foil check gets - when
+        there is one; image is the card itself only when no separate foil picture was made (a fixed
+        area's `image` is the area as drawn, not a flat card: stations_api.station_capture).
+        """
+        card = foil_image if foil_image is not None else image
+        if self.foil_marker is None or not self.ocr_enabled or card is None:
+            return 'unknown'
+        try:
+            foil, probability = self.foil_marker.read(card, self.card_ocr)
+        except Exception as e:
+            self.log(f"Foil marker network failed ({e}) - left to the AI's check", level="warning")
+            return 'unknown'
+        if foil != 'unknown':
+            # probability None: the strip's own OCR read the symbol; otherwise the network's answer
+            how = 'by OCR on the strip' if probability is None else f'by the network ({probability:.2f})'
+            self.log(f"Foil marker read {how}: {foil}")
+        return foil
+
     @staticmethod
     def _said_by_ocr(ocr_info):
         return f"✓ Card identified by OCR: {ocr_info['name']} #{ocr_info['collector_number']}"
@@ -176,7 +204,10 @@ class Identification:
             ocr_info = self.card_ocr.read_card(image, games.active_id())
             if ocr_info and games.active().confirmed_read(ocr_info['name'], ocr_info['collector_number'],
                                                          ocr_info['set_code']):
-                # OCR misses the marker on about a third of the foils: ask the AI about those
+                # OCR misses the marker on about a third of the foils: the small network reads it
+                # from the set line first; only what it is not sure of is asked of the AI
+                if ocr_info['foil'] == 'unknown':
+                    ocr_info['foil'] = self._read_foil_locally(image, foil_image)
                 if ocr_info['foil'] == 'unknown' and self._ai_foil_check(foil_image):
                     return ocr_info, FOIL
                 self.log(self._said_by_ocr(ocr_info), level="success")
@@ -206,7 +237,13 @@ class Identification:
         # Ollama, more with cloud providers that serve requests in parallel)
         foil_result = {}
         foil_thread = None
-        if self._ai_foil_check(foil_image) and (not ocr_info or ocr_info['foil'] == 'unknown'):
+        if not ocr_info or ocr_info['foil'] == 'unknown':
+            # the small network first (a card OCR confirmed was tried in the OCR stage already
+            # and comes here as FOIL, not IDENTIFY, so this does not read the same set line twice)
+            local = self._read_foil_locally(image, foil_image)
+            if local != 'unknown':
+                foil_result['foil'] = local
+        if 'foil' not in foil_result and self._ai_foil_check(foil_image) and (not ocr_info or ocr_info['foil'] == 'unknown'):
             foil_thread = threading.Thread(
                 target=lambda: foil_result.update(foil=identifier.read_foil_symbol(foil_image)),
                 daemon=True)

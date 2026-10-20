@@ -119,6 +119,12 @@ database:
 # ocr/ (scripts/deploy.sh does it); switched on/off in Settings
 ocr:
   provider: auto  # auto (GPU through WebGPU/Vulkan when available, else CPU), cpu, webgpu
+  # Read the foil marker (★ foil, • regular) of a card OCR confirmed but could not read the
+  # marker of, with a small network on the set line (core/foil_marker.py) - before the AI's
+  # foil check is asked. One more small OCR request for the cards that need it: the whole read
+  # took 170 ms (median) measured while the GPU was busy training; the strip's OCR alone took
+  # 46-85 ms in the experiment; a quiet server's whole read was not measured
+  foil_marker: true
 
 # Cleanup Settings
 cleanup:
