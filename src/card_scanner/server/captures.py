@@ -196,7 +196,7 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     # writes down where it does not (data/logs/printing_check.jsonl), in the background, and changes nothing
     # (also when nothing was found: the lookup then shows what the picture and the strip alone would have answered)
     if printing_check and image_path:
-        printing_check.observe(image_path, db_card_info, station, read_by)
+        printing_check.observe(image_path, db_card_info, station, read_by, foil=foil)
 
     # Adding automatically, only cards whose exact printing was confirmed are added
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review

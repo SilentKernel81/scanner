@@ -48,12 +48,13 @@ import cv2
 import numpy as np
 
 from card_scanner.core import card_ocr, foil_marker, image_index
+# The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
+# for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
+from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
 
 logger = logging.getLogger('ai')
 
-AGREE_BELOW = 0.02
 DISAGREE_FROM = 0.06
-IMAGE_LEAD = 0.05                 # the lookup believes the picture alone when its best match leads the second by this much
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
@@ -68,6 +69,27 @@ def read_strip(ocr, card_rgb):
     return card_ocr.parse_strip(lines) if lines else ('', '')
 
 
+def read_strip_evidence(ocr, card_rgb, net=None):
+    """
+    The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
+    set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked only when the OCR read no symbol and there is a network (a
+    foil_marker.FoilMarker; a separate instance from the live path's) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
+    """
+    strip = foil_marker.strip_of(card_rgb)
+    lines = ocr.read_lines(strip)
+    if not lines:
+        return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+    number, set_code = card_ocr.parse_strip(lines)
+    line = foil_marker.set_line(lines)
+    symbol = foil_marker.symbol_read(line) if line else 'unknown'
+    probability = None
+    if symbol == 'unknown' and net is not None and line is not None:
+        crop = foil_marker.set_line_crop(strip, line['box'])
+        if crop is not None:
+            probability = net.probability(crop)
+    return {'number': number, 'set': set_code, 'symbol': symbol, 'net': probability}
+
+
 class StripReader:
     """
     The lookup's strip reader: a light-ocr reader OF ITS OWN, never the live one. A second light-ocr process, started on the first strip it is
@@ -78,28 +100,35 @@ class StripReader:
     failed read can only spoil this reader.
     Called with a flat card (RGB) it returns (number, set_code), ('', '') for what was not read or while OCR is off (ocr_enabled(): the person's
     choice, and it would start a reader); an exception from the reader goes to the caller (PrintingCheck, which goes on by the picture alone).
+    `read` gives the strip's evidence in full (read_strip_evidence: also the foil symbol and, with `foil_net`, the network's probability) from the same one read.
     """
 
     IDLE_STOP = 120
 
-    def __init__(self, ocr_enabled=lambda: True, make_reader=None, idle_stop=IDLE_STOP):
+    def __init__(self, ocr_enabled=lambda: True, make_reader=None, idle_stop=IDLE_STOP, foil_net=None):
         self.ocr_enabled = ocr_enabled
         self._make = make_reader or card_ocr.CardOcr
         self._idle_stop = idle_stop
+        self._net = foil_net                          # a foil_marker.FoilMarker of its own (not the live path's), or None
         self._reader = None
         self._last_used = 0.0
         self._timer = None
         self._lock = threading.Lock()                 # one request at a time; also guards starting and stopping
 
-    def __call__(self, rgb):
+    def read(self, rgb):
+        """The strip's evidence in full ({'number', 'set', 'symbol', 'net'}; read_strip_evidence), or nothing while OCR is off"""
         if not self.ocr_enabled():
-            return '', ''
+            return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
         with self._lock:
             if self._reader is None:
                 self._reader = self._make()
             self._last_used = time.monotonic()
             self._arm()
-            return read_strip(self._reader, rgb)
+            return read_strip_evidence(self._reader, rgb, self._net)
+
+    def __call__(self, rgb):
+        evidence = self.read(rgb)
+        return evidence['number'], evidence['set']
 
     def _arm(self):
         """(Re)start the idle timer: the reader stops idle_stop seconds after the last strip"""
@@ -131,9 +160,7 @@ class StripReader:
             self._stop()
 
 
-def _plain_number(number):
-    """A collector number as the strip's parse writes it: no leading zeros ('0172' -> '172', '0' stays '0' for a card numbered 0)"""
-    return str(number or '').strip().lstrip('0') or '0'
+_plain_number = plain_number      # the name this module had for it; the function now lives in core/reading/decide.py
 
 
 def verdict_for(gap):
@@ -154,13 +181,16 @@ class PrintingCheck:
     the lookup then goes by the picture alone.
     """
 
-    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None):
+    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None):
         self.database = database
         self.index_folder = Path(index_folder)
         self.log_file = Path(log_file)
         self.mode = mode if mode in ('shadow', 'off') else 'shadow'
         self.lookup_mode = lookup if lookup in LOOKUP_MODES else 'ai_cases'
         self.strip_reader = strip_reader
+        # finish_for(card, foil): the finish the SERVER chose for a card it added ('regular', 'foil', 'surge'; Game.suggested_finish), given the marker
+        # it read; the server hands it in so that core/ needs no game code. None: the finish evidence is logged without a comparison.
+        self.finish_for = finish_for
         self._index = None
         self._index_stamp = 'not looked at yet'   # meta.json's modification time when the index was loaded (None: no index)
         self._queue = queue.Queue(QUEUE_SIZE)
@@ -240,7 +270,24 @@ class PrintingCheck:
             logger.debug(f"Printing check: the strip could not be read: {e}")
             return '', ''
 
-    def lookup(self, rgb, resolved_id=None, search=None):
+    def _strip_evidence(self, rgb, search):
+        """
+        The strip's evidence in full - {'number', 'set', 'symbol', 'net'} - from ONE read, of the card the right way up (a card the search found upside down is turned
+        back first). A strip reader that has `read` (StripReader) gives it all; a plain function gives (number, set) and the foil evidence is 'unknown' / None.
+        """
+        upright = cv2.rotate(rgb, cv2.ROTATE_180) if search['rotated'] else rgb
+        try:
+            if self.strip_reader is None:
+                return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+            if hasattr(self.strip_reader, 'read'):
+                return self.strip_reader.read(upright)
+            number, set_code = self.strip_reader(upright)
+            return {'number': number, 'set': set_code, 'symbol': 'unknown', 'net': None}
+        except Exception as e:
+            logger.debug(f"Printing check: the strip could not be read: {e}")
+            return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+
+    def lookup(self, rgb, resolved_id=None, search=None, strip=None):
         """
         What the picture and the strip ALONE would have answered, with no OCR of the whole card and no vision AI - the answer that would
         replace the AI's. The rule is the experiment's rule A2 (docs/plans/IMAGE_MATCH_EXPERIMENT.md, section 4):
@@ -259,25 +306,26 @@ class PrintingCheck:
             return None
         index, top, sims = search['index'], search['top'], search['sims']
         # The strip is at the bottom left of the card the right way up: a card that was put in upside down (the search found its
-        # fingerprint turned) is turned back first, or the strip cut would be the title area and the collector lines would be missed
-        number, set_code = self._strip(cv2.rotate(rgb, cv2.ROTATE_180) if search['rotated'] else rgb)
-        lead = float(sims[0] - sims[1]) if len(top) > 1 else None
-        chosen, path = None, 'review'
-        if number and set_code:
-            for row, similarity in zip(top, sims):               # nearest first: the first that names the strip's printing
-                card = self.database.get_card_by_id(index.ids[int(row)])
-                if card and _plain_number(card.get('number')) == number and (card.get('set_code') or '').lower() == set_code:
-                    if float(sims[0]) - float(similarity) < AGREE_BELOW:     # its picture looks like the best match's: the strip decides
-                        chosen, path = (int(row), float(similarity)), 'strong'
-                    break                                         # one that names it but looks different: the strip is not believed
-        if chosen is None and lead is not None and lead >= IMAGE_LEAD:
-            chosen, path = (int(top[0]), float(sims[0])), 'image'
+        # fingerprint turned) is turned back first, or the strip cut would be the title area and the collector lines would be missed.
+        # `strip`: the evidence the caller has read already (the shadow worker reads it once for the lookup and the finish)
+        strip = strip or self._strip_evidence(rgb, search)
+        number, set_code = strip['number'], strip['set']
+        # The evidence as plain data (core/reading/evidence.py), every lookup done here - and then a pure function decides
+        cards = {}
+        candidates = []
+        for row, similarity in zip(top, sims):
+            printing_id = index.ids[int(row)]
+            card = cards[printing_id] = self.database.get_card_by_id(printing_id) or {}
+            candidates.append({'id': printing_id, 'similarity': float(similarity), 'set': card.get('set_code'), 'number': card.get('number'),
+                               'oracle_id': card.get('oracle_id'), 'finishes': card.get('finishes') or []})
+        decision = decide_printing({'rotated': bool(search['rotated']), 'candidates': candidates}, {'number': number, 'set': set_code})
         printing = None
-        if chosen is not None:
-            card = self.database.get_card_by_id(index.ids[chosen[0]]) or {}
-            printing = {'id': index.ids[chosen[0]], 'name': card.get('name'), 'set': card.get('set_code'), 'number': card.get('number'),
-                        'similarity': round(chosen[1], 4)}
-        return {'path': path, 'printing': printing, 'strip': {'number': number, 'set': set_code} if number or set_code else None,
+        if decision['printing_id'] is not None:
+            card = cards[decision['printing_id']]
+            printing = {'id': decision['printing_id'], 'name': card.get('name'), 'set': card.get('set_code'), 'number': card.get('number'),
+                        'similarity': round(decision['similarity'], 4)}
+        lead = decision['lead']
+        return {'path': decision['path'], 'printing': printing, 'strip': {'number': number, 'set': set_code} if number or set_code else None,
                 'lead': round(lead, 4) if lead is not None else None, 'rotated': search['rotated'],
                 'against_resolved': self._against(resolved_id, printing)}
 
@@ -312,11 +360,12 @@ class PrintingCheck:
         # for review too) - the cards the AI is, or would be, needed for
         return resolved is None or reader != card_ocr.READER
 
-    def observe(self, image_path, card, station=None, reader=None):
+    def observe(self, image_path, card, station=None, reader=None, foil=None):
         """
         Shadow mode: look at a capture and the card the server resolved for it (a card dict with 'id'; None when nothing was read or found
         - the cases where the AI gave no answer), in the background. The check compares the picture with that card; the lookup (for the
         captures wants_lookup says) works out what the picture and the strip alone would have answered. reader: what read the card.
+        foil: the marker the server read for the capture ('foil', 'non-foil', 'unknown'; None = not given), for the comparison of the finish.
         Returns at once and never raises: the capture goes on whatever happens here.
         """
         resolved = card if card and card.get('id') else None
@@ -325,7 +374,7 @@ class PrintingCheck:
             return
         try:
             self._start()
-            self._queue.put_nowait((str(image_path), dict(resolved) if resolved else None, station, reader, lookup))
+            self._queue.put_nowait((str(image_path), dict(resolved) if resolved else None, station, reader, lookup, foil))
         except queue.Full:
             pass                          # busy: this one is not looked at
         except Exception as e:
@@ -361,7 +410,7 @@ class PrintingCheck:
         threading.Thread(target=lambda: (self._queue.join(), done.set()), daemon=True).start()
         return done.wait(timeout)
 
-    def _look(self, image_path, card, station, reader, lookup):
+    def _look(self, image_path, card, station, reader, lookup, foil=None):
         image = cv2.imread(image_path)
         if image is None:                 # the picture is gone (cleaned up, or a path that does not exist)
             return
@@ -381,7 +430,9 @@ class PrintingCheck:
                           best={'id': result['best']['id'], 'name': best.get('name'), 'set': best.get('set_code'),
                                 'number': best.get('number'), 'similarity': result['best']['similarity']})
         if lookup:
-            record['lookup'] = self.lookup(rgb, card['id'] if card else None, search)
+            strip = self._strip_evidence(rgb, search)       # ONE read of the strip serves the lookup and the finish
+            record['lookup'] = self.lookup(rgb, card['id'] if card else None, search, strip)
+            record['finish'] = self._finish(card, record['lookup'], strip, foil)
         self._append(record)
         if result and result['verdict'] == 'disagree':
             logger.info(f"Printing check (shadow, nothing changed): {card.get('name')} [{card.get('set_code')} {card.get('number')}] was added, "
@@ -393,6 +444,33 @@ class PrintingCheck:
             logger.info(f"Printing check (shadow, nothing changed): read by {reader or 'the AI'} as {name} [{card.get('set_code')} {card.get('number')}], "
                         f"the picture and the strip would say {p['name']} [{p['set']} {p['number']}] ({answer['path']}, "
                         f"{answer['against_resolved']}, {Path(image_path).name})")
+
+    def _finish(self, card, answer, strip, foil):
+        """
+        The finish evidence of a capture, in a field of its own (never part of the lookup's answer). The shadow finish is worked out for the printing the LOOKUP
+        selected - never the server's: with the server's printing, a wrongly resolved printing that exists in one finish only would force both finishes to agree and
+        hide the disagreement this evidence is there to show. Beside it, the finish the server chose for the card it added (finish_for; the server's own printing)
+        and whether the two agree ('same' is None when either side does not say: an unread marker is 'unknown', not 'regular'). When the lookup selected no printing
+        (review) there is no shadow finish: 'decision' is None. None without a strip.
+        """
+        if not strip:
+            return None
+        printing = None
+        if answer and answer.get('printing'):
+            printing = self.database.get_card_by_id(answer['printing']['id'])
+        decision = decide_finish(printing.get('finishes'), strip['symbol'], strip['net']) if printing else None
+        chosen = None
+        if card is not None and self.finish_for is not None:
+            try:
+                chosen = self.finish_for(card, foil or 'unknown')
+            except Exception as e:
+                logger.debug(f"Printing check: the server's finish could not be worked out: {e}")
+        server = None if chosen is None else ('regular' if chosen == 'regular' else 'foil')     # a surge foil is a foil here
+        shadow = decision['finish'] if decision else None
+        return {'printing': answer['printing']['id'] if printing else None,
+                'decision': shadow, 'source': decision['source'] if decision else None, 'symbol': strip['symbol'],
+                'net': None if strip['net'] is None else round(strip['net'], 4), 'server': chosen,
+                'same': None if server is None or shadow in (None, 'unknown') else server == shadow}
 
     def _append(self, record):
         self.log_file.parent.mkdir(parents=True, exist_ok=True)

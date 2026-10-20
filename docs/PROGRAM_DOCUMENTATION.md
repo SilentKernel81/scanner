@@ -102,6 +102,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
+| `reading/evidence.py`, `reading/decide.py` | server | The decision about a printing as a pure function of plain data (`decide_printing`, rule A2): what `printing_check.py`'s lookup used to do inline, now with test files another program can pass too (see *Printing check*) |
 | `image_index.py`, `printing_check.py` | server | The printing check, shadow mode (see *Printing check*): a 96-byte fingerprint of every printing's picture (`hash_card`, `ImageIndex`, the builder `build`) and the check that a capture looks like the printing the server resolved (`PrintingCheck`) |
 | `foil_marker.py`, `foil_net.onnx` | server | The foil marker (★ / •) read from the set line by a small network where OCR left it unread (`FoilMarker`, `load`); the network is the file beside the module, run with OpenCV's dnn (310 KB) |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
@@ -1438,6 +1439,25 @@ at one more request per capture). The hook is `search_and_emit_card` (also when 
 was read at all). `python scripts/printing_check_report.py` prints, for the AI-handled cards: how many were compared, how many the picture
 and the strip would add by themselves and how many they would send to review, how they stand against what the AI resolved, how many of the
 unresolved ones they would have added, the exit criteria below with the numbers so far, and the latest disagreements to look at.
+
+**The decision is a pure function** (since 2026-10-20, phase 2a of `docs/plans/READING_REFACTOR_PLAN.md`): `PrintingCheck.lookup` gathers the evidence - the
+picture's five nearest printings with their set, number, oracle id and finishes (one database read each), and what the strip says - as plain data
+(`core/reading/evidence.py`) and `core/reading/decide.py: decide_printing` applies rule A2 to it; the function imports nothing but `typing`, so every test case is
+a complete file. Two files of cases, made from different sources: `tests/data/reading_decision_cases.json`, hand-written with the answer worked out by hand for each edge
+(22 cases, including the boundaries), and `tests/data/reading_regression_cases.json`, captured from the lookup as committed in a84dcb9 before it was rebuilt (135 real
+pictures: 96 strong, 31 by the picture alone, 8 review; ids and similarities only). **Nothing changed in what the lookup answers**, shown picture by picture and not by
+totals: the previous code (taken from git) and the rebuilt one ran on the same 444 pictures (the 15 Deadpool captures, the AI-read ones, a sample of the OCR-confirmed
+ones) in separate processes and every record - path, printing, strip, lead, orientation, comparison with the resolved card, the check's verdict and gap - was identical
+(`scripts/experiments/image_match/compare_lookup_versions.py`); the 72 tests that existed before passed unedited.
+
+**The finish as evidence** (phase 2b, log only): for a capture that gets the lookup, `data/logs/printing_check.jsonl` carries a `finish` field *beside* `lookup` - never inside
+it, because the exit criteria were measured on the lookup's answer as it was. The strip is read once for both (`StripReader.read`: number, set, the symbol the OCR read in the set
+line and, only where it read none, the probability of the foil network - the shadow reader has a `FoilMarker` of its own, `foil_marker.read` of the live path is untouched).
+`core/reading/decide.py: decide_finish` answers in this order: a printing that exists in one finish only is certain (source `printing`); else the symbol the OCR read (`symbol`);
+else the network when it is at least 0.9 sure either way (`network`); else `unknown` (source `none`) - **not** regular: the live rule (`Game.suggested_finish`) files an
+unread marker as regular, which is exactly where the two can differ. The field: `{decision, source, symbol, net, server, same}`; `server` is the finish the server chose
+(`finish_for`, handed in by `startup.py` so `core/` needs no game code), `same` compares them with a surge foil counted as a foil, and is `null` when either side does not say.
+Not measured live yet; the first use is counting `same: false` once real scans have gone through.
 
 *Exit criteria for dropping the AI (written 2026-10-20, before any live data):* about 300 AI-handled cards compared; at least 85% of
 them added by the picture and the strip; at most 0.5% wrong - judged BY EYE on the disagreements, because a disagreement with the AI is not

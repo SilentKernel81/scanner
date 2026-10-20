@@ -755,6 +755,20 @@ class TheLookup(unittest.TestCase):
         self.assertEqual((record['reader'], record['verdict'], record['resolved']['id']), ('qwen3.5:9b', 'disagree', 'p2'))
         self.assertEqual((record['lookup']['path'], record['lookup']['printing']['id'], record['lookup']['against_resolved']), ('strong', 'p3', 'other_card'))
 
+    def test_the_record_has_the_finish_in_a_field_of_its_own_and_the_lookup_keeps_its_keys(self):
+        # phase 2b: the finish evidence beside the lookup, never in it (the exit criteria were measured on the lookup's answer as it was)
+        self.check.finish_for = lambda card, foil: 'foil' if foil == 'foil' else 'regular'
+        self.strip = ('3', 'tst')
+        card = {'id': 'p3', 'name': 'Card p3', 'set_code': 'tst', 'number': '3', 'finishes': ['nonfoil', 'foil']}
+        capture = self.root / 'capture.jpg'
+        cv2.imwrite(str(capture), cv2.cvtColor(degraded(synthetic_card(3)), cv2.COLOR_RGB2BGR))
+        self.check.observe(capture, card, 'phone', 'qwen3.5:9b', foil='non-foil')
+        self.assertTrue(self.check.wait())
+        (record,) = [json.loads(l) for l in self.log_file.read_text().splitlines()]
+        self.assertEqual(set(record['lookup']), {'path', 'printing', 'strip', 'lead', 'rotated', 'against_resolved'})
+        self.assertEqual(record['finish']['server'], 'regular')
+        self.assertEqual((record['finish']['decision'], record['finish']['source']), ('unknown', 'none'))     # a plain function reads no symbol
+
     def test_a_card_nothing_was_resolved_for_still_gets_the_lookup(self):
         # the AI gave no answer: the card would go to review today; the lookup shows what the picture and the strip would have done
         self.strip = ('3', 'tst')
@@ -822,14 +836,14 @@ class TheHook(unittest.TestCase):
         check = mock.MagicMock()
         card = {'id': 'p2', 'name': 'Card p2'}
         outcome = self.run_search(check, card)
-        check.observe.assert_called_once_with('capture.jpg', card, 'phone', 'ai')      # ... and what read it ('ai': get_ai_model_info)
+        check.observe.assert_called_once_with('capture.jpg', card, 'phone', 'ai', foil='unknown')      # ... and what read it ('ai': get_ai_model_info)
         self.assertEqual(outcome['status'], 'review')                  # what became of the card is not the check's business
 
     def test_a_capture_nothing_was_found_for_is_handed_over_too_for_the_lookup(self):
         # the AI gave no card the database knows: the lookup shows what the picture and the strip would have answered
         check = mock.MagicMock()
         self.run_search(check, None)
-        check.observe.assert_called_once_with('capture.jpg', None, 'phone', 'ai')
+        check.observe.assert_called_once_with('capture.jpg', None, 'phone', 'ai', foil='unknown')
 
     def test_no_picture_means_nothing_is_handed_over(self):
         check = mock.MagicMock()
@@ -855,6 +869,97 @@ class TheHook(unittest.TestCase):
     def test_before_the_service_exists_nothing_breaks(self):
         # a LocalProxy of None is falsy: the hook skips it (a capture that arrives before start-up has finished)
         self.assertEqual(self.run_search(None, {'id': 'p2', 'name': 'x'})['status'], 'review')
+
+
+class TheFinishEvidence(unittest.TestCase):
+    """Phase 2b of docs/plans/READING_REFACTOR_PLAN.md: the finish as evidence, in a field of its own beside the lookup (log only)"""
+
+    CARD = np.zeros((1200, 860, 3), np.uint8)
+    BOTH = {'id': 'x', 'finishes': ['nonfoil', 'foil']}
+
+    class FakeNet:
+        def __init__(self, probability):
+            self.value, self.asked = probability, 0
+
+        def probability(self, crop):
+            self.asked += 1
+            return self.value
+
+    def check(self, finish_for=None):
+        return printing_check.PrintingCheck(FakeDatabase(), Path('/nonexistent'), Path('/nonexistent/log.jsonl'), 'shadow', 'all', None, finish_for)
+
+    def test_one_read_gives_the_number_the_set_and_the_symbol(self):
+        reader = FakeReader([line('U 0172', 5), line('HOB \u2605 EN', 40)])
+        self.assertEqual(printing_check.read_strip_evidence(reader, self.CARD),
+                         {'number': '172', 'set': 'hob', 'symbol': 'foil', 'net': None})
+        self.assertEqual(reader.calls, 1)
+
+    def test_the_network_is_asked_only_when_the_ocr_read_no_symbol(self):
+        net = self.FakeNet(0.97)
+        read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB \u2605 EN', 40)]), self.CARD, net)
+        self.assertEqual((read['symbol'], read['net'], net.asked), ('foil', None, 0))
+        read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB EN', 40)]), self.CARD, net)
+        self.assertEqual((read['symbol'], read['net'], net.asked), ('unknown', 0.97, 1))
+
+    def test_nothing_read_is_unknown_evidence(self):
+        self.assertEqual(printing_check.read_strip_evidence(FakeReader([]), self.CARD),
+                         {'number': '', 'set': '', 'symbol': 'unknown', 'net': None})
+
+    def test_the_strip_reader_still_answers_number_and_set_as_before(self):
+        reader = printing_check.StripReader(lambda: True, lambda: FakeReader([line('U 0172', 5), line('HOB \u2605 EN', 40)]))
+        self.addCleanup(reader.close)
+        self.assertEqual(reader(self.CARD), ('172', 'hob'))
+        self.assertEqual(reader.read(self.CARD)['symbol'], 'foil')
+
+    def lookup_says(self, printing_id='p9'):
+        return {'printing': {'id': printing_id} if printing_id else None}
+
+    def check_with(self, finishes_by_id, finish_for=None):
+        database = FakeDatabase()
+        database.get_card_by_id = lambda i: {'id': i, 'finishes': finishes_by_id.get(i, [])}
+        return printing_check.PrintingCheck(database, Path('/nonexistent'), Path('/nonexistent/log.jsonl'), 'shadow', 'all', None, finish_for)
+
+    def test_it_agrees_with_the_server_when_both_say_foil(self):
+        check = self.check_with({'p9': ['nonfoil', 'foil']}, lambda card, foil: 'surge' if foil == 'foil' else 'regular')        # a surge foil is a foil here
+        got = check._finish(self.BOTH, self.lookup_says(), {'number': '1', 'set': 'x', 'symbol': 'foil', 'net': None}, 'foil')
+        self.assertEqual(got, {'printing': 'p9', 'decision': 'foil', 'source': 'symbol', 'symbol': 'foil', 'net': None, 'server': 'surge', 'same': True})
+
+    def test_it_shows_where_the_server_guessed_regular_for_an_unread_marker(self):
+        # the live rule files an unread marker as regular; the evidence has the network sure of a foil: they differ
+        check = self.check_with({'p9': ['nonfoil', 'foil']}, lambda card, foil: 'foil' if foil == 'foil' else 'regular')
+        got = check._finish(self.BOTH, self.lookup_says(), {'number': '1', 'set': 'x', 'symbol': 'unknown', 'net': 0.98123}, 'unknown')
+        self.assertEqual((got['decision'], got['source'], got['server'], got['same'], got['net']), ('foil', 'network', 'regular', False, 0.9812))
+
+    def test_the_review_of_2026_10_20_the_shadow_finish_uses_the_lookups_printing_not_the_servers(self):
+        # The server resolved a printing that exists non-foil only; the lookup selected a foil-only printing and the strip reads a foil.
+        # With the server's printing both would say 'regular' and 'same' would be True - hiding the disagreement.
+        server_card = {'id': 'wrong', 'finishes': ['nonfoil']}
+        check = self.check_with({'right': ['foil'], 'wrong': ['nonfoil']}, lambda card, foil: 'regular')
+        got = check._finish(server_card, self.lookup_says('right'), {'number': '', 'set': '', 'symbol': 'foil', 'net': None}, 'foil')
+        self.assertEqual((got['printing'], got['decision'], got['source']), ('right', 'foil', 'printing'))
+        self.assertEqual((got['server'], got['same']), ('regular', False))
+
+    def test_when_the_lookup_selects_no_printing_there_is_no_shadow_finish(self):
+        check = self.check_with({}, lambda card, foil: 'regular')
+        got = check._finish(self.BOTH, self.lookup_says(None), {'number': '', 'set': '', 'symbol': 'foil', 'net': None}, 'foil')
+        self.assertEqual((got['printing'], got['decision'], got['source'], got['same']), (None, None, None, None))
+        self.assertEqual(got['server'], 'regular')                       # the server's own choice is still shown
+        self.assertIsNone(check._finish(self.BOTH, self.lookup_says(), None, 'foil'))        # no strip, no finish
+
+    def test_an_unknown_finish_is_not_compared(self):
+        check = self.check_with({'p9': ['nonfoil', 'foil']}, lambda c, f: 'regular')
+        got = check._finish(self.BOTH, self.lookup_says(), {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}, 'unknown')
+        self.assertEqual((got['decision'], got['same']), ('unknown', None))
+
+    def test_without_the_servers_rule_the_finish_is_still_logged(self):
+        got = self.check_with({'p9': ['nonfoil', 'foil']})._finish(self.BOTH, self.lookup_says(), {'number': '', 'set': '', 'symbol': 'non-foil', 'net': None}, None)
+        self.assertEqual((got['decision'], got['server'], got['same']), ('regular', None, None))
+
+    def test_a_failing_server_rule_does_not_stop_the_record(self):
+        def broken(card, foil):
+            raise RuntimeError('no game')
+        got = self.check_with({'p9': ['nonfoil', 'foil']}, broken)._finish(self.BOTH, self.lookup_says(), {'number': '', 'set': '', 'symbol': 'foil', 'net': None}, 'foil')
+        self.assertEqual((got['decision'], got['server']), ('foil', None))
 
 
 if __name__ == '__main__':

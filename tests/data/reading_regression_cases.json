@@ -1,0 +1,9601 @@
+{
+"_note": "Captured from PrintingCheck.lookup as committed in a84dcb9, before it was rebuilt on core/reading/decide.py: the evidence it used and the answer it gave, for real pictures (ids and similarities only). scripts/experiments/image_match/make_reading_vectors.py made it.",
+"cases": [
+{
+"name": "rescan-000",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "84c0dfa2-680e-47c5-987d-a02561d7e790",
+"similarity": 0.6197916666666667,
+"set": "sld",
+"number": "IFIYW-1",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "939e8322-e4be-48c4-9afc-90f8cc2ef802",
+"similarity": 0.5260416666666667,
+"set": "sld",
+"number": "IFIYW-6",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "598405fd-02d2-4bf8-b241-7a2ae6338913",
+"similarity": 0.28645833333333337,
+"set": "2xm",
+"number": "80",
+"oracle_id": "8cdfd9df-4783-4138-a286-828a97f516aa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "32668329-2f62-48ed-8da3-3cb0c3692ed9",
+"similarity": 0.27083333333333337,
+"set": "cmm",
+"number": "251",
+"oracle_id": "48fe0f52-1676-49d5-acf6-5476081e8e1b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9e0a57ca-f9e4-4f06-9c67-b7b87646954b",
+"similarity": 0.26041666666666663,
+"set": "sld",
+"number": "2426",
+"oracle_id": "3567c3c8-b3c7-45b7-935b-b1fdbc973720",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "80",
+"set": "2xm"
+},
+"expected": {
+"path": "image",
+"printing_id": "84c0dfa2-680e-47c5-987d-a02561d7e790",
+"similarity": 0.6198,
+"lead": 0.0938
+}
+},
+{
+"name": "rescan-001",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dc12105d-7536-429b-9510-4f56bfc0c497",
+"similarity": 0.6510416666666667,
+"set": "sld",
+"number": "IFIYW-2",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bde26955-6de3-4212-9e1a-5e11f73ebf44",
+"similarity": 0.49479166666666663,
+"set": "sld",
+"number": "IFIYW-7",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a5603e1f-593c-45f0-9e13-fe3492464443",
+"similarity": 0.390625,
+"set": "m15",
+"number": "155",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "084b7337-c06f-4cbf-8fc0-0b20c221f1dc",
+"similarity": 0.390625,
+"set": "m19",
+"number": "152",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "116d6679-2834-4cfe-a848-846c17f1af42",
+"similarity": 0.38020833333333337,
+"set": "gn2",
+"number": "42",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "42",
+"set": "gn2"
+},
+"expected": {
+"path": "image",
+"printing_id": "dc12105d-7536-429b-9510-4f56bfc0c497",
+"similarity": 0.651,
+"lead": 0.1563
+}
+},
+{
+"name": "rescan-002",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "e5f3bd60-cdeb-48bc-9209-c01686938bfb",
+"similarity": 0.6302083333333333,
+"set": "sld",
+"number": "IFIYW-4",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4eac3ed8-5f23-4244-941c-ac42e3fbe191",
+"similarity": 0.5572916666666667,
+"set": "sld",
+"number": "IFIYW-9",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "bc079c81-85e8-4a0d-83fe-533c4feaa343",
+"similarity": 0.31770833333333337,
+"set": "inr",
+"number": "123",
+"oracle_id": "1c29ae09-cc93-4a2a-b432-3c78ae01c1ed",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "562be5c0-5ad0-4307-a803-a7dc1385a330",
+"similarity": 0.3125,
+"set": "pana",
+"number": "222",
+"oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "0c3be020-37a3-49ce-8604-27794175bf9d",
+"similarity": 0.30729166666666663,
+"set": "tsr",
+"number": "272",
+"oracle_id": "e3056f28-868b-401a-a528-7528d639bdeb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "ncc"
+},
+"expected": {
+"path": "image",
+"printing_id": "e5f3bd60-cdeb-48bc-9209-c01686938bfb",
+"similarity": 0.6302,
+"lead": 0.0729
+}
+},
+{
+"name": "rescan-003",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.5885416666666667,
+"set": "sld",
+"number": "IFIYW-5",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.46354166666666663,
+"set": "sld",
+"number": "IFIYW-10",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "319b65f6-a6e6-45ea-9837-bc5831f54205",
+"similarity": 0.29166666666666663,
+"set": "inr",
+"number": "224",
+"oracle_id": "dcf692f6-baec-4b60-a6e3-2a8b731d7816",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "1090e40c-c04b-4ee2-aa12-1575f896d31a",
+"similarity": 0.28645833333333337,
+"set": "afr",
+"number": "312",
+"oracle_id": "9e107382-f683-44ed-ada1-775d3ac79dd0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e2ddc922-d69d-4fca-b7f8-8cfb17537213",
+"similarity": 0.27604166666666663,
+"set": "woc",
+"number": "27",
+"oracle_id": "1a2ab12a-5778-40df-a2ec-2733a7121cb4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "scd"
+},
+"expected": {
+"path": "image",
+"printing_id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.5885,
+"lead": 0.125
+}
+},
+{
+"name": "rescan-004",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3da4d946-fd93-4211-96b2-c9bd0d2b572d",
+"similarity": 0.6979166666666667,
+"set": "sld",
+"number": "IFIYW-3",
+"oracle_id": "1cb0610b-a731-42c2-b93f-0a29f63cebf4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7c337af5-35bf-4a80-8cc0-bb9af20305b3",
+"similarity": 0.46875,
+"set": "j22",
+"number": "615",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "25af9ac1-a03b-4be7-b726-fb66427b1caa",
+"similarity": 0.44270833333333337,
+"set": "ktk",
+"number": "123",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "8550cac1-c02a-42f1-acd6-beb29dc97be8",
+"similarity": 0.44270833333333337,
+"set": "cn2",
+"number": "171",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "48dbbc83-5549-480f-bf98-da90495d2a29",
+"similarity": 0.4375,
+"set": "m19",
+"number": "164",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "j22"
+},
+"expected": {
+"path": "image",
+"printing_id": "3da4d946-fd93-4211-96b2-c9bd0d2b572d",
+"similarity": 0.6979,
+"lead": 0.2292
+}
+},
+{
+"name": "rescan-005",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "84c0dfa2-680e-47c5-987d-a02561d7e790",
+"similarity": 0.6666666666666667,
+"set": "sld",
+"number": "IFIYW-1",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "939e8322-e4be-48c4-9afc-90f8cc2ef802",
+"similarity": 0.484375,
+"set": "sld",
+"number": "IFIYW-6",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "598405fd-02d2-4bf8-b241-7a2ae6338913",
+"similarity": 0.36458333333333337,
+"set": "2xm",
+"number": "80",
+"oracle_id": "8cdfd9df-4783-4138-a286-828a97f516aa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2ad01565-73f5-4687-8486-ea175526394b",
+"similarity": 0.34895833333333337,
+"set": "plst",
+"number": "XLN-96",
+"oracle_id": "8cdfd9df-4783-4138-a286-828a97f516aa",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "7bd002c7-21ec-4f77-81be-2788fa267f21",
+"similarity": 0.34375,
+"set": "chk",
+"number": "258",
+"oracle_id": "2935b603-d459-4f50-b244-0746febaaacd",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "80",
+"set": "2xm"
+},
+"expected": {
+"path": "image",
+"printing_id": "84c0dfa2-680e-47c5-987d-a02561d7e790",
+"similarity": 0.6667,
+"lead": 0.1823
+}
+},
+{
+"name": "rescan-006",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dc12105d-7536-429b-9510-4f56bfc0c497",
+"similarity": 0.6510416666666667,
+"set": "sld",
+"number": "IFIYW-2",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bde26955-6de3-4212-9e1a-5e11f73ebf44",
+"similarity": 0.515625,
+"set": "sld",
+"number": "IFIYW-7",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "084b7337-c06f-4cbf-8fc0-0b20c221f1dc",
+"similarity": 0.421875,
+"set": "m19",
+"number": "152",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "116d6679-2834-4cfe-a848-846c17f1af42",
+"similarity": 0.41666666666666663,
+"set": "gn2",
+"number": "42",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "a5603e1f-593c-45f0-9e13-fe3492464443",
+"similarity": 0.40104166666666663,
+"set": "m15",
+"number": "155",
+"oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "42",
+"set": "gn2"
+},
+"expected": {
+"path": "image",
+"printing_id": "dc12105d-7536-429b-9510-4f56bfc0c497",
+"similarity": 0.651,
+"lead": 0.1354
+}
+},
+{
+"name": "rescan-007",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "e5f3bd60-cdeb-48bc-9209-c01686938bfb",
+"similarity": 0.671875,
+"set": "sld",
+"number": "IFIYW-4",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4eac3ed8-5f23-4244-941c-ac42e3fbe191",
+"similarity": 0.59375,
+"set": "sld",
+"number": "IFIYW-9",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "edd242c8-c146-4d5a-86f8-6009ed29fe5a",
+"similarity": 0.359375,
+"set": "j22",
+"number": "533",
+"oracle_id": "97bff952-3bc8-41d0-b03f-5c76f3c7e0a3",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "6f10358e-4639-4873-9d0d-18f1b092b365",
+"similarity": 0.34895833333333337,
+"set": "plst",
+"number": "AFC-221",
+"oracle_id": "8b9119b0-9948-497f-aa92-2879d07bed1c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "5454a9ba-c749-45f1-880a-cdb699f12bdf",
+"similarity": 0.33854166666666663,
+"set": "cn2",
+"number": "162",
+"oracle_id": "c6bdaf76-6a03-4695-9c4b-f040e73435af",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "ncc"
+},
+"expected": {
+"path": "image",
+"printing_id": "e5f3bd60-cdeb-48bc-9209-c01686938bfb",
+"similarity": 0.6719,
+"lead": 0.0781
+}
+},
+{
+"name": "rescan-008",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.6510416666666667,
+"set": "sld",
+"number": "IFIYW-5",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.453125,
+"set": "sld",
+"number": "IFIYW-10",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "cc2690bd-390e-4217-a991-340ddc0b487d",
+"similarity": 0.29166666666666663,
+"set": "om1",
+"number": "16",
+"oracle_id": "2e677ded-7af3-4af0-81df-b70d6ee616ec",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "24456083-0c76-46c5-9b18-8d468702df69",
+"similarity": 0.29166666666666663,
+"set": "dsk",
+"number": "28",
+"oracle_id": "7ac608bc-dc2a-43c9-9b3b-1b985c121d60",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2f7e5122-89ff-4a25-96a5-fee5f96da7f2",
+"similarity": 0.28125,
+"set": "bbd",
+"number": "90",
+"oracle_id": "f688863f-b8eb-4143-8ea5-0b234cc91bd0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "scd"
+},
+"expected": {
+"path": "image",
+"printing_id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.651,
+"lead": 0.1979
+}
+},
+{
+"name": "rescan-009",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3da4d946-fd93-4211-96b2-c9bd0d2b572d",
+"similarity": 0.6354166666666667,
+"set": "sld",
+"number": "IFIYW-3",
+"oracle_id": "1cb0610b-a731-42c2-b93f-0a29f63cebf4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "25af9ac1-a03b-4be7-b726-fb66427b1caa",
+"similarity": 0.46875,
+"set": "ktk",
+"number": "123",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7c337af5-35bf-4a80-8cc0-bb9af20305b3",
+"similarity": 0.46354166666666663,
+"set": "j22",
+"number": "615",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "8550cac1-c02a-42f1-acd6-beb29dc97be8",
+"similarity": 0.45833333333333337,
+"set": "cn2",
+"number": "171",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "48dbbc83-5549-480f-bf98-da90495d2a29",
+"similarity": 0.453125,
+"set": "m19",
+"number": "164",
+"oracle_id": "f307b5b4-e949-4f69-8dc7-856e33a45a16",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "j22"
+},
+"expected": {
+"path": "image",
+"printing_id": "3da4d946-fd93-4211-96b2-c9bd0d2b572d",
+"similarity": 0.6354,
+"lead": 0.1667
+}
+},
+{
+"name": "rescan-010",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "939e8322-e4be-48c4-9afc-90f8cc2ef802",
+"similarity": 0.671875,
+"set": "sld",
+"number": "IFIYW-6",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "84c0dfa2-680e-47c5-987d-a02561d7e790",
+"similarity": 0.48958333333333337,
+"set": "sld",
+"number": "IFIYW-1",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fc12c22a-11ff-4fb0-bc42-dd8490b8efb7",
+"similarity": 0.29166666666666663,
+"set": "hob",
+"number": "92",
+"oracle_id": "81c2913f-42b7-4cfa-adc0-b3416fbe2ec6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b5b47279-fb96-4c2e-aa19-cbee46485e2e",
+"similarity": 0.28645833333333337,
+"set": "prm",
+"number": "36264",
+"oracle_id": "a1cc5e37-b09a-4b7f-afd5-77c1c35aa425",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "d3e33835-a293-4a1f-85d5-8ac22360ef35",
+"similarity": 0.28645833333333337,
+"set": "ema",
+"number": "84",
+"oracle_id": "a1cc5e37-b09a-4b7f-afd5-77c1c35aa425",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "80",
+"set": "2xm"
+},
+"expected": {
+"path": "image",
+"printing_id": "939e8322-e4be-48c4-9afc-90f8cc2ef802",
+"similarity": 0.6719,
+"lead": 0.1823
+}
+},
+{
+"name": "rescan-011",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "bde26955-6de3-4212-9e1a-5e11f73ebf44",
+"similarity": 0.6614583333333333,
+"set": "sld",
+"number": "IFIYW-7",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "dc12105d-7536-429b-9510-4f56bfc0c497",
+"similarity": 0.515625,
+"set": "sld",
+"number": "IFIYW-2",
+"oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e8685c8e-935f-49f2-acf2-8e3c41c5b330",
+"similarity": 0.3125,
+"set": "znr",
+"number": "135",
+"oracle_id": "43827acb-70cf-44a3-8560-e9f7330c835e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f7818d28-b9a5-4341-9adc-666070b8878d",
+"similarity": 0.30729166666666663,
+"set": "tdm",
+"number": "119",
+"oracle_id": "d0458ffe-9a61-443f-8e80-3d2dde224a4d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cece953f-6961-4f8d-87bb-3ecb76b6bc15",
+"similarity": 0.30729166666666663,
+"set": "prm",
+"number": "54545",
+"oracle_id": "edad60c6-80de-4033-af1b-a703ac332983",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "42",
+"set": "gn2"
+},
+"expected": {
+"path": "image",
+"printing_id": "bde26955-6de3-4212-9e1a-5e11f73ebf44",
+"similarity": 0.6615,
+"lead": 0.1458
+}
+},
+{
+"name": "rescan-012",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4eac3ed8-5f23-4244-941c-ac42e3fbe191",
+"similarity": 0.6875,
+"set": "sld",
+"number": "IFIYW-9",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e5f3bd60-cdeb-48bc-9209-c01686938bfb",
+"similarity": 0.6145833333333333,
+"set": "sld",
+"number": "IFIYW-4",
+"oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6f10358e-4639-4873-9d0d-18f1b092b365",
+"similarity": 0.33333333333333337,
+"set": "plst",
+"number": "AFC-221",
+"oracle_id": "8b9119b0-9948-497f-aa92-2879d07bed1c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "9a1c3f32-9add-455d-bb7f-b31c430c6590",
+"similarity": 0.31770833333333337,
+"set": "ddp",
+"number": "5",
+"oracle_id": "5045cfc3-ea63-4e0d-bf6a-bdeaf841ae3c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "0208b947-78d9-45bd-855f-846d9a7c547d",
+"similarity": 0.3125,
+"set": "drc",
+"number": "9",
+"oracle_id": "eefe2d53-4856-465d-a900-77836ef9ae07",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "ncc"
+},
+"expected": {
+"path": "image",
+"printing_id": "4eac3ed8-5f23-4244-941c-ac42e3fbe191",
+"similarity": 0.6875,
+"lead": 0.0729
+}
+},
+{
+"name": "rescan-013",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.6614583333333333,
+"set": "sld",
+"number": "IFIYW-10",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.515625,
+"set": "sld",
+"number": "IFIYW-5",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c524688d-ec43-4665-a22b-c8efacb4be61",
+"similarity": 0.29166666666666663,
+"set": "ltc",
+"number": "172",
+"oracle_id": "41fb2b0e-d0a0-4e47-a6f3-fc9860ade65a",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "477eb787-aec7-43fd-9813-184111d9dcc5",
+"similarity": 0.28125,
+"set": "bfz",
+"number": "220",
+"oracle_id": "c71f19be-aabc-44ef-a62b-57522b3a2c98",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "adfa16dc-03b3-4533-884c-a23b992b8d86",
+"similarity": 0.28125,
+"set": "grn",
+"number": "268",
+"oracle_id": "eae7dd41-3d5f-49a7-baaa-2c03bb341c3a",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "scd"
+},
+"expected": {
+"path": "image",
+"printing_id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.6615,
+"lead": 0.1458
+}
+},
+{
+"name": "rescan-014",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6905e150-4eb8-497c-98b0-439e6253871a",
+"similarity": 0.5625,
+"set": "sld",
+"number": "IFIYW-8",
+"oracle_id": "1cb0610b-a731-42c2-b93f-0a29f63cebf4",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "99cc0e94-f608-4a57-a719-3f8fe675d0ae",
+"similarity": 0.35416666666666663,
+"set": "snc",
+"number": "416",
+"oracle_id": "92380c57-0a92-48eb-b562-2be149b5792a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "87cfee6f-b8fe-4b25-87ea-9b9a28f84ca9",
+"similarity": 0.33854166666666663,
+"set": "prm",
+"number": "99767",
+"oracle_id": "92380c57-0a92-48eb-b562-2be149b5792a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a3f6a13a-ab38-49d1-8712-f9c9135a23c8",
+"similarity": 0.296875,
+"set": "m21",
+"number": "175",
+"oracle_id": "b1062763-1fcf-4605-9253-daa1687e8173",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3da4d946-fd93-4211-96b2-c9bd0d2b572d",
+"similarity": 0.29166666666666663,
+"set": "sld",
+"number": "IFIYW-3",
+"oracle_id": "1cb0610b-a731-42c2-b93f-0a29f63cebf4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "j22"
+},
+"expected": {
+"path": "image",
+"printing_id": "6905e150-4eb8-497c-98b0-439e6253871a",
+"similarity": 0.5625,
+"lead": 0.2083
+}
+},
+{
+"name": "hard-000",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4b1cedfe-4712-4602-a8a8-112bd54c9938",
+"similarity": 0.546875,
+"set": "msh",
+"number": "98",
+"oracle_id": "edf429a8-6a4d-4d2a-b0ca-c0c72a0698a3",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7a7f0900-331b-4676-bb61-cc197500505a",
+"similarity": 0.41145833333333337,
+"set": "c15",
+"number": "112",
+"oracle_id": "6a125750-2b8c-4f9d-8173-ac8d14c91ddb",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "2b90c9a9-098b-463a-8588-b078fb0364dd",
+"similarity": 0.390625,
+"set": "cmm",
+"number": "863",
+"oracle_id": "b0bc2d60-20d0-4ca2-be86-65b297226ac7",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c592ef76-d612-4cfe-b906-0e63c44d36f8",
+"similarity": 0.38541666666666663,
+"set": "wwk",
+"number": "48",
+"oracle_id": "9c462cd8-36f9-4e39-adf3-310ad4d76051",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "04fc99dc-bfbe-4567-b791-6b1db96471ec",
+"similarity": 0.38020833333333337,
+"set": "uma",
+"number": "110",
+"oracle_id": "a044474a-cd72-4e9d-bd8d-a08f2de9cdc0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "98",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "4b1cedfe-4712-4602-a8a8-112bd54c9938",
+"similarity": 0.5469,
+"lead": 0.1354
+}
+},
+{
+"name": "hard-001",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "239f0955-28e1-49e8-8b3c-b79f7fdbc5b3",
+"similarity": 0.703125,
+"set": "pltr",
+"number": "173s",
+"oracle_id": "5e99497f-7c73-49ae-88b3-78d5d74ba9ea",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a9405577-c1dc-48e0-b2aa-6237c569d02e",
+"similarity": 0.703125,
+"set": "ltr",
+"number": "173",
+"oracle_id": "5e99497f-7c73-49ae-88b3-78d5d74ba9ea",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fe6e9ef5-bd34-4d6c-baf4-957f13b331b6",
+"similarity": 0.39583333333333337,
+"set": "ltr",
+"number": "624",
+"oracle_id": "5e99497f-7c73-49ae-88b3-78d5d74ba9ea",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f542fbf8-3700-4b86-83d8-d8bdf8f14285",
+"similarity": 0.38020833333333337,
+"set": "fdc",
+"number": "225",
+"oracle_id": "761021ce-4559-464e-aa03-85c2fe78e267",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "3ab4e0a4-2faf-456b-99e3-ee06c008538c",
+"similarity": 0.36979166666666663,
+"set": "otj",
+"number": "263",
+"oracle_id": "de417a82-8f03-4d7e-aee7-48f7d7eba61a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "173",
+"set": ""
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0
+}
+},
+{
+"name": "hard-002",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6458333333333333,
+"set": "msh",
+"number": "106",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf38cf25-579f-4f94-92fb-a781c90a5f2e",
+"similarity": 0.5885416666666667,
+"set": "msh",
+"number": "408",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "21e9b236-f0e5-4e9d-a9c9-7d625e8412f2",
+"similarity": 0.38020833333333337,
+"set": "dft",
+"number": "425",
+"oracle_id": "e2c35551-1ba5-4424-baf9-821b49bbcc8c",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "3ef8d765-b799-463b-a003-caee721df354",
+"similarity": 0.375,
+"set": "pz2",
+"number": "72",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "46b99a84-3733-48bf-b743-522e5f94aca3",
+"similarity": 0.36979166666666663,
+"set": "mkc",
+"number": "248",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "106",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6458,
+"lead": 0.0573
+}
+},
+{
+"name": "hard-003",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "7c769658-0d99-4758-b8bd-4c8d03a09add",
+"similarity": 0.65625,
+"set": "msh",
+"number": "382",
+"oracle_id": "7785ffd4-f169-475d-9558-ce4877b3378a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f16c4abb-917a-4bd5-b0bc-b700611cd5b9",
+"similarity": 0.28125,
+"set": "spg",
+"number": "11",
+"oracle_id": "b0b6be0c-41cf-4757-9f0e-87227b6ba6b3",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b2481acb-9738-4069-b772-99fdbacc3857",
+"similarity": 0.27083333333333337,
+"set": "vow",
+"number": "323",
+"oracle_id": "a0380b63-58ef-4545-beec-6ad307bbc21b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cfc3f81d-333f-4ac9-8374-082675e07ac1",
+"similarity": 0.26041666666666663,
+"set": "sos",
+"number": "303",
+"oracle_id": "c854ecb0-cc60-4c48-a9aa-7f2348a7a8c6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3f4f07cc-eea4-4ad7-aabf-dab090327cbe",
+"similarity": 0.25520833333333337,
+"set": "cmm",
+"number": "558",
+"oracle_id": "d0dd425b-fdba-41b4-b9e6-f5161610bd7e",
+"finishes": [
+"etched"
+]
+}
+]
+},
+"strip": {
+"number": "362",
+"set": "msh"
+},
+"expected": {
+"path": "image",
+"printing_id": "7c769658-0d99-4758-b8bd-4c8d03a09add",
+"similarity": 0.6562,
+"lead": 0.375
+}
+},
+{
+"name": "hard-004",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.6458333333333333,
+"set": "sld",
+"number": "IFIYW-5",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.47395833333333337,
+"set": "sld",
+"number": "IFIYW-10",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "cc2690bd-390e-4217-a991-340ddc0b487d",
+"similarity": 0.27083333333333337,
+"set": "om1",
+"number": "16",
+"oracle_id": "2e677ded-7af3-4af0-81df-b70d6ee616ec",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "a7f9b8f0-f2b9-48ec-86c2-71d1419e396b",
+"similarity": 0.24479166666666663,
+"set": "ddq",
+"number": "28",
+"oracle_id": "55fe5ec3-1c81-4e9d-9e4c-f68ce6d7c2de",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "6f3b8171-8bf0-40eb-8ea1-9519b9d9425d",
+"similarity": 0.23958333333333337,
+"set": "pca",
+"number": "25",
+"oracle_id": "4f9942ee-d3fd-4c01-93eb-870d642ebd83",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "scd"
+},
+"expected": {
+"path": "image",
+"printing_id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.6458,
+"lead": 0.1719
+}
+},
+{
+"name": "hard-005",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c2e446e1-e384-4d5f-8099-544f78c08510",
+"similarity": 0.45833333333333337,
+"set": "msh",
+"number": "100",
+"oracle_id": "27692079-a517-4d38-b452-7409980b5912",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "11f68867-a46c-447f-9061-2bc4dbdde206",
+"similarity": 0.36979166666666663,
+"set": "c13",
+"number": "52",
+"oracle_id": "1b95970c-e7eb-41c4-a8d2-9889b64b3c63",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "7b3c373d-9733-425b-8ff5-2862a96f5188",
+"similarity": 0.36458333333333337,
+"set": "eve",
+"number": "128",
+"oracle_id": "0c1e2bb8-0629-466c-b435-c4c71cdc755d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d6a64e05-988e-4c6b-98dd-3640d9793fcf",
+"similarity": 0.36458333333333337,
+"set": "plst",
+"number": "RTR-49",
+"oracle_id": "fe1b0b19-0994-4bc7-ab6c-d1419d274f40",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "cb9dd0d9-8e35-4a8c-af6f-83c7d2a3ea7d",
+"similarity": 0.36458333333333337,
+"set": "m10",
+"number": "109",
+"oracle_id": "4e769107-0f32-4181-9e57-ffebc2228d3a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "6100",
+"set": "msh"
+},
+"expected": {
+"path": "image",
+"printing_id": "c2e446e1-e384-4d5f-8099-544f78c08510",
+"similarity": 0.4583,
+"lead": 0.0885
+}
+},
+{
+"name": "hard-006",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f1448731-d50e-4b9c-8eb2-3d85c21516c6",
+"similarity": 0.5416666666666667,
+"set": "msh",
+"number": "61",
+"oracle_id": "184dba74-63ed-4820-9174-68adf26bfabf",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "98dc5470-507a-4364-8480-42607255e56c",
+"similarity": 0.359375,
+"set": "fra",
+"number": "267",
+"oracle_id": "76771cd1-6b74-49bb-9421-8845fe344567",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "14545360-7b6c-4a61-9b23-1c6fc71b2b0f",
+"similarity": 0.35416666666666663,
+"set": "pogw",
+"number": "132",
+"oracle_id": "4d937ea3-bfd4-4cdf-b722-08f2b99ea2a5",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "954d53f3-ebbe-48e0-9e1a-7019d2b0740c",
+"similarity": 0.34895833333333337,
+"set": "emn",
+"number": "110",
+"oracle_id": "2e163679-7303-4e05-9d20-86b76dfa1407",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7b55e5ab-f437-477d-8c21-eb96f03f089e",
+"similarity": 0.34895833333333337,
+"set": "ema",
+"number": "182",
+"oracle_id": "b8b9e6fd-b3ed-4fbc-8753-74018fa33caa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "61",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f1448731-d50e-4b9c-8eb2-3d85c21516c6",
+"similarity": 0.5417,
+"lead": 0.1823
+}
+},
+{
+"name": "hard-007",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "87f14fae-281c-4667-a25b-ca764d8e4fbf",
+"similarity": 0.65625,
+"set": "msh",
+"number": "381",
+"oracle_id": "36b58705-c5a5-4547-8d8b-a7c35e1f69ae",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d8528e41-299d-461e-83c6-04ba3da6b17d",
+"similarity": 0.27604166666666663,
+"set": "bro",
+"number": "299",
+"oracle_id": "32116127-cf96-4a1b-8896-a1ebc087b597",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "98178c9d-e113-4f0e-9a7b-3ebfaafe2503",
+"similarity": 0.27083333333333337,
+"set": "bro",
+"number": "298",
+"oracle_id": "5eb8b497-ec9a-4a89-ad29-1ec3ca82da7c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "979c3262-7680-49a3-b0dc-12154e44c317",
+"similarity": 0.27083333333333337,
+"set": "mkc",
+"number": "16",
+"oracle_id": "901d3027-4394-481e-9a0e-dec4513d9f88",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f5559960-e306-4992-b607-9654327c4507",
+"similarity": 0.25,
+"set": "bfz",
+"number": "167",
+"oracle_id": "31b27775-196b-4022-bff5-25b34290ff7f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "381",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "87f14fae-281c-4667-a25b-ca764d8e4fbf",
+"similarity": 0.6562,
+"lead": 0.3802
+}
+},
+{
+"name": "hard-008",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "cc641f4a-ddbe-4f7d-bb55-eabf11f8b7fb",
+"similarity": 0.7395833333333333,
+"set": "spm",
+"number": "5",
+"oracle_id": "072d05c4-e0d7-47af-b2a9-16b90810fd30",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "23a623f0-2b7b-4e9b-84e3-9e7406b569c8",
+"similarity": 0.7291666666666667,
+"set": "msc",
+"number": "770",
+"oracle_id": "072d05c4-e0d7-47af-b2a9-16b90810fd30",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "91780fa7-b58e-479b-92b2-4aa86b67828d",
+"similarity": 0.41145833333333337,
+"set": "plst",
+"number": "DKA-119",
+"oracle_id": "296dee6b-6ec1-4ea4-8dc3-23080dd37646",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b38a0dbc-3ebd-4f87-a5fb-bc2ee8a48a8d",
+"similarity": 0.40104166666666663,
+"set": "dka",
+"number": "119",
+"oracle_id": "296dee6b-6ec1-4ea4-8dc3-23080dd37646",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f2da0ce0-799b-40dc-af28-b3d9da968b4f",
+"similarity": 0.39583333333333337,
+"set": "j25",
+"number": "347",
+"oracle_id": "df4569d7-ee75-4ba0-bbc3-7766ac686523",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "spm"
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0104
+}
+},
+{
+"name": "hard-009",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "ff3a48ee-27c6-45de-8252-5f488bc05e66",
+"similarity": 0.6197916666666667,
+"set": "sld",
+"number": "2372",
+"oracle_id": "2a2ea189-b663-4f4a-bb23-ff7a4af25f71",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "63c2857a-ac6b-4640-bf14-ad47b62bf8d4",
+"similarity": 0.20833333333333337,
+"set": "peld",
+"number": "97s",
+"oracle_id": "1080c5b5-6651-4c6a-93e6-099fbe389e26",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e040be83-3fb5-4da5-ba7a-4923b8854b74",
+"similarity": 0.19791666666666663,
+"set": "ice",
+"number": "90",
+"oracle_id": "e744dbb6-2d56-462a-8d49-d79c73944048",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "4d50fa57-db11-419e-b73b-666a6b25f7de",
+"similarity": 0.19791666666666663,
+"set": "tsr",
+"number": "360",
+"oracle_id": "3f3b2c10-21f8-4e13-be83-4ef3fa36e123",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "80590c26-285e-4b7b-9ee5-62956dba4ad7",
+"similarity": 0.19791666666666663,
+"set": "spg",
+"number": "54",
+"oracle_id": "b1544f21-7e98-461b-aed5-e748b0168c52",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "2372",
+"set": "sld"
+},
+"expected": {
+"path": "strong",
+"printing_id": "ff3a48ee-27c6-45de-8252-5f488bc05e66",
+"similarity": 0.6198,
+"lead": 0.4115
+}
+},
+{
+"name": "hard-010",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "0db45ef8-5bc5-4914-9918-dae4ebf48153",
+"similarity": 0.625,
+"set": "hob",
+"number": "278",
+"oracle_id": "f48f2a9b-4ba5-4984-8180-3950889bba65",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "efc66a6b-8ac7-4cb7-82f1-710fb0e86f82",
+"similarity": 0.6197916666666667,
+"set": "hob",
+"number": "242",
+"oracle_id": "f48f2a9b-4ba5-4984-8180-3950889bba65",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "273c99c1-7326-4ceb-9be0-37efcb69be1e",
+"similarity": 0.22916666666666663,
+"set": "dd2",
+"number": "38",
+"oracle_id": "50bc464e-1c8d-455c-a870-ddbbc4618343",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "9ea7381c-c745-458c-bf55-457242781a09",
+"similarity": 0.22916666666666663,
+"set": "mkm",
+"number": "323",
+"oracle_id": "e8aa0d7d-e5f6-4d66-bdc1-315483e1b256",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "118253e9-f33a-455d-b785-dd9df657e7cf",
+"similarity": 0.22395833333333337,
+"set": "tsp",
+"number": "197",
+"oracle_id": "22abc3e8-49bb-475a-8248-0ce85274913c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "242",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "efc66a6b-8ac7-4cb7-82f1-710fb0e86f82",
+"similarity": 0.6198,
+"lead": 0.0052
+}
+},
+{
+"name": "hard-011",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6197916666666667,
+"set": "msh",
+"number": "106",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf38cf25-579f-4f94-92fb-a781c90a5f2e",
+"similarity": 0.5833333333333333,
+"set": "msh",
+"number": "408",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9d7ac112-bb20-4ea4-b797-5d21f6b7c121",
+"similarity": 0.38020833333333337,
+"set": "c16",
+"number": "56",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "33e0f5c9-6f89-4b2e-8934-057009b33e90",
+"similarity": 0.36979166666666663,
+"set": "ltc",
+"number": "338",
+"oracle_id": "ec96cde2-f1e6-495c-94e2-3e8ae79e556c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "644319c2-f122-4369-b1f8-56ad7d8ce861",
+"similarity": 0.36979166666666663,
+"set": "shm",
+"number": "60",
+"oracle_id": "df6d9787-b423-4067-adf4-c09dcee1329e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "106",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6198,
+"lead": 0.0365
+}
+},
+{
+"name": "hard-012",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a6bd585d-0155-4ed8-8b8a-9c0b7604e942",
+"similarity": 0.265625,
+"set": "dis",
+"number": "156",
+"oracle_id": "814f06aa-b48e-4c7f-b4cd-595d89176d0e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "37257329-5946-44df-9f5a-50bd38b6a151",
+"similarity": 0.23958333333333337,
+"set": "ddh",
+"number": "73",
+"oracle_id": "814f06aa-b48e-4c7f-b4cd-595d89176d0e",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "89b6a352-40f5-4d7c-b2b6-2617539a1c1c",
+"similarity": 0.234375,
+"set": "leb",
+"number": "110",
+"oracle_id": "f75f9006-217d-4ec8-9c35-ceefe1c5ae4e",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "251e36f1-1bfd-4c04-8c61-1c2bc18beb8a",
+"similarity": 0.234375,
+"set": "clu",
+"number": "47",
+"oracle_id": "01becf76-aa53-4fd5-94c1-665c64674219",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "47ba5ac8-e8fa-4979-9ef9-c3d75ee7f982",
+"similarity": 0.234375,
+"set": "mh2",
+"number": "410",
+"oracle_id": "f15b3b76-d38a-48db-bb44-3296183c8641",
+"finishes": [
+"nonfoil",
+"foil",
+"etched"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": ""
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.026
+}
+},
+{
+"name": "hard-013",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "7c769658-0d99-4758-b8bd-4c8d03a09add",
+"similarity": 0.5989583333333333,
+"set": "msh",
+"number": "382",
+"oracle_id": "7785ffd4-f169-475d-9558-ce4877b3378a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cfc3f81d-333f-4ac9-8374-082675e07ac1",
+"similarity": 0.234375,
+"set": "sos",
+"number": "303",
+"oracle_id": "c854ecb0-cc60-4c48-a9aa-7f2348a7a8c6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6e982bf8-382f-4987-bc39-28e1ce290340",
+"similarity": 0.234375,
+"set": "clu",
+"number": "12",
+"oracle_id": "cb91e842-9f06-4863-a328-2cabe1bcfe27",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f2687683-2986-4e22-97d9-7820c870475b",
+"similarity": 0.22916666666666663,
+"set": "soi",
+"number": "266",
+"oracle_id": "9b5cf592-8385-4115-b27a-98f42bdf6329",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b33b5e4e-e68f-4b7d-a9c3-af01aa92c4e8",
+"similarity": 0.22395833333333337,
+"set": "sld",
+"number": "880",
+"oracle_id": "499dceab-1890-49c8-b35d-b059a1dc950f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "382",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "7c769658-0d99-4758-b8bd-4c8d03a09add",
+"similarity": 0.599,
+"lead": 0.3646
+}
+},
+{
+"name": "hard-014",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "0c13e282-bbfb-4601-94ff-803874634371",
+"similarity": 0.5364583333333333,
+"set": "hob",
+"number": "241",
+"oracle_id": "514b451b-814d-45fb-a2ba-8fe6f0bdad60",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "12d441b7-9349-47a1-b61e-9d563bc085b5",
+"similarity": 0.46875,
+"set": "hob",
+"number": "277",
+"oracle_id": "514b451b-814d-45fb-a2ba-8fe6f0bdad60",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e5fdcd21-55a3-4cad-8b73-3d6f85a69ce1",
+"similarity": 0.1875,
+"set": "big",
+"number": "91",
+"oracle_id": "b3a80545-9a8a-46b2-9d8c-b0d66fb68a5d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "92503118-b37b-4c52-b40a-487f6ad695ef",
+"similarity": 0.18229166666666663,
+"set": "dka",
+"number": "99",
+"oracle_id": "e0cd4619-9a83-41f2-a349-358feaf2ef2f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "1465ca9e-a997-4b8c-9677-6c7961f67eba",
+"similarity": 0.17708333333333337,
+"set": "jud",
+"number": "23",
+"oracle_id": "bcc7e32a-9cf9-4fdf-a0a4-e90ae42f1353",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "241",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "0c13e282-bbfb-4601-94ff-803874634371",
+"similarity": 0.5365,
+"lead": 0.0677
+}
+},
+{
+"name": "hard-015",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "b680a089-5cf0-494a-98e8-23d28315f572",
+"similarity": 0.6354166666666667,
+"set": "spm",
+"number": "205",
+"oracle_id": "19845456-3d96-48a4-89fa-9b8e583774c9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "143052c4-a59a-4bb7-afff-ac38b23d820f",
+"similarity": 0.21875,
+"set": "cmb2",
+"number": "10",
+"oracle_id": "fe4c1292-d68f-46b4-9e96-80f195753656",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "0ddfc5f7-911b-4159-8540-530d642d0e7c",
+"similarity": 0.21354166666666663,
+"set": "stx",
+"number": "380",
+"oracle_id": "544acde0-850d-4c4f-8389-e22930d87345",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0bdc0779-8c92-404d-b959-db9f4bd63947",
+"similarity": 0.21354166666666663,
+"set": "2x2",
+"number": "419",
+"oracle_id": "82f3faa8-39fa-450b-843f-d60a4c36d8f7",
+"finishes": [
+"etched"
+]
+},
+{
+"id": "086b6003-6d90-426b-809e-ea837d868290",
+"similarity": 0.21354166666666663,
+"set": "tla",
+"number": "329",
+"oracle_id": "af7d7da5-aff5-48e1-901a-f81257a85f71",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "2099",
+"set": "spm"
+},
+"expected": {
+"path": "image",
+"printing_id": "b680a089-5cf0-494a-98e8-23d28315f572",
+"similarity": 0.6354,
+"lead": 0.4167
+}
+},
+{
+"name": "hard-016",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a4adb258-381e-4e64-9f93-9fcf943be360",
+"similarity": 0.5989583333333333,
+"set": "hob",
+"number": "244",
+"oracle_id": "d05db2c1-a19a-4803-8e8a-fa2f9b798181",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f7c75c32-a24f-46e5-9128-2df9a2ec11f9",
+"similarity": 0.59375,
+"set": "hob",
+"number": "280",
+"oracle_id": "d05db2c1-a19a-4803-8e8a-fa2f9b798181",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "1399bc6c-365e-4597-8a66-3d1ffd24e3cc",
+"similarity": 0.21875,
+"set": "fj25",
+"number": "19",
+"oracle_id": "d438aa86-198a-4fd4-96ca-b67bd765104c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "0c9ac08c-11ce-4e8a-8ea8-c18cfc745ac7",
+"similarity": 0.21354166666666663,
+"set": "clb",
+"number": "368",
+"oracle_id": "48daee9d-ddaf-410f-8c3a-12fa1064ab56",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d7ad87f5-26da-445e-bdaa-8768d885444e",
+"similarity": 0.19791666666666663,
+"set": "cmr",
+"number": "579",
+"oracle_id": "f5aa7385-12ea-4ecb-86eb-e8622ebb6908",
+"finishes": [
+"etched"
+]
+}
+]
+},
+"strip": {
+"number": "244",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a4adb258-381e-4e64-9f93-9fcf943be360",
+"similarity": 0.599,
+"lead": 0.0052
+}
+},
+{
+"name": "hard-017",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "adae8941-8f93-46cd-a520-20330ed2acff",
+"similarity": 0.59375,
+"set": "ltr",
+"number": "489",
+"oracle_id": "8e94ccdb-5978-440b-b7cd-11c7ca6b2c98",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "116d4030-acd2-4aa2-8254-aaaff1264459",
+"similarity": 0.40104166666666663,
+"set": "ltr",
+"number": "38",
+"oracle_id": "8e94ccdb-5978-440b-b7cd-11c7ca6b2c98",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "88d958a1-2dab-4a49-b79d-2c9bc4c4a76d",
+"similarity": 0.30208333333333337,
+"set": "ltr",
+"number": "695",
+"oracle_id": "7695ef41-fa58-4890-b3fe-de5751831d8e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "53eef712-365a-4313-af97-c4d7b56dd70c",
+"similarity": 0.28125,
+"set": "ltr",
+"number": "465",
+"oracle_id": "adeed5e8-9019-4740-83ea-67dcd754e194",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "764db087-e8ce-4603-b553-7ba74e12c9a5",
+"similarity": 0.28125,
+"set": "ltr",
+"number": "651",
+"oracle_id": "28aefa3a-16d3-4207-bb8c-588b722a4041",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "489",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "adae8941-8f93-46cd-a520-20330ed2acff",
+"similarity": 0.5938,
+"lead": 0.1927
+}
+},
+{
+"name": "hard-018",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f5f80d82-d64c-466f-8874-9cfb00469f02",
+"similarity": 0.828125,
+"set": "spm",
+"number": "49",
+"oracle_id": "14c356aa-178d-4c14-a88e-fbe92ee6d89f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "51a15ac9-5d33-4db1-aa64-eefa1a60f056",
+"similarity": 0.7864583333333334,
+"set": "pspm",
+"number": "49s",
+"oracle_id": "14c356aa-178d-4c14-a88e-fbe92ee6d89f",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "5569baf4-0cc9-46da-80cb-2cac5452f460",
+"similarity": 0.6822916666666667,
+"set": "spm",
+"number": "255",
+"oracle_id": "14c356aa-178d-4c14-a88e-fbe92ee6d89f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "eac210dc-0814-4c0a-9bf7-12fa26128c3a",
+"similarity": 0.46875,
+"set": "cn2",
+"number": "147",
+"oracle_id": "920445ab-0ac2-4de7-bc1c-f5e58eb4424c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "59f7f84c-d0a8-4204-a68e-93075f2a96b0",
+"similarity": 0.46354166666666663,
+"set": "c21",
+"number": "152",
+"oracle_id": "920445ab-0ac2-4de7-bc1c-f5e58eb4424c",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "49",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f5f80d82-d64c-466f-8874-9cfb00469f02",
+"similarity": 0.8281,
+"lead": 0.0417
+}
+},
+{
+"name": "hard-019",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "8538a97f-302d-468a-8a6c-50c800d614e5",
+"similarity": 0.5572916666666667,
+"set": "ltr",
+"number": "273",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4d48ef1f-e000-452b-aae8-c3257f149c7d",
+"similarity": 0.546875,
+"set": "ltr",
+"number": "714",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "80804f25-efc3-44a2-bbae-9a97fec98009",
+"similarity": 0.22395833333333337,
+"set": "moc",
+"number": "10",
+"oracle_id": "e7604cd9-d00d-4957-82c9-46a7cdb88209",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0873cfa8-046c-4b14-ae22-3fd6a691f763",
+"similarity": 0.22395833333333337,
+"set": "clb",
+"number": "271",
+"oracle_id": "3dfb006f-6620-4602-ac3c-d40a5a15a981",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4da8f836-b41c-4717-887f-e0e873320d17",
+"similarity": 0.22395833333333337,
+"set": "prm",
+"number": "36092",
+"oracle_id": "cf0dcb27-f02e-4065-81dc-75fbbb09ea3f",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "273",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "8538a97f-302d-468a-8a6c-50c800d614e5",
+"similarity": 0.5573,
+"lead": 0.0104
+}
+},
+{
+"name": "hard-020",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a416ca91-e646-40b4-824c-24aed6b9c683",
+"similarity": 0.5260416666666667,
+"set": "hob",
+"number": "246",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "49539856-989e-4f95-8e67-9cff4408cd87",
+"similarity": 0.5104166666666667,
+"set": "hob",
+"number": "282",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "bf652c00-e5f5-47ec-a2b7-de341d5f8b5c",
+"similarity": 0.22916666666666663,
+"set": "30a",
+"number": "411",
+"oracle_id": "c58dfcbf-49e6-4ef0-bd31-ebd81b0cfa41",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "e36e4e30-a3de-4284-a2f9-9a0c01ed05a2",
+"similarity": 0.21354166666666663,
+"set": "dbl",
+"number": "58",
+"oracle_id": "61ab4548-5da9-4351-87e7-a3afc93d4bf5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4b71ae6d-ee48-44d6-a3f2-c855ae882350",
+"similarity": 0.19791666666666663,
+"set": "dbl",
+"number": "258",
+"oracle_id": "b29a0686-2246-47a9-974d-4425e8a5546c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "282",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "49539856-989e-4f95-8e67-9cff4408cd87",
+"similarity": 0.5104,
+"lead": 0.0156
+}
+},
+{
+"name": "hard-021",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3aa6fc02-ef76-426b-accd-6c0ef88b2a5e",
+"similarity": 0.4375,
+"set": "msh",
+"number": "25",
+"oracle_id": "62916107-14c0-4516-9fed-a032b1a80e5d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a5686e11-86ce-4795-9512-7974a2767c93",
+"similarity": 0.3125,
+"set": "peld",
+"number": "101s",
+"oracle_id": "b8619990-9dc2-4fcc-bc7e-457b77cd2a8e",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "76ebe313-3452-415c-a93f-52c7467531a3",
+"similarity": 0.30729166666666663,
+"set": "mh2",
+"number": "377",
+"oracle_id": "0fc64fd6-f057-4056-9dca-47accb7ff036",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "38138bb4-25ea-4aaf-8b1c-e9e60678fc6b",
+"similarity": 0.30729166666666663,
+"set": "apc",
+"number": "9",
+"oracle_id": "e9517fc3-d1bc-42f7-b052-9f629b302735",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fe7d5581-68c8-4e78-aa80-69dd0d62b08d",
+"similarity": 0.30208333333333337,
+"set": "anb",
+"number": "39",
+"oracle_id": "64e0c580-0e55-4f42-8594-11ccb584d633",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "25",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "3aa6fc02-ef76-426b-accd-6c0ef88b2a5e",
+"similarity": 0.4375,
+"lead": 0.125
+}
+},
+{
+"name": "hard-022",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "9be0d67e-522b-48dc-afdd-7aae867821a3",
+"similarity": 0.53125,
+"set": "ltr",
+"number": "481",
+"oracle_id": "14f36157-f55f-495d-9ffe-f38135a59750",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "444b687f-2571-4c55-a497-d24b9e18bc0f",
+"similarity": 0.39583333333333337,
+"set": "ltr",
+"number": "30",
+"oracle_id": "14f36157-f55f-495d-9ffe-f38135a59750",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b62104ea-1410-4918-9c7d-da6019324600",
+"similarity": 0.27604166666666663,
+"set": "ltr",
+"number": "477",
+"oracle_id": "f0449cbd-855c-4c20-a1f5-f76a395d8d39",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3b3f2e18-0cc3-42bf-af33-60b95c5e2e40",
+"similarity": 0.25520833333333337,
+"set": "ltr",
+"number": "697",
+"oracle_id": "3aa83ed2-f48b-4ce6-a614-2c54ddf50538",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a08654c6-9073-4c37-b23d-02136248cf37",
+"similarity": 0.25,
+"set": "ima",
+"number": "121",
+"oracle_id": "ba14843d-6b7f-4e3d-b5ba-fc573fa8bf50",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "9be0d67e-522b-48dc-afdd-7aae867821a3",
+"similarity": 0.5312,
+"lead": 0.1354
+}
+},
+{
+"name": "hard-023",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.671875,
+"set": "msh",
+"number": "106",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf38cf25-579f-4f94-92fb-a781c90a5f2e",
+"similarity": 0.578125,
+"set": "msh",
+"number": "408",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9d7ac112-bb20-4ea4-b797-5d21f6b7c121",
+"similarity": 0.40104166666666663,
+"set": "c16",
+"number": "56",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "46b99a84-3733-48bf-b743-522e5f94aca3",
+"similarity": 0.390625,
+"set": "mkc",
+"number": "248",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "af648aaf-a8e0-4291-acf9-5f8533728f92",
+"similarity": 0.390625,
+"set": "jmp",
+"number": "22",
+"oracle_id": "3ad5af12-1741-427d-92c4-6a730cd4faa2",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "106",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6719,
+"lead": 0.0938
+}
+},
+{
+"name": "hard-024",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "7b9eb4e1-7bb6-4224-a47a-051c04df98c0",
+"similarity": 0.6875,
+"set": "sld",
+"number": "7073",
+"oracle_id": "8586169f-cb8c-4424-ba64-a7c1cc00680e",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e7d3012e-1798-4f72-8d9a-b2d16f817502",
+"similarity": 0.24479166666666663,
+"set": "vow",
+"number": "198",
+"oracle_id": "1be58157-186e-48e4-b375-dc5f10d785ac",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6ba78cd7-a3b6-4ef2-b6b7-3416c0ba61f1",
+"similarity": 0.234375,
+"set": "clb",
+"number": "641",
+"oracle_id": "d8e6294d-51cc-44ff-8bc6-b0a168e4f423",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d0dc39cc-c5ae-4e6e-ba31-f30841d49351",
+"similarity": 0.234375,
+"set": "clb",
+"number": "592",
+"oracle_id": "0c92432d-ac76-47d2-af7a-fdffd4b546a2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c762f475-7e58-4477-839b-b3c55434b88f",
+"similarity": 0.22916666666666663,
+"set": "msc",
+"number": "269",
+"oracle_id": "6a6c5e17-6465-4a1f-9d63-8a3ce2edc522",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "7073",
+"set": "sld"
+},
+"expected": {
+"path": "strong",
+"printing_id": "7b9eb4e1-7bb6-4224-a47a-051c04df98c0",
+"similarity": 0.6875,
+"lead": 0.4427
+}
+},
+{
+"name": "hard-025",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a416ca91-e646-40b4-824c-24aed6b9c683",
+"similarity": 0.734375,
+"set": "hob",
+"number": "246",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "49539856-989e-4f95-8e67-9cff4408cd87",
+"similarity": 0.6666666666666667,
+"set": "hob",
+"number": "282",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a54c9d18-76d7-4c24-ab19-7ad57d9a33a4",
+"similarity": 0.22395833333333337,
+"set": "dsk",
+"number": "410",
+"oracle_id": "f153e369-1d5b-4d8b-a2f6-d93b849cabb5",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "7a4c0731-555a-4bef-9d9e-b877f0339417",
+"similarity": 0.21875,
+"set": "mid",
+"number": "275",
+"oracle_id": "a3fb7228-e76b-4e96-a40e-20b5fed75685",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0b8f388d-b313-4838-ad2c-82d4a0337b52",
+"similarity": 0.21875,
+"set": "dbl",
+"number": "422",
+"oracle_id": "09618da4-6e2d-4047-96d7-0576c0754e7d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "246",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a416ca91-e646-40b4-824c-24aed6b9c683",
+"similarity": 0.7344,
+"lead": 0.0677
+}
+},
+{
+"name": "hard-026",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "0ed36ada-22c8-4e40-86c5-c116a0bee1c2",
+"similarity": 0.7916666666666666,
+"set": "spm",
+"number": "52",
+"oracle_id": "f5cdb413-2b72-4dc6-b93d-2532ac2ae568",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3a553f75-87fe-4f1e-8fd8-f091aca30bab",
+"similarity": 0.7395833333333333,
+"set": "pspm",
+"number": "52s",
+"oracle_id": "f5cdb413-2b72-4dc6-b93d-2532ac2ae568",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "7335da62-3b59-4c73-a19e-b1733393ed88",
+"similarity": 0.48958333333333337,
+"set": "ori",
+"number": "113",
+"oracle_id": "e6b0c47b-9758-4ee3-b831-0af0650660fe",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "00b9ac91-51e4-4653-ac2a-da166a894f2a",
+"similarity": 0.484375,
+"set": "c20",
+"number": "3",
+"oracle_id": "2a2376b8-6962-4f9e-ba36-fd7de87dc77d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cd56f047-6bdc-4e83-8a7c-923ebad26302",
+"similarity": 0.47395833333333337,
+"set": "fra",
+"number": "48",
+"oracle_id": "253d0cf7-65d3-4f13-aaf2-aae5bb60ac46",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "52",
+"set": "sph"
+},
+"expected": {
+"path": "image",
+"printing_id": "0ed36ada-22c8-4e40-86c5-c116a0bee1c2",
+"similarity": 0.7917,
+"lead": 0.0521
+}
+},
+{
+"name": "hard-027",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6875,
+"set": "msh",
+"number": "106",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf38cf25-579f-4f94-92fb-a781c90a5f2e",
+"similarity": 0.6458333333333333,
+"set": "msh",
+"number": "408",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b945f8c2-acfc-4622-8e96-993921d58995",
+"similarity": 0.36458333333333337,
+"set": "m3c",
+"number": "207",
+"oracle_id": "14c3ff84-1e82-4606-a433-869fc52cc382",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3ef8d765-b799-463b-a003-caee721df354",
+"similarity": 0.35416666666666663,
+"set": "pz2",
+"number": "72",
+"oracle_id": "58257464-278e-45fa-8e0b-bcd9a7500bc1",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "00566375-e976-4e96-b751-cf0430452c9c",
+"similarity": 0.35416666666666663,
+"set": "cmm",
+"number": "183",
+"oracle_id": "9dbc3530-b278-4c8d-b2cc-a09dfac9d5e5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "106",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.6875,
+"lead": 0.0417
+}
+},
+{
+"name": "hard-028",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "efc66a6b-8ac7-4cb7-82f1-710fb0e86f82",
+"similarity": 0.671875,
+"set": "hob",
+"number": "242",
+"oracle_id": "f48f2a9b-4ba5-4984-8180-3950889bba65",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0db45ef8-5bc5-4914-9918-dae4ebf48153",
+"similarity": 0.6666666666666667,
+"set": "hob",
+"number": "278",
+"oracle_id": "f48f2a9b-4ba5-4984-8180-3950889bba65",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "0a41d10e-7dad-46fd-bd15-0ea6c89bc0aa",
+"similarity": 0.21875,
+"set": "fra",
+"number": "313",
+"oracle_id": "48b891b6-3175-4864-bb98-af131098c557",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b0038c0e-071f-4fee-bf23-d50d00014703",
+"similarity": 0.20833333333333337,
+"set": "8ed",
+"number": "24",
+"oracle_id": "9357de36-f8be-4f49-b2c8-9fe9eaf82b07",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "379809a2-988b-46a8-a38e-134cee7eeaaf",
+"similarity": 0.20833333333333337,
+"set": "ohop",
+"number": "6",
+"oracle_id": "5503c308-560d-4d5f-a86a-4b06d9947ddc",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "242",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "efc66a6b-8ac7-4cb7-82f1-710fb0e86f82",
+"similarity": 0.6719,
+"lead": 0.0052
+}
+},
+{
+"name": "hard-029",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "5091e2bd-247d-4a1d-adf4-6e66324ee20b",
+"similarity": 0.6770833333333333,
+"set": "hob",
+"number": "281",
+"oracle_id": "20535126-f811-4386-bdce-d73f30691724",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "189a7d55-c3ec-4402-a3b3-72817f533e87",
+"similarity": 0.671875,
+"set": "hob",
+"number": "245",
+"oracle_id": "20535126-f811-4386-bdce-d73f30691724",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0c13e282-bbfb-4601-94ff-803874634371",
+"similarity": 0.28125,
+"set": "hob",
+"number": "241",
+"oracle_id": "514b451b-814d-45fb-a2ba-8fe6f0bdad60",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "12d441b7-9349-47a1-b61e-9d563bc085b5",
+"similarity": 0.21354166666666663,
+"set": "hob",
+"number": "277",
+"oracle_id": "514b451b-814d-45fb-a2ba-8fe6f0bdad60",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "dfe9ae51-fd2b-45ca-a780-725f51f897b2",
+"similarity": 0.203125,
+"set": "avr",
+"number": "66",
+"oracle_id": "aef067b4-cd9c-4f18-8c63-fbbc39b63376",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "245",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "189a7d55-c3ec-4402-a3b3-72817f533e87",
+"similarity": 0.6719,
+"lead": 0.0052
+}
+},
+{
+"name": "hard-030",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6589b339-9067-4e9b-bfdb-c49f8b3ef2d4",
+"similarity": 0.5625,
+"set": "ltr",
+"number": "190",
+"oracle_id": "eb2ff7f2-b7fd-4984-a4e8-cf57b619c1a5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "74bbdfb9-13e9-4256-b082-39f48844b86b",
+"similarity": 0.44270833333333337,
+"set": "ltr",
+"number": "641",
+"oracle_id": "eb2ff7f2-b7fd-4984-a4e8-cf57b619c1a5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "545503f8-a8c6-4518-9ad6-76e4996397fc",
+"similarity": 0.36458333333333337,
+"set": "lci",
+"number": "58",
+"oracle_id": "6bda307b-1508-4582-952b-c690db85e045",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b29e5af4-feb6-485a-a631-bfc42fa1b13a",
+"similarity": 0.34375,
+"set": "dsc",
+"number": "218",
+"oracle_id": "21254bdb-7b1f-4ac6-8fdd-f0ac2c35f47d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b16fba05-25d7-4495-a9f6-cec6b3aabbbd",
+"similarity": 0.33333333333333337,
+"set": "acr",
+"number": "292",
+"oracle_id": "b255d1ec-49ac-49a2-9af8-21915bbcd224",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "190",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "6589b339-9067-4e9b-bfdb-c49f8b3ef2d4",
+"similarity": 0.5625,
+"lead": 0.1198
+}
+},
+{
+"name": "hard-031",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4fe5952d-f50f-443a-b960-657fc4bc1965",
+"similarity": 0.6979166666666667,
+"set": "msh",
+"number": "254",
+"oracle_id": "be0b86fc-8450-41d4-9836-6de11cecb857",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cc101b90-3e17-4beb-a606-3e76088e362c",
+"similarity": 0.41666666666666663,
+"set": "ppp1",
+"number": "2",
+"oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "29d59151-09e5-4e6c-8c46-586796535733",
+"similarity": 0.41145833333333337,
+"set": "pemn",
+"number": "109s",
+"oracle_id": "0cdece2a-0bdf-4e6d-9ddc-4a8d58b2ec29",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "006cbb74-7447-45fb-b44b-bac31832b392",
+"similarity": 0.40625,
+"set": "xln",
+"number": "105",
+"oracle_id": "33d405ea-7a9a-4970-b70f-9c05d90dd6f0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4237eaa8-1169-47b2-9009-ac529831a36e",
+"similarity": 0.40104166666666663,
+"set": "j22",
+"number": "103",
+"oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "254",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "4fe5952d-f50f-443a-b960-657fc4bc1965",
+"similarity": 0.6979,
+"lead": 0.2813
+}
+},
+{
+"name": "hard-032",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "760b41a1-c087-4b11-b8a0-fb01d8a4c0c6",
+"similarity": 0.71875,
+"set": "spm",
+"number": "88",
+"oracle_id": "a9d288b8-cdc1-4e55-a0c9-d6edfc95e65d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b23900fb-efe9-43ab-9f67-4545dd01fb9c",
+"similarity": 0.6979166666666667,
+"set": "msc",
+"number": "809",
+"oracle_id": "a9d288b8-cdc1-4e55-a0c9-d6edfc95e65d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "46828728-4f51-49cd-ba05-dc4214b98be6",
+"similarity": 0.36979166666666663,
+"set": "plst",
+"number": "KLD-100",
+"oracle_id": "08122109-6287-4d78-9242-2da8a25022b0",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "61a8cb98-7ee7-4f90-bfba-0a406a5e6d6b",
+"similarity": 0.36979166666666663,
+"set": "kld",
+"number": "100",
+"oracle_id": "08122109-6287-4d78-9242-2da8a25022b0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c60593d9-f0d6-47d5-8c22-edf528a221ef",
+"similarity": 0.36458333333333337,
+"set": "cmd",
+"number": "105",
+"oracle_id": "8386f43f-8106-415c-a9a6-7fd3f5b060f3",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "spm"
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0208
+}
+},
+{
+"name": "hard-033",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.703125,
+"set": "msh",
+"number": "106",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf38cf25-579f-4f94-92fb-a781c90a5f2e",
+"similarity": 0.6041666666666667,
+"set": "msh",
+"number": "408",
+"oracle_id": "fe7cc414-42d0-4dad-8516-7a0be0860a67",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "00566375-e976-4e96-b751-cf0430452c9c",
+"similarity": 0.375,
+"set": "cmm",
+"number": "183",
+"oracle_id": "9dbc3530-b278-4c8d-b2cc-a09dfac9d5e5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e1ef942d-e1fc-47f4-a026-ed56db35e303",
+"similarity": 0.36979166666666663,
+"set": "j25",
+"number": "481",
+"oracle_id": "9dbc3530-b278-4c8d-b2cc-a09dfac9d5e5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "6694496c-45b9-4ddf-bfcd-b632441b8811",
+"similarity": 0.36458333333333337,
+"set": "m11",
+"number": "188",
+"oracle_id": "ee2ab1ab-be1e-4e56-99f2-7784f7350b41",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "106",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "38e87542-50f7-4812-9338-84e4b9b7bb44",
+"similarity": 0.7031,
+"lead": 0.099
+}
+},
+{
+"name": "hard-034",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a416ca91-e646-40b4-824c-24aed6b9c683",
+"similarity": 0.5364583333333333,
+"set": "hob",
+"number": "246",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "49539856-989e-4f95-8e67-9cff4408cd87",
+"similarity": 0.44791666666666663,
+"set": "hob",
+"number": "282",
+"oracle_id": "4a5f76e7-40be-4b06-9935-4a3b2672e1c2",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a09915f3-1078-4cd4-8d22-d95fb8749693",
+"similarity": 0.22395833333333337,
+"set": "brr",
+"number": "95",
+"oracle_id": "3212e47a-5492-4c50-9d4a-6ea562f1a6e1",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3a8bd920-5e70-4c3d-bd15-ccb8d1c87e2e",
+"similarity": 0.21354166666666663,
+"set": "ltr",
+"number": "436",
+"oracle_id": "9f3941d8-b4d2-4faf-881a-f15973b4368d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf75477f-d42b-4756-a05a-4ec45a246709",
+"similarity": 0.20833333333333337,
+"set": "lcc",
+"number": "109",
+"oracle_id": "eea4feef-2595-4ed2-92a0-11ccb3e7d40e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "246",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a416ca91-e646-40b4-824c-24aed6b9c683",
+"similarity": 0.5365,
+"lead": 0.0885
+}
+},
+{
+"name": "hard-035",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a383c442-3f4a-4115-97e4-23f0eb88465b",
+"similarity": 0.7604166666666666,
+"set": "spm",
+"number": "30",
+"oracle_id": "ae91c16c-5267-4957-b36c-5aa787fa6b5e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "455e9558-494e-43b2-b661-8e996d767f49",
+"similarity": 0.7291666666666667,
+"set": "msc",
+"number": "784",
+"oracle_id": "ae91c16c-5267-4957-b36c-5aa787fa6b5e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ef3c7a8e-b52d-4ed5-8c6b-be29d898a275",
+"similarity": 0.48958333333333337,
+"set": "plst",
+"number": "ORI-74",
+"oracle_id": "498707db-258f-423a-9ff6-9e294fce84d6",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f7860cf3-c3ea-4055-8c95-6d1c8d50e69d",
+"similarity": 0.47916666666666663,
+"set": "w17",
+"number": "14",
+"oracle_id": "9fd288d6-445e-4605-b206-aab43e300dde",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "37c9916a-2806-4c3d-a152-5543071cc311",
+"similarity": 0.47916666666666663,
+"set": "mm3",
+"number": "212",
+"oracle_id": "b1696989-7f00-41ec-82a4-fd10aed7a7f9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "30",
+"set": ""
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0312
+}
+},
+{
+"name": "hard-036",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "67786575-7ad6-40a9-adac-5626f407f5b1",
+"similarity": 0.6614583333333333,
+"set": "sld",
+"number": "1991",
+"oracle_id": "1b882a0e-0ede-4d1a-bd1a-9b7cffbcde8e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7c58e69d-1cbd-4d67-8d34-bd66904983c4",
+"similarity": 0.265625,
+"set": "sld",
+"number": "1985",
+"oracle_id": "457af74a-02b3-4659-846d-63e482667f34",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ed989141-9089-4ff9-9771-5aba505c9d9f",
+"similarity": 0.25,
+"set": "dbl",
+"number": "370",
+"oracle_id": "ae18580a-1753-4dc8-b437-8a779b1a6e4d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fa3ecb4e-d08f-4fac-8842-c3e772b95bd5",
+"similarity": 0.23958333333333337,
+"set": "chk",
+"number": "272",
+"oracle_id": "766c644c-04fe-4b01-93dd-09a50d78d01f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cdaf61a9-02da-48fd-a38b-13ecc326c40c",
+"similarity": 0.234375,
+"set": "ltc",
+"number": "399z",
+"oracle_id": "17784f90-89a1-47a5-83ef-ae60dfc30bd1",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "1991",
+"set": "sld"
+},
+"expected": {
+"path": "strong",
+"printing_id": "67786575-7ad6-40a9-adac-5626f407f5b1",
+"similarity": 0.6615,
+"lead": 0.3958
+}
+},
+{
+"name": "hard-037",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "fef1c2a5-d5d8-4c1e-9b14-ee202a5f16b1",
+"similarity": 0.6041666666666667,
+"set": "sld",
+"number": "2362",
+"oracle_id": "debce64a-18bd-42f5-9e85-158c2242e9e9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "826b4f26-419a-4d74-8c70-275555092095",
+"similarity": 0.25520833333333337,
+"set": "tla",
+"number": "307",
+"oracle_id": "f8966fd5-2926-4ba0-b7d6-cfea40cd4e05",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c3992c4c-d241-4dc5-bb68-6db5fb93a356",
+"similarity": 0.21354166666666663,
+"set": "one",
+"number": "433",
+"oracle_id": "54c18f09-5c5a-46e7-9f66-ff91bc12537c",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "179d50b5-cab1-482c-85a6-36f59335b562",
+"similarity": 0.19270833333333337,
+"set": "trk",
+"number": "500",
+"oracle_id": "5fe6f4ae-3fb1-4df6-8760-88c8666068df",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fe227493-42f3-460f-a3f1-54c108893eea",
+"similarity": 0.1875,
+"set": "dbl",
+"number": "178",
+"oracle_id": "be9bee08-ac04-42bc-93be-5a77482a7690",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "2362",
+"set": "sld"
+},
+"expected": {
+"path": "strong",
+"printing_id": "fef1c2a5-d5d8-4c1e-9b14-ee202a5f16b1",
+"similarity": 0.6042,
+"lead": 0.349
+}
+},
+{
+"name": "hard-038",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "07c70df6-b064-424a-852e-201b312a5b54",
+"similarity": 0.59375,
+"set": "msh",
+"number": "86",
+"oracle_id": "95161e23-e4c4-411f-bce5-58a02abc0958",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6f0fea13-63cf-4574-8752-3c357eee4524",
+"similarity": 0.453125,
+"set": "rtr",
+"number": "77",
+"oracle_id": "0cf742c1-feb5-4108-9976-37fa58528212",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "1f29d9e4-3100-43cb-9723-7d5c23f89b12",
+"similarity": 0.44270833333333337,
+"set": "j25",
+"number": "467",
+"oracle_id": "938b4e2c-88d9-4637-bc00-e228920c9a78",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "5d964629-6d1d-4253-ac23-92f2199323b4",
+"similarity": 0.4375,
+"set": "m15",
+"number": "183",
+"oracle_id": "cb7baa46-7963-4d45-9a6e-e3c34db3c0e6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "320e195e-65c7-4220-bdc7-fe1e02a4adfc",
+"similarity": 0.4375,
+"set": "plst",
+"number": "M20-109",
+"oracle_id": "938b4e2c-88d9-4637-bc00-e228920c9a78",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "86",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "07c70df6-b064-424a-852e-201b312a5b54",
+"similarity": 0.5938,
+"lead": 0.1406
+}
+},
+{
+"name": "hard-039",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "87f14fae-281c-4667-a25b-ca764d8e4fbf",
+"similarity": 0.65625,
+"set": "msh",
+"number": "381",
+"oracle_id": "36b58705-c5a5-4547-8d8b-a7c35e1f69ae",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ded2e0ca-acdb-470f-a287-67bd1605107f",
+"similarity": 0.29166666666666663,
+"set": "woc",
+"number": "153",
+"oracle_id": "dcb7e046-f01b-497c-88e5-57794eb30ce5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "9b99bb11-bec7-4c50-a0c8-49740655f725",
+"similarity": 0.28645833333333337,
+"set": "cmm",
+"number": "989",
+"oracle_id": "dcb7e046-f01b-497c-88e5-57794eb30ce5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b76f2de1-ea17-40b0-8d90-4c4369516eff",
+"similarity": 0.28645833333333337,
+"set": "mkc",
+"number": "252",
+"oracle_id": "dcb7e046-f01b-497c-88e5-57794eb30ce5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "7cd6955d-13a4-4fc9-a016-d1b3b5f20712",
+"similarity": 0.27083333333333337,
+"set": "pbfz",
+"number": "234s",
+"oracle_id": "dcb7e046-f01b-497c-88e5-57794eb30ce5",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "381",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "87f14fae-281c-4667-a25b-ca764d8e4fbf",
+"similarity": 0.6562,
+"lead": 0.3646
+}
+},
+{
+"name": "hard-040",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3b4e11a7-b48b-4fd8-9395-7a9bc655439a",
+"similarity": 0.6770833333333333,
+"set": "spm",
+"number": "216",
+"oracle_id": "19845456-3d96-48a4-89fa-9b8e583774c9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "14d8c9b5-6863-45d1-89f0-6a4f8189758b",
+"similarity": 0.22395833333333337,
+"set": "fdn",
+"number": "354",
+"oracle_id": "1d60c80d-9a95-4051-bbf7-02ca51ee1be2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "8b4b7b29-b1c1-4413-80d9-3c8585ed8eb4",
+"similarity": 0.22395833333333337,
+"set": "mkm",
+"number": "309",
+"oracle_id": "cbbb5c0c-e953-410d-88c6-8fedb719e94c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "91c0467d-bc7b-4233-8ac1-adb9d88344fb",
+"similarity": 0.22395833333333337,
+"set": "neo",
+"number": "375",
+"oracle_id": "b47b3cfe-7005-4b33-9d41-83b60808e12b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0d6df801-abe1-4c49-84c9-c2737bb4fbf2",
+"similarity": 0.21875,
+"set": "pc2",
+"number": "85",
+"oracle_id": "f9e31993-bfe1-46fb-8a32-418e97f9cfe1",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "2099",
+"set": "spm"
+},
+"expected": {
+"path": "image",
+"printing_id": "3b4e11a7-b48b-4fd8-9395-7a9bc655439a",
+"similarity": 0.6771,
+"lead": 0.4531
+}
+},
+{
+"name": "hard-041",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "2a72c7e7-34f5-4cb0-9959-35516e398e49",
+"similarity": 0.6875,
+"set": "spm",
+"number": "150",
+"oracle_id": "19845456-3d96-48a4-89fa-9b8e583774c9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ca53f8fe-a4f7-43fc-afaf-0cc308842b60",
+"similarity": 0.6822916666666667,
+"set": "pspm",
+"number": "150s",
+"oracle_id": "19845456-3d96-48a4-89fa-9b8e583774c9",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "c1a7e728-ba01-4e3d-b269-9e2dd85a1d1b",
+"similarity": 0.375,
+"set": "neo",
+"number": "92",
+"oracle_id": "c6c1e576-7197-4067-8cd1-aa535188e1b8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e6db1ad2-ed85-4084-976e-da1933f4d008",
+"similarity": 0.36979166666666663,
+"set": "fdc",
+"number": "123",
+"oracle_id": "ee579a32-a048-4335-b966-231ba731cdea",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "985c30bb-ae5f-4cfd-87ab-eff1caad3db4",
+"similarity": 0.36979166666666663,
+"set": "pneo",
+"number": "88p",
+"oracle_id": "5c22447b-7a7f-4a27-8d3b-1bb664ea94c3",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "2099",
+"set": "spm"
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0052
+}
+},
+{
+"name": "hard-042",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f471e9ce-73bb-4090-98f2-f591c7cf4efe",
+"similarity": 0.42708333333333337,
+"set": "msh",
+"number": "118",
+"oracle_id": "e50fecff-8872-42f5-8882-41ad13d9d1ae",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5e64fbfb-9499-4a3c-86d1-c7ec5ad6789e",
+"similarity": 0.375,
+"set": "plst",
+"number": "CHK-140",
+"oracle_id": "079d4698-dc11-4d29-91b6-725d78dfb75d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "db574719-746a-433e-a5be-06d232a01021",
+"similarity": 0.36979166666666663,
+"set": "jmp",
+"number": "280",
+"oracle_id": "60b6bd93-3eb3-4b81-bc4d-1e3351ee2e64",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "92b300a3-e6a8-4ca9-bb26-03f57b5ff6ec",
+"similarity": 0.36979166666666663,
+"set": "chk",
+"number": "140",
+"oracle_id": "079d4698-dc11-4d29-91b6-725d78dfb75d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f7201d43-ae2e-4faa-a508-8555079c3bc7",
+"similarity": 0.36979166666666663,
+"set": "m13",
+"number": "90",
+"oracle_id": "33d405ea-7a9a-4970-b70f-9c05d90dd6f0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "118",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f471e9ce-73bb-4090-98f2-f591c7cf4efe",
+"similarity": 0.4271,
+"lead": 0.0521
+}
+},
+{
+"name": "hard-043",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "5f4f77e5-0019-4a5f-bae6-136121946929",
+"similarity": 0.5989583333333333,
+"set": "msh",
+"number": "79",
+"oracle_id": "939e6f71-185e-41f2-9d54-72cce06f1dce",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "842bbf88-f579-4f98-a08f-17ae60a6784b",
+"similarity": 0.43229166666666663,
+"set": "mic",
+"number": "28",
+"oracle_id": "4f945baa-40a9-4494-b2f9-f1926f3fec84",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "cc79f0f7-0a09-4a74-b2b9-cc1ce608d89f",
+"similarity": 0.421875,
+"set": "woe",
+"number": "106",
+"oracle_id": "f545870d-b628-4acb-88c7-37c2d72a5a85",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "47f8c11f-8171-416a-a4a3-6530ca3ba7a6",
+"similarity": 0.41666666666666663,
+"set": "lcc",
+"number": "255",
+"oracle_id": "4f945baa-40a9-4494-b2f9-f1926f3fec84",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "02962013-fc5a-46be-9021-8fd40ab3027c",
+"similarity": 0.40625,
+"set": "ori",
+"number": "118",
+"oracle_id": "a5ba544f-b223-47c8-a408-b00512772107",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "79",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "5f4f77e5-0019-4a5f-bae6-136121946929",
+"similarity": 0.599,
+"lead": 0.1667
+}
+},
+{
+"name": "hard-044",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "29bffd7c-73be-4185-976b-36a42a4512fe",
+"similarity": 0.625,
+"set": "msh",
+"number": "184",
+"oracle_id": "4bccfa67-0c6f-42a1-b8d4-0842a8230d1e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3b4465b8-0988-4efd-8b33-cc471909a773",
+"similarity": 0.453125,
+"set": "ddu",
+"number": "19",
+"oracle_id": "bdb3ca68-ec1f-4e16-81cc-d23f8f52c728",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "25fb3d07-a128-455a-a632-c1aba4a4ceb8",
+"similarity": 0.44791666666666663,
+"set": "dmr",
+"number": "174",
+"oracle_id": "7bb41690-f8ec-462a-ba29-be453eb86fca",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "198be33b-d6d1-4c96-bdfa-4b4098079042",
+"similarity": 0.44791666666666663,
+"set": "j25",
+"number": "732",
+"oracle_id": "185d6356-8f8d-4b32-8259-b4eb0a95866c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "47f8c11f-8171-416a-a4a3-6530ca3ba7a6",
+"similarity": 0.44270833333333337,
+"set": "lcc",
+"number": "255",
+"oracle_id": "4f945baa-40a9-4494-b2f9-f1926f3fec84",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "184",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "29bffd7c-73be-4185-976b-36a42a4512fe",
+"similarity": 0.625,
+"lead": 0.1719
+}
+},
+{
+"name": "hard-045",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6c6193e8-453b-49dd-ad65-ee6e363bff93",
+"similarity": 0.59375,
+"set": "hob",
+"number": "247",
+"oracle_id": "09f09d0a-6054-4545-b81e-0295773cc5f0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9a0d62ce-8fd3-4465-b3aa-5d5052df30dc",
+"similarity": 0.546875,
+"set": "hob",
+"number": "283",
+"oracle_id": "09f09d0a-6054-4545-b81e-0295773cc5f0",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "f63c72f4-fbce-41c5-a46f-bfe4d1833965",
+"similarity": 0.20833333333333337,
+"set": "arb",
+"number": "131",
+"oracle_id": "76bdc626-f51b-420a-ac5c-5ab33772fabe",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "166fd2e7-8330-447b-889f-8d457d0128aa",
+"similarity": 0.19791666666666663,
+"set": "hop",
+"number": "96",
+"oracle_id": "76bdc626-f51b-420a-ac5c-5ab33772fabe",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b673dfb7-e384-4586-8326-ae6f23edfe78",
+"similarity": 0.1875,
+"set": "soc",
+"number": "325",
+"oracle_id": "9c0f7cdc-9095-40ae-bf83-75a5ffda72b9",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "247",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "6c6193e8-453b-49dd-ad65-ee6e363bff93",
+"similarity": 0.5938,
+"lead": 0.0469
+}
+},
+{
+"name": "hard-046",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c035c625-4de5-4c3b-9d07-aa1df8fc7b78",
+"similarity": 0.765625,
+"set": "msh",
+"number": "246",
+"oracle_id": "60105eb8-bdca-44b9-a970-68a7615526e8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "8be37115-b4aa-437a-9b72-01af0cf0a0cd",
+"similarity": 0.36979166666666663,
+"set": "lcc",
+"number": "258",
+"oracle_id": "6cac6f76-f3c6-4b00-a468-166b07853401",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f7139613-488b-496b-a21d-a577b1426e6f",
+"similarity": 0.35416666666666663,
+"set": "scd",
+"number": "93",
+"oracle_id": "938b4e2c-88d9-4637-bc00-e228920c9a78",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "e3ad4029-6b87-4bf1-a221-1720cd85bea0",
+"similarity": 0.34895833333333337,
+"set": "8ed",
+"number": "130\u2605",
+"oracle_id": "1389ae4a-c3a5-4678-9012-937a3cbaf7f7",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "99f0a14c-17e3-4f0b-8b8e-7cd0268cde74",
+"similarity": 0.34895833333333337,
+"set": "plst",
+"number": "SOI-117",
+"oracle_id": "7be2bc4e-3986-4f4f-bd5b-0a9f59b2f865",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "c035c625-4de5-4c3b-9d07-aa1df8fc7b78",
+"similarity": 0.7656,
+"lead": 0.3958
+}
+},
+{
+"name": "hard-047",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c22bb4d5-6b6f-4c43-b005-48ae4042739d",
+"similarity": 0.7447916666666667,
+"set": "msh",
+"number": "214",
+"oracle_id": "88f34d15-c338-40a7-b56c-c5b650847430",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "adb202e7-f9a4-4785-840d-18aa6aa663b4",
+"similarity": 0.5052083333333333,
+"set": "iko",
+"number": "219",
+"oracle_id": "7351317d-62a1-4894-9811-aa950c49eece",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d0b24567-8fb7-4ec0-b81b-21a141c3861a",
+"similarity": 0.48958333333333337,
+"set": "clu",
+"number": "49",
+"oracle_id": "ff135dc7-31c8-41d6-a5d5-626217844d09",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "4bc803ad-f8a2-4198-a8a6-8d987b3d00fb",
+"similarity": 0.46875,
+"set": "mkm",
+"number": "104",
+"oracle_id": "ccb1b532-92b8-4ebf-b3c2-fb5924b116f5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7335da62-3b59-4c73-a19e-b1733393ed88",
+"similarity": 0.46875,
+"set": "ori",
+"number": "113",
+"oracle_id": "e6b0c47b-9758-4ee3-b831-0af0650660fe",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "214",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "c22bb4d5-6b6f-4c43-b005-48ae4042739d",
+"similarity": 0.7448,
+"lead": 0.2396
+}
+},
+{
+"name": "hard-048",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "bc02e193-df33-4eb1-adc1-b51ee931218a",
+"similarity": 0.42708333333333337,
+"set": "ltr",
+"number": "251",
+"oracle_id": "73dad679-1edb-41c9-9d43-56dc93c3e9fe",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "8d7ff937-de92-445f-976c-726fef5c91cc",
+"similarity": 0.31770833333333337,
+"set": "mom",
+"number": "255",
+"oracle_id": "422a76e1-97a2-4a90-b07d-f487a2d8c236",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "876e5247-9a97-4cc5-a4de-578a4d2c022c",
+"similarity": 0.3125,
+"set": "pneo",
+"number": "276p",
+"oracle_id": "c5ee72d5-3a9e-4fe5-8802-3286ee612055",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "69cac525-c48d-4fc3-8a11-5e992e73d140",
+"similarity": 0.30729166666666663,
+"set": "pmom",
+"number": "255p",
+"oracle_id": "422a76e1-97a2-4a90-b07d-f487a2d8c236",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "64bf0806-0f8d-4b3a-a136-9c5ae72159c3",
+"similarity": 0.30729166666666663,
+"set": "pone",
+"number": "229p",
+"oracle_id": "aebfdcc0-c5b9-4737-8498-764a5021b087",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "251",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "bc02e193-df33-4eb1-adc1-b51ee931218a",
+"similarity": 0.4271,
+"lead": 0.1094
+}
+},
+{
+"name": "hard-049",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "2242b5c3-42ef-4be0-a61f-65c93e56fcab",
+"similarity": 0.6979166666666667,
+"set": "msh",
+"number": "8",
+"oracle_id": "a1a791be-71e6-4c1f-8717-08ca62d40de2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e8181eee-c03b-40db-aea1-24a4b34a4785",
+"similarity": 0.453125,
+"set": "2x2",
+"number": "12",
+"oracle_id": "48e603a2-b965-4fbc-ad57-4388bce5ac8b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "79076264-d71c-4b30-aac9-702a4d229933",
+"similarity": 0.421875,
+"set": "nph",
+"number": "22",
+"oracle_id": "9676da93-1e17-4f6c-b610-a242b78c71ab",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f36f269c-4178-48be-b1f7-fc35fc5082f0",
+"similarity": 0.41666666666666663,
+"set": "plst",
+"number": "MM3-23",
+"oracle_id": "9676da93-1e17-4f6c-b610-a242b78c71ab",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "138f0e49-71d5-4582-92be-797e753f0f42",
+"similarity": 0.41666666666666663,
+"set": "clu",
+"number": "63",
+"oracle_id": "48e603a2-b965-4fbc-ad57-4388bce5ac8b",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "msh"
+},
+"expected": {
+"path": "image",
+"printing_id": "2242b5c3-42ef-4be0-a61f-65c93e56fcab",
+"similarity": 0.6979,
+"lead": 0.2448
+}
+},
+{
+"name": "hard-050",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4a4ca473-3000-4e98-9881-03372c4f79a5",
+"similarity": 0.671875,
+"set": "hob",
+"number": "239",
+"oracle_id": "c01aeaa5-1d3b-4493-9575-30175dcd780d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "42a1986c-9585-4544-b5a7-bee4be5c4506",
+"similarity": 0.6302083333333333,
+"set": "hob",
+"number": "275",
+"oracle_id": "c01aeaa5-1d3b-4493-9575-30175dcd780d",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "b0870c73-bc83-44ac-a194-7455fcacadf0",
+"similarity": 0.27083333333333337,
+"set": "otp",
+"number": "69",
+"oracle_id": "bdccceb6-ad3c-4a75-a8a6-ca796ede4185",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "1a015b68-eb88-4c20-867e-fa61ef046188",
+"similarity": 0.26041666666666663,
+"set": "sld",
+"number": "7071",
+"oracle_id": "a85197ab-dc94-4b72-9716-8dbdbbe90ff8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d885f124-2c0c-4321-9434-19dcdcdb907a",
+"similarity": 0.25,
+"set": "chr",
+"number": "51",
+"oracle_id": "3a620d92-ec92-4733-8c05-7fa1b956bab6",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "239",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "4a4ca473-3000-4e98-9881-03372c4f79a5",
+"similarity": 0.6719,
+"lead": 0.0417
+}
+},
+{
+"name": "hard-051",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6c6193e8-453b-49dd-ad65-ee6e363bff93",
+"similarity": 0.5364583333333333,
+"set": "hob",
+"number": "247",
+"oracle_id": "09f09d0a-6054-4545-b81e-0295773cc5f0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9a0d62ce-8fd3-4465-b3aa-5d5052df30dc",
+"similarity": 0.5052083333333333,
+"set": "hob",
+"number": "283",
+"oracle_id": "09f09d0a-6054-4545-b81e-0295773cc5f0",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "0de4181f-652e-4eab-8de0-57a346c51994",
+"similarity": 0.21875,
+"set": "moc",
+"number": "279",
+"oracle_id": "f797a325-ec2a-4142-b0ff-90cac1356da9",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "503256f8-3aab-49d0-b78b-6502aa29ce52",
+"similarity": 0.19791666666666663,
+"set": "leg",
+"number": "253",
+"oracle_id": "fef452ee-9018-4175-bb79-476544e48433",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "23d64aa6-b677-4292-9e24-7b239f0e5065",
+"similarity": 0.19270833333333337,
+"set": "pd3",
+"number": "26",
+"oracle_id": "9809d975-7ef8-4946-9041-607c4e954b13",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "247",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "6c6193e8-453b-49dd-ad65-ee6e363bff93",
+"similarity": 0.5365,
+"lead": 0.0312
+}
+},
+{
+"name": "hard-052",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3b4e11a7-b48b-4fd8-9395-7a9bc655439a",
+"similarity": 0.6510416666666667,
+"set": "spm",
+"number": "216",
+"oracle_id": "19845456-3d96-48a4-89fa-9b8e583774c9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5ae24220-cf0e-47d8-8dc5-1be4c366361d",
+"similarity": 0.22395833333333337,
+"set": "dbl",
+"number": "530",
+"oracle_id": "a75445d3-1303-4bb5-89ad-26ea93fecd48",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2a428d58-b376-489e-8224-17a41ef6e81b",
+"similarity": 0.21875,
+"set": "blb",
+"number": "284",
+"oracle_id": "31b5d0ad-3a4d-4f43-b0a9-c9f7a362680f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0267e1fe-23aa-4181-acf9-be1ebc8d2a8c",
+"similarity": 0.21354166666666663,
+"set": "dbl",
+"number": "331",
+"oracle_id": "5f1386d5-b802-46b2-9803-275621ebda80",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ce5f3b5c-feb8-4304-852f-01c467d6517c",
+"similarity": 0.20833333333333337,
+"set": "cn2",
+"number": "4",
+"oracle_id": "88e936c3-cab9-430f-baa1-930ff557cbf6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "2099",
+"set": "spm"
+},
+"expected": {
+"path": "image",
+"printing_id": "3b4e11a7-b48b-4fd8-9395-7a9bc655439a",
+"similarity": 0.651,
+"lead": 0.4271
+}
+},
+{
+"name": "hard-053",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a194f930-c99f-4915-8a62-e20ab2b4ad1f",
+"similarity": 0.8229166666666666,
+"set": "spm",
+"number": "26",
+"oracle_id": "87972de1-c1d7-408e-8d56-995590f639b8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "891718e9-bef3-470a-80c5-514f7f43abe8",
+"similarity": 0.42708333333333337,
+"set": "ori",
+"number": "97",
+"oracle_id": "cdb68656-633d-436e-ad56-0fdb4814bd19",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "56a95546-c45a-4da5-b1e8-d5658b5b7d53",
+"similarity": 0.41145833333333337,
+"set": "m21",
+"number": "98",
+"oracle_id": "cdb68656-633d-436e-ad56-0fdb4814bd19",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3140d5af-41e9-4009-9412-294ab71856ac",
+"similarity": 0.40625,
+"set": "voc",
+"number": "123",
+"oracle_id": "a85197ab-dc94-4b72-9716-8dbdbbe90ff8",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "40fcf59a-9a48-45da-90ba-7e9a46ef9bac",
+"similarity": 0.40625,
+"set": "plst",
+"number": "EVG-1",
+"oracle_id": "e75b2a97-b28d-43fe-8b1e-ba87a09f339c",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": ""
+},
+"expected": {
+"path": "image",
+"printing_id": "a194f930-c99f-4915-8a62-e20ab2b4ad1f",
+"similarity": 0.8229,
+"lead": 0.3958
+}
+},
+{
+"name": "hard-054",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "8acfaac6-5a63-4fd6-999b-562e989e2ce1",
+"similarity": 0.7291666666666667,
+"set": "hob",
+"number": "240",
+"oracle_id": "3b38f314-d997-4c2a-b4c9-40dbe780993d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b0f29cce-324d-4229-8e29-692594b2e3c7",
+"similarity": 0.640625,
+"set": "hob",
+"number": "276",
+"oracle_id": "3b38f314-d997-4c2a-b4c9-40dbe780993d",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "b6c7a658-c5be-473f-a7df-ff39243318a4",
+"similarity": 0.203125,
+"set": "pfrf",
+"number": "138",
+"oracle_id": "d1d171de-1c6d-4fb9-817a-9c689c709f3d",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e450f3e6-a3ee-4e50-b939-c1e678f77c2b",
+"similarity": 0.1875,
+"set": "clu",
+"number": "9",
+"oracle_id": "ed2ef95e-8851-4226-9c63-4c19ea323b82",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "ac906fdc-a871-4bf8-8b23-6baed64926c6",
+"similarity": 0.18229166666666663,
+"set": "c19",
+"number": "180",
+"oracle_id": "d1d171de-1c6d-4fb9-817a-9c689c709f3d",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "240",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "8acfaac6-5a63-4fd6-999b-562e989e2ce1",
+"similarity": 0.7292,
+"lead": 0.0885
+}
+},
+{
+"name": "hard-055",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "d8f91212-2ff5-4024-8f14-86bb5c4a9754",
+"similarity": 0.6145833333333333,
+"set": "msh",
+"number": "123",
+"oracle_id": "0a364879-31bd-4760-833d-165cde1e96c6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "868bb9fc-6b55-471c-9963-055ed2221526",
+"similarity": 0.36979166666666663,
+"set": "ddu",
+"number": "2",
+"oracle_id": "30d0d75f-e94c-460b-b957-9f1d655c0f65",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "3139cce8-3467-4c50-add2-5b78fb33b90a",
+"similarity": 0.36458333333333337,
+"set": "mh2",
+"number": "355",
+"oracle_id": "c8de43a3-ebd3-4000-b343-a6ffed11d34d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "01c00d7b-7fac-4f8c-a1ea-de2cf4d06627",
+"similarity": 0.36458333333333337,
+"set": "fdn",
+"number": "217",
+"oracle_id": "30d0d75f-e94c-460b-b957-9f1d655c0f65",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "91c143a9-c642-425a-a469-a9d158e43c21",
+"similarity": 0.36458333333333337,
+"set": "ori",
+"number": "172",
+"oracle_id": "30d0d75f-e94c-460b-b957-9f1d655c0f65",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "123",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "d8f91212-2ff5-4024-8f14-86bb5c4a9754",
+"similarity": 0.6146,
+"lead": 0.2448
+}
+},
+{
+"name": "hard-056",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "5df07a06-e585-412d-a6db-cb5a78a68b6e",
+"similarity": 0.24479166666666663,
+"set": "mar",
+"number": "12",
+"oracle_id": "cd11c27b-9368-4622-bc5a-2e0b993cc42b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "92e78cec-aaf9-4fe8-887b-b7e356d63315",
+"similarity": 0.24479166666666663,
+"set": "scg",
+"number": "103",
+"oracle_id": "ddc7f59a-bbb1-4ba1-82c8-6813fd191940",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "470618f6-f67f-44c6-a086-285632508915",
+"similarity": 0.21354166666666663,
+"set": "tnph",
+"number": "5",
+"oracle_id": "60acebe2-e1e5-478a-ab88-6a9c1409bca5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "7340b21f-726d-47e8-a2bf-1cde21be70f4",
+"similarity": 0.20833333333333337,
+"set": "ddt",
+"number": "24",
+"oracle_id": "f2d1e991-e13a-43c7-85aa-d53dd14822e6",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f52c2f83-9535-4ee5-9964-5cc01e617981",
+"similarity": 0.203125,
+"set": "sth",
+"number": "89",
+"oracle_id": "db9c0d94-9fa5-4f07-be48-23e19d2f3d68",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "12",
+"set": "mar"
+},
+"expected": {
+"path": "strong",
+"printing_id": "5df07a06-e585-412d-a6db-cb5a78a68b6e",
+"similarity": 0.2448,
+"lead": 0.0
+}
+},
+{
+"name": "hard-057",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "eaf2251a-ffaf-4055-9474-7e3d08d89609",
+"similarity": 0.5364583333333333,
+"set": "msh",
+"number": "88",
+"oracle_id": "c91e64d4-e687-4ccd-a56e-796cff6e052c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0eb58292-72f2-4344-b5ec-db6c8999cb01",
+"similarity": 0.5104166666666667,
+"set": "msh",
+"number": "446",
+"oracle_id": "c91e64d4-e687-4ccd-a56e-796cff6e052c",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "80b6e52b-4a78-4cc4-a8f6-4a006c2cbc9b",
+"similarity": 0.390625,
+"set": "prm",
+"number": "72271",
+"oracle_id": "1bd5e51f-f9a5-4eb7-bda2-957310602c20",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0141b48a-89bb-40fb-b7f0-99a5bb8070a5",
+"similarity": 0.359375,
+"set": "omb",
+"number": "18",
+"oracle_id": "94f0a572-e91c-4b56-a5d1-6cbbeabd210d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "347060c0-fef7-45da-b42e-8e11051b2c69",
+"similarity": 0.359375,
+"set": "dom",
+"number": "104",
+"oracle_id": "60b6bd93-3eb3-4b81-bc4d-1e3351ee2e64",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "88",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "eaf2251a-ffaf-4055-9474-7e3d08d89609",
+"similarity": 0.5365,
+"lead": 0.026
+}
+},
+{
+"name": "hard-058",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.6458333333333333,
+"set": "sld",
+"number": "IFIYW-5",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d75bfbe3-41a0-44e1-86ce-f56c9bcf57d7",
+"similarity": 0.5104166666666667,
+"set": "sld",
+"number": "IFIYW-10",
+"oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "e0d6cea1-83d1-4045-b4da-40560af86df9",
+"similarity": 0.30729166666666663,
+"set": "m20",
+"number": "22",
+"oracle_id": "6ff4ff67-ad08-447f-a112-1a071c1474a4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "32341fcd-b29b-434c-b004-3430e307a45b",
+"similarity": 0.30208333333333337,
+"set": "mkc",
+"number": "90",
+"oracle_id": "5f601f48-d24b-4883-9fde-b3f620e7c9ea",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "bea1e2c4-1671-4322-b8ba-e4e1a879cf37",
+"similarity": 0.30208333333333337,
+"set": "shm",
+"number": "15",
+"oracle_id": "e4ecd56c-216d-4c3a-9dfa-09ae1be03e4f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "scd"
+},
+"expected": {
+"path": "image",
+"printing_id": "3dd5ea51-68f7-4c12-a96b-8caca0d54640",
+"similarity": 0.6458,
+"lead": 0.1354
+}
+},
+{
+"name": "hard-059",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dec3dd36-b8ca-432b-8973-d37c6efc4c1a",
+"similarity": 0.5052083333333333,
+"set": "msh",
+"number": "31",
+"oracle_id": "0bbceb51-1fb8-44d7-8afc-b4746d292262",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f6f2c2f6-d07f-42af-9944-70d3dac8348c",
+"similarity": 0.38020833333333337,
+"set": "m15",
+"number": "100",
+"oracle_id": "a6899b94-427d-4851-a474-4087e0a0918a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c9618200-f4ea-4572-9f17-9db8b785982e",
+"similarity": 0.375,
+"set": "c21",
+"number": "215",
+"oracle_id": "a9ff368b-5208-4ada-bb99-eccbf8eaea28",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "cfc3b75a-5494-4a40-b261-127dbc8586fe",
+"similarity": 0.36979166666666663,
+"set": "pmh2",
+"number": "92s",
+"oracle_id": "e48951ed-1c32-449a-898e-e5b1c0d0ee73",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "abfd4afb-d5d0-42d2-8500-4c02d6639cbf",
+"similarity": 0.36458333333333337,
+"set": "gk2",
+"number": "39",
+"oracle_id": "a9ff368b-5208-4ada-bb99-eccbf8eaea28",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "",
+"set": "msh"
+},
+"expected": {
+"path": "image",
+"printing_id": "dec3dd36-b8ca-432b-8973-d37c6efc4c1a",
+"similarity": 0.5052,
+"lead": 0.125
+}
+},
+{
+"name": "easy-000",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c2e446e1-e384-4d5f-8099-544f78c08510",
+"similarity": 0.71875,
+"set": "msh",
+"number": "100",
+"oracle_id": "27692079-a517-4d38-b452-7409980b5912",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "940b3aa3-0f57-4b44-8ccb-60229c8cc72d",
+"similarity": 0.453125,
+"set": "pfdn",
+"number": "58p",
+"oracle_id": "fd505c02-c59e-476d-8e88-35da862ddc23",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "59fbc345-fa8c-459b-97af-66baede950da",
+"similarity": 0.44791666666666663,
+"set": "plst",
+"number": "KTK-84",
+"oracle_id": "e753f50d-64ed-4822-a301-57659ee378b6",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c1fb5a98-94f4-419f-850b-e3a01f17080f",
+"similarity": 0.44791666666666663,
+"set": "m15",
+"number": "181",
+"oracle_id": "9c4c478c-6f0c-430a-91eb-4125a73d03a7",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ae62a43e-36ce-471e-93f1-21fe674858b5",
+"similarity": 0.44270833333333337,
+"set": "ktk",
+"number": "84",
+"oracle_id": "e753f50d-64ed-4822-a301-57659ee378b6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "100",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "c2e446e1-e384-4d5f-8099-544f78c08510",
+"similarity": 0.7188,
+"lead": 0.2656
+}
+},
+{
+"name": "easy-001",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3efeaa30-9db9-4e68-a658-9064d6e67516",
+"similarity": 0.41666666666666663,
+"set": "ltr",
+"number": "281",
+"oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e7059825-0844-4271-89e8-645e2f515b59",
+"similarity": 0.40104166666666663,
+"set": "ltr",
+"number": "722",
+"oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "662d812f-4936-48e4-acbe-abccf9ab21c7",
+"similarity": 0.26041666666666663,
+"set": "m15",
+"number": "27",
+"oracle_id": "c7ecb785-2bfc-4953-b356-db7c27406dbb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c1d7203b-55ed-4d08-ac2e-2c4b4b93c274",
+"similarity": 0.25,
+"set": "cmm",
+"number": "40",
+"oracle_id": "6cf8191c-acca-4145-86c2-53a138b3fe4a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "89c8456e-c971-42b7-abf3-ff5ae1320abe",
+"similarity": 0.22916666666666663,
+"set": "blb",
+"number": "200",
+"oracle_id": "d7dfb4d5-8510-4904-abb7-834ec65d9bf3",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "722",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "e7059825-0844-4271-89e8-645e2f515b59",
+"similarity": 0.401,
+"lead": 0.0156
+}
+},
+{
+"name": "easy-002",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "9ee905d6-b647-4eb1-a8d9-89add9bafc31",
+"similarity": 0.78125,
+"set": "spm",
+"number": "81",
+"oracle_id": "de861715-fd0b-493e-9a7c-c470a23044c0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b6e3fe01-5e75-4cde-b9df-d7cb707e4995",
+"similarity": 0.7552083333333334,
+"set": "pspm",
+"number": "81s",
+"oracle_id": "de861715-fd0b-493e-9a7c-c470a23044c0",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "c81a2ecf-837c-44a9-81d4-476763f89107",
+"similarity": 0.6041666666666667,
+"set": "spm",
+"number": "261",
+"oracle_id": "de861715-fd0b-493e-9a7c-c470a23044c0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "edffbf80-09f7-4e65-b2fe-494473224c20",
+"similarity": 0.36979166666666663,
+"set": "plst",
+"number": "BFZ-195",
+"oracle_id": "8b89c6f1-8c9e-43ef-ad6b-11424de090e4",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c9da02a1-7b39-4a0e-8466-6512a02f3e3b",
+"similarity": 0.36979166666666663,
+"set": "iko",
+"number": "101",
+"oracle_id": "36cfdbd6-f971-4ee5-aa1b-fa3ddad5b4b1",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "81",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "9ee905d6-b647-4eb1-a8d9-89add9bafc31",
+"similarity": 0.7812,
+"lead": 0.026
+}
+},
+{
+"name": "easy-003",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "0ce44270-a684-4489-9077-521456e6dfaa",
+"similarity": 0.47395833333333337,
+"set": "ltr",
+"number": "60",
+"oracle_id": "66f28905-c7fc-4ada-8fa0-199626d9bedb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "209204c7-aae5-4768-91b8-89c8c4d4a97f",
+"similarity": 0.4375,
+"set": "hoc",
+"number": "179",
+"oracle_id": "66f28905-c7fc-4ada-8fa0-199626d9bedb",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "230b5899-460d-4506-b22d-9bb879e4437f",
+"similarity": 0.31770833333333337,
+"set": "pblb",
+"number": "61p",
+"oracle_id": "b9df2cdf-397c-458d-89cf-911568737ffa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ade32396-8841-4ba4-8852-d11146607f21",
+"similarity": 0.296875,
+"set": "blb",
+"number": "61",
+"oracle_id": "b9df2cdf-397c-458d-89cf-911568737ffa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c12fc244-ca30-4da6-8350-340975a79708",
+"similarity": 0.28125,
+"set": "pip",
+"number": "760",
+"oracle_id": "a02e1ca7-23c5-41e3-a744-72fc9e9dd8ba",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "60",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "0ce44270-a684-4489-9077-521456e6dfaa",
+"similarity": 0.474,
+"lead": 0.0365
+}
+},
+{
+"name": "easy-004",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "99223677-b8a5-48f1-8009-e8475eada7db",
+"similarity": 0.8229166666666666,
+"set": "spm",
+"number": "148",
+"oracle_id": "8281f2b9-e81b-48da-812a-8713b2adf8ab",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "1c0ebffc-7350-4f04-b13c-20c41563e57e",
+"similarity": 0.515625,
+"set": "plst",
+"number": "MM2-114",
+"oracle_id": "396564be-3747-49dd-98dc-afb81a375f18",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "8f8db60d-3adf-45e1-b4d0-3b5e24f5e01d",
+"similarity": 0.5052083333333333,
+"set": "mh2",
+"number": "168",
+"oracle_id": "bbfee53c-30a6-4ed0-beef-5c254be75fc5",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e6c043b7-1eec-4d11-986c-8fb3823fc3b1",
+"similarity": 0.5,
+"set": "mm2",
+"number": "114",
+"oracle_id": "396564be-3747-49dd-98dc-afb81a375f18",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4f03b00a-f6d0-419a-abfd-fa8bc63226db",
+"similarity": 0.47395833333333337,
+"set": "bfz",
+"number": "116",
+"oracle_id": "12eeabe1-a02c-42a3-aa87-6774c4de7093",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "148",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "99223677-b8a5-48f1-8009-e8475eada7db",
+"similarity": 0.8229,
+"lead": 0.3073
+}
+},
+{
+"name": "easy-005",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "5684483b-9a6a-499b-a5e1-e2815ee03cdb",
+"similarity": 0.75,
+"set": "ltr",
+"number": "21",
+"oracle_id": "467c9fe6-d1d3-4242-bc0c-e522b4f21d56",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "808029df-e1db-4fe0-b1ed-a75f8d496aa7",
+"similarity": 0.6302083333333333,
+"set": "hoc",
+"number": "169",
+"oracle_id": "467c9fe6-d1d3-4242-bc0c-e522b4f21d56",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "e9271f6e-ba11-45a7-bdc6-2088585749ab",
+"similarity": 0.46875,
+"set": "ltr",
+"number": "472",
+"oracle_id": "467c9fe6-d1d3-4242-bc0c-e522b4f21d56",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "62d2ee20-abbc-4a9d-8d30-4223242123e8",
+"similarity": 0.40625,
+"set": "ltr",
+"number": "62",
+"oracle_id": "ef9a5bd1-6ce2-4570-9d42-89d997e2fc6f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "967fb583-48cd-453b-be52-b0249f22ea69",
+"similarity": 0.36979166666666663,
+"set": "plst",
+"number": "M19-186",
+"oracle_id": "befb211f-37ca-4083-98d4-9ff1f28be3f2",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "21",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "5684483b-9a6a-499b-a5e1-e2815ee03cdb",
+"similarity": 0.75,
+"lead": 0.1198
+}
+},
+{
+"name": "easy-006",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dec3dd36-b8ca-432b-8973-d37c6efc4c1a",
+"similarity": 0.6614583333333333,
+"set": "msh",
+"number": "31",
+"oracle_id": "0bbceb51-1fb8-44d7-8afc-b4746d292262",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "43711fbd-88e5-4300-a9d5-67010e7121c0",
+"similarity": 0.40104166666666663,
+"set": "klr",
+"number": "289",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "6f26faca-f338-4ce5-a218-6a61d40fc50a",
+"similarity": 0.40104166666666663,
+"set": "vma",
+"number": "142",
+"oracle_id": "78db3190-59bc-4033-95bc-32d8ed872b6a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e9595a2d-a3ff-4757-be02-23a317fcf1a1",
+"similarity": 0.39583333333333337,
+"set": "ovnt",
+"number": "2022A",
+"oracle_id": "54022a10-c9f0-458d-a0ed-228843cd9a40",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "31a4fdc1-f69e-4306-bb0c-08d72fc3cf48",
+"similarity": 0.390625,
+"set": "sis",
+"number": "38",
+"oracle_id": "d12e374d-ed09-4d5e-bb7a-6c7d9ea80a1e",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "31",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "dec3dd36-b8ca-432b-8973-d37c6efc4c1a",
+"similarity": 0.6615,
+"lead": 0.2604
+}
+},
+{
+"name": "easy-007",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "49e36cac-3999-40b3-91b3-85af4fded679",
+"similarity": 0.7864583333333334,
+"set": "msh",
+"number": "93",
+"oracle_id": "e98cd00c-b812-4c6a-81d4-e3f94b64fc58",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5eed1907-03ba-46c2-a4ef-4429bd2237bf",
+"similarity": 0.421875,
+"set": "pvow",
+"number": "100s",
+"oracle_id": "85e9a43e-5676-4d12-ac27-e8cf57307d5e",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "7e73cd46-0dec-441b-bb91-ec6defb3355e",
+"similarity": 0.40625,
+"set": "con",
+"number": "130",
+"oracle_id": "01d70534-7c26-4a54-9eca-d0ebbefc2159",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "61b52152-0f7c-4466-9e49-033477028f67",
+"similarity": 0.40625,
+"set": "grn",
+"number": "83",
+"oracle_id": "45d5cd4c-7285-4507-8cbf-eace7a734f41",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cfa6c57f-a193-48cc-9764-d8348548a111",
+"similarity": 0.40104166666666663,
+"set": "eoe",
+"number": "103",
+"oracle_id": "15c6837c-775b-4b4a-a2f7-9fd79215fa05",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "93",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "49e36cac-3999-40b3-91b3-85af4fded679",
+"similarity": 0.7865,
+"lead": 0.3646
+}
+},
+{
+"name": "easy-008",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f7725dc2-2654-4ffb-b6b3-510ae64ec6af",
+"similarity": 0.5572916666666667,
+"set": "ltr",
+"number": "55",
+"oracle_id": "100d1c9e-15aa-4bab-9fb3-76c2cd6abc2f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d24b248c-d34b-4b1c-be30-f28f80d0ebfd",
+"similarity": 0.4375,
+"set": "ltr",
+"number": "506",
+"oracle_id": "100d1c9e-15aa-4bab-9fb3-76c2cd6abc2f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cc719eb5-1867-4c5f-a5ce-e97ffa15ac61",
+"similarity": 0.375,
+"set": "gvl",
+"number": "57",
+"oracle_id": "a88a1c53-7de3-423a-a95a-24ed5666ab96",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "433d0737-bb61-4aa0-98e8-1bd2d86f03fd",
+"similarity": 0.36458333333333337,
+"set": "dvd",
+"number": "55",
+"oracle_id": "a88a1c53-7de3-423a-a95a-24ed5666ab96",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c175c998-7b80-4187-bdbc-5b6e0d7eac91",
+"similarity": 0.359375,
+"set": "dsk",
+"number": "184",
+"oracle_id": "bef3f0a9-4d5c-4469-81df-adbeedeed768",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "55",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f7725dc2-2654-4ffb-b6b3-510ae64ec6af",
+"similarity": 0.5573,
+"lead": 0.1198
+}
+},
+{
+"name": "easy-009",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "be6400e8-7f99-4005-9a92-ffbc359d3871",
+"similarity": 0.46354166666666663,
+"set": "ltr",
+"number": "70",
+"oracle_id": "35a17b42-9d3f-49ef-8218-2780c5ef5f08",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a034d73b-a511-4c02-946f-ea520f93a2a4",
+"similarity": 0.34895833333333337,
+"set": "ltc",
+"number": "204",
+"oracle_id": "c3c45d50-9038-41df-bb2f-9bc40071845b",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b60c97a2-52db-4e4b-a075-0120a3ebca75",
+"similarity": 0.33854166666666663,
+"set": "mm3",
+"number": "213",
+"oracle_id": "3ec1b309-8c26-4dc4-b4c3-f97c2c3f8a68",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cbe262f2-e35b-4c85-938d-3e9e9c764c1b",
+"similarity": 0.33854166666666663,
+"set": "m20",
+"number": "176",
+"oracle_id": "2701b912-b672-4764-97f7-51c444f754f2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "dad31171-ad46-4654-91f0-8027e00dedfc",
+"similarity": 0.33333333333333337,
+"set": "mm3",
+"number": "8",
+"oracle_id": "76cef1af-ff7e-4eab-9be6-81ba6049d222",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "70",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "be6400e8-7f99-4005-9a92-ffbc359d3871",
+"similarity": 0.4635,
+"lead": 0.1146
+}
+},
+{
+"name": "easy-010",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a5abbfdb-0460-4f78-be7f-d3e8a4b3afb5",
+"similarity": 0.5625,
+"set": "mar",
+"number": "45",
+"oracle_id": "7e7ec3d6-a84f-4cc3-93f4-4d181d41e126",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ee6a541f-a72e-4aa5-bced-430e5158ca85",
+"similarity": 0.22916666666666663,
+"set": "spg",
+"number": "74",
+"oracle_id": "377d31b5-0a48-4d5b-91bd-b5a62d4f7899",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5be62041-fec2-44e0-aec9-5368d1c7f1da",
+"similarity": 0.21354166666666663,
+"set": "tsr",
+"number": "323",
+"oracle_id": "38f3b157-0df4-409b-89cc-086e1531cd5b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "da7ed8ba-3886-4779-a9b3-6892a7ed3527",
+"similarity": 0.203125,
+"set": "atq",
+"number": "7",
+"oracle_id": "c7076e2c-81f1-44ad-a4dd-45a01802d364",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "11a94c04-b6d3-4118-b252-5146eedae4e8",
+"similarity": 0.19791666666666663,
+"set": "blb",
+"number": "265",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "45",
+"set": "mar"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a5abbfdb-0460-4f78-be7f-d3e8a4b3afb5",
+"similarity": 0.5625,
+"lead": 0.3333
+}
+},
+{
+"name": "easy-011",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dd698f10-b0fc-42fc-84ec-f5a0d96bfa1d",
+"similarity": 0.7708333333333334,
+"set": "ltr",
+"number": "255",
+"oracle_id": "a1a9695e-073b-4a65-b3ec-2cfddc23202a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "969df973-e45a-485f-91d5-a25b3dc0e69c",
+"similarity": 0.46875,
+"set": "pltr",
+"number": "256s",
+"oracle_id": "7b0d7e62-0287-454a-8702-b0bfa7b41245",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "b38b6760-616f-4b11-8ce7-ac1223c7fd53",
+"similarity": 0.46875,
+"set": "ltr",
+"number": "256",
+"oracle_id": "7b0d7e62-0287-454a-8702-b0bfa7b41245",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "25932483-58cd-4ae5-82bf-ab455177d117",
+"similarity": 0.42708333333333337,
+"set": "ltr",
+"number": "261",
+"oracle_id": "619173f4-0403-49cd-9659-2fedd5028a90",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c253ee40-41c9-4cb5-a1a3-94b0aaed09d4",
+"similarity": 0.42708333333333337,
+"set": "ltr",
+"number": "63",
+"oracle_id": "1b8de1c5-1e23-4c84-bc5a-a14853ad8c7a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "255",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "dd698f10-b0fc-42fc-84ec-f5a0d96bfa1d",
+"similarity": 0.7708,
+"lead": 0.3021
+}
+},
+{
+"name": "easy-012",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f9b9f9d6-b50c-4b29-80be-284ba773c70b",
+"similarity": 0.7291666666666667,
+"set": "msh",
+"number": "33",
+"oracle_id": "60754d4b-2add-4928-8d30-8ce9c0f54f91",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "405c096c-a94b-4817-8c7f-f0551f6513e3",
+"similarity": 0.47395833333333337,
+"set": "jmp",
+"number": "256",
+"oracle_id": "b5b049d4-242a-48ec-85d1-1ef66c8cfa4c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "048cd940-1295-4a6c-b3d3-fc61e0c4680a",
+"similarity": 0.453125,
+"set": "j25",
+"number": "135",
+"oracle_id": "a297f9a2-3461-4138-8a3e-75027cbdbe12",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "572dc342-bfa3-413d-847d-571ee4b9b461",
+"similarity": 0.44270833333333337,
+"set": "pz1",
+"number": "73",
+"oracle_id": "3b6cbd2a-02ba-4afb-a081-0f25d830a8ee",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c50a8053-7e79-4e0f-8e72-8df089377cd1",
+"similarity": 0.4375,
+"set": "c21",
+"number": "154",
+"oracle_id": "67d55b4f-944e-4376-93ed-1a240bca1eae",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "33",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f9b9f9d6-b50c-4b29-80be-284ba773c70b",
+"similarity": 0.7292,
+"lead": 0.2552
+}
+},
+{
+"name": "easy-013",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "ec674497-2793-48f1-b7fd-6bbde96bda10",
+"similarity": 0.7552083333333334,
+"set": "ltr",
+"number": "779",
+"oracle_id": "d82c77a1-2b81-415d-9f18-47e059c15e01",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "25e2fd90-95b0-4b12-846c-80bb979f0724",
+"similarity": 0.7395833333333333,
+"set": "ltr",
+"number": "368",
+"oracle_id": "d82c77a1-2b81-415d-9f18-47e059c15e01",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "8ebd8813-4aaf-48bf-9243-3ec4099b8372",
+"similarity": 0.6302083333333333,
+"set": "ltr",
+"number": "199",
+"oracle_id": "d82c77a1-2b81-415d-9f18-47e059c15e01",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6d589d54-2efd-4d1c-9b74-b3bb41f70b99",
+"similarity": 0.625,
+"set": "pltr",
+"number": "199s",
+"oracle_id": "d82c77a1-2b81-415d-9f18-47e059c15e01",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "0261b9b1-c6a9-4dcb-af87-8e948e686e23",
+"similarity": 0.44270833333333337,
+"set": "plst",
+"number": "MKM-170",
+"oracle_id": "9af4a832-d634-47aa-91ed-79d44fe08864",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "368",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "25e2fd90-95b0-4b12-846c-80bb979f0724",
+"similarity": 0.7396,
+"lead": 0.0156
+}
+},
+{
+"name": "easy-014",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "354b4623-50a0-41f1-ad1e-7dd6ac3852df",
+"similarity": 0.48958333333333337,
+"set": "ltr",
+"number": "124",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "21a6028c-4372-4fb7-bbc0-fdd1139807de",
+"similarity": 0.46354166666666663,
+"set": "pltr",
+"number": "124s",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "4dcfd032-ab7f-48e1-a02a-7611aa7354e1",
+"similarity": 0.421875,
+"set": "ltr",
+"number": "770",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "726fdf85-ae3c-409d-a515-0051e25c116c",
+"similarity": 0.41145833333333337,
+"set": "ltr",
+"number": "359",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "2f5ea15b-d5aa-431a-a801-8b55a64a2ff8",
+"similarity": 0.34375,
+"set": "ltr",
+"number": "575",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "124",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "354b4623-50a0-41f1-ad1e-7dd6ac3852df",
+"similarity": 0.4896,
+"lead": 0.026
+}
+},
+{
+"name": "easy-015",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4b12dc1f-2218-4c71-aafa-ea6a26eeb0aa",
+"similarity": 0.6458333333333333,
+"set": "msh",
+"number": "40",
+"oracle_id": "282d6e61-3240-4f1e-9c2d-8ddb59b03af4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "02cb1755-1ba9-49ad-a8fc-6d008c27cd43",
+"similarity": 0.35416666666666663,
+"set": "plst",
+"number": "MM2-166",
+"oracle_id": "fe3c524e-10b7-485a-9285-973092eeb214",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "cecdb092-7af2-4c53-be47-f6573fcb2f7d",
+"similarity": 0.34895833333333337,
+"set": "peoe",
+"number": "201p",
+"oracle_id": "50d6fd91-23d3-4d32-804f-6233e4386904",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "08be60eb-15ec-4112-919c-995062a9ed54",
+"similarity": 0.34895833333333337,
+"set": "mh1",
+"number": "99",
+"oracle_id": "bf44b9b7-180c-4d8c-a410-9561e4c8fb9b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fed54d00-b11f-4529-864c-63a114617b36",
+"similarity": 0.34895833333333337,
+"set": "stx",
+"number": "255",
+"oracle_id": "16e48b95-f030-400c-a2b7-c3f3111cc165",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "40",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "4b12dc1f-2218-4c71-aafa-ea6a26eeb0aa",
+"similarity": 0.6458,
+"lead": 0.2917
+}
+},
+{
+"name": "easy-016",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "2daf449a-5f3e-44fd-968e-55d8517ae797",
+"similarity": 0.78125,
+"set": "ltr",
+"number": "156",
+"oracle_id": "64fa0416-16b7-4128-ac6c-f30373074a1e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c88e946a-03dc-4730-8f74-e41dfaf28177",
+"similarity": 0.75,
+"set": "hoc",
+"number": "203",
+"oracle_id": "64fa0416-16b7-4128-ac6c-f30373074a1e",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "5d348ed2-8538-400b-983f-78d0d20b9a5c",
+"similarity": 0.65625,
+"set": "ltr",
+"number": "607",
+"oracle_id": "64fa0416-16b7-4128-ac6c-f30373074a1e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0991db5d-2aba-467f-9044-c11e024d5d43",
+"similarity": 0.43229166666666663,
+"set": "m3c",
+"number": "104",
+"oracle_id": "335a6c6a-030f-45d4-806c-467a22962eed",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "9f4e8d4c-79f8-4313-bdb4-2062d8f5299b",
+"similarity": 0.43229166666666663,
+"set": "c21",
+"number": "131",
+"oracle_id": "ea1eb902-a23c-44ff-9169-19baf71de238",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "156",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "2daf449a-5f3e-44fd-968e-55d8517ae797",
+"similarity": 0.7812,
+"lead": 0.0312
+}
+},
+{
+"name": "easy-017",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a27aee6d-1fc3-4307-bb16-b964d723fe2f",
+"similarity": 0.78125,
+"set": "msh",
+"number": "192",
+"oracle_id": "f44bde8b-43e9-4719-ac60-b8f0cee8df9b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5e50f209-634b-48d8-972b-c32f8e655f88",
+"similarity": 0.44270833333333337,
+"set": "pfdn",
+"number": "180s",
+"oracle_id": "ee579a32-a048-4335-b966-231ba731cdea",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "cc0c2bab-4392-4e7b-9d14-2901f4ffbae8",
+"similarity": 0.42708333333333337,
+"set": "soc",
+"number": "207",
+"oracle_id": "c0d8fef4-65f4-4769-982d-b397d2b7e977",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "8aec1f69-dae8-47a0-940f-643a4988d30b",
+"similarity": 0.42708333333333337,
+"set": "plst",
+"number": "NEC-121",
+"oracle_id": "de1cfa83-2049-48ab-b093-2f120a3ef4f2",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "166775be-c3b7-4a17-9376-aa4229b147f9",
+"similarity": 0.42708333333333337,
+"set": "neo",
+"number": "113",
+"oracle_id": "060d109f-2969-4f9e-a723-535d662a571a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "192",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a27aee6d-1fc3-4307-bb16-b964d723fe2f",
+"similarity": 0.7812,
+"lead": 0.3385
+}
+},
+{
+"name": "easy-018",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "cec575f6-43c9-41c6-a996-bb806bf82185",
+"similarity": 0.6927083333333333,
+"set": "spm",
+"number": "103",
+"oracle_id": "d6eabbff-cc0c-4000-8feb-4826e1b6bc66",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6516c7c6-d49b-49c5-8968-563622c2c8c1",
+"similarity": 0.41666666666666663,
+"set": "avr",
+"number": "183",
+"oracle_id": "0f719e56-5203-4138-bbe9-6a37b8ac2512",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "21af9e72-fbaf-460a-a2eb-a09b925ebd9a",
+"similarity": 0.41666666666666663,
+"set": "eve",
+"number": "39",
+"oracle_id": "ea8acbd4-1ace-4634-9e88-7f91401d2b30",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a8d01a68-e006-44c3-b0ed-047facb3d66f",
+"similarity": 0.39583333333333337,
+"set": "plst",
+"number": "EVE-39",
+"oracle_id": "ea8acbd4-1ace-4634-9e88-7f91401d2b30",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "68232299-17bd-4342-baed-1a28e6685f3e",
+"similarity": 0.390625,
+"set": "30a",
+"number": "213",
+"oracle_id": "9eb2912d-2130-49f2-9529-b58fa5a97a15",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "103",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "cec575f6-43c9-41c6-a996-bb806bf82185",
+"similarity": 0.6927,
+"lead": 0.276
+}
+},
+{
+"name": "easy-019",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "15c5d6cd-8af6-4852-8043-e6b1ef771ce6",
+"similarity": 0.59375,
+"set": "ltc",
+"number": "159",
+"oracle_id": "b3a81bb1-cbd5-41a0-8dd4-faea06593f84",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c9430043-f452-4bb6-bff3-d6f91420b756",
+"similarity": 0.42708333333333337,
+"set": "who",
+"number": "1044",
+"oracle_id": "1a89c623-c9c3-443c-bbd3-834767b6bdb8",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "ab60a02f-741a-4304-852e-f446e43bb46f",
+"similarity": 0.421875,
+"set": "who",
+"number": "453",
+"oracle_id": "1a89c623-c9c3-443c-bbd3-834767b6bdb8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d2d36ecf-5508-4fe6-9ad4-72df934b5c40",
+"similarity": 0.40625,
+"set": "who",
+"number": "358",
+"oracle_id": "d9c4a3ca-b966-4fd0-b189-ffbcbfb412b1",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2a5e0f58-5cc1-4cf5-9bb7-da45a6e0bd0e",
+"similarity": 0.40104166666666663,
+"set": "who",
+"number": "949",
+"oracle_id": "d9c4a3ca-b966-4fd0-b189-ffbcbfb412b1",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "159",
+"set": "ltc"
+},
+"expected": {
+"path": "strong",
+"printing_id": "15c5d6cd-8af6-4852-8043-e6b1ef771ce6",
+"similarity": 0.5938,
+"lead": 0.1667
+}
+},
+{
+"name": "easy-020",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a27aee6d-1fc3-4307-bb16-b964d723fe2f",
+"similarity": 0.515625,
+"set": "msh",
+"number": "192",
+"oracle_id": "f44bde8b-43e9-4719-ac60-b8f0cee8df9b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "726f760e-90e6-4b24-aa43-c5a0ef4d4432",
+"similarity": 0.39583333333333337,
+"set": "plst",
+"number": "SOI-142",
+"oracle_id": "378110e9-62d6-4dcf-a2e3-813081c82ec4",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "3cc13a00-bd58-44fa-93af-846001ca4f84",
+"similarity": 0.39583333333333337,
+"set": "soi",
+"number": "142",
+"oracle_id": "378110e9-62d6-4dcf-a2e3-813081c82ec4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f689e20a-2c24-44a3-9e1b-7717df3d1948",
+"similarity": 0.38541666666666663,
+"set": "uma",
+"number": "118",
+"oracle_id": "378110e9-62d6-4dcf-a2e3-813081c82ec4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "36392057-e3a8-433f-949a-f62af913598d",
+"similarity": 0.38020833333333337,
+"set": "ddo",
+"number": "31",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "192",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a27aee6d-1fc3-4307-bb16-b964d723fe2f",
+"similarity": 0.5156,
+"lead": 0.1198
+}
+},
+{
+"name": "easy-021",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c035c625-4de5-4c3b-9d07-aa1df8fc7b78",
+"similarity": 0.7708333333333334,
+"set": "msh",
+"number": "246",
+"oracle_id": "60105eb8-bdca-44b9-a970-68a7615526e8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "99f0a14c-17e3-4f0b-8b8e-7cd0268cde74",
+"similarity": 0.390625,
+"set": "plst",
+"number": "SOI-117",
+"oracle_id": "7be2bc4e-3986-4f4f-bd5b-0a9f59b2f865",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "34a0203f-9cce-43a4-9cb7-8ce6647895cd",
+"similarity": 0.38541666666666663,
+"set": "dmr",
+"number": "108",
+"oracle_id": "ededbdae-d9dc-4206-9335-d7158f2d7700",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e7e778ce-3f1e-4626-8f55-bba03970d91a",
+"similarity": 0.375,
+"set": "ema",
+"number": "112",
+"oracle_id": "ededbdae-d9dc-4206-9335-d7158f2d7700",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0fc37615-ef72-4176-9e94-080e56af1d8a",
+"similarity": 0.375,
+"set": "soi",
+"number": "117",
+"oracle_id": "7be2bc4e-3986-4f4f-bd5b-0a9f59b2f865",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "246",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "c035c625-4de5-4c3b-9d07-aa1df8fc7b78",
+"similarity": 0.7708,
+"lead": 0.3802
+}
+},
+{
+"name": "easy-022",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "29e82e97-79b3-4495-9aa0-a90242d594b2",
+"similarity": 0.484375,
+"set": "msh",
+"number": "376",
+"oracle_id": "090d815b-b2c8-48cd-a0b3-dc662d5352ac",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fb3697cb-416c-49ca-a80a-c681e15230ce",
+"similarity": 0.234375,
+"set": "one",
+"number": "314",
+"oracle_id": "6e42da0c-151e-468d-91cb-5a5b117a9298",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6f6cdd9d-98ca-4949-bf19-43e770f4658e",
+"similarity": 0.22916666666666663,
+"set": "sld",
+"number": "7182",
+"oracle_id": "9ad4f730-a18e-4a7c-a468-a926c718c741",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ebc1978e-ba4f-48ed-90e2-9252603f99fe",
+"similarity": 0.22916666666666663,
+"set": "one",
+"number": "457",
+"oracle_id": "6e42da0c-151e-468d-91cb-5a5b117a9298",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "197743cd-249c-42ba-ac8d-027c088f8418",
+"similarity": 0.20833333333333337,
+"set": "m19",
+"number": "14",
+"oracle_id": "207c7f93-3abf-44c5-ace6-3f86359c9745",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "376",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "29e82e97-79b3-4495-9aa0-a90242d594b2",
+"similarity": 0.4844,
+"lead": 0.25
+}
+},
+{
+"name": "easy-023",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "13253f8d-1897-41e8-a904-9e57ac7eff0a",
+"similarity": 0.6875,
+"set": "ltr",
+"number": "231",
+"oracle_id": "6b974499-bf1c-4e5b-a72c-c72220f4e591",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "3fa150aa-28d2-418b-b1a8-7d10e5f1c139",
+"similarity": 0.6822916666666667,
+"set": "pltr",
+"number": "231s",
+"oracle_id": "6b974499-bf1c-4e5b-a72c-c72220f4e591",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "9d842adf-72af-41fd-9d9b-b38d39a44b24",
+"similarity": 0.5104166666666667,
+"set": "ltr",
+"number": "682",
+"oracle_id": "6b974499-bf1c-4e5b-a72c-c72220f4e591",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c0a72721-2a4a-4d48-a7b0-2370b90b8619",
+"similarity": 0.42708333333333337,
+"set": "mid",
+"number": "98",
+"oracle_id": "33d405ea-7a9a-4970-b70f-9c05d90dd6f0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "87fed54e-9f77-4eb1-a49e-8c4aa1f1ff23",
+"similarity": 0.421875,
+"set": "f14",
+"number": "8",
+"oracle_id": "0dd95516-893d-477e-a38c-3cc37c6e7ae0",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "231",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "13253f8d-1897-41e8-a904-9e57ac7eff0a",
+"similarity": 0.6875,
+"lead": 0.0052
+}
+},
+{
+"name": "easy-024",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "dd698f10-b0fc-42fc-84ec-f5a0d96bfa1d",
+"similarity": 0.75,
+"set": "ltr",
+"number": "255",
+"oracle_id": "a1a9695e-073b-4a65-b3ec-2cfddc23202a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b38b6760-616f-4b11-8ce7-ac1223c7fd53",
+"similarity": 0.484375,
+"set": "ltr",
+"number": "256",
+"oracle_id": "7b0d7e62-0287-454a-8702-b0bfa7b41245",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "969df973-e45a-485f-91d5-a25b3dc0e69c",
+"similarity": 0.47395833333333337,
+"set": "pltr",
+"number": "256s",
+"oracle_id": "7b0d7e62-0287-454a-8702-b0bfa7b41245",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a3236aea-45b1-4f8e-8df5-f2ce2faeb94e",
+"similarity": 0.45833333333333337,
+"set": "pogw",
+"number": "147s",
+"oracle_id": "a0af158b-f42a-4022-a438-e0a2e1fd6d9e",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "67f02bc3-b565-4a38-8313-eb47ff31db8d",
+"similarity": 0.44270833333333337,
+"set": "ogw",
+"number": "147",
+"oracle_id": "a0af158b-f42a-4022-a438-e0a2e1fd6d9e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "255",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "dd698f10-b0fc-42fc-84ec-f5a0d96bfa1d",
+"similarity": 0.75,
+"lead": 0.2656
+}
+},
+{
+"name": "easy-025",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "f7725dc2-2654-4ffb-b6b3-510ae64ec6af",
+"similarity": 0.5625,
+"set": "ltr",
+"number": "55",
+"oracle_id": "100d1c9e-15aa-4bab-9fb3-76c2cd6abc2f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d24b248c-d34b-4b1c-be30-f28f80d0ebfd",
+"similarity": 0.40625,
+"set": "ltr",
+"number": "506",
+"oracle_id": "100d1c9e-15aa-4bab-9fb3-76c2cd6abc2f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "433d0737-bb61-4aa0-98e8-1bd2d86f03fd",
+"similarity": 0.38020833333333337,
+"set": "dvd",
+"number": "55",
+"oracle_id": "a88a1c53-7de3-423a-a95a-24ed5666ab96",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "8e5758cc-1f84-455d-a983-8ec471727eaf",
+"similarity": 0.38020833333333337,
+"set": "m20",
+"number": "110",
+"oracle_id": "b17f4960-9603-4a81-8dc8-e09e8b822357",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cc719eb5-1867-4c5f-a5ce-e97ffa15ac61",
+"similarity": 0.375,
+"set": "gvl",
+"number": "57",
+"oracle_id": "a88a1c53-7de3-423a-a95a-24ed5666ab96",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "55",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "f7725dc2-2654-4ffb-b6b3-510ae64ec6af",
+"similarity": 0.5625,
+"lead": 0.1562
+}
+},
+{
+"name": "easy-026",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "fb11c04f-6f17-4da4-bbf6-0bd09de6e544",
+"similarity": 0.6875,
+"set": "ltr",
+"number": "40",
+"oracle_id": "bc475376-54eb-4846-9cfc-5fa2e7908905",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "9dc2521f-d9a5-4ae7-b5dc-bf0504e66345",
+"similarity": 0.5260416666666667,
+"set": "ltr",
+"number": "491",
+"oracle_id": "bc475376-54eb-4846-9cfc-5fa2e7908905",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "da97eb9c-8768-42d1-a80e-c88bccc4c9b3",
+"similarity": 0.44270833333333337,
+"set": "pdom",
+"number": "102s",
+"oracle_id": "a3b2e0a2-f4ad-457b-ae70-7732bc3479ff",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "1ed7cca3-79be-44ca-bf10-2ae1c0835ed1",
+"similarity": 0.41666666666666663,
+"set": "dom",
+"number": "102",
+"oracle_id": "a3b2e0a2-f4ad-457b-ae70-7732bc3479ff",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "06831e80-845d-4bd7-8fdc-8140eb606fe4",
+"similarity": 0.41145833333333337,
+"set": "cmm",
+"number": "867",
+"oracle_id": "44ed4c0c-a012-4895-a547-b04150553bba",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "40",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "fb11c04f-6f17-4da4-bbf6-0bd09de6e544",
+"similarity": 0.6875,
+"lead": 0.1615
+}
+},
+{
+"name": "easy-027",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3ce397f2-a57e-4db3-8ac5-6ba4ea753f43",
+"similarity": 0.7135416666666667,
+"set": "pspm",
+"number": "94s",
+"oracle_id": "daca1d5e-349d-4e8a-abc7-427dab43fb0c",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "a27834b7-e763-48ac-845e-ed49f2fa6c6d",
+"similarity": 0.703125,
+"set": "spm",
+"number": "94",
+"oracle_id": "daca1d5e-349d-4e8a-abc7-427dab43fb0c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d75ccaee-e5ca-423f-a235-c0e989cbf76f",
+"similarity": 0.6197916666666667,
+"set": "spm",
+"number": "264",
+"oracle_id": "daca1d5e-349d-4e8a-abc7-427dab43fb0c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fdad1b0e-d3cc-4d76-ae7e-fee12558cf2c",
+"similarity": 0.35416666666666663,
+"set": "m3c",
+"number": "4",
+"oracle_id": "9f6828e3-39d9-45d9-9bf1-0e3737a0321e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7b7a348a-51f7-4dc5-8fe7-1c70fea5e050",
+"similarity": 0.34375,
+"set": "cmm",
+"number": "130",
+"oracle_id": "e87906d2-db1a-4e19-b910-adb4eb339945",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "94",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a27834b7-e763-48ac-845e-ed49f2fa6c6d",
+"similarity": 0.7031,
+"lead": 0.0104
+}
+},
+{
+"name": "easy-028",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c3d5add1-0d0e-414b-a964-8da326472d35",
+"similarity": 0.484375,
+"set": "msh",
+"number": "47",
+"oracle_id": "e3b70a85-4296-411f-a673-7992b0c8a9aa",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "358c61e2-4af4-4e19-bee6-4b8c90a33f03",
+"similarity": 0.40625,
+"set": "j22",
+"number": "466",
+"oracle_id": "658f5cfb-326d-4da9-a39b-2ecd393a1f54",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "735a5082-72f4-4812-adcc-d8095d8eee51",
+"similarity": 0.40625,
+"set": "mh2",
+"number": "347",
+"oracle_id": "f7f4ddc9-cea0-42f9-bbca-2ad87a24bfc8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "954d53f3-ebbe-48e0-9e1a-7019d2b0740c",
+"similarity": 0.40104166666666663,
+"set": "emn",
+"number": "110",
+"oracle_id": "2e163679-7303-4e05-9d20-86b76dfa1407",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "423c5752-b634-44a9-82b3-2dd1045e4d90",
+"similarity": 0.390625,
+"set": "msc",
+"number": "649",
+"oracle_id": "9caa490e-dc28-4069-9ffb-4b1afd8fdd54",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "47",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "c3d5add1-0d0e-414b-a964-8da326472d35",
+"similarity": 0.4844,
+"lead": 0.0781
+}
+},
+{
+"name": "easy-029",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "7b7c408b-8660-4db5-9a16-5003c11b4ac1",
+"similarity": 0.6875,
+"set": "hob",
+"number": "189",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b6a46b11-3225-45aa-b54e-4d19d81b51cf",
+"similarity": 0.41145833333333337,
+"set": "afr",
+"number": "278",
+"oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "cfd1cfb0-c147-434b-8c81-9510d7a4be02",
+"similarity": 0.40625,
+"set": "j25",
+"number": "767",
+"oracle_id": "c17d799f-adc9-4c41-87cf-b243b5ea3be1",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "bac08825-ca54-4a9f-bf4f-f75708a1550b",
+"similarity": 0.40104166666666663,
+"set": "sos",
+"number": "273",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "514f8188-3d9e-4937-bfcb-b73acd80878d",
+"similarity": 0.39583333333333337,
+"set": "m20",
+"number": "276",
+"oracle_id": "a3fb7228-e76b-4e96-a40e-20b5fed75685",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "189",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "7b7c408b-8660-4db5-9a16-5003c11b4ac1",
+"similarity": 0.6875,
+"lead": 0.276
+}
+},
+{
+"name": "easy-030",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "8c321159-43e5-40fc-9f0c-4ecc4f6cfd20",
+"similarity": 0.6666666666666667,
+"set": "ltr",
+"number": "126",
+"oracle_id": "111889d4-bcca-4b1f-ad48-3077e2f5136f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0e60a0b4-357b-4221-baff-afcda079422c",
+"similarity": 0.46354166666666663,
+"set": "pip",
+"number": "821",
+"oracle_id": "55a519b4-61cb-448a-875b-4d6dbe00580f",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "cdda2ce8-23d1-4814-8e81-d6cf40f75a13",
+"similarity": 0.45833333333333337,
+"set": "pip",
+"number": "293",
+"oracle_id": "55a519b4-61cb-448a-875b-4d6dbe00580f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ba578d94-6f49-45f5-b6e2-1090c05acc4a",
+"similarity": 0.45833333333333337,
+"set": "cmm",
+"number": "379",
+"oracle_id": "d683024d-8fe7-4509-851b-7655fadc1de7",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5bf22183-e12c-4358-b34c-52cfc098226f",
+"similarity": 0.44791666666666663,
+"set": "c17",
+"number": "111",
+"oracle_id": "932668fa-d6e3-41c0-ad0c-8e0a00e68d11",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "126",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "8c321159-43e5-40fc-9f0c-4ecc4f6cfd20",
+"similarity": 0.6667,
+"lead": 0.2031
+}
+},
+{
+"name": "easy-031",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "1ab7c1e6-54af-4002-8a81-23a1ccafa3ff",
+"similarity": 0.71875,
+"set": "spm",
+"number": "21",
+"oracle_id": "9b9b086c-d201-4574-a1e9-0d6f8de53d7d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5e50f209-634b-48d8-972b-c32f8e655f88",
+"similarity": 0.4375,
+"set": "pfdn",
+"number": "180s",
+"oracle_id": "ee579a32-a048-4335-b966-231ba731cdea",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "ff1b8d52-23f2-4c4f-9dab-2ca1f62b4e9d",
+"similarity": 0.43229166666666663,
+"set": "sir",
+"number": "224",
+"oracle_id": "e33dec01-c114-436a-befc-dab4e806c10b",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "d2bc55d3-dd1c-40da-9197-76cb1b5d29c2",
+"similarity": 0.43229166666666663,
+"set": "ima",
+"number": "178",
+"oracle_id": "0ddb3fa0-447c-40c5-928a-541f3d543014",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "eeb44caf-09b6-430d-99e1-3597f703d5e0",
+"similarity": 0.43229166666666663,
+"set": "ddo",
+"number": "49",
+"oracle_id": "0ddb3fa0-447c-40c5-928a-541f3d543014",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "21",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "1ab7c1e6-54af-4002-8a81-23a1ccafa3ff",
+"similarity": 0.7188,
+"lead": 0.2812
+}
+},
+{
+"name": "easy-032",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "7be20870-ccdc-4285-920d-739cafb60465",
+"similarity": 0.5625,
+"set": "msh",
+"number": "345",
+"oracle_id": "8dd929cb-0fe1-4cb3-bc8d-96ca37f194f3",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "060c12ee-65b0-48d3-82d0-fdb5e27097a8",
+"similarity": 0.22916666666666663,
+"set": "dsc",
+"number": "368",
+"oracle_id": "a3c8d817-7949-4dae-b9f5-f9d952479270",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "cefa3241-ca85-4b8b-af40-2d178db71e36",
+"similarity": 0.22395833333333337,
+"set": "dbl",
+"number": "155",
+"oracle_id": "a45762af-4aac-40b3-a983-ea441b04c5ee",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "da5e29a8-a8fb-452b-9973-61ad613f9907",
+"similarity": 0.21875,
+"set": "soa",
+"number": "5",
+"oracle_id": "170a5dbc-6a43-4715-9501-178b1eb7b08c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7496ad0f-fc6d-4154-ac42-c2471e72ed88",
+"similarity": 0.21875,
+"set": "ltc",
+"number": "503",
+"oracle_id": "e6f2ba06-2c92-48b7-a95f-ea6bf35aa0fe",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "345",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "7be20870-ccdc-4285-920d-739cafb60465",
+"similarity": 0.5625,
+"lead": 0.3333
+}
+},
+{
+"name": "easy-033",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "354b4623-50a0-41f1-ad1e-7dd6ac3852df",
+"similarity": 0.578125,
+"set": "ltr",
+"number": "124",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "21a6028c-4372-4fb7-bbc0-fdd1139807de",
+"similarity": 0.5520833333333333,
+"set": "pltr",
+"number": "124s",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "4dcfd032-ab7f-48e1-a02a-7611aa7354e1",
+"similarity": 0.5208333333333333,
+"set": "ltr",
+"number": "770",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "726fdf85-ae3c-409d-a515-0051e25c116c",
+"similarity": 0.5052083333333333,
+"set": "ltr",
+"number": "359",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "2f5ea15b-d5aa-431a-a801-8b55a64a2ff8",
+"similarity": 0.49479166666666663,
+"set": "ltr",
+"number": "575",
+"oracle_id": "33c0a8c0-d1d9-4b03-869d-65dab8ace3df",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "124",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "354b4623-50a0-41f1-ad1e-7dd6ac3852df",
+"similarity": 0.5781,
+"lead": 0.026
+}
+},
+{
+"name": "easy-034",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "1a42c951-1146-4f49-a690-7d385962b191",
+"similarity": 0.703125,
+"set": "ltr",
+"number": "210",
+"oracle_id": "b967fbb8-ddc8-485b-bd18-cbf3ef6b1bf8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "6ee4f545-2c17-4f71-955f-031e891a8a28",
+"similarity": 0.484375,
+"set": "ltr",
+"number": "661",
+"oracle_id": "b967fbb8-ddc8-485b-bd18-cbf3ef6b1bf8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "76423446-d62f-4cc5-a23a-3175be88bd73",
+"similarity": 0.40625,
+"set": "dft",
+"number": "52",
+"oracle_id": "aaafcd69-6295-4d79-8e67-98df0c9bae88",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "57ca2ec5-442d-4909-be28-93c50fbc5f7a",
+"similarity": 0.40625,
+"set": "woe",
+"number": "89",
+"oracle_id": "d6e68414-80cb-4e08-ae84-b084a3f4b6de",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0bc5f4e8-e4e8-4a77-992a-3af8ef2f8df6",
+"similarity": 0.40625,
+"set": "ema",
+"number": "247",
+"oracle_id": "5d641bf6-0f93-4189-8dc1-ec7ea446dade",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "210",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "1a42c951-1146-4f49-a690-7d385962b191",
+"similarity": 0.7031,
+"lead": 0.2188
+}
+},
+{
+"name": "easy-035",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "49e36cac-3999-40b3-91b3-85af4fded679",
+"similarity": 0.8229166666666666,
+"set": "msh",
+"number": "93",
+"oracle_id": "e98cd00c-b812-4c6a-81d4-e3f94b64fc58",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "7e73cd46-0dec-441b-bb91-ec6defb3355e",
+"similarity": 0.41666666666666663,
+"set": "con",
+"number": "130",
+"oracle_id": "01d70534-7c26-4a54-9eca-d0ebbefc2159",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "605ca3c0-7c9a-4bc1-9795-82aeb6f552ee",
+"similarity": 0.40625,
+"set": "frc",
+"number": "44",
+"oracle_id": "8c0520fa-276b-4d21-b4a9-dce1fce59f6b",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "10f60c15-923f-4d97-b20b-ad5c05df92b4",
+"similarity": 0.390625,
+"set": "rvr",
+"number": "208",
+"oracle_id": "877bfa3f-6e30-4cb3-831e-d56849b01334",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b42b4b0e-39f6-4f93-a358-9bcec8d13b65",
+"similarity": 0.390625,
+"set": "tle",
+"number": "103",
+"oracle_id": "bc1ea0ba-46bf-49b6-af95-51eaf1ab915e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "93",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "49e36cac-3999-40b3-91b3-85af4fded679",
+"similarity": 0.8229,
+"lead": 0.4062
+}
+},
+{
+"name": "easy-036",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6e518842-ce44-4af2-8f38-89869828294a",
+"similarity": 0.7291666666666667,
+"set": "msh",
+"number": "15",
+"oracle_id": "ca3cda24-0ecd-4edf-b1b3-54311ad58a51",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d01a2b68-efe6-4027-846d-db7b19d9eef6",
+"similarity": 0.41666666666666663,
+"set": "woe",
+"number": "101",
+"oracle_id": "380c367f-73ea-485f-a37b-5af0ba160893",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a8b4ab5e-aa83-448e-94b3-a4a643968804",
+"similarity": 0.41666666666666663,
+"set": "woc",
+"number": "87",
+"oracle_id": "4c9bcba6-87b5-4fb3-97ee-6fe5b739337d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "a3236aea-45b1-4f8e-8df5-f2ce2faeb94e",
+"similarity": 0.41666666666666663,
+"set": "pogw",
+"number": "147s",
+"oracle_id": "a0af158b-f42a-4022-a438-e0a2e1fd6d9e",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "32ea1726-34c5-4f75-828c-1c67e8cd4789",
+"similarity": 0.40625,
+"set": "plst",
+"number": "OGW-147",
+"oracle_id": "a0af158b-f42a-4022-a438-e0a2e1fd6d9e",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "15",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "6e518842-ce44-4af2-8f38-89869828294a",
+"similarity": 0.7292,
+"lead": 0.3125
+}
+},
+{
+"name": "easy-037",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "9763bd56-fa4b-4907-ad15-c3f040c5fc0a",
+"similarity": 0.5208333333333333,
+"set": "hob",
+"number": "76",
+"oracle_id": "66961bcb-f588-47a7-b3f3-12f4ac674477",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bc099b2e-a7d9-4d5c-8088-4de17c694d44",
+"similarity": 0.48958333333333337,
+"set": "psoi",
+"number": "139s",
+"oracle_id": "518cf9ce-14aa-4f51-81bf-f8c2692a4244",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "5a645c8d-7cfb-466b-9fd0-e1c26bf6f652",
+"similarity": 0.484375,
+"set": "soi",
+"number": "139",
+"oracle_id": "518cf9ce-14aa-4f51-81bf-f8c2692a4244",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5913d004-0ef6-4dce-8f74-a8fbfc794d43",
+"similarity": 0.453125,
+"set": "hob",
+"number": "296",
+"oracle_id": "66961bcb-f588-47a7-b3f3-12f4ac674477",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2f3d1a99-4b5e-4138-b48b-6d7bb8a64293",
+"similarity": 0.44791666666666663,
+"set": "tpr",
+"number": "250",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "76",
+"set": "hob"
+},
+"expected": {
+"path": "strong",
+"printing_id": "9763bd56-fa4b-4907-ad15-c3f040c5fc0a",
+"similarity": 0.5208,
+"lead": 0.0312
+}
+},
+{
+"name": "easy-038",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "30fe0cb4-71f0-4acb-af1a-a48775826487",
+"similarity": 0.6041666666666667,
+"set": "ltr",
+"number": "324",
+"oracle_id": "ddc12487-f577-4def-acdb-491f7ba6dc51",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5877d76e-4ef3-48be-9223-3d349cf9398a",
+"similarity": 0.59375,
+"set": "ltr",
+"number": "816",
+"oracle_id": "ddc12487-f577-4def-acdb-491f7ba6dc51",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "349d4989-a316-4e0a-946b-3fdba80a1a8d",
+"similarity": 0.28645833333333337,
+"set": "prm",
+"number": "58893",
+"oracle_id": "d39b9f64-dc9b-413f-8d05-e21ef46d6756",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "1335a145-248a-4f1e-8760-9a5d531e14e3",
+"similarity": 0.28645833333333337,
+"set": "tla",
+"number": "85",
+"oracle_id": "89f96032-5cba-404d-82b0-38d2be963e4b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d43981b1-60c8-4896-8885-b07e73b99b30",
+"similarity": 0.28125,
+"set": "otj",
+"number": "81",
+"oracle_id": "c3adc698-a0c5-4c82-8347-536745c9e928",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "324",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "30fe0cb4-71f0-4acb-af1a-a48775826487",
+"similarity": 0.6042,
+"lead": 0.0104
+}
+},
+{
+"name": "easy-039",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "72dbab11-96ed-43db-8b59-ceca47c8cd22",
+"similarity": 0.7395833333333333,
+"set": "spm",
+"number": "45",
+"oracle_id": "163f1fce-70c8-44e3-a679-f97d52cd1e9a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "95bc5f89-2f01-40c4-9883-4c90ab89fcbb",
+"similarity": 0.47395833333333337,
+"set": "mkm",
+"number": "115",
+"oracle_id": "484b3586-c0ed-4793-a3c0-e99f265e092d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f1140cb9-6c48-4054-966e-5cc02aa7d5a4",
+"similarity": 0.46875,
+"set": "bro",
+"number": "96",
+"oracle_id": "0180bed7-892a-4af9-ac4b-96c9cd4beb42",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "27e2a759-971d-455b-845c-2e9b471950bb",
+"similarity": 0.45833333333333337,
+"set": "soc",
+"number": "119",
+"oracle_id": "a3b3b9ae-1e48-481d-80a5-7e2a26cf2f50",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "f7a6fd97-819c-4947-b125-fb9da2329a02",
+"similarity": 0.44791666666666663,
+"set": "plst",
+"number": "AKH-167",
+"oracle_id": "43a86d36-9653-4498-a533-8b30b919cdbf",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "45",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "72dbab11-96ed-43db-8b59-ceca47c8cd22",
+"similarity": 0.7396,
+"lead": 0.2656
+}
+},
+{
+"name": "easy-040",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "467df77a-a99c-4cfd-9af4-502eaa2eb2e3",
+"similarity": 0.703125,
+"set": "spm",
+"number": "185",
+"oracle_id": "6ef30340-a26d-49aa-bc86-0b8aa5252f87",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2bc350c9-0c1e-40a1-bb08-1b2e1f37320e",
+"similarity": 0.44791666666666663,
+"set": "c15",
+"number": "115",
+"oracle_id": "9167998d-5cac-47d7-99f2-f38122f7b8e7",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "37d5b6d7-1b3f-4586-8969-8c5d7457b75f",
+"similarity": 0.44791666666666663,
+"set": "cma",
+"number": "48",
+"oracle_id": "9167998d-5cac-47d7-99f2-f38122f7b8e7",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "cb3411cb-8c43-4f06-8583-49dd9ba5db63",
+"similarity": 0.43229166666666663,
+"set": "ddq",
+"number": "52",
+"oracle_id": "9167998d-5cac-47d7-99f2-f38122f7b8e7",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "23986add-b33d-4bad-86f3-e2d0f99cf949",
+"similarity": 0.421875,
+"set": "jmp",
+"number": "202",
+"oracle_id": "9167998d-5cac-47d7-99f2-f38122f7b8e7",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "185",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "467df77a-a99c-4cfd-9af4-502eaa2eb2e3",
+"similarity": 0.7031,
+"lead": 0.2552
+}
+},
+{
+"name": "easy-041",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "c9132e45-4ddb-4565-ac45-86f1ecc6230d",
+"similarity": 0.734375,
+"set": "spm",
+"number": "91",
+"oracle_id": "2d1a15dc-3123-4425-b036-a3b5a83fcdf8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fd1f0b5f-5e0e-4da1-ab54-a62db5af3591",
+"similarity": 0.42708333333333337,
+"set": "msh",
+"number": "209",
+"oracle_id": "10db57b4-f895-4514-b610-2252ba676353",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5354868b-c96b-4765-b0c8-8895093e4019",
+"similarity": 0.40104166666666663,
+"set": "snc",
+"number": "141",
+"oracle_id": "12e0321b-1cd7-4519-8929-3261cf11a1a9",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "74165827-f9fc-4994-b396-c6633536ed0c",
+"similarity": 0.390625,
+"set": "tpr",
+"number": "169",
+"oracle_id": "755dbf29-7484-444f-b5df-29ec4b4bbc82",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "399590b5-14be-43b1-b7c0-2bd6243168ff",
+"similarity": 0.390625,
+"set": "30a",
+"number": "133",
+"oracle_id": "e8ad3a77-b293-4d69-b080-27ca9f95d443",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "91",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "c9132e45-4ddb-4565-ac45-86f1ecc6230d",
+"similarity": 0.7344,
+"lead": 0.3073
+}
+},
+{
+"name": "easy-042",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "8ebf2a25-9bee-4146-af83-f22aab6db2a8",
+"similarity": 0.6666666666666667,
+"set": "ltr",
+"number": "208",
+"oracle_id": "6696d2e4-28ee-4ba7-8710-c1b735745270",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c46ba8df-834e-47f0-981b-a296e79a2288",
+"similarity": 0.44791666666666663,
+"set": "30a",
+"number": "101",
+"oracle_id": "82004860-e589-4e38-8d61-8c0210e4ea39",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "8f0abdb4-4898-4818-b7e2-24a90f15e49d",
+"similarity": 0.42708333333333337,
+"set": "afr",
+"number": "70",
+"oracle_id": "a73e1f0a-8895-4eb2-9780-94951a8f227b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "67d52db5-597e-46d5-af39-c3a2de107d30",
+"similarity": 0.41666666666666663,
+"set": "hob",
+"number": "66",
+"oracle_id": "3cc64ce6-45e2-4dc3-9b28-d7206a131873",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e14e994d-ed2e-451b-a165-93da7e9c3579",
+"similarity": 0.41666666666666663,
+"set": "ddj",
+"number": "62",
+"oracle_id": "937de7f3-7f7f-4fd4-8531-0b90a11815c8",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "208",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "8ebf2a25-9bee-4146-af83-f22aab6db2a8",
+"similarity": 0.6667,
+"lead": 0.2188
+}
+},
+{
+"name": "easy-043",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "72727c2a-08a9-47bc-a5eb-cda52e21684b",
+"similarity": 0.7552083333333334,
+"set": "msh",
+"number": "186",
+"oracle_id": "556f127f-6131-4171-b1ed-11420c21d345",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "16344025-1a71-4a97-88ee-1ec4437f2089",
+"similarity": 0.453125,
+"set": "plst",
+"number": "C14-166",
+"oracle_id": "84ee0da2-d886-4603-9aaa-bc5326a424d7",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b74cfb23-c644-4787-8479-476f293f1bf2",
+"similarity": 0.44791666666666663,
+"set": "plst",
+"number": "M19-68",
+"oracle_id": "328b42f1-d679-4f9c-80e3-38fe3b965d10",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "296ac494-8538-443d-9e31-fd40b6cacb5b",
+"similarity": 0.44270833333333337,
+"set": "plst",
+"number": "2XM-169",
+"oracle_id": "291e4b91-17c7-4b7b-8057-f0d361424016",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "285d22fa-1623-463a-83c0-a9aa7c969ce2",
+"similarity": 0.4375,
+"set": "m19",
+"number": "68",
+"oracle_id": "328b42f1-d679-4f9c-80e3-38fe3b965d10",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "186",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "72727c2a-08a9-47bc-a5eb-cda52e21684b",
+"similarity": 0.7552,
+"lead": 0.3021
+}
+},
+{
+"name": "easy-044",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "eb5038af-06b0-401e-8dea-a1a8483788ae",
+"similarity": 0.640625,
+"set": "ltr",
+"number": "253",
+"oracle_id": "88159872-d37d-4847-b048-e4a9af6437bd",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "40afbbb5-055f-4271-b291-272ffbaab1fd",
+"similarity": 0.5677083333333333,
+"set": "pltr",
+"number": "253s",
+"oracle_id": "88159872-d37d-4847-b048-e4a9af6437bd",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "861e8c51-0cda-497a-b289-a9f678f0e328",
+"similarity": 0.41666666666666663,
+"set": "emn",
+"number": "153",
+"oracle_id": "76ee013d-5293-4432-b425-649a2e82bd74",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "27d11924-23c5-485e-9c56-9efcaf6cd9d2",
+"similarity": 0.38020833333333337,
+"set": "j22",
+"number": "490",
+"oracle_id": "cb65ee08-bfdb-4c18-8967-8bcf31fcabfa",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "51faff0a-1006-4bc5-adb6-4ff3d7f07326",
+"similarity": 0.375,
+"set": "who",
+"number": "882",
+"oracle_id": "834b8f71-9a45-42ae-9e99-e749fa6fb45e",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "253",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "eb5038af-06b0-401e-8dea-a1a8483788ae",
+"similarity": 0.6406,
+"lead": 0.0729
+}
+},
+{
+"name": "easy-045",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "9a1b057b-229c-4f65-ba4e-12dd342238de",
+"similarity": 0.39583333333333337,
+"set": "msh",
+"number": "41",
+"oracle_id": "9b9b086c-d201-4574-a1e9-0d6f8de53d7d",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0a44065d-0f0b-4fef-b8a1-364555bc6899",
+"similarity": 0.390625,
+"set": "smid",
+"number": "3",
+"oracle_id": "cb5ca670-a50e-4c73-879a-8dc0aa2cbd9f",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "1d461d67-8554-4b55-8f01-909a54d23117",
+"similarity": 0.38020833333333337,
+"set": "eve",
+"number": "123",
+"oracle_id": "364e8bd6-52e5-4397-8d2a-10c4706e5a45",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "90742ab3-89fb-4ac1-9bf0-0e2d17252bff",
+"similarity": 0.375,
+"set": "m14",
+"number": "233",
+"oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4e991cd5-8abe-46c0-8731-a58a4b4e5c92",
+"similarity": 0.36979166666666663,
+"set": "plst",
+"number": "DDJ-65",
+"oracle_id": "ab94d8f7-f811-436a-9a22-9a12bd929e98",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "41",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "9a1b057b-229c-4f65-ba4e-12dd342238de",
+"similarity": 0.3958,
+"lead": 0.0052
+}
+},
+{
+"name": "easy-046",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a92a95d2-9529-417a-b7d5-b4244d7fdca7",
+"similarity": 0.734375,
+"set": "msh",
+"number": "206",
+"oracle_id": "191ba5f0-45f4-4b7f-910d-4bd4d2d28b33",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ef974a13-4eea-4c96-adfe-6f42b71563d4",
+"similarity": 0.38020833333333337,
+"set": "om1",
+"number": "54",
+"oracle_id": "8388faa0-f64e-4b01-836e-617f99b808a4",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "caef93cc-70d0-4cce-9aaa-13c0931b2ef7",
+"similarity": 0.38020833333333337,
+"set": "lci",
+"number": "235",
+"oracle_id": "b69bbb8d-7f8c-45d6-983a-759b5fce6ebd",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bd7e1645-ea8f-41c4-b3ee-58f44fc5c574",
+"similarity": 0.375,
+"set": "mic",
+"number": "1",
+"oracle_id": "cd47eedd-57cb-460d-b339-4785f63a5475",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bde95f7b-ad81-4e49-8a15-f3ced162087f",
+"similarity": 0.375,
+"set": "omic",
+"number": "1",
+"oracle_id": "cd47eedd-57cb-460d-b339-4785f63a5475",
+"finishes": [
+"etched"
+]
+}
+]
+},
+"strip": {
+"number": "206",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a92a95d2-9529-417a-b7d5-b4244d7fdca7",
+"similarity": 0.7344,
+"lead": 0.3542
+}
+},
+{
+"name": "easy-047",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "ed36c685-df55-4d62-99ba-9ad1cb7547f7",
+"similarity": 0.453125,
+"set": "pltr",
+"number": "236s",
+"oracle_id": "e6521404-8474-4727-b2d0-537d15d8a63f",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "7e7b9eea-a224-4db1-a089-cb385f7af20c",
+"similarity": 0.42708333333333337,
+"set": "ltr",
+"number": "236",
+"oracle_id": "e6521404-8474-4727-b2d0-537d15d8a63f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a163a525-1091-42cf-ad94-1c60c1b2c738",
+"similarity": 0.33854166666666663,
+"set": "pltr",
+"number": "246s",
+"oracle_id": "3aa83ed2-f48b-4ce6-a614-2c54ddf50538",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "77aa98c5-0f8a-45b2-904d-29afeeb491bc",
+"similarity": 0.33333333333333337,
+"set": "pip",
+"number": "756",
+"oracle_id": "c01aafb8-3da5-4eb1-8731-2a223e747d63",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "51ab3270-3f50-46e8-b222-64e2b8f9a382",
+"similarity": 0.328125,
+"set": "msh",
+"number": "444",
+"oracle_id": "1df7a09f-fbc8-4c2a-a903-bab9e680eda7",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "236",
+"set": "ltr"
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.026
+}
+},
+{
+"name": "easy-048",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "30e1ec49-ad4f-4623-aeeb-dba07d6e6251",
+"similarity": 0.45833333333333337,
+"set": "ltr",
+"number": "39",
+"oracle_id": "13ac12db-d04b-4211-90df-886e1c597e8f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "70466aa9-b81f-429e-9804-5d354f9fb86e",
+"similarity": 0.34895833333333337,
+"set": "ltr",
+"number": "490",
+"oracle_id": "13ac12db-d04b-4211-90df-886e1c597e8f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e185a110-9e65-4ecd-a051-16ac6967db3b",
+"similarity": 0.3125,
+"set": "dsc",
+"number": "312",
+"oracle_id": "e6e6fce8-0f6a-4b84-865e-d4e4a4182f9f",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "18748b1d-4161-482c-a726-8762b4c1819c",
+"similarity": 0.30729166666666663,
+"set": "fdn",
+"number": "591",
+"oracle_id": "3a2bb47d-228d-499e-a34b-9e10d99e9b2c",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "2a3288ba-038c-4d8e-939d-c513a76fbfbf",
+"similarity": 0.30729166666666663,
+"set": "clb",
+"number": "924",
+"oracle_id": "e6e6fce8-0f6a-4b84-865e-d4e4a4182f9f",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "39",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "30e1ec49-ad4f-4623-aeeb-dba07d6e6251",
+"similarity": 0.4583,
+"lead": 0.1094
+}
+},
+{
+"name": "easy-049",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "afbec7e7-f5b9-407e-bf96-2e088710e791",
+"similarity": 0.5416666666666667,
+"set": "ltr",
+"number": "250",
+"oracle_id": "973c49a1-8425-40b9-8bdc-2c2434222314",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "0e11ae7e-45fa-4d05-a4fa-c43d33d6daed",
+"similarity": 0.515625,
+"set": "pltr",
+"number": "250s",
+"oracle_id": "973c49a1-8425-40b9-8bdc-2c2434222314",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "02a89b0e-e49d-44ec-a385-89e22d727c7c",
+"similarity": 0.39583333333333337,
+"set": "pecl",
+"number": "204p",
+"oracle_id": "48a773d0-c433-4463-b50f-b6d4604a042c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "bf708169-a307-494b-b8d8-baae53b2e2f2",
+"similarity": 0.390625,
+"set": "ecl",
+"number": "204",
+"oracle_id": "48a773d0-c433-4463-b50f-b6d4604a042c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "90fb9e92-1cce-48cb-a386-c609a8fead2b",
+"similarity": 0.38541666666666663,
+"set": "plst",
+"number": "EMA-88",
+"oracle_id": "9f3e1eef-31db-4e1a-b5a9-ac835f6a3eab",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "250",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "afbec7e7-f5b9-407e-bf96-2e088710e791",
+"similarity": 0.5417,
+"lead": 0.026
+}
+},
+{
+"name": "easy-050",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4cea42fd-035e-4b8f-8b1d-ff363b694f14",
+"similarity": 0.6458333333333333,
+"set": "msh",
+"number": "80",
+"oracle_id": "4a46ea59-6c5d-4bed-9951-b5590f9a1bdb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "62862a2e-1a3c-41b8-af02-44d9d9087e76",
+"similarity": 0.38020833333333337,
+"set": "prm",
+"number": "90170",
+"oracle_id": "544acde0-850d-4c4f-8389-e22930d87345",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f1f39fe7-dc12-49c9-80ac-4135dc1f8f08",
+"similarity": 0.36979166666666663,
+"set": "stx",
+"number": "207",
+"oracle_id": "544acde0-850d-4c4f-8389-e22930d87345",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f6cdff9b-bb09-45b9-aa3c-16a3136d183c",
+"similarity": 0.36458333333333337,
+"set": "soc",
+"number": "321",
+"oracle_id": "544acde0-850d-4c4f-8389-e22930d87345",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "69b3df55-f664-4922-9bc8-ab227d87da53",
+"similarity": 0.359375,
+"set": "c18",
+"number": "102",
+"oracle_id": "94a4f70a-8aac-412a-99f0-933e3ff87fe0",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "80",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "4cea42fd-035e-4b8f-8b1d-ff363b694f14",
+"similarity": 0.6458,
+"lead": 0.2656
+}
+},
+{
+"name": "easy-051",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a1c10e93-88eb-46b9-8adc-583661807990",
+"similarity": 0.6145833333333333,
+"set": "ltr",
+"number": "87",
+"oracle_id": "f3817f63-7bde-46c5-93cb-b4756f5f821e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e715f4e0-6ef4-40da-bc6c-84709e910cad",
+"similarity": 0.4375,
+"set": "ltc",
+"number": "289",
+"oracle_id": "8cf38025-5821-45a0-9483-266353b7e82d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "6ed96237-ef35-4665-881b-868634161717",
+"similarity": 0.4375,
+"set": "afc",
+"number": "264",
+"oracle_id": "0a28dff0-2bd6-4105-b73a-b6c4735833fd",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "69f8f64c-2a4d-4df0-8356-cb15a60b54a6",
+"similarity": 0.4375,
+"set": "ncc",
+"number": "430",
+"oracle_id": "0a28dff0-2bd6-4105-b73a-b6c4735833fd",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b14eaeec-d7ce-462a-90d3-2ae5ff605fdb",
+"similarity": 0.40104166666666663,
+"set": "ltr",
+"number": "240",
+"oracle_id": "88777fc0-286d-47fc-8e94-1e289b4964c4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "87",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a1c10e93-88eb-46b9-8adc-583661807990",
+"similarity": 0.6146,
+"lead": 0.1771
+}
+},
+{
+"name": "easy-052",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a268ad73-9a1f-47d9-9a85-a4669a769c3d",
+"similarity": 0.6927083333333333,
+"set": "spm",
+"number": "139",
+"oracle_id": "37827e84-9f5f-49ed-b939-0cf80dac82e7",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "b64074c0-5fa5-4d6c-b3ef-9a9f69ca385c",
+"similarity": 0.6822916666666667,
+"set": "msc",
+"number": "822",
+"oracle_id": "37827e84-9f5f-49ed-b939-0cf80dac82e7",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4f50bb47-cc4d-4b81-b5f1-817ca8744d12",
+"similarity": 0.38541666666666663,
+"set": "eoe",
+"number": "126",
+"oracle_id": "7efe9fe5-d93c-46a6-afbd-9655a902c6bc",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "465d8c18-c76b-488a-a4ec-ec0d2267a307",
+"similarity": 0.38020833333333337,
+"set": "jmp",
+"number": "206",
+"oracle_id": "310f141c-7f37-4729-aed6-dd9c09db448d",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "dc259874-5341-4cad-8766-73931f9914c4",
+"similarity": 0.375,
+"set": "plst",
+"number": "BBD-190",
+"oracle_id": "7735eeba-693b-47e2-bd51-414379cf1016",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "139",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "a268ad73-9a1f-47d9-9a85-a4669a769c3d",
+"similarity": 0.6927,
+"lead": 0.0104
+}
+},
+{
+"name": "easy-053",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "6a780abd-f276-40d3-b2af-d2e47d858d3d",
+"similarity": 0.5572916666666667,
+"set": "ltr",
+"number": "101",
+"oracle_id": "228fe7f0-54ad-411b-bedb-65a1bc2a099b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "d2709d91-4235-482c-b9b3-ac5d61cb5bcb",
+"similarity": 0.42708333333333337,
+"set": "ltr",
+"number": "552",
+"oracle_id": "228fe7f0-54ad-411b-bedb-65a1bc2a099b",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "68b69d14-41ff-4236-9301-967a1e767353",
+"similarity": 0.38020833333333337,
+"set": "pltr",
+"number": "102s",
+"oracle_id": "c75add5e-4e9d-4c68-a8ad-b878b1dbc0a4",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "bb2dc2e0-f393-4442-818b-d3b860bfffd0",
+"similarity": 0.38020833333333337,
+"set": "ltr",
+"number": "102",
+"oracle_id": "c75add5e-4e9d-4c68-a8ad-b878b1dbc0a4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "46fb94ad-f9be-48b4-b65a-4e736e5ffdbb",
+"similarity": 0.35416666666666663,
+"set": "thb",
+"number": "166",
+"oracle_id": "f0435065-a8ca-4b4d-a7da-0ef41749118f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "101",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "6a780abd-f276-40d3-b2af-d2e47d858d3d",
+"similarity": 0.5573,
+"lead": 0.1302
+}
+},
+{
+"name": "easy-054",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "25b3c781-e8e3-412d-98a0-ed80712298e3",
+"similarity": 0.6197916666666667,
+"set": "ltr",
+"number": "582",
+"oracle_id": "1b550c27-14b0-45fb-b17e-fcb061dc6ad0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "efde011d-8732-49b3-9204-8b114a3d81ba",
+"similarity": 0.43229166666666663,
+"set": "ltr",
+"number": "131",
+"oracle_id": "1b550c27-14b0-45fb-b17e-fcb061dc6ad0",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "5e605142-6e9f-496c-94f3-1d6e7044748e",
+"similarity": 0.34375,
+"set": "ltr",
+"number": "583",
+"oracle_id": "29375a7a-af4e-46aa-8d1c-e8d22d3c0ea7",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "dbcd3600-a9b2-4e23-bca3-3d55fb7cad81",
+"similarity": 0.33854166666666663,
+"set": "ltr",
+"number": "679",
+"oracle_id": "23db92aa-d4db-49e3-a5bc-7b120e02822f",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "a13343e9-b6bb-421c-8ba5-fe3c6794dca0",
+"similarity": 0.33333333333333337,
+"set": "ltc",
+"number": "467",
+"oracle_id": "2e94bfb2-9f7d-43af-8995-6cd5ffb15b21",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "582",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "25b3c781-e8e3-412d-98a0-ed80712298e3",
+"similarity": 0.6198,
+"lead": 0.1875
+}
+},
+{
+"name": "easy-055",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "e19929bc-cbe1-4970-952d-8e9d0193ddce",
+"similarity": 0.6197916666666667,
+"set": "spm",
+"number": "115",
+"oracle_id": "2ca85872-9436-4515-af50-c13e59605627",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "e450cbd1-1d08-44ab-be87-95674dfc96cf",
+"similarity": 0.36979166666666663,
+"set": "cma",
+"number": "98",
+"oracle_id": "c6423251-759a-48f1-a9ae-b49b98172c08",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "c70f3a79-5b79-4496-9234-58baeae74af3",
+"similarity": 0.36458333333333337,
+"set": "c14",
+"number": "42",
+"oracle_id": "c6423251-759a-48f1-a9ae-b49b98172c08",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "b8225b51-d5a4-4b46-9a10-b581362b6a11",
+"similarity": 0.34895833333333337,
+"set": "msc",
+"number": "72",
+"oracle_id": "aa792980-0811-4c08-8343-00fba0c5cf5e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "fd21b3ae-37f0-4415-8f12-20aba6afbae4",
+"similarity": 0.34895833333333337,
+"set": "j22",
+"number": "643",
+"oracle_id": "c6423251-759a-48f1-a9ae-b49b98172c08",
+"finishes": [
+"nonfoil"
+]
+}
+]
+},
+"strip": {
+"number": "115",
+"set": "spm"
+},
+"expected": {
+"path": "strong",
+"printing_id": "e19929bc-cbe1-4970-952d-8e9d0193ddce",
+"similarity": 0.6198,
+"lead": 0.25
+}
+},
+{
+"name": "easy-056",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "a383c442-3f4a-4115-97e4-23f0eb88465b",
+"similarity": 0.7864583333333334,
+"set": "spm",
+"number": "30",
+"oracle_id": "ae91c16c-5267-4957-b36c-5aa787fa6b5e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "455e9558-494e-43b2-b661-8e996d767f49",
+"similarity": 0.765625,
+"set": "msc",
+"number": "784",
+"oracle_id": "ae91c16c-5267-4957-b36c-5aa787fa6b5e",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "ef3c7a8e-b52d-4ed5-8c6b-be29d898a275",
+"similarity": 0.47916666666666663,
+"set": "plst",
+"number": "ORI-74",
+"oracle_id": "498707db-258f-423a-9ff6-9e294fce84d6",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "3682b3d3-cb3d-4c2c-a419-f08e3a370cd1",
+"similarity": 0.46875,
+"set": "ori",
+"number": "74",
+"oracle_id": "498707db-258f-423a-9ff6-9e294fce84d6",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "87d8354b-df56-4294-9f8a-b7c92e31b88e",
+"similarity": 0.45833333333333337,
+"set": "emn",
+"number": "95",
+"oracle_id": "0a8511b9-ed7d-4e33-9c2f-96b9a4c535e2",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "30",
+"set": ""
+},
+"expected": {
+"path": "review",
+"printing_id": null,
+"similarity": null,
+"lead": 0.0208
+}
+},
+{
+"name": "easy-057",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "4cea42fd-035e-4b8f-8b1d-ff363b694f14",
+"similarity": 0.7135416666666667,
+"set": "msh",
+"number": "80",
+"oracle_id": "4a46ea59-6c5d-4bed-9951-b5590f9a1bdb",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "f1f39fe7-dc12-49c9-80ac-4135dc1f8f08",
+"similarity": 0.34895833333333337,
+"set": "stx",
+"number": "207",
+"oracle_id": "544acde0-850d-4c4f-8389-e22930d87345",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "4acb66bd-6abd-46dd-a272-09bea66e2917",
+"similarity": 0.34895833333333337,
+"set": "roe",
+"number": "95",
+"oracle_id": "753b4258-bc1d-47f4-b994-356507b0816a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "efc25013-9477-4eb7-8b16-87e5685876ca",
+"similarity": 0.33854166666666663,
+"set": "msc",
+"number": "681",
+"oracle_id": "19e60344-57a8-41e0-8eca-87dbedf5a81a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "c85ce746-a0df-4146-9c0e-562bac5164bf",
+"similarity": 0.33333333333333337,
+"set": "pdmu",
+"number": "252s",
+"oracle_id": "9c58d241-4d9f-4b46-b8ee-f4587f9acfd6",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "80",
+"set": "msh"
+},
+"expected": {
+"path": "strong",
+"printing_id": "4cea42fd-035e-4b8f-8b1d-ff363b694f14",
+"similarity": 0.7135,
+"lead": 0.3646
+}
+},
+{
+"name": "easy-058",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "9ae65f96-7bfd-4390-88bf-764c26bf4668",
+"similarity": 0.796875,
+"set": "ltr",
+"number": "34",
+"oracle_id": "bce30bc5-b059-42bb-a9a4-5886f5607160",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2e9963da-f1f2-42c3-8fac-b1d16792d115",
+"similarity": 0.59375,
+"set": "ltr",
+"number": "485",
+"oracle_id": "bce30bc5-b059-42bb-a9a4-5886f5607160",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "adc53534-f362-4871-a594-9855a4923cd0",
+"similarity": 0.40625,
+"set": "who",
+"number": "79",
+"oracle_id": "7ec3aaa4-8b6a-4046-b599-654f9844ca6c",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "27e0b79b-874b-4ae2-b60e-ee6cb6753e6d",
+"similarity": 0.40104166666666663,
+"set": "who",
+"number": "684",
+"oracle_id": "7ec3aaa4-8b6a-4046-b599-654f9844ca6c",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "f3f96749-3536-4f3e-b5e6-bfc1e989c5d9",
+"similarity": 0.390625,
+"set": "40k",
+"number": "126\u2605",
+"oracle_id": "fc315174-d063-41dd-9379-11d95c5fd4ed",
+"finishes": [
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "34",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "9ae65f96-7bfd-4390-88bf-764c26bf4668",
+"similarity": 0.7969,
+"lead": 0.2031
+}
+},
+{
+"name": "easy-059",
+"picture": {
+"rotated": false,
+"candidates": [
+{
+"id": "3f440fa1-5387-41d6-a80f-5b19dbb21514",
+"similarity": 0.7239583333333333,
+"set": "ltr",
+"number": "221",
+"oracle_id": "3c86541c-3601-4a38-8872-39705e41303a",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "1e63983d-c36b-4440-b9e1-baaa6c7c0ba9",
+"similarity": 0.4375,
+"set": "ltr",
+"number": "78",
+"oracle_id": "c0afbb32-dc50-436a-bd24-2990c103a4f8",
+"finishes": [
+"nonfoil",
+"foil"
+]
+},
+{
+"id": "2285b3a3-782e-4acd-bf32-cb116c27b883",
+"similarity": 0.4375,
+"set": "ltc",
+"number": "271",
+"oracle_id": "602132c2-8ee8-41f8-bfac-cb17d32203f5",
+"finishes": [
+"nonfoil"
+]
+},
+{
+"id": "984ac231-5488-4312-bdc7-b425d2e7061f",
+"similarity": 0.421875,
+"set": "pip",
+"number": "825",
+"oracle_id": "402ec768-76fb-474e-ae74-babc90d833c4",
+"finishes": [
+"foil"
+]
+},
+{
+"id": "011bd068-32f4-4055-930d-afd2015fb41a",
+"similarity": 0.41666666666666663,
+"set": "pip",
+"number": "297",
+"oracle_id": "402ec768-76fb-474e-ae74-babc90d833c4",
+"finishes": [
+"nonfoil",
+"foil"
+]
+}
+]
+},
+"strip": {
+"number": "221",
+"set": "ltr"
+},
+"expected": {
+"path": "strong",
+"printing_id": "3f440fa1-5387-41d6-a80f-5b19dbb21514",
+"similarity": 0.724,
+"lead": 0.2865
+}
+}
+]
+}

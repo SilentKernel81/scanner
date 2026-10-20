@@ -1,0 +1,178 @@
+# Deploy plan: the foil-marker network, the printing check and the lookup
+
+Prepared 2026-10-20. **Nothing in this plan has been run.** It covers the server only (`user@192.168.1.23`, `~/scanner-server`).
+The camera stations (the Pis, the phone) are not touched: their code did not change, and they reconnect by themselves.
+
+## What goes live, and how risky each part is
+
+| Part | Commit | What it does on the live server | Risk |
+|---|---|---|---|
+| Foil-marker network | `874520a` | **Changes a decision**: where the OCR left the ★/• unread, a small network reads it before the AI's foil check. Measured: 394 of 394 right on held-out cards, 15 of 15 on the Deadpool rescan | Low-medium: real behaviour change, never tried on live scans. Wrong finish on a card the OCR missed (the AI used to be asked) |
+| Printing check (shadow) | `6a462ff` | Only writes `data/logs/printing_check.jsonl`; changes nothing | Low: one background thread, bounded queue, never raises |
+| The lookup (shadow) | `a84dcb9` | Also log-only. For cards the AI handles, a second light-ocr process reads the strip | Low-medium: **a second OCR process on the GPU next to Ollama** (see "The question that needs an answer first") |
+
+Not in the server: `scripts/experiments/` (49 files) - the plan leaves them out of the copy. The new data artifacts are inert without the code: `data/image_index/`
+(15 MB) and `data/logs/printing_check.jsonl`.
+
+**No data migration** (checked: no `CREATE TABLE`, `ALTER TABLE` or migration in the changes since `04cf82e`), **nothing deleted or moved away**
+(so nothing to delete by hand on the server). Sixteen server-relevant files differ from the commit before my work: 3 new modules
+(`foil_marker.py`, `image_index.py`, `printing_check.py`), `foil_net.onnx`, 2 scripts and 11 small edits (`identification.py`, `captures.py`,
+`startup.py`, `state.py`, `config.py`, `card_ocr.py`, `database.py`, `config.yaml`, `.gitignore`, `CLAUDE.md`).
+
+## Decisions I need from you
+
+1. **Lookup mode.** `ai_cases` (default, ~3% of captures, the cards the AI is needed for) or `all` (every capture, one more small OCR request each; much faster evidence, but
+   against easy cards). I recommend `ai_cases`.
+2. **Exclude `scripts/experiments/` from the copy** (49 tracked files that would end up in the image). I recommend yes.
+3. **Rehearse first** on a copy of the data (the plan's step 5), as for the earlier deploys that changed behaviour. I recommend yes: it is where the GPU question gets answered.
+4. **When.** At a quiet moment: the container restarts (~20-40 s for the OCR models) and the stations queue captures meanwhile ("a station keeps scanning while the server is away").
+
+## Facts that shape the plan
+
+- **My notes of the server's state stop at 2026-10-15** (main at `003a0fe`), and that hash is not an ancestor of today's `main`: it cannot say what is on
+  the server. The server's data folder has `others.db` and `settings_login.json` (features committed after 10-15), so it is newer than the notes.
+  **So the plan starts by comparing checksums** (step 1) instead of assuming. If that shows much more than the 16 files, the server was behind: stop and decide.
+- The container runs as **uid 1000** (`user: "${SCANNER_UID:-1000}"`); `HOME=/tmp`; `data/` is a volume. Files rsynced by `user` (uid 1000?) are readable and writable by it - step 1 checks.
+- `config.yaml` is **baked into the image** (`COPY . .`): there is no environment switch for the new settings, so changing one means editing the file and rebuilding.
+- The deploy procedure is the one in my notes (`git ls-files | rsync -rlpt --checksum --files-from=-`, `build` before `up`, both GPU files, `-l` for the `deploy/.env` link).
+  rsync does not delete; nothing needs deleting this time.
+
+## The question that needs an answer first: a second OCR process next to Ollama
+
+The lookup starts a second light-ocr process (own models, on the GPU through WebGPU, like the live one) on the first strip it needs and stops it after two idle minutes.
+The server's RTX 4070 Ti SUPER has 16 GB, and Ollama keeps qwen3.5:9b-q8_0 resident (roughly 10 GB, not measured by me). Whether a second reader fits was **not measured**. If it
+does not, it fails to start: the lookup then records no strip and goes by the picture alone (caught, logged, nothing else affected) - but the live OCR reader must not be the
+one that is squeezed. The rehearsal (step 5) measures it: `nvidia-smi` before and while two readers run. If it is tight, set `printing_check.lookup: off` (rebuild) or give the
+shadow reader the CPU (a small code change I can make: the OCR is ~0.7 s a card on a CPU, fine for 3% of the captures).
+
+## Step 0 - decide the open points above (no commands)
+
+## Step 1 - read-only checks on the server (nothing is changed)
+
+Run from the repo on the laptop. `rsync --dry-run` changes nothing; the rest only reads.
+
+```bash
+cd ~/Projects/scanner-server
+# a) what differs from the server's copy (expected: about the 16 files above; more = the server was behind)
+git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | LC_ALL=C sort \
+  | rsync -rlpt --checksum --dry-run --itemize-changes --files-from=- ./ user@192.168.1.23:scanner-server/ | grep -v "^\.d"
+# b) does the server's folder hold files the repo no longer has? (rsync never deletes them; a stray .py in the top folder is imported ahead of src/)
+ssh user@192.168.1.23 'cd ~/scanner-server && find . -path ./data -prune -o -path ./scanned_cards -prune -o -type f -print | LC_ALL=C sort' > /tmp/server_files.txt
+git ls-files | LC_ALL=C sort > /tmp/repo_files.txt;  LC_ALL=C comm -23 /tmp/server_files.txt <(sed 's#^#./#' /tmp/repo_files.txt)   # on the server only
+#    (expected: .env and a few runtime files; a stray .py or a moved file's old copy is what to look for)
+# c) the server's state, to compare with after
+ssh user@192.168.1.23 'df -h ~ | tail -1; nvidia-smi --query-gpu=memory.used,memory.total --format=csv; sudo docker ps --format "{{.Names}} {{.Image}} {{.Status}}"; sudo docker images mtg-scanner-server --format "{{.ID}} {{.CreatedAt}}"; ls -ld ~/scanner-server/data ~/scanner-server/data/logs'
+curl -s http://192.168.1.23:5000/api/stats    # collection, scanned and deck numbers: write them down
+```
+
+(These are read-only; an earlier `ssh` of this kind was blocked by the safety check on this machine - if it happens again, run them yourself with `!` in the prompt.)
+
+## Step 2 - backups (data and code)
+
+```bash
+ssh user@192.168.1.23 'cd ~/scanner-server && bash scripts/backup.sh'        # the data: ~/scanner-backups/scanner-backup-<time>.tar.gz
+ssh user@192.168.1.23 'tar czf ~/scanner-backups/code-$(date +%Y%m%d_%H%M%S).tar.gz -C ~ --exclude=scanner-server/data --exclude=scanner-server/scanned_cards scanner-server'
+```
+The code backup is the way back: my notes say no previous image is kept after a rebuild. Write down the two file names.
+
+## Step 3 - the code to a working folder (not the live one)
+
+```bash
+git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | rsync -rlpt --files-from=- ./ user@192.168.1.23:scanner-rehearsal/
+```
+
+## Step 4 - build the new image under its own tag (the live image is not replaced)
+
+```bash
+ssh user@192.168.1.23 'cd ~/scanner-rehearsal && sudo docker build -f deploy/Dockerfile --target server -t mtg-scanner-server:rehearsal .'
+ssh user@192.168.1.23 'sudo docker run --rm --entrypoint python mtg-scanner-server:rehearsal -c "import app, card_scanner.config as c, card_scanner.core.foil_marker as f, card_scanner.core.printing_check; print(c.__file__, f.MODEL_FILE.exists())"'
+#   expect: /app/src/card_scanner/config.py True
+```
+
+## Step 5 - rehearsal on a copy of the real data (port 5002, own data folder; nothing touches the live data)
+
+```bash
+# the backup of step 2 as the rehearsal's data. First look at how the archive is laid out: it must unpack to /tmp/rehearsal/data/ (the earlier rehearsals did; adjust -C if it does not)
+ssh user@192.168.1.23 'tar tzf ~/scanner-backups/scanner-backup-<the one from step 2>.tar.gz | head -5'
+ssh user@192.168.1.23 'mkdir -p /tmp/rehearsal/scanned_cards && tar xzf ~/scanner-backups/scanner-backup-<the one from step 2>.tar.gz -C /tmp/rehearsal/ && ls /tmp/rehearsal/data | head'
+# the index goes into that data folder (15 MB, from the laptop; it exists now, so the copy can be made)
+rsync -rt ~/Projects/scanner-server/data/image_index/ user@192.168.1.23:/tmp/rehearsal/data/image_index/
+ssh user@192.168.1.23 'sudo docker run -d --name rehearsal -p 5002:5000 --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all \
+  --add-host host.docker.internal:host-gateway -e LOCAL_AI_ENDPOINT=http://host.docker.internal:11434/v1/chat/completions \
+  -v /tmp/rehearsal/data:/app/data -v /tmp/rehearsal/scanned_cards:/app/scanned_cards mtg-scanner-server:rehearsal'
+# test pictures: the 15 Deadpool captures (their versions are known) and 15 ordinary ones, from the laptop's experiment cache
+rsync -rt ~/.cache/mtg-image-match/truth/rescan_cards/ user@192.168.1.23:/tmp/rehearsal/pictures/
+```
+Send them through the whole pipeline as a station would (a station id of its own, `foil_is_image=1`, the pictures are the finished cards):
+```bash
+for f in /tmp/rehearsal/pictures/phone-0240eb84_10[3-5]*.jpg; do
+  curl -s -F image=@$f -F foil_is_image=1 -F capture_id=rehearsal-$(basename $f .jpg) -F wait=60 http://localhost:5002/api/stations/rehearsal/captures; echo; done
+```
+**What must be true before going on:**
+- the log (`sudo docker logs rehearsal`) has `light-ocr ready (webgpu)` and `Printing check: image index loaded (112765 printings ...)`, and no warning about `foil_net.onnx`;
+- the captures are answered (`added` or `review`); a Deadpool foil whose marker the full-card OCR misses gets its finish from the strip / the network (log: `Foil marker read by ...`);
+- `sudo docker exec rehearsal python scripts/printing_check_report.py` shows a THE CHECK and a THE LOOKUP section, the Deadpool captures as disagreements of kind `other_card`;
+- **GPU memory**: `nvidia-smi` before the rehearsal, with the live container and Ollama running, and while the lookup's second reader is up (a `ps` inside the container shows two `server.mjs`):
+  enough free memory left? the live container's OCR unaffected? Note the numbers;
+- two minutes after the last capture the second reader is gone (one `server.mjs`);
+- `curl` of `/api/stats` and `/api/decks` on port 5002 equal the live server's (the code did not change data);
+- the time of the OCR stage in the log is as before (the lookup must not slow the live reader).
+
+Clean up: `sudo docker rm -f rehearsal; sudo docker rmi mtg-scanner-server:rehearsal; rm -rf /tmp/rehearsal ~/scanner-rehearsal`.
+If the GPU does not have room: decide between `lookup: off`, the shadow reader on the CPU, or `ocr.foil_marker` only. **Do not go to step 6 until the numbers are in.**
+
+## Step 6 - the real deploy
+
+```bash
+cd ~/Projects/scanner-server
+# 1. the index first (harmless to the old code: it is only a folder it does not look at)
+rsync -rt data/image_index/ user@192.168.1.23:scanner-server/data/image_index/
+# 2. the code (no --delete; the same list as step 1a)
+git ls-files | grep -v "^data/\|^\.claude/\|^scripts/experiments/" | rsync -rlpt --checksum --files-from=- ./ user@192.168.1.23:scanner-server/
+# 3. on the server: look at where the volumes point, build while the old container serves, look into the image, then start
+ssh user@192.168.1.23
+cd ~/scanner-server
+sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml config | grep "source:"          # must be ~/scanner-server/data and scanned_cards
+sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml build
+sudo docker run --rm --entrypoint python mtg-scanner-server -c "import app, card_scanner.config as c; print(c.__file__)"      # /app/src/card_scanner/config.py
+sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d       # always BOTH files: without the GPU file the OCR runs on the CPU
+```
+Do not run `docker image prune` afterwards (it removed the previous image once, with 15.8 GB of others).
+
+## Step 7 - after it is up (the checks, in this order)
+
+1. `sudo docker logs mtg-scanner-server | head -60`, or `data/logs/app.log`: `light-ocr ready (webgpu)`, `Printing check: image index loaded (112765 printings ...)`, no traceback.
+2. `/api/stats` and `/api/decks`: the numbers from step 1c (plus anything scanned meanwhile).
+3. The stations reconnected (`pi`, `rpi-scanner`, the phone): the stations page.
+4. One real scan of a foil card; its finish and, in the log, how it was read (`Foil marker read by ...` when the OCR missed the marker).
+5. After some captures: `sudo docker exec mtg-scanner-server python scripts/printing_check_report.py`. The first lines show it works (cards looked at, agree / disagree).
+6. `nvidia-smi` and `docker stats`: the memory and CPU are as the rehearsal showed.
+
+## The switches, if something misbehaves
+
+| Problem | Switch | Needs |
+|---|---|---|
+| The printing check / the lookup (any problem) | `ssh ... 'mv ~/scanner-server/data/image_index ~/scanner-server/data/image_index.off'` | **Nothing else, at once**: without an index it does nothing (the next capture notices; no restart) |
+| The foil network gives wrong finishes | `ocr.foil_marker: false` in `~/scanner-server/config.yaml`, then build + `up -d` | a rebuild (2-3 min); or the rollback below |
+| The second OCR process is a problem | `printing_check.lookup: off` (same way), or the index switch above | a rebuild, or the index switch |
+
+## Rollback
+
+There is no data migration, so **a rollback is code only**: restore the code backup of step 2 (`tar xzf ~/scanner-backups/code-<time>.tar.gz -C ~`), `build`, `up -d` with both files.
+The data backup is a precaution; the new `data/image_index/` and `data/logs/printing_check.jsonl` are inert and can stay.
+
+## After the deploy
+
+- Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`a84dcb9`) and the backup names.
+- **The index must be rebuilt after each card data update** (a new set's printings are `not_indexed` until then):
+  `sudo docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml exec server python scripts/build_image_index.py` - it downloads only the new printings from
+  Scryfall (10 requests a second at most), can be stopped and run again, and a second one at the same time is refused. The report's `not_indexed` count says when it is due.
+  A timer for it is a later decision.
+- Read `printing_check_report.py` now and then. The exit criteria for dropping the AI are in `docs/PROGRAM_DOCUMENTATION.md` ("Printing check"); at ~3% of captures, 300 AI-handled
+  cards is weeks of normal scanning.
+- The Android app and the standalone mirror (`../scanner`, by `git merge server/main`) are separate decisions and are not part of this deploy.
+
+## What I could not verify from here
+
+The server's current state (only step 1 can say), its free GPU memory, whether `user` is uid 1000 there, and whether a second reader fits next to Ollama. Everything else in the
+plan was checked against the code and the earlier deploys' notes.
