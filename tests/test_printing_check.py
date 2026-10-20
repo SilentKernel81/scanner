@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the c
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-from card_scanner.core import image_index, printing_check  # noqa: E402
+from card_scanner.core import card_ocr, image_index, printing_check  # noqa: E402
 
 
 def synthetic_card(seed, width=488, height=680):
@@ -398,8 +398,9 @@ class InShadowMode(unittest.TestCase):
         self.log_file = root / 'logs' / 'printing_check.jsonl'
         self.root = root
 
-    def make(self, mode='shadow'):
-        return printing_check.PrintingCheck(FakeDatabase(), self.root / 'index', self.log_file, mode)
+    def make(self, mode='shadow', lookup='off', strip_reader=None):
+        # the lookup is off here: these tests are about the check; TheLookup has the lookup's
+        return printing_check.PrintingCheck(FakeDatabase(), self.root / 'index', self.log_file, mode, lookup, strip_reader)
 
     def lines(self):
         return [json.loads(l) for l in self.log_file.read_text().splitlines()] if self.log_file.is_file() else []
@@ -438,11 +439,11 @@ class InShadowMode(unittest.TestCase):
         real = shadow.check
         calls = []
 
-        def flaky(rgb, printing_id):
+        def flaky(rgb, printing_id, search=None):
             calls.append(printing_id)
             if len(calls) == 1:
                 raise RuntimeError('boom')
-            return real(rgb, printing_id)
+            return real(rgb, printing_id, search)
         with mock.patch.object(shadow, 'check', flaky):
             shadow.observe(self.capture, {'id': 'p2', 'name': 'x'})
             shadow.observe(self.capture, {'id': 'p0', 'name': 'y'})
@@ -467,7 +468,8 @@ class InShadowMode(unittest.TestCase):
         out = []
         printing_check.report(self.log_file, out=out.append)
         text = '\n'.join(out)
-        self.assertIn('2 cards looked at', text)
+        self.assertIn('2 captures looked at', text)
+        self.assertIn('THE CHECK - 2 resolved cards', text)
         self.assertIn('1 agree', text)
         self.assertIn('1 disagree', text)
         self.assertIn('other_card', text)
@@ -475,6 +477,328 @@ class InShadowMode(unittest.TestCase):
         out.clear()
         printing_check.report(self.root / 'nothing.jsonl', out=out.append)
         self.assertIn('looked at nothing', out[0])
+
+
+def line(text, top):
+    """An OCR line of the strip as card_ocr.read_lines gives it"""
+    return {'text': text, 'confidence': 0.9, 'box': [[5, top], [150, top], [150, top + 20], [5, top + 20]]}
+
+
+class TheStripParse(unittest.TestCase):
+    """card_ocr.parse_strip: the collector number and the set code of the bottom-left strip"""
+
+    def test_a_modern_strip(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('U 0172', 5), line('HOB ★ EN', 40)]), ('172', 'hob'))
+
+    def test_the_old_form_with_the_set_total(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('123/281 U', 5), line('M21 • EN', 40)]), ('123', 'm21'))
+
+    def test_lines_in_any_order_and_digit_lookalikes(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('SPM · EN', 40), line('M 0O28', 5)]), ('28', 'spm'))
+
+    def test_what_is_not_read_is_empty(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([]), ('', ''))
+        self.assertEqual(card_ocr.parse_strip([line('Illus. Somebody', 5)]), ('', ''))
+        self.assertEqual(card_ocr.parse_strip([line('U 0172', 5)]), ('172', ''))
+
+
+class FakeReader:
+    """Stands in for a light-ocr reader (CardOcr): read_lines gives the lines it is told to - or stalls until released, fails, or times out (None)"""
+
+    def __init__(self, lines=None, error=None, stall=None):
+        self.lines, self.error, self.stall = lines, error, stall
+        self.calls = 0
+        self.stopped = 0
+
+    def read_lines(self, image):
+        self.calls += 1
+        if self.stall is not None:
+            self.stall.wait(10)
+        if self.error:
+            raise self.error
+        return self.lines
+
+    def stop(self):
+        self.stopped += 1
+
+
+def wait_for(condition, seconds=3.0):
+    """True once condition() is, polled for up to `seconds`"""
+    import time
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return condition()
+
+
+class TheStripReader(unittest.TestCase):
+    """printing_check.StripReader: the lookup's OWN OCR reader. The review of 2026-10-20: on the live reader, a slow shadow request holds the
+    live OCR worker up (it holds the request lock while it waits), and a time-out stops the shared process and starts a 60 s cool-down."""
+
+    STRIP_LINES = [line('U 0172', 5), line('HOB ★ EN', 40)]
+    CARD = np.zeros((1200, 860, 3), np.uint8)
+
+    def make(self, reader=None, enabled=True, idle_stop=60):
+        self.made = []
+
+        def make_reader():
+            self.made.append(reader or FakeReader(self.STRIP_LINES))
+            return self.made[-1]
+        strip_reader = printing_check.StripReader(lambda: enabled, make_reader, idle_stop)
+        self.addCleanup(strip_reader.close)
+        return strip_reader
+
+    def test_it_reads_the_number_and_the_set_of_the_strip(self):
+        self.assertEqual(self.make()(self.CARD), ('172', 'hob'))
+
+    def test_the_reader_is_started_on_the_first_strip_and_kept(self):
+        strip_reader = self.make()
+        self.assertEqual(self.made, [])                        # nothing is started until a strip is asked for
+        strip_reader(self.CARD)
+        strip_reader(self.CARD)
+        self.assertEqual(len(self.made), 1)
+        self.assertEqual(self.made[0].calls, 2)
+
+    def test_while_ocr_is_off_nothing_is_started(self):
+        self.assertEqual(self.make(enabled=False)(self.CARD), ('', ''))
+        self.assertEqual(self.made, [])
+
+    def test_a_reader_that_read_nothing_or_timed_out_gives_nothing(self):
+        self.assertEqual(self.make(FakeReader(lines=None))(self.CARD), ('', ''))      # CardOcr.read_lines answers None on a time-out
+        self.assertEqual(self.make(FakeReader(lines=[]))(self.CARD), ('', ''))
+
+    def test_a_stalled_shadow_read_does_not_touch_the_live_reader(self):
+        live = card_ocr.CardOcr()                              # the live reader: its lock, its process, its cool-down
+        stall = threading.Event()
+        strip_reader = self.make(FakeReader(self.STRIP_LINES, stall=stall))
+        worker = threading.Thread(target=strip_reader, args=(self.CARD,))
+        worker.start()
+        try:
+            self.assertTrue(wait_for(lambda: self.made and self.made[0].calls == 1))      # the shadow request is in, stalled
+            self.assertTrue(live._lock.acquire(blocking=False), 'the live reader\'s request lock is held by a shadow request')
+            live._lock.release()
+            self.assertIsNone(live.process)
+            self.assertIsNone(live._failed_at)
+            self.assertNotIn(live, self.made)                  # the shadow reader is not the live one
+        finally:
+            stall.set()
+            worker.join(10)
+
+    def test_a_failing_shadow_read_leaves_the_live_reader_as_it_was_and_the_lookup_goes_on(self):
+        live = card_ocr.CardOcr()
+        strip_reader = self.make(FakeReader(error=RuntimeError('the reader died')))
+        with self.assertRaises(RuntimeError):
+            strip_reader(self.CARD)
+        # PrintingCheck turns the failure into "the strip was not read": the lookup goes on by the picture alone
+        check = printing_check.PrintingCheck(FakeDatabase(), Path(tempfile.gettempdir()) / 'no-index', Path('/nonexistent/x.jsonl'),
+                                             strip_reader=strip_reader)
+        self.assertEqual(check._strip(self.CARD), ('', ''))
+        self.assertIsNone(live.process)
+        self.assertIsNone(live._failed_at)
+
+    def test_the_reader_stops_when_idle_and_starts_again_when_needed(self):
+        strip_reader = self.make(idle_stop=0.1)
+        strip_reader(self.CARD)
+        self.assertTrue(wait_for(lambda: self.made[0].stopped == 1), 'the idle reader was not stopped')
+        strip_reader(self.CARD)
+        self.assertEqual(len(self.made), 2)                    # a new one for the next strip
+
+    def test_a_reader_used_again_is_not_stopped_by_the_older_timer(self):
+        strip_reader = self.make(idle_stop=0.4)
+        strip_reader(self.CARD)
+        import time
+        time.sleep(0.25)
+        strip_reader(self.CARD)                                # the first timer (0.4 s) is now stale
+        time.sleep(0.25)                                       # t = 0.5 s: the first timer has fired
+        self.assertEqual(self.made[0].stopped, 0)
+        self.assertTrue(wait_for(lambda: self.made[0].stopped == 1), 'it was never stopped')
+
+    def test_close_stops_the_reader_at_once_and_printing_check_passes_it_on(self):
+        strip_reader = self.make()
+        check = printing_check.PrintingCheck(FakeDatabase(), Path(tempfile.gettempdir()) / 'no-index', Path('/nonexistent/x.jsonl'),
+                                             strip_reader=strip_reader)
+        strip_reader(self.CARD)
+        check.close()
+        self.assertEqual(self.made[0].stopped, 1)
+        check.close()                                          # twice is fine
+        self.assertEqual(self.made[0].stopped, 1)
+
+    def test_a_plain_function_has_nothing_to_close(self):
+        check = printing_check.PrintingCheck(FakeDatabase(), Path(tempfile.gettempdir()) / 'no-index', Path('/nonexistent/x.jsonl'),
+                                             strip_reader=lambda rgb: ('', ''))
+        check.close()
+        printing_check.PrintingCheck(FakeDatabase(), Path(tempfile.gettempdir()) / 'no-index', Path('/nonexistent/x.jsonl')).close()
+
+
+class TheLookup(unittest.TestCase):
+    """What the picture and the strip ALONE would have answered (printing_check.lookup): rule A2 of the experiment"""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name)
+        pictures = self.root / 'pictures'
+        pictures.mkdir()
+        write_pictures(pictures, range(6))
+        # p6 is a reprint of p0 with the same art: the two pictures are identical, so only the strip can tell them apart
+        cv2.imwrite(str(pictures / 'p6.jpg'), cv2.cvtColor(synthetic_card(0), cv2.COLOR_RGB2BGR))
+        image_index.build([(f'p{n}', None) for n in range(7)], self.root / 'index', image_dir=pictures, fetch=False, log=lambda m: None)
+        self.log_file = self.root / 'printing_check.jsonl'
+        self.strip = ('', '')
+        self.strip_calls = []
+        self.check = self.make()
+
+    def make(self, lookup='ai_cases', reader_present=True):
+        def strip_reader(rgb):
+            self.strip_calls.append(rgb.shape)
+            if isinstance(self.strip, Exception):
+                raise self.strip
+            return self.strip
+        return printing_check.PrintingCheck(FakeDatabase(), self.root / 'index', self.log_file, 'shadow', lookup,
+                                            strip_reader if reader_present else None)
+
+    def test_a_strip_that_names_a_printing_that_looks_like_the_picture_decides(self):
+        self.strip = ('3', 'tst')
+        answer = self.check.lookup(degraded(synthetic_card(3)))
+        self.assertEqual((answer['path'], answer['printing']['id']), ('strong', 'p3'))
+        self.assertEqual(answer['strip'], {'number': '3', 'set': 'tst'})
+
+    def test_a_strip_that_names_a_printing_that_looks_different_is_not_believed_the_picture_decides(self):
+        # the Secret Lair case: the printed line names another printing (p2), the picture is p3
+        self.strip = ('2', 'tst')
+        answer = self.check.lookup(degraded(synthetic_card(3)))
+        self.assertEqual((answer['path'], answer['printing']['id']), ('image', 'p3'))
+
+    def test_two_reprints_with_the_same_art_are_told_apart_by_the_strip(self):
+        picture = degraded(synthetic_card(0))
+        self.strip = ('6', 'tst')
+        self.assertEqual(self.check.lookup(picture)['printing']['id'], 'p6')
+        self.strip = ('0', 'tst')
+        self.assertEqual(self.check.lookup(picture)['printing']['id'], 'p0')
+
+    def test_two_reprints_with_the_same_art_and_no_strip_would_go_to_review(self):
+        answer = self.check.lookup(degraded(synthetic_card(0)))               # the picture cannot decide: no lead
+        self.assertEqual((answer['path'], answer['printing']), ('review', None))
+        self.assertEqual(answer['against_resolved'], 'unresolved')
+
+    def test_a_strip_that_cannot_be_read_leaves_the_picture_alone(self):
+        for unreadable in (('', ''), ('3', ''), ('', 'tst'), RuntimeError('ocr is down')):
+            self.strip = unreadable
+            answer = self.check.lookup(degraded(synthetic_card(3)))
+            self.assertEqual((answer['path'], answer['printing']['id']), ('image', 'p3'), unreadable)
+
+    def test_without_a_strip_reader_it_is_the_picture_alone(self):
+        answer = self.make(reader_present=False).lookup(degraded(synthetic_card(3)))
+        self.assertEqual((answer['path'], answer['printing']['id'], answer['strip']), ('image', 'p3', None))
+
+    def test_it_says_how_the_answer_stands_to_what_the_server_resolved(self):
+        picture, self.strip = degraded(synthetic_card(0)), ('0', 'tst')
+        self.assertEqual(self.check.lookup(picture, 'p0')['against_resolved'], 'same_printing')
+        self.assertEqual(self.check.lookup(picture, 'p1')['against_resolved'], 'same_card')       # p1: another printing of p0's card
+        self.assertEqual(self.check.lookup(picture, 'p2')['against_resolved'], 'other_card')
+        self.assertEqual(self.check.lookup(picture, None)['against_resolved'], 'unresolved')
+        self.strip = ('', '')                                                                      # the picture cannot decide (p0 and p6 alike)
+        self.assertEqual(self.check.lookup(picture, 'p1')['against_resolved'], 'picture_review')
+
+    def test_a_card_upside_down_is_found_by_the_lookup_too(self):
+        answer = self.check.lookup(cv2.rotate(degraded(synthetic_card(4)), cv2.ROTATE_180))
+        self.assertEqual((answer['printing']['id'], answer['rotated']), ('p4', True))
+
+    def test_the_strip_of_a_card_put_in_upside_down_is_read_the_right_way_up(self):
+        # The review of 2026-10-20: the search turned the card for the fingerprint but the strip was cut from the picture as it came, so
+        # the collector lines were missed and two reprints with the same art - only the strip can tell them apart - fell back to review
+        upright = degraded(synthetic_card(0))                    # p0 and p6 have this very picture
+        received = []
+
+        def strip_reader(rgb):
+            received.append(rgb)
+            return ('6', 'tst') if np.array_equal(rgb, upright) else ('', '')       # it can only read the card the right way up
+        check = printing_check.PrintingCheck(FakeDatabase(), self.root / 'index', self.log_file, 'shadow', 'ai_cases', strip_reader)
+        answer = check.lookup(cv2.rotate(upright, cv2.ROTATE_180))
+        self.assertTrue(answer['rotated'])
+        self.assertTrue(np.array_equal(received[0], upright), 'the strip reader was given the card upside down')
+        self.assertEqual((answer['path'], answer['printing']['id']), ('strong', 'p6'))
+        # and a card the right way up is handed over as it is
+        received.clear()
+        self.assertEqual(check.lookup(upright)['printing']['id'], 'p6')
+        self.assertTrue(np.array_equal(received[0], upright))
+
+    def test_without_an_index_there_is_no_answer(self):
+        empty = printing_check.PrintingCheck(FakeDatabase(), self.root / 'nothing', self.log_file)
+        self.assertIsNone(empty.lookup(synthetic_card(0)))
+
+    def test_which_captures_get_the_lookup(self):
+        ai_cases, everything, off = self.make('ai_cases'), self.make('all'), self.make('off')
+        for reader, want in (('light-ocr', False), ('qwen3.5:9b', True), (None, True)):
+            self.assertEqual(ai_cases.wants_lookup(reader, {'id': 'p0'}), want, reader)
+        self.assertTrue(ai_cases.wants_lookup('light-ocr', None))                    # nothing resolved: the lookup is what is missing
+        self.assertTrue(everything.wants_lookup('light-ocr', {'id': 'p0'}))
+        self.assertFalse(off.wants_lookup('qwen3.5:9b', None))
+        self.assertEqual(printing_check.PrintingCheck(FakeDatabase(), self.root, self.log_file, lookup='nonsense').lookup_mode, 'ai_cases')
+
+    def observe(self, check, card, reader, picture=None):
+        capture = self.root / 'capture.jpg'
+        cv2.imwrite(str(capture), cv2.cvtColor(picture if picture is not None else degraded(synthetic_card(3)), cv2.COLOR_RGB2BGR))
+        check.observe(capture, card, 'phone', reader)
+        self.assertTrue(check.wait())
+        return [json.loads(l) for l in self.log_file.read_text().splitlines()] if self.log_file.is_file() else []
+
+    def test_a_card_the_ai_resolved_gets_the_check_and_the_lookup_in_one_line(self):
+        self.strip = ('3', 'tst')
+        (record,) = self.observe(self.check, {'id': 'p2', 'name': 'Card p2', 'set_code': 'tst', 'number': '2'}, 'qwen3.5:9b')
+        self.assertEqual((record['reader'], record['verdict'], record['resolved']['id']), ('qwen3.5:9b', 'disagree', 'p2'))
+        self.assertEqual((record['lookup']['path'], record['lookup']['printing']['id'], record['lookup']['against_resolved']), ('strong', 'p3', 'other_card'))
+
+    def test_a_card_nothing_was_resolved_for_still_gets_the_lookup(self):
+        # the AI gave no answer: the card would go to review today; the lookup shows what the picture and the strip would have done
+        self.strip = ('3', 'tst')
+        (record,) = self.observe(self.check, None, 'qwen3.5:9b')
+        self.assertIsNone(record['verdict'])
+        self.assertIsNone(record['resolved'])
+        self.assertEqual((record['lookup']['path'], record['lookup']['printing']['id'], record['lookup']['against_resolved']), ('strong', 'p3', 'unresolved'))
+
+    def test_a_card_the_ocr_confirmed_gets_only_the_check_unless_all_is_asked_for(self):
+        card = {'id': 'p3', 'name': 'Card p3', 'set_code': 'tst', 'number': '3'}
+        (record,) = self.observe(self.check, card, 'light-ocr')
+        self.assertEqual(record['verdict'], 'agree')
+        self.assertNotIn('lookup', record)
+        self.log_file.unlink()
+        (record,) = self.observe(self.make('all'), card, 'light-ocr')
+        self.assertEqual((record['verdict'], record['lookup']['against_resolved']), ('agree', 'same_printing'))
+
+    def test_with_the_lookup_off_a_card_nothing_was_resolved_for_is_not_looked_at(self):
+        self.assertEqual(self.observe(self.make('off'), None, 'qwen3.5:9b'), [])
+
+    def test_the_strip_is_read_once_per_capture_and_only_when_asked_for(self):
+        self.observe(self.check, {'id': 'p3', 'name': 'x'}, 'light-ocr')                    # ai_cases: the OCR's card is not looked up
+        self.assertEqual(self.strip_calls, [])
+        self.observe(self.check, {'id': 'p3', 'name': 'x'}, 'qwen3.5:9b')
+        self.assertEqual(len(self.strip_calls), 1)
+
+    def test_the_report_sums_up_the_lookup_and_lists_the_disagreements(self):
+        self.strip = ('3', 'tst')
+        self.observe(self.check, {'id': 'p2', 'name': 'Card p2', 'set_code': 'tst', 'number': '2'}, 'qwen3.5:9b')       # disagrees
+        self.observe(self.check, {'id': 'p3', 'name': 'Card p3', 'set_code': 'tst', 'number': '3'}, 'qwen3.5:9b')       # agrees
+        self.observe(self.check, None, 'qwen3.5:9b')                                                                    # unresolved
+        self.strip = ('', '')
+        self.observe(self.check, None, 'qwen3.5:9b', degraded(synthetic_card(0)))                                       # the picture cannot decide
+        out = []
+        printing_check.report(self.log_file, out=out.append)
+        text = '\n'.join(out)
+        self.assertIn('THE LOOKUP - cards the AI handled', text)
+        self.assertIn('4 compared', text)
+        self.assertIn('would add by themselves 3 (75.0%', text)
+        self.assertIn('send 1 (25.0%)', text)
+        self.assertIn('nothing was resolved for, the picture and the strip would have added 1', text)
+        self.assertIn('exit criteria', text)
+        self.assertIn('Card p2', text)                              # the disagreement is listed with both answers
+        self.assertIn('other_card', text)
 
 
 class TheHook(unittest.TestCase):
@@ -498,14 +822,35 @@ class TheHook(unittest.TestCase):
         check = mock.MagicMock()
         card = {'id': 'p2', 'name': 'Card p2'}
         outcome = self.run_search(check, card)
-        check.observe.assert_called_once_with('capture.jpg', card, 'phone')
+        check.observe.assert_called_once_with('capture.jpg', card, 'phone', 'ai')      # ... and what read it ('ai': get_ai_model_info)
         self.assertEqual(outcome['status'], 'review')                  # what became of the card is not the check's business
 
-    def test_no_card_or_no_picture_means_nothing_is_handed_over(self):
+    def test_a_capture_nothing_was_found_for_is_handed_over_too_for_the_lookup(self):
+        # the AI gave no card the database knows: the lookup shows what the picture and the strip would have answered
         check = mock.MagicMock()
         self.run_search(check, None)
+        check.observe.assert_called_once_with('capture.jpg', None, 'phone', 'ai')
+
+    def test_no_picture_means_nothing_is_handed_over(self):
+        check = mock.MagicMock()
         self.run_search(check, {'id': 'p2'}, image_path=None)
+        self.run_search(check, None, image_path=None)
         check.observe.assert_not_called()
+
+    def test_a_capture_nothing_was_read_for_is_handed_over_from_route_identified(self):
+        # the AI answered nothing at all (no name): route_identified never reaches the card search - the lookup is asked here
+        from card_scanner.server import captures
+        check = mock.MagicMock()
+        patches = [mock.patch.object(captures, name, value) for name, value in (
+            ('printing_check', check), ('games', mock.MagicMock()), ('desk', mock.MagicMock(**{'return_value.current_review_id': None})),
+            ('set_pending_capture', mock.Mock()), ('queue_for_review', mock.Mock(return_value='nothing read')),
+            ('get_ai_model_info', mock.Mock(return_value='ai')))]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        outcome = captures.route_identified('capture.jpg', '', '', '', fast=True, station='phone')
+        check.observe.assert_called_once_with('capture.jpg', None, 'phone', 'ai')
+        self.assertEqual(outcome['status'], 'review')
 
     def test_before_the_service_exists_nothing_breaks(self):
         # a LocalProxy of None is falsy: the hook skips it (a capture that arrives before start-up has finished)

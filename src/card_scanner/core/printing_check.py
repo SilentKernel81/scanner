@@ -25,6 +25,14 @@
 # labels would have been flagged (some of those are probably labels that were wrong too). 20 wrong cases
 # is a small sample: that is what shadow mode is for. Measure on live scans before it changes anything.
 #
+# THE LOOKUP (since 2026-10-20, also shadow only) is the second half: what the picture and the strip ALONE would have
+# answered, with no vision AI - to compare on live scans with what the AI answered before anything is switched off
+# (the exit criteria are in docs/PROGRAM_DOCUMENTATION.md, "Printing check"). The rule is the experiment's rule A2:
+# the printing the strip names (number AND set) if it is one of the picture's five nearest and looks as much like the
+# picture as the best match; else the best match if it leads the second by IMAGE_LEAD; else it would send the card to
+# review. By default it runs for the captures the AI read and for those nothing was read for ('ai_cases'): the cards the
+# AI would no longer be needed for, ~3% of the captures; 'all' adds the OCR-confirmed ones at one more small OCR request each.
+#
 # Shadow mode writes one JSON line per card it looked at to data/logs/printing_check.jsonl, and a line in
 # the log for each 'disagree'. `python scripts/printing_check_report.py` sums them up. The work is done by
 # one background thread behind a small queue: a capture never waits for it, and nothing it does can fail one.
@@ -39,14 +47,93 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from card_scanner.core import image_index
+from card_scanner.core import card_ocr, foil_marker, image_index
 
 logger = logging.getLogger('ai')
 
 AGREE_BELOW = 0.02
 DISAGREE_FROM = 0.06
+IMAGE_LEAD = 0.05                 # the lookup believes the picture alone when its best match leads the second by this much
+LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
+
+
+def read_strip(ocr, card_rgb):
+    """
+    (number, set_code) the OCR reader (card_ocr.CardOcr) reads from the bottom-left strip of a flat card - the collector line and the
+    set line, enlarged when the card image is small (foil_marker.strip_of): ('', '') when it read neither. One more small request.
+    """
+    lines = ocr.read_lines(foil_marker.strip_of(card_rgb))
+    return card_ocr.parse_strip(lines) if lines else ('', '')
+
+
+class StripReader:
+    """
+    The lookup's strip reader: a light-ocr reader OF ITS OWN, never the live one. A second light-ocr process, started on the first strip it is
+    asked for and stopped when it has been idle for `idle_stop` seconds (the lookup is for ~3% of the captures: the models need not stay in
+    memory), one request at a time. Why not the live reader (a review of 2026-10-20): `CardOcr.read_lines` holds that reader's request lock
+    while it waits, so a slow shadow request would hold up the live OCR worker for up to its 10 s time-out, and a time-out stops the shared
+    process and starts its 60 s cool-down - after which the live captures go to the AI. Shadow mode must not be able to do that: here a stalled or
+    failed read can only spoil this reader.
+    Called with a flat card (RGB) it returns (number, set_code), ('', '') for what was not read or while OCR is off (ocr_enabled(): the person's
+    choice, and it would start a reader); an exception from the reader goes to the caller (PrintingCheck, which goes on by the picture alone).
+    """
+
+    IDLE_STOP = 120
+
+    def __init__(self, ocr_enabled=lambda: True, make_reader=None, idle_stop=IDLE_STOP):
+        self.ocr_enabled = ocr_enabled
+        self._make = make_reader or card_ocr.CardOcr
+        self._idle_stop = idle_stop
+        self._reader = None
+        self._last_used = 0.0
+        self._timer = None
+        self._lock = threading.Lock()                 # one request at a time; also guards starting and stopping
+
+    def __call__(self, rgb):
+        if not self.ocr_enabled():
+            return '', ''
+        with self._lock:
+            if self._reader is None:
+                self._reader = self._make()
+            self._last_used = time.monotonic()
+            self._arm()
+            return read_strip(self._reader, rgb)
+
+    def _arm(self):
+        """(Re)start the idle timer: the reader stops idle_stop seconds after the last strip"""
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = threading.Timer(self._idle_stop, self._idle)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _idle(self):
+        with self._lock:                              # waits for a request in progress
+            if time.monotonic() - self._last_used >= self._idle_stop:    # not used again since this timer was set
+                self._stop()
+
+    def _stop(self):
+        if self._reader is not None:
+            try:
+                self._reader.stop()
+            except Exception:
+                pass
+            self._reader = None
+
+    def close(self):
+        """Stops the reader now (the server's shutdown)"""
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self._stop()
+
+
+def _plain_number(number):
+    """A collector number as the strip's parse writes it: no leading zeros ('0172' -> '172', '0' stays '0' for a card numbered 0)"""
+    return str(number or '').strip().lstrip('0') or '0'
 
 
 def verdict_for(gap):
@@ -57,13 +144,23 @@ def verdict_for(gap):
 
 
 class PrintingCheck:
-    """Looks at the cards the server resolved. mode: 'shadow' (log only) or 'off'."""
+    """
+    Looks at the cards the server resolved (the check) and at what the picture and the strip alone would have answered (the lookup).
+    mode: 'shadow' (log only) or 'off'.
+    lookup: which captures also get the lookup - 'ai_cases' (those the vision AI read, or nothing read: the cards the AI would no longer
+    be needed for), 'all' (every capture: the OCR-confirmed ones show how often the picture agrees on easy cards, at the price of one
+    more small OCR request for each) or 'off'.
+    strip_reader: a function (RGB flat card) -> (number, set_code) for the lookup (read_strip with the server's OCR reader), or None:
+    the lookup then goes by the picture alone.
+    """
 
-    def __init__(self, database, index_folder, log_file, mode='shadow'):
+    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None):
         self.database = database
         self.index_folder = Path(index_folder)
         self.log_file = Path(log_file)
         self.mode = mode if mode in ('shadow', 'off') else 'shadow'
+        self.lookup_mode = lookup if lookup in LOOKUP_MODES else 'ai_cases'
+        self.strip_reader = strip_reader
         self._index = None
         self._index_stamp = 'not looked at yet'   # meta.json's modification time when the index was loaded (None: no index)
         self._queue = queue.Queue(QUEUE_SIZE)
@@ -94,10 +191,10 @@ class PrintingCheck:
 
     # ------------------------------------------------------------------ the check
 
-    def check(self, rgb, printing_id):
+    def _search(self, rgb):
         """
-        The verdict for a capture (RGB array) and the printing the server resolved for it: a dict, or None without an index.
-        {'verdict', 'kind', 'gap', 'lead', 'rotated', 'best': {'id', 'similarity'}, 'resolved_similarity'}
+        The capture against every printing, in both orientations (the better one counts): the index, the distance to every row, whether the
+        card was upside down, and the five nearest rows with their similarities (nearest first). None without an index.
         """
         index = self.index()
         if index is None or not len(index):
@@ -106,12 +203,23 @@ class PrintingCheck:
         turned = index.distances(image_index.hash_card(cv2.rotate(rgb, cv2.ROTATE_180)))
         rotated = int(turned.min()) < int(upright.min())      # the card was put in upside down
         distances = turned if rotated else upright
-        best_two = np.argpartition(distances, 1)[:2] if len(distances) > 1 else np.array([0, 0])
-        best_two = best_two[np.argsort(distances[best_two])]
-        best = int(best_two[0])
-        sims = image_index.similarity(distances[best_two])
-        result = {'rotated': rotated, 'best': {'id': index.ids[best], 'similarity': round(float(sims[0]), 4)},
-                  'lead': round(float(sims[0] - sims[1]), 4) if len(best_two) > 1 else None}
+        k = min(5, len(distances))
+        top = np.argpartition(distances, k - 1)[:k]
+        top = top[np.argsort(distances[top], kind='stable')]
+        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top])}
+
+    def check(self, rgb, printing_id, search=None):
+        """
+        The verdict for a capture (RGB array) and the printing the server resolved for it: a dict, or None without an index.
+        {'verdict', 'kind', 'gap', 'lead', 'rotated', 'best': {'id', 'similarity'}, 'resolved_similarity'}
+        search: what _search gave for this picture, when the caller has it already.
+        """
+        search = search or self._search(rgb)
+        if search is None:
+            return None
+        index, distances, top, sims = search['index'], search['distances'], search['top'], search['sims']
+        result = {'rotated': search['rotated'], 'best': {'id': index.ids[int(top[0])], 'similarity': round(float(sims[0]), 4)},
+                  'lead': round(float(sims[0] - sims[1]), 4) if len(top) > 1 else None}
         row = index.row(printing_id)
         if row is None:
             return {**result, 'verdict': 'not_indexed', 'kind': None, 'gap': None, 'resolved_similarity': None}
@@ -119,8 +227,69 @@ class PrintingCheck:
         gap = float(sims[0]) - resolved_similarity
         result.update(gap=round(gap, 4), resolved_similarity=round(resolved_similarity, 4), verdict=verdict_for(gap), kind=None)
         if result['verdict'] != 'agree':
-            result['kind'] = self._kind(printing_id, index.ids[best])
+            result['kind'] = self._kind(printing_id, index.ids[int(top[0])])
         return result
+
+    def _strip(self, rgb):
+        """(number, set_code) the strip reader gives, or ('', '') without one or when it fails: the lookup then goes by the picture alone"""
+        if self.strip_reader is None:
+            return '', ''
+        try:
+            return self.strip_reader(rgb)
+        except Exception as e:
+            logger.debug(f"Printing check: the strip could not be read: {e}")
+            return '', ''
+
+    def lookup(self, rgb, resolved_id=None, search=None):
+        """
+        What the picture and the strip ALONE would have answered, with no OCR of the whole card and no vision AI - the answer that would
+        replace the AI's. The rule is the experiment's rule A2 (docs/plans/IMAGE_MATCH_EXPERIMENT.md, section 4):
+          'strong'  the strip names a printing (number AND set) that is one of the picture's five nearest and looks as much like the
+                    picture as the best match does (a reprint with the same art has almost the same fingerprint: the strip decides
+                    among those) - that printing;
+          'image'   else, the picture's best match when it leads the second by IMAGE_LEAD (0.05);
+          'review'  else: it would not decide.
+        The answer is compared with the printing the server resolved (resolved_id, from the OCR or the AI) when there is one:
+        'against_resolved' is 'same_printing', 'same_card' (another printing of the card), 'other_card', 'picture_review' (it would not
+        have decided) or, with no resolved printing, 'unresolved'. None without an index.
+        {'path', 'printing': {'id', 'name', 'set', 'number', 'similarity'} or None, 'strip': {'number', 'set'}, 'lead', 'rotated', 'against_resolved'}
+        """
+        search = search or self._search(rgb)
+        if search is None:
+            return None
+        index, top, sims = search['index'], search['top'], search['sims']
+        # The strip is at the bottom left of the card the right way up: a card that was put in upside down (the search found its
+        # fingerprint turned) is turned back first, or the strip cut would be the title area and the collector lines would be missed
+        number, set_code = self._strip(cv2.rotate(rgb, cv2.ROTATE_180) if search['rotated'] else rgb)
+        lead = float(sims[0] - sims[1]) if len(top) > 1 else None
+        chosen, path = None, 'review'
+        if number and set_code:
+            for row, similarity in zip(top, sims):               # nearest first: the first that names the strip's printing
+                card = self.database.get_card_by_id(index.ids[int(row)])
+                if card and _plain_number(card.get('number')) == number and (card.get('set_code') or '').lower() == set_code:
+                    if float(sims[0]) - float(similarity) < AGREE_BELOW:     # its picture looks like the best match's: the strip decides
+                        chosen, path = (int(row), float(similarity)), 'strong'
+                    break                                         # one that names it but looks different: the strip is not believed
+        if chosen is None and lead is not None and lead >= IMAGE_LEAD:
+            chosen, path = (int(top[0]), float(sims[0])), 'image'
+        printing = None
+        if chosen is not None:
+            card = self.database.get_card_by_id(index.ids[chosen[0]]) or {}
+            printing = {'id': index.ids[chosen[0]], 'name': card.get('name'), 'set': card.get('set_code'), 'number': card.get('number'),
+                        'similarity': round(chosen[1], 4)}
+        return {'path': path, 'printing': printing, 'strip': {'number': number, 'set': set_code} if number or set_code else None,
+                'lead': round(lead, 4) if lead is not None else None, 'rotated': search['rotated'],
+                'against_resolved': self._against(resolved_id, printing)}
+
+    def _against(self, resolved_id, printing):
+        """How the lookup's printing stands to the one the server resolved (see lookup)"""
+        if resolved_id is None:
+            return 'unresolved'
+        if printing is None:
+            return 'picture_review'
+        if printing['id'] == resolved_id:
+            return 'same_printing'
+        return self._kind(resolved_id, printing['id']) or 'other_card'
 
     def _kind(self, resolved_id, best_id):
         """'same_card' when the best match is another printing of the resolved card, else 'other_card'"""
@@ -133,20 +302,40 @@ class PrintingCheck:
 
     # ------------------------------------------------------------------ shadow mode
 
-    def observe(self, image_path, card, station=None):
+    def wants_lookup(self, reader, resolved):
+        """Whether a capture gets the lookup: reader is what read the card ('light-ocr' or the AI's name), resolved the card found or None"""
+        if self.lookup_mode == 'all':
+            return True
+        if self.lookup_mode == 'off':
+            return False
+        # 'ai_cases': the vision AI read it, or no card was resolved (whoever read it: an OCR read the database does not know is a card
+        # for review too) - the cards the AI is, or would be, needed for
+        return resolved is None or reader != card_ocr.READER
+
+    def observe(self, image_path, card, station=None, reader=None):
         """
-        Shadow mode: look at a capture and the card the server resolved for it (a card dict with 'id'), in the background.
+        Shadow mode: look at a capture and the card the server resolved for it (a card dict with 'id'; None when nothing was read or found
+        - the cases where the AI gave no answer), in the background. The check compares the picture with that card; the lookup (for the
+        captures wants_lookup says) works out what the picture and the strip alone would have answered. reader: what read the card.
         Returns at once and never raises: the capture goes on whatever happens here.
         """
-        if self.mode != 'shadow' or not image_path or not card or not card.get('id'):
+        resolved = card if card and card.get('id') else None
+        lookup = self.wants_lookup(reader, resolved)
+        if self.mode != 'shadow' or not image_path or (resolved is None and not lookup):
             return
         try:
             self._start()
-            self._queue.put_nowait((str(image_path), dict(card), station))
+            self._queue.put_nowait((str(image_path), dict(resolved) if resolved else None, station, reader, lookup))
         except queue.Full:
             pass                          # busy: this one is not looked at
         except Exception as e:
             logger.debug(f"Printing check could not queue a capture: {e}")
+
+    def close(self):
+        """The server's shutdown: lets go of the strip reader's process, if it has one (a plain function has nothing to close)"""
+        close = getattr(self.strip_reader, 'close', None)
+        if close:
+            close()
 
     def _start(self):
         with self._lock:
@@ -172,26 +361,38 @@ class PrintingCheck:
         threading.Thread(target=lambda: (self._queue.join(), done.set()), daemon=True).start()
         return done.wait(timeout)
 
-    def _look(self, image_path, card, station):
+    def _look(self, image_path, card, station, reader, lookup):
         image = cv2.imread(image_path)
         if image is None:                 # the picture is gone (cleaned up, or a path that does not exist)
             return
-        result = self.check(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), card['id'])
-        if result is None:
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        search = self._search(rgb)
+        if search is None:
             return
-        best = self.database.get_card_by_id(result['best']['id']) or {}
-        record = {'time': time.strftime('%Y-%m-%d %H:%M:%S'), 'station': station, 'capture': Path(image_path).name,
-                  'verdict': result['verdict'], 'kind': result['kind'], 'gap': result['gap'], 'lead': result['lead'],
-                  'rotated': result['rotated'],
-                  'resolved': {'id': card['id'], 'name': card.get('name'), 'set': card.get('set_code'), 'number': card.get('number'),
-                               'similarity': result['resolved_similarity']},
-                  'best': {'id': result['best']['id'], 'name': best.get('name'), 'set': best.get('set_code'),
-                           'number': best.get('number'), 'similarity': result['best']['similarity']}}
+        record = {'time': time.strftime('%Y-%m-%d %H:%M:%S'), 'station': station, 'capture': Path(image_path).name, 'reader': reader,
+                  'verdict': None, 'kind': None, 'gap': None, 'lead': None, 'rotated': search['rotated'], 'resolved': None, 'best': None}
+        result = self.check(rgb, card['id'], search) if card else None
+        best = {}
+        if result:
+            best = self.database.get_card_by_id(result['best']['id']) or {}
+            record.update(verdict=result['verdict'], kind=result['kind'], gap=result['gap'], lead=result['lead'],
+                          resolved={'id': card['id'], 'name': card.get('name'), 'set': card.get('set_code'), 'number': card.get('number'),
+                                    'similarity': result['resolved_similarity']},
+                          best={'id': result['best']['id'], 'name': best.get('name'), 'set': best.get('set_code'),
+                                'number': best.get('number'), 'similarity': result['best']['similarity']})
+        if lookup:
+            record['lookup'] = self.lookup(rgb, card['id'] if card else None, search)
         self._append(record)
-        if result['verdict'] == 'disagree':
+        if result and result['verdict'] == 'disagree':
             logger.info(f"Printing check (shadow, nothing changed): {card.get('name')} [{card.get('set_code')} {card.get('number')}] was added, "
                         f"the picture looks like {best.get('name')} [{best.get('set_code')} {best.get('number')}] "
                         f"({result['kind']}, gap {result['gap']:.3f}, {Path(image_path).name})")
+        answer = record.get('lookup')
+        if answer and answer['against_resolved'] in ('same_card', 'other_card'):
+            p, name = answer['printing'], card.get('name') if card else None
+            logger.info(f"Printing check (shadow, nothing changed): read by {reader or 'the AI'} as {name} [{card.get('set_code')} {card.get('number')}], "
+                        f"the picture and the strip would say {p['name']} [{p['set']} {p['number']}] ({answer['path']}, "
+                        f"{answer['against_resolved']}, {Path(image_path).name})")
 
     def _append(self, record):
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -220,23 +421,63 @@ def report(log_file, show=15, out=print):
             records.append(json.loads(line))
         except ValueError:
             pass
+    out(f"{len(records)} captures looked at ({records[0]['time'] if records else '-'} to {records[-1]['time'] if records else '-'})")
+
+    # --- the check: does the picture look like the printing the server resolved? ---
+    checked = [r for r in records if r.get('verdict')]
     verdicts = {}
-    for r in records:
+    for r in checked:
         verdicts[r['verdict']] = verdicts.get(r['verdict'], 0) + 1
-    out(f"{len(records)} cards looked at ({records[0]['time'] if records else '-'} to {records[-1]['time'] if records else '-'}): "
-        + ', '.join(f"{n} {v}" for v, n in sorted(verdicts.items(), key=lambda kv: -kv[1])))
+    out(f"\nTHE CHECK - {len(checked)} resolved cards: " + ', '.join(f"{n} {v}" for v, n in sorted(verdicts.items(), key=lambda kv: -kv[1])))
     kinds = {}
-    for r in records:
+    for r in checked:
         if r['verdict'] == 'disagree':
             kinds[r['kind']] = kinds.get(r['kind'], 0) + 1
     if kinds:
-        out("disagreements by kind: " + ', '.join(f"{n} {k}" for k, n in kinds.items())
+        out("  disagreements by kind: " + ', '.join(f"{n} {k}" for k, n in kinds.items())
             + "   (other_card: probably a misread; same_card: the printed line names another printing)")
-    out(f"\nthe latest {show} disagreements:")
-    for r in [r for r in records if r['verdict'] == 'disagree'][-show:]:
+    out(f"  the latest {show} disagreements:")
+    for r in [r for r in checked if r['verdict'] == 'disagree'][-show:]:
         a, b = r['resolved'], r['best']
-        out(f"  {r['time']} {r['capture']}: added {a['name']} [{a['set']} {a['number']}], the picture looks like {b['name']} [{b['set']} {b['number']}] "
+        out(f"    {r['time']} {r['capture']}: added {a['name']} [{a['set']} {a['number']}], the picture looks like {b['name']} [{b['set']} {b['number']}] "
             f"- {r['kind']}, gap {r['gap']:.3f}, lead {r['lead']}{', card upside down' if r['rotated'] else ''}")
+
+    # --- the lookup: what the picture and the strip alone would have answered ---
+    looked = [r for r in records if r.get('lookup')]
+    if not looked:
+        out("\nTHE LOOKUP - none yet (printing_check.lookup in config.yaml: ai_cases, all or off)")
+        return
+    percent = lambda n, whole: f"{100 * n / whole:.1f}%" if whole else '-'
+    ai = [r for r in looked if r.get('reader') != card_ocr.READER]           # the AI read it, or nothing did: where the AI would go
+    easy = [r for r in looked if r.get('reader') == card_ocr.READER]
+    for title, group in (("cards the AI handled (read by the vision AI, or not read at all)", ai), ("cards the OCR confirmed", easy)):
+        if not group:
+            continue
+        paths = {}
+        for r in group:
+            paths[r['lookup']['path']] = paths.get(r['lookup']['path'], 0) + 1
+        decided = paths.get('strong', 0) + paths.get('image', 0)
+        out(f"\nTHE LOOKUP - {title}: {len(group)} compared")
+        out(f"  the picture and the strip would add by themselves {decided} ({percent(decided, len(group))}: {paths.get('strong', 0)} strong, "
+            f"{paths.get('image', 0)} by the picture alone) and send {paths.get('review', 0)} ({percent(paths.get('review', 0), len(group))}) to review")
+        against = {}
+        for r in group:
+            against[r['lookup']['against_resolved']] = against.get(r['lookup']['against_resolved'], 0) + 1
+        out("  against what the server resolved: " + ', '.join(f"{n} {k}" for k, n in sorted(against.items(), key=lambda kv: -kv[1])))
+        if against.get('unresolved'):
+            unresolved = [r for r in group if r['lookup']['against_resolved'] == 'unresolved']
+            added = sum(1 for r in unresolved if r['lookup']['path'] != 'review')
+            out(f"  of the {len(unresolved)} nothing was resolved for, the picture and the strip would have added {added}")
+    out(f"\n  exit criteria for dropping the AI (written beforehand): about 300 AI-handled cards compared - {len(ai)} so far; at least 85% added by "
+        f"the picture and the strip - {percent(sum(1 for r in ai if r['lookup']['path'] != 'review'), len(ai))} so far; at most 0.5% wrong - "
+        "that needs the disagreements below judged BY EYE (a disagreement with the AI is not an error of the picture: the AI misreads ~12%)")
+    disagreements = [r for r in looked if r['lookup']['against_resolved'] in ('same_card', 'other_card')]
+    out(f"  the latest {min(show, len(disagreements))} of the {len(disagreements)} disagreements between the AI / OCR and the picture + strip, to look at:")
+    for r in disagreements[-show:]:
+        a, p, s = r.get('resolved') or {}, r['lookup']['printing'], r['lookup']['strip']
+        out(f"    {r['time']} {r['capture']} (read by {r.get('reader')}): {a.get('name')} [{a.get('set')} {a.get('number')}] -> the picture and the strip say "
+            f"{p['name']} [{p['set']} {p['number']}], {r['lookup']['path']}, {r['lookup']['against_resolved']}"
+            f"{', strip ' + s['set'] + ' ' + s['number'] if s else ', strip unread'}")
 
 
 def main(argv=None):

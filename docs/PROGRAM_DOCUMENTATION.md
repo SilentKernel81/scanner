@@ -1415,6 +1415,51 @@ the card it resolved to `PrintingCheck.observe`, which returns at once: the work
 looks like; renamed to `.1` beyond 10 MB), and a `disagree` also a line in the log. `python scripts/printing_check_report.py` sums it up:
 how many cards, how many agreed, the latest disagreements.
 
+**The lookup: what the picture and the strip alone would have answered** (since 2026-10-20; also log-only; `printing_check.lookup` in
+`config.yaml`: `ai_cases` by default, `all`, `off`). The aim is to drop the vision AI, and the evidence has to come from live scans before
+anything is switched off: for the captures the AI is, or would be, needed for, `PrintingCheck.lookup` works out what the picture and the
+strip alone would have done and the log keeps it beside what the AI answered. The strip is read with a light-ocr reader OF ITS OWN
+(`StripReader`: a second Node process, started on the first strip, stopped after two idle minutes and at shutdown; a small request on the
+bottom-left strip: `read_strip`, `card_ocr.parse_strip`; skipped while OCR is switched off, then the lookup goes by the picture alone) -
+never the live reader: a review found that a slow shadow request would hold up the live OCR worker (the reader holds its request lock
+while it waits) for up to its 10 s time-out, and that a time-out stops the shared process and starts its 60 s cool-down, after which live
+captures go to the AI; here a stalled or failed read can only spoil the lookup's own reader (the cost: a second set of models in memory
+while lookups are running). A card the search found upside down is turned back first, or the strip would be the title area (a review
+found that; `tests/test_printing_check.py` pins it with two reprints of one art). The rule is the experiment's rule A2:
+`strong` - the strip names a printing (number AND set) that is one of the picture's five nearest and looks as much like the picture as the
+best match does (a gap below 0.02: a reprint with the same art has almost the same fingerprint, so the strip decides among those) - that
+printing; `image` - else the best match, when it leads the second by 0.05 (`IMAGE_LEAD`); `review` - else the lookup would not decide.
+Each record's `lookup` block has the path, the printing chosen (id, name, set, number, similarity), what the strip read, the lead, the
+orientation and `against_resolved`: `same_printing`, `same_card` (another printing of the card), `other_card`, `picture_review` (it would
+not have decided) or `unresolved` (the server found no card: the AI gave no answer, or one the database does not know).
+`ai_cases` runs it for the captures the vision AI read and for those no card was resolved for (whoever read them): about 3% of the
+captures, one more small OCR request each. `all` adds the OCR-confirmed ones (it shows how often the picture agrees on easy cards,
+at one more request per capture). The hook is `search_and_emit_card` (also when nothing was found) and `route_identified` (when nothing
+was read at all). `python scripts/printing_check_report.py` prints, for the AI-handled cards: how many were compared, how many the picture
+and the strip would add by themselves and how many they would send to review, how they stand against what the AI resolved, how many of the
+unresolved ones they would have added, the exit criteria below with the numbers so far, and the latest disagreements to look at.
+
+*Exit criteria for dropping the AI (written 2026-10-20, before any live data):* about 300 AI-handled cards compared; at least 85% of
+them added by the picture and the strip; at most 0.5% wrong - judged BY EYE on the disagreements, because a disagreement with the AI is not
+an error of the picture (the AI misreads about 12% of what it handles); an extra review load the owner accepts (about +0.5% of all captures
+in the experiment); the index rebuilt after every card data update, with a printing newer than the index (`not_indexed`) going to review.
+Then `vision_ai.enabled` is switched off by default; the AI's code stays for one release.
+
+*Measured* with the shipped code, the real index and the real OCR reader (`scripts/experiments/image_match/check_lookup.py`): on the 128
+AI-read pictures of the experiment, against the frozen corrected truth, it added 107 by itself (83.6%, 75 strong and 32 by the picture
+alone) with **0 wrong**, and would have sent 21 (16.4%) to review - the experiment's colour hash with illustration ids got 85.2% and 14.8%
+(two pictures more in review: the shipped rule judges "the same art" by the fingerprint, the experiment by Scryfall's illustration id).
+It disagreed with what the AI resolved on 13 cards (all `other_card`: the AI's misreads, among them the five Deadpool cards) and agreed on
+94. On 300 OCR-confirmed pictures it added 292 (97.3%, all `strong`) and every one of them was the printing the OCR had confirmed; 8
+would have gone to review. With two real light-ocr processes side by side (`check_strip_reader.py`): the lookup's own reader started in
+1.6 s and read the same strip as the live one, 30 strips each at the same time took 53 ms (median) on both, the live reader's state was
+untouched, the lookup's process stopped itself when idle (two processes, then one), started again on demand, and none were left after
+closing. In a second sample of 100 the one disagreement was an owner's Deadpool Lightning Bolt (`sld IFIYW-2`) that the
+OCR had "confirmed" as `Lightning Strike [gn2 42]`, the base printing its printed line names: the strip read `gn2 42` too, the picture did
+not look like it, and the lookup went by the picture (`image`) - the very case it is for, and the lookup's answer was the right one. **Never tried:** live scans (this is what shadow mode is for), a Raspberry Pi, a phone, a card data update
+followed by a rebuild, printings newer than the index, and the 58 captures that went to review in the owner's history (they are not in
+the evaluation set).
+
 **What happens after shadow mode is not decided.** The experiment's rule would, for a printing the picture disagrees with, use the
 picture's printing or send the card to review; that needs the shadow log looked at on real scans first (are the disagreements the AI's
 misreads and the Secret Lair cards, or something else?), and its own tests. **Never tried:** the Android app (it has no index), a

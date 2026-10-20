@@ -176,6 +176,9 @@ class Config:
     # The printing check (core/printing_check.py): 'shadow' writes down where a capture does not look like the
     # printing the server resolved and changes nothing; 'off'. It needs an image index (scripts/build_image_index.py)
     PRINTING_CHECK_MODE = str(config.get('printing_check', 'mode', default='shadow')).strip().lower()
+    # ... and which captures also get the lookup (what the picture and the strip alone would have answered, to compare with the AI's
+    # answer before the AI is switched off): 'ai_cases' (read by the AI, or not read), 'all', 'off'
+    PRINTING_CHECK_LOOKUP = str(config.get('printing_check', 'lookup', default='ai_cases')).strip().lower()
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

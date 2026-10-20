@@ -67,8 +67,10 @@ game sits behind one interface (`games/`), so another could be added.
   a capture looks like the printing it just added - the Secret Lair cards that print another
   printing's set and number, and cards the AI misread. For now it only writes down where it
   disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it
-  does nothing. Thresholds from 20 known-wrong labels, never run on live scans, a Pi or the
-  Android app.
+  does nothing. For the cards the vision AI handles it also writes down what the picture and the
+  collector line alone would have answered, beside the AI's answer: the evidence for dropping the AI
+  later (on the experiment's pictures: 84% added by themselves, none wrong, 16% would go to
+  review). Thresholds from 20 known-wrong labels, never run on live scans, a Pi or the Android app.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
   the printing, finish and quantity, and add it. Scanning goes on meanwhile.

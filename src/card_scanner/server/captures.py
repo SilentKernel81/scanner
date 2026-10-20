@@ -112,6 +112,9 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
         return search_and_emit_card(card_name, collector_number, processing_time, was_fast_scan_mode=fast,
                                     set_code=set_code, image_path=image_path, foil=foil, reader=reader,
                                     station=station, captured_at=captured_at)
+    # Nothing was read (the AI gave no answer): the printing check's lookup still shows what the picture and the strip would have answered
+    if printing_check and image_path:
+        printing_check.observe(image_path, None, station, reader or get_ai_model_info())
     if fast or reviewing:
         return {'status': 'review', 'reason': queue_for_review(games.active(), image_path, foil=foil, station=station)}
     return {'status': 'shown'}
@@ -191,8 +194,9 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
 
     # Shadow mode of the printing check: does the picture look like the printing just resolved? It only
     # writes down where it does not (data/logs/printing_check.jsonl), in the background, and changes nothing
-    if printing_check and db_card_info and image_path:
-        printing_check.observe(image_path, db_card_info, station)
+    # (also when nothing was found: the lookup then shows what the picture and the strip alone would have answered)
+    if printing_check and image_path:
+        printing_check.observe(image_path, db_card_info, station, read_by)
 
     # Adding automatically, only cards whose exact printing was confirmed are added
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review

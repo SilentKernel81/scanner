@@ -133,6 +133,12 @@ ocr:
 # index of Scryfall's pictures: python scripts/build_image_index.py (about 15 MB); without one it does nothing
 printing_check:
   mode: shadow
+  # The lookup: also work out what the picture and the strip alone would have answered - the answer
+  # that could replace the vision AI's - and write it beside what the AI answered, to compare on live
+  # scans before anything is switched off. ai_cases: only for cards the AI read or nothing read (about
+  # 3% of the captures); all: every capture, the OCR-confirmed too, at one more small OCR request each;
+  # off. Still log-only: nothing is added, changed or sent to review by it
+  lookup: ai_cases
 
 # Cleanup Settings
 cleanup:

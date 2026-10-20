@@ -96,6 +96,33 @@ def parse_magic(lines, width, height):
     return {'name': name, 'collector_number': number, 'set_code': set_code, 'foil': foil}
 
 
+def parse_strip(lines):
+    """
+    The collector number and the set code out of the OCR lines of the bottom-left STRIP of a flat card (foil_marker.strip_of: only the
+    collector line and the set line are in it, so no position filter is needed): (number, set_code), each '' when it was not read.
+    The number has its leading zeros taken off ('0172' -> '172') and the set code is lower case, as the card database writes them.
+    The same reading parse_magic does of those two lines, for the printing check's picture lookup (printing_check.py).
+    """
+    number = set_code = ''
+    for line in sorted(lines, key=lambda l: l['box'][0][1]):
+        text = line['text'].strip()
+        if not number:
+            match = MAGIC_NUMBER.match(text)
+            digits = match and (match.group(1) or match.group(2))
+            if digits and sum(c.isdigit() for c in digits) >= 2:
+                number = digits.translate(DIGIT_LOOKALIKES)
+                continue
+            match = MAGIC_NUMBER_OF_TOTAL.match(text)
+            if match:
+                number = match.group(1)
+                continue
+        if not set_code:
+            match = MAGIC_SET.match(text)
+            if match:
+                set_code = match.group(1)
+    return number.lstrip('0'), set_code.lower()
+
+
 # Game id -> parser(lines, width, height); a game without one is read by the vision AI only
 PARSERS = {'mtg': parse_magic}
 
