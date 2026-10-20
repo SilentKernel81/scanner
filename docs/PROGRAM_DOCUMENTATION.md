@@ -1449,7 +1449,7 @@ unresolved ones they would have added, the exit criteria below with the numbers 
 picture's five nearest printings with their set, number, oracle id and finishes (one database read each), and what the strip says - as plain data
 (`core/reading/evidence.py`) and `core/reading/decide.py: decide_printing` applies rule A2 to it; the function imports nothing but `typing`, so every test case is
 a complete file. Two files of cases, made from different sources: `tests/data/reading_decision_cases.json`, hand-written with the answer worked out by hand for each edge
-(22 cases, including the boundaries), and `tests/data/reading_regression_cases.json`, captured from the lookup as committed in a84dcb9 before it was rebuilt (135 real
+(22 cases, including the boundaries), and `tests/data/reading_finish_cases.json` (hand-written, for `decide_finish`; 20 cases, the boundaries included) and `tests/data/reading_regression_cases.json`, captured from the lookup as committed in a84dcb9 before it was rebuilt (135 real
 pictures: 96 strong, 31 by the picture alone, 8 review; ids and similarities only). **Nothing changed in what the lookup answers**, shown picture by picture and not by
 totals: the previous code (taken from git) and the rebuilt one ran on the same 444 pictures (the 15 Deadpool captures, the AI-read ones, a sample of the OCR-confirmed
 ones) in separate processes and every record - path, printing, strip, lead, orientation, comparison with the resolved card, the check's verdict and gap - was identical

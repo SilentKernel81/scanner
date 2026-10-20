@@ -22,6 +22,7 @@ from card_scanner.core.reading import decide  # noqa: E402
 
 DATA = Path(__file__).with_name('data')
 HAND = json.loads((DATA / 'reading_decision_cases.json').read_text())['cases']
+FINISH = json.loads((DATA / 'reading_finish_cases.json').read_text())['cases']
 REGRESSION = json.loads((DATA / 'reading_regression_cases.json').read_text())['cases']
 
 
@@ -120,6 +121,14 @@ class PurityAndTheNumber(unittest.TestCase):
 class Finish(unittest.TestCase):
     """decide_finish: its own rule, answered apart from rule A2. Expectations written by hand."""
     BOTH = ['nonfoil', 'foil']
+
+    def test_every_case_of_the_shared_file_gives_its_answer(self):
+        # tests/data/reading_finish_cases.json: hand-written, and passed by the Android app too (its copy is made by a script, never by hand)
+        for case in FINISH:
+            with self.subTest(case['name']):
+                self.assertEqual(decide.decide_finish(case['finishes'], case['symbol'], case['net'], case.get('thresholds')), case['expected'])
+        self.assertGreaterEqual(len(FINISH), 15)
+        self.assertEqual(len({c['name'] for c in FINISH}), len(FINISH))
 
     def test_a_printing_in_one_finish_is_certain(self):
         # whatever the marker says: a foil-only printing is a foil, a non-foil-only one is regular

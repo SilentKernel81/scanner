@@ -79,6 +79,19 @@ _POPCOUNT = np.array([bin(i).count('1') for i in range(256)], np.uint8)
 # The fingerprint
 # ---------------------------------------------------------------------------------------------
 
+def stretch_plane(plane):
+    """One colour of a picture with its 2nd to 98th percentile stretched to 0..255 (uint8 plane in, uint8 out). A function of its own so that another program - the Android app - can be tested against it"""
+    low, high = np.percentile(plane, (2, 98))
+    # float64 on purpose (what the experiment's numpy 2 did without saying so; numpy 1 would have used float32): the
+    # same bits on any numpy. Cast to uint8 it cuts the fraction off, as the experiment did.
+    return np.clip((plane.astype(np.float64) - low) * 255 / max(high - low, 1), 0, 255).astype(np.uint8)
+
+
+def channel_bits(low):
+    """The 32 bytes of one colour: which of the 16 x 16 lowest DCT frequencies (float32) lie above the median of all of them but the first (0, 0), packed 8 to a byte, row by row"""
+    return np.packbits((low > np.median(low.flatten()[1:])).flatten())
+
+
 def prepare(rgb):
     """The picture every fingerprint is made from: edge cut, 224 x 312, each colour stretched. RGB uint8 in and out."""
     height, width = rgb.shape[:2]
@@ -86,11 +99,7 @@ def prepare(rgb):
     rgb = cv2.resize(rgb[int(height * y0):int(height * y1), int(width * x0):int(width * x1)], CARD_SIZE, interpolation=cv2.INTER_AREA)
     out = np.empty_like(rgb)
     for channel in range(3):
-        plane = rgb[..., channel]
-        low, high = np.percentile(plane, (2, 98))
-        # float64 on purpose (what the experiment's numpy 2 did without saying so; numpy 1 would have used float32): the
-        # same bits on any numpy. Assigning into the uint8 array cuts the fraction off, as the experiment did.
-        out[..., channel] = np.clip((plane.astype(np.float64) - low) * 255 / max(high - low, 1), 0, 255)
+        out[..., channel] = stretch_plane(rgb[..., channel])
     return out
 
 
@@ -100,7 +109,7 @@ def hash_card(rgb):
     parts = []
     for channel in range(3):
         low = cv2.dct(small[..., channel].astype(np.float32))[:16, :16]       # the 16 x 16 lowest frequencies
-        parts.append(np.packbits((low > np.median(low.flatten()[1:])).flatten()))   # [1:]: not the plain average (0, 0)
+        parts.append(channel_bits(low))                                        # [1:] inside: not the plain average (0, 0)
     return np.concatenate(parts).tobytes()
 
 
