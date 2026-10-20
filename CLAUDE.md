@@ -88,7 +88,7 @@ page (which setting wins, the form's checks, the password and its sessions);
 `tests/test_station_uploads.py` a station's unsent captures across restarts;
 `tests/test_capture_sync.py` a phone asking about and removing one capture's copy (storage and
 the two routes, through Flask's test client; also the route of "Send to review");
-`tests/test_send_to_review.py` sending one copy of an entry back to the review queue (storage); `tests/test_others.py` other people's collections, receiving in a trade, the buy list; `tests/test_deck_cover.py` a deck's cover (the
+`tests/test_send_to_review.py` sending one copy of an entry back to the review queue (storage); `tests/test_camera_quirks.py` a webcam whose focus control crashes it, and a saved focus lock that does not fit the camera; `tests/test_others.py` other people's collections, receiving in a trade, the buy list; `tests/test_deck_cover.py` a deck's cover (the
 table's new column on an old file, which card is shown when); `tests/test_arena_export.py` the
 list written for MTG Arena (what it is made of - not whether Arena takes it); `tests/test_arena_collection.py`
 the digital collection (reading an Arena export, finding its cards, replacing whole, backups)

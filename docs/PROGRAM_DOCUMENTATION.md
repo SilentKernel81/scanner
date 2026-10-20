@@ -1523,6 +1523,19 @@ Because the camera-to-card distance is fixed, the scanner can **lock** the focus
   a camera whose lens cannot be set from the station (a Pi camera, a webcam without the focus
   control) ignores it and reports continuous autofocus (`_open_camera`) - until 2026-10-12 it
   took the number over and its page showed autofocus as off. Checked with fake cameras only.
+- **A saved lock that does not fit the camera, and a camera that crashes on it** (2026-10-19).
+  The position is kept per *station*, not per camera, so after another webcam is plugged in the
+  saved one (the Anker's 440) is another lens's. A lock outside the camera's own
+  `focus_absolute` range is **not applied** (logged; continuous autofocus). And a webcam that lists
+  the control but resets itself when the lens is set - the LX-260325-A "USB 2.0 Camera" (range
+  0-15): a USB disconnect and a new device number a second later, v4l2-ctl "Protocol error",
+  uvcvideo "Failed to query (SET_CUR) UVC control 6" - is remembered the first time it does so
+  (`_focus_reset_the_camera`; its USB ids and name in `data/camera_quirks.json`, kept across
+  restarts) and treated as a camera without a focus control: continuous autofocus, no lock, sweeps,
+  refocus or drift check (`focus_range` is `None`, `_run_v4l2_command` skips lens writes). Other
+  controls are still sent. Measured on that camera (2026-10-19): streaming at 1920×1080 and the
+  other controls are fine, and only the lens write resets it. The lock is still one per station
+  on the server; one per camera is not done. `tests/test_camera_quirks.py` (fake camera and v4l2-ctl).
 - **The lens has play**: the same `focus_absolute` reached from above measured up to 5× blurrier
   than from below (395: 22 vs 118, peak 2,480). Sweeps measure while moving up, and every final
   or restored position is approached from 30 below (`_move_focus`).
