@@ -217,6 +217,16 @@ printings (53 new, 7 s; the server followed the new generation by itself). The r
 RAM-backed filesystem (the backup was extracted under `~` instead, without the picture folders); `docker logs` does not show `light-ocr ready` (it is in `data/logs/app.log`); no previous image remains after a rebuild
 (the way back is the code backup and a rebuild, as the notes said). Left alone: `nomad_homebox` is in a restart loop (not ours).
 
+## Second deploy (2026-10-20, 18:50 CDT): the vision AI last by default
+
+Main at `68f0643` (nothing pushed). Backups `scanner-backup-20261020_174228.tar.gz` and `code-20261020_174434.tar.gz` first. The comparison showed exactly this round's 18 files. Rehearsed on a copy extracted from that backup
+(the settings lock deleted from the COPY, the index copied in): left alone, the server reported `evidence`, the 39 pictures were read as in the first server rehearsal (8 by picture and strip in 0.2-0.4 s, 16 by the 9B model, the two
+`Sol Ring` cards to review), the picture index button on the copy finished at once with nothing missing and Stop was harmless, no tracebacks, `picture+strip` never in the shadow log. Then `build` + `up -d` with both GPU files at 18:50:14
+(production idle: no capture in the previous ten minutes). After: `light-ocr ready (webgpu)` at 18:50:16, no errors, collection / decks / finish split / review identical (8,925 / 4,176 / $16,503.46 / 23 / 0), the mode `evidence`
+with nothing saved, the index 112,818 of 112,818, the Settings page shows the new text and the Storage block, the guard refuses a mode change and an index build without the settings password (production still has no `reading_mode` key).
+`rpi-scanner` reconnected at once; **the `pi` station was not connected: its machine (192.168.1.88) does not answer ping or SSH - it went off at 17:29:03, 80 minutes before this deploy**, so it is powered off or off the network (not
+the server's doing; the other Pi, 192.168.1.199, is fine). The vision AI is now the last step on the real server; **nothing has been scanned in this mode there yet** - the first live evidence is `picture+strip` in `scanned_cards.log`.
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
