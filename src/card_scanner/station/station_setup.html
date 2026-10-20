@@ -278,6 +278,7 @@ async function refresh() {
   $('setup').style.display = 'block';
   showStatus();
   if (!formFilled) { fillForm(); formFilled = true; }
+  else if (JSON.stringify(state.cameras.map(c => [c.kind, c.index])) !== cameraListKey) fillCameraList(true);
 }
 
 function showStatus() {
@@ -331,18 +332,17 @@ function escapeHtml(text) {
   return element.innerHTML;
 }
 
-function fillForm() {
-  const settings = state.settings;
-  $('server').value = settings.server || '';
-  $('name').value = settings.name || '';
-  $('id').value = settings.id || '';
-  $('tokenHint').textContent = state.has_token ? 'A token is saved. Leave this empty to keep it.' : '';
-  $('removeTokenRow').style.display = state.has_token && !state.fixed.token ? 'block' : 'none';
-  $('removeToken').checked = false;
+// The camera list: "automatic", then every camera found. A saved camera that is not
+// plugged in right now is listed too, so that saving does not silently change it.
+// It is made again whenever the cameras the station finds change (a camera plugged in after
+// the page was opened shows up by itself); keepChoice then leaves what the person has
+// chosen in the list, saved or not, as it is.
+let cameraListKey = null;
 
-  // The camera list: "automatic", then every camera found. A saved camera that is not
-  // plugged in right now is listed too, so that saving does not silently change it.
+function fillCameraList(keepChoice) {
+  const settings = state.settings;
   const select = $('camera');
+  const chosen = keepChoice ? select.value : null;
   select.innerHTML = '';
   const add = (value, label) => select.add(new Option(label, value));
   add('auto', 'Automatic (a USB camera if there is one, else a Raspberry Pi camera)');
@@ -357,7 +357,20 @@ function fillForm() {
   }
   if (settings.camera === 'picamera' && !state.cameras.some(c => c.kind === 'picamera'))
     add('picamera', 'Raspberry Pi camera (not found right now)');
-  select.value = current;
+  select.value = chosen !== null && [...select.options].some(o => o.value === chosen) ? chosen : current;
+  cameraListKey = JSON.stringify(state.cameras.map(c => [c.kind, c.index]));
+}
+
+function fillForm() {
+  const settings = state.settings;
+  $('server').value = settings.server || '';
+  $('name').value = settings.name || '';
+  $('id').value = settings.id || '';
+  $('tokenHint').textContent = state.has_token ? 'A token is saved. Leave this empty to keep it.' : '';
+  $('removeTokenRow').style.display = state.has_token && !state.fixed.token ? 'block' : 'none';
+  $('removeToken').checked = false;
+
+  fillCameraList(false);
 
   crop = settings.crop || null;
   showCropText();

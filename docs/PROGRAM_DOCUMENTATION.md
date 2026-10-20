@@ -500,6 +500,15 @@ settings are read from the saved values, so the page still shows them.
 holds only what a station must know *before* it can reach the server; everything about
 scanning stays on the camera's page on the server.
 
+- **The camera list follows the cameras** (2026-10-19). The page re-reads the station's state every
+  2 s, and rebuilds the dropdown whenever the cameras found change - a webcam plugged in
+  after the page was opened shows up without a reload - keeping the camera the person has
+  chosen (saved or not) and listing a saved camera that is gone as "not found right now". Until
+  then the list was filled once, at the first load. A camera named by `SCANNER_CAMERA_INDEX` in
+  the station's environment (`.env`) is *fixed* and wins over the dropdown: to choose from the
+  page, take the line out of `.env`. Tried in headless Chromium with a camera list that changed
+  while the page was open; not with a real unplugging.
+
 | On the page | Saved as (`data/station.json`) |
 |---|---|
 | Server address, station token. *Test connection* asks the address for `/api/stations` (only a scanner server answers that) and, if the server wants a token, for this station's capture 0 - a request that needs the token and changes nothing: 401 means the token is wrong | `server`, `token` |
