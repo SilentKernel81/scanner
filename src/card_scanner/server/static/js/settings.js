@@ -93,6 +93,7 @@ function connect() {
 
     // Card reading
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
+    socket.on('reading_mode_changed', applyReadingState);
     socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running, data.debugger));
     socket.on('ai_provider_set', data => {
         activeProvider = data.provider; activeModel = data.model;
@@ -213,6 +214,7 @@ async function loadCameraSettings() {
     // The server's own settings come with the same answer
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
+    applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
 }
 
@@ -357,6 +359,25 @@ function applyOcrState(enabled, installed) {
         : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
 }
 
+// The reading mode (core/identification.py: reading_mode): off is OCR then the AI as always; on reads a card OCR could not confirm by its picture first
+function applyReadingState(reading) {
+    if (!reading) return;
+    const evidence = reading.mode === 'evidence';
+    $('toggle-reading-evidence').checked = evidence;
+    $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
+    $('toggle-picture-alone').disabled = !evidence;
+    $('reading-evidence-desc').textContent = evidence
+        ? 'On: a card OCR could not confirm is read by its picture and collector line before the vision AI is asked'
+        : 'Off: OCR, then the vision AI, as always';
+    const missing = [];
+    if (reading.index_printings === null || reading.index_printings === undefined) {
+        missing.push('there is no image index (python scripts/build_image_index.py)');
+    }
+    if (!reading.ocr_enabled) missing.push('OCR is switched off');
+    $('reading-status').textContent = (reading.index_printings ? `Image index: ${reading.index_printings.toLocaleString()} printings. ` : '')
+        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
+}
+
 let availableModels = {};
 let activeProvider = null, activeModel = null;
 let aiCredentials = {};
@@ -483,6 +504,31 @@ async function loadPromptSummary() {
 
 function bindReading() {
     $('toggle-ocr').addEventListener('change', event => socket.emit('toggle_ocr', {enabled: event.target.checked}));
+    // Both switches change what is added to the scanned cards: turning one ON asks first, and the page goes back if it is declined
+    $('toggle-reading-evidence').addEventListener('change', async event => {
+        const toggle = event.target;
+        if (toggle.checked) {
+            const ok = await confirmDialog({
+                title: 'Read cards by their picture first?',
+                message: 'A card OCR could not confirm is then read by its picture and collector line before the vision AI is asked. This has never been tried on live scans: check the first cards it adds. You can turn it off again here at any time.',
+                confirmText: 'Turn on', danger: true
+            });
+            if (!ok) { toggle.checked = false; return; }
+        }
+        socket.emit('set_reading_mode', {mode: toggle.checked ? 'evidence' : 'cascade'});
+    });
+    $('toggle-picture-alone').addEventListener('change', async event => {
+        const toggle = event.target;
+        if (toggle.checked) {
+            const ok = await confirmDialog({
+                title: 'Add cards the picture alone decided?',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. Leave it off unless you rebuild the index after every card data update and look at what is added.',
+                confirmText: 'Turn on', danger: true
+            });
+            if (!ok) { toggle.checked = false; return; }
+        }
+        socket.emit('set_reading_mode', {accept_image_alone: toggle.checked});
+    });
     $('ai-provider').addEventListener('change', event => {
         const provider = event.target.value;
         renderCredentialField(provider);

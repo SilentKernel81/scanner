@@ -100,6 +100,7 @@ For data-changing tests compare database rows, summed quantities, per-finish pri
 | READ-12 | P0 I/H | `evidence` mode: a Secret Lair card (e.g. the Deadpool ones) whose printed line names another printing. | The printing the picture matches is added, not the one the line names. NOT TRIED live. |
 | READ-13 | P1 I | `evidence` mode with no image index, or with OCR switched off. | Every card is read as in `cascade`; nothing is lost and nothing fails. |
 | READ-14 | P1 I/H | `evidence` mode: the AI answers a card with a printing the picture clearly is not. | The card goes to review under the AI's name with no number or set; log line "does not look like the picture". |
+| READ-15 | P1 I/H | With an image index, open a review item (a card that could not be confirmed). | "The picture looks like" shows up to five printings, nearest first; clicking one shows that printing and it can be added; without an index the section is absent and the item works as before. |
 | READ-09 | P1 E/I | Search by name alone, name + number, name + set + number, and treatment. | Appropriate matching printings appear; treatment filters variants correctly. |
 | READ-10 | P1 E | Press Enter separately in each search field; correct prefilled capture fields. | Search runs consistently and the corrected selection replaces the previous candidate. |
 | READ-11 | P1 E/I | Search an unknown/partial/misspelled name; select a similar suggestion. | No-match/suggestions are clear; selected result becomes the current card. |

@@ -114,6 +114,13 @@ class Identification:
         mode = str((settings.get('reading_mode', Config.READING_MODE) if settings else Config.READING_MODE) or '').strip().lower()
         return EVIDENCE if mode == EVIDENCE else CASCADE
 
+    @property
+    def accept_image_alone(self):
+        """Whether a card only the picture decided may be added (reading.accept_image_alone; the person's 'reading_accept_image_alone' in data/settings.json wins)"""
+        settings = getattr(self, 'settings', None)
+        value = settings.get('reading_accept_image_alone', Config.READING_ACCEPT_IMAGE_ALONE) if settings else Config.READING_ACCEPT_IMAGE_ALONE
+        return value is True
+
     def log(self, message, level="info"):
         """Send log message to both file logger and UI callback"""
         getattr(logger, 'info' if level == 'success' else level, logger.info)(message)
@@ -230,7 +237,7 @@ class Identification:
         if self.reading_mode != EVIDENCE or self.evidence is None or not self.ocr_enabled:
             return None             # (the strip is read by the OCR reader: with OCR switched off there is no strip)
         try:
-            reading = self.evidence.live_read(image, foil_image, self.card_ocr, self.foil_marker, Config.READING_ACCEPT_IMAGE_ALONE)
+            reading = self.evidence.live_read(image, foil_image, self.card_ocr, self.foil_marker, self.accept_image_alone)
         except Exception as e:
             self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
             return None
@@ -247,6 +254,23 @@ class Identification:
             return info, FOIL       # as for an OCR-confirmed card whose marker nothing read: the AI's foil check
         self.log(self._said_by_ocr(info), level="success")
         return info, None
+
+    def _contradicted_by_picture(self, image, foil_image, ocr_info, ocr_card):
+        """
+        reading.mode 'evidence': whether the picture clearly looks like another printing of the card the OCR read (printing_check.contradicts: the Secret
+        Lair case, 6 of 10,568 correctly read cards). Fails open to the OCR: no printing check, no index, a failure - the OCR's read stands.
+        """
+        if self.reading_mode != EVIDENCE or self.evidence is None or not ocr_card or not ocr_card.get('id'):
+            return False
+        try:
+            contradicted = self.evidence.contradicts(foil_image if foil_image is not None else image, ocr_card['id'])
+        except Exception as e:
+            self.log(f"The OCR read could not be checked against the picture ({e})", level="warning")
+            return False
+        if contradicted:
+            self.log(f"The OCR read {ocr_info['name']} [{ocr_info['set_code']} {ocr_info['collector_number']}] but the picture looks like "
+                     f"another printing of the card - not taken as a confirmed read", level="warning")
+        return contradicted
 
     def _checked_against_picture(self, image, card_info):
         """
@@ -277,8 +301,20 @@ class Identification:
         ocr_info = None
         if self.ocr_enabled:
             ocr_info = self.card_ocr.read_card(image, games.active_id())
-            if ocr_info and games.active().confirmed_read(ocr_info['name'], ocr_info['collector_number'],
-                                                         ocr_info['set_code']):
+            confirmed, ocr_card = False, None
+            if ocr_info:
+                if self.reading_mode == EVIDENCE:
+                    # the same look-up as confirmed_read, keeping the card: its printing is what the picture is asked about
+                    ocr_card = games.active().confirmed_card(ocr_info['name'], ocr_info['collector_number'], ocr_info['set_code'])
+                    confirmed = ocr_card is not None
+                else:
+                    confirmed = games.active().confirmed_read(ocr_info['name'], ocr_info['collector_number'], ocr_info['set_code'])
+            if confirmed and self._contradicted_by_picture(image, foil_image, ocr_info, ocr_card):
+                # reading.mode 'evidence': the OCR read a printing the picture clearly is another printing of (Secret Lair). It is no longer a
+                # confirmed read: without its number and set it can only go to review under its name, if nothing below settles it
+                ocr_info = {**ocr_info, 'collector_number': '', 'set_code': ''}
+                confirmed = False
+            if confirmed:
                 # OCR misses the marker on about a third of the foils: the small network reads it
                 # from the set line first; only what it is not sure of is asked of the AI
                 if ocr_info['foil'] == 'unknown':

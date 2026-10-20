@@ -393,6 +393,40 @@ class PrintingCheck:
             return True
         return bool(named) and index.row(named['id']) is None
 
+    def candidates(self, image_path):
+        """
+        The printings a capture's picture looks like, nearest first (at most five), for the review screen: [{'id', 'name', 'set', 'set_code', 'number', 'image_uri',
+        'finishes', 'similarity'}] - plain Python values, ready for JSON; [] without an index, without the picture, or for a printing the card database
+        lacks (left out). Display only: a person picks. The picture is the file as given: for a station that sends a fixed area it is the area as drawn,
+        not a flat card (the flat copy is not kept for a review item), so the candidates of such a capture are poorer.
+        """
+        image = cv2.imread(str(image_path)) if image_path else None
+        if image is None:
+            return []
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        search = self._search(rgb)
+        if search is None:
+            return []
+        picture, cards = self._picture_evidence(search)
+        found = []
+        for candidate in picture['candidates']:
+            card = cards.get(candidate['id'])
+            if card:
+                found.append({'id': card['id'], 'name': card.get('name'), 'set': card.get('set'), 'set_code': card.get('set_code'), 'number': card.get('number'),
+                              'image_uri': card.get('image_uri'), 'finishes': list(card.get('finishes') or []), 'similarity': round(float(candidate['similarity']), 4)})
+        return found
+
+    def contradicts(self, image, printing_id):
+        """
+        Whether the picture clearly looks like ANOTHER PRINTING OF THE SAME CARD than printing_id: the 'disagree' verdict of the check with kind
+        'same_card' - the Secret Lair case (the card prints the set and number of the card it is made from; the OCR reads the printed line and
+        confirms the wrong printing, silently). Only that kind: a 'disagree' for another card is, on correctly read cards, mostly a foil's glare or a
+        showcase background (0.78% of the OCR-confirmed pictures, 76 of 82 of them other cards, three of the four looked at false alarms) - the
+        same_card ones were 6 of 10,568, all genuine (scripts/experiments/image_match/measure_contradiction.py). False without an index.
+        """
+        result = self.check(image, printing_id)
+        return bool(result and result['verdict'] == 'disagree' and result['kind'] == 'same_card')
+
     def verdict_of(self, image, printing_id):
         """
         'agree' / 'weak' / 'disagree' / 'not_indexed' for a capture and a printing the server was told (the vision AI's answer, looked up),

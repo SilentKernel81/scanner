@@ -25,10 +25,16 @@ list the rsync commands send holds **35 files that differ**: 21 of code, config 
 server's copy: step 1a is what says how the server differs.
 The server image copies the whole tree (`COPY . .`), so the new package needs no line of its own in the Dockerfile; only the station images name modules.
 
+## Decisions made (2026-10-20)
+
+- **Lookup mode: `ai_cases`** (the owner's answer). It is the default already, so nothing to change.
+- **Nothing is pushed or deployed until the reading refactor is finished** (phases 3 and 4 are being completed first, the Android part last); this plan waits for that, and will be re-checked
+  against the final commit before it is used.
+- Still open, below: excluding `scripts/experiments/`, rehearsing first, and timing.
+
 ## Decisions I need from you
 
-1. **Lookup mode.** `ai_cases` (default, ~3% of captures, the cards the AI is needed for) or `all` (every capture, one more small OCR request each; much faster evidence, but
-   against easy cards). I recommend `ai_cases`.
+1. ~~**Lookup mode.**~~ Decided: `ai_cases` (see above).
 2. **Exclude `scripts/experiments/` from the copy** (52 tracked files that would end up in the image; the commands below already leave them out, the new comparison scripts too). I recommend yes.
 3. **Rehearse first** on a copy of the data (the plan's step 5), as for the earlier deploys that changed behaviour. I recommend yes: it is where the GPU question gets answered.
 4. **When.** At a quiet moment: the container restarts (~20-40 s for the OCR models) and the stations queue captures meanwhile ("a station keeps scanning while the server is away").
@@ -172,12 +178,11 @@ The data backup is a precaution; the new `data/image_index/` and `data/logs/prin
 
 ## Trying the evidence mode (separate from this deploy, and only on the rehearsal copy first)
 
-The mode is off in what is deployed. To try it, on the **rehearsal container's own copy of the data** (never the live `data/`): put `"reading_mode": "evidence"` into that copy's
-`data/settings.json` and restart the rehearsal container (no rebuild). Send the Deadpool pictures and a dozen ordinary ones as in step 5, then check by eye: every `added` card is the
+The mode is off in what is deployed. To try it, on the **rehearsal container's own copy of the data** (never the live `data/`): turn on Settings > Card reading > "Read by picture and collector line first" on the
+rehearsal's page (port 5002; or put `"reading_mode": "evidence"` into that copy's `data/settings.json` and restart it) - no rebuild either way. Send the Deadpool pictures and a dozen ordinary ones as in step 5, then check by eye: every `added` card is the
 right printing (the Deadpool foil / confetti ones the picture's, not the printed line's), `picture+strip` shows in `data/logs/scanned_cards.log`, the cards it could not decide
 went to the AI, and the time per card is not worse (the mode adds about 60 ms in the OCR worker on the laptop - **not measured next to Ollama on the server**). Switching it on for
-the live server is the owner's decision after the exit criteria are met, with the same two-line change in the live `data/settings.json` and a container restart; **to switch it off again**, delete
-that line (or set `cascade`) and restart - nothing else changed on disk (no schema, nothing to undo; cards it added stay as added).
+the live server is the owner's decision after the exit criteria are met, with the same switch on the live Settings page (the next card takes it); **to switch it off again**, turn it off there (or set `cascade` in `data/settings.json`) - nothing else changed on disk (no schema, nothing to undo; cards it added stay as added).
 
 ## After the deploy
 

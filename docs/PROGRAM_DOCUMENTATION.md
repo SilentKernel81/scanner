@@ -1106,7 +1106,12 @@ station's **review queue** (`review.py`, table `review_queue` with the station's
 capture in `data/review/`) and scanning goes on (it used to pause until the card was reviewed). Items keep what the AI
 read, the ★/• result and the best match. The *Review* counter opens them oldest first
 (`review_open` → `review_item`): the capture beside the suggested card, the AI read, and a
-search prefilled with it (without a match kept, the search runs at once). Add resolves the item
+search prefilled with it (without a match kept, the search runs at once). With an image index (see *Printing check*) it also shows **"The picture looks like"**: the five nearest
+printings of the capture's picture, nearest first (`PrintingCheck.candidates`, worked out when the item is opened - nothing is stored with the item, so there is no migration), as
+tiles that pick the printing when clicked (the same `select_printing` as the printing list) - beside what the AI read, never instead of it; the one that was read is outlined and
+tagged, the nearest says "closest". An item whose foil marker was not read says so ("check the finish before adding"). Limits: the candidates come from the picture file the item keeps, so for a station
+that sends a fixed area they are those of the area as drawn (the flat copy is not kept) and poorer; and the finish hint covers items in the review only - a card added automatically
+with an unread marker is still filed as regular, with no flag (a printing that exists in one finish only is not affected). `scripts/check_review_page.py` tries the panel in a headless browser. Add resolves the item
 - the capture becomes the entry's thumbnail - and the server sends the next; Skip drops it
 (`review_skip`; the review's **Delete** button does the same when the card can't be found);
 Close leaves the rest (`review_close`). Cards added automatically meanwhile
@@ -1490,8 +1495,9 @@ only checked against the right printing), a quiet server's timing, and the false
 
 ## Reading mode: evidence (phase 3 of the reading refactor; off by default, never tried live)
 
-`reading.mode` in `config.yaml` (`cascade` by default), overridden by `reading_mode` in `data/settings.json` (set on the machine and restart the container; no image
-rebuild). **`cascade` is exactly the reading described above and below this section**; nothing in this section runs in it (the foil-marker tests, which predate the mode,
+`reading.mode` in `config.yaml` (`cascade` by default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode` and
+`reading_accept_image_alone`; the next card takes it - no restart and no image rebuild). The page asks for confirmation when either switch is turned on and says what the mode needs
+(the image index with its number of printings, and OCR switched on; without them every card is read as before). **`cascade` is exactly the reading described above and below this section**; nothing in this section runs in it (the foil-marker tests, which predate the mode,
 pass unedited, and `cascade` never calls the code of this section - a test pins that).
 
 **`evidence`** changes only the card the full-card OCR did *not* confirm - the card that would have gone to the vision AI. A card OCR confirms is read as before.
@@ -1536,9 +1542,18 @@ still handles and says nothing about the cards the mode adds itself. What the mo
 guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
 (median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker - not measured on the server with Ollama resident. *Never run on live scans.*
 
-*Not done yet* (deferred on purpose): the single worker pool that would replace the OCR and AI workers (a restructuring that changes no decision, and the riskiest part of the live
-path); a rule for an OCR-confirmed card whose picture says `disagree` (the Secret Lair case: it is added as the OCR read it, as before); a Settings page switch for the mode; flagging an
-unsure finish in the review screen (phase 4).
+**An OCR-confirmed card is asked one thing** (`Identification._contradicted_by_picture`, `PrintingCheck.contradicts`; 2026-10-20): whether the picture clearly looks like *another printing of
+the same card* than the one the OCR read (the Secret Lair case: the card prints the set and number of the card it is made from). If so, the OCR read is no longer a confirmed read: its
+number and set are dropped, and it goes to the picture (when the picture alone is on), to the AI (whose answer is checked as above) or, without either, to review under its name. It fails open
+to the OCR: no index, no verdict or a failure leaves the read standing. The look-up is one (`Game.confirmed_card`, `confirmed_read` unchanged) and the search costs 18 ms (median) on the
+development machine, on the single OCR worker, for every OCR-confirmed card in this mode. **Interim and incomplete - not yet a finished rule:** it covers only `same_card`. Measured on the stored labels of
+10,568 OCR-confirmed pictures, 82 disagree: 6 `same_card` (all the Deadpool Secret Lair cards, genuine) and 76 `other_card`, a mix of foil glare / showcase backgrounds on correct reads and genuine OCR
+misreads (3 of 4 looked at were glare). Run end to end on the 15 Deadpool captures with no vision AI and the picture alone off, **4 of 15 would still be added wrongly** - garbled OCR names that fuzzily
+match another card (`Lightning` #042, `under DEADLY DiSPUTe 1` -> `2XM #080: Costly Plunder`), which are `other_card`. Whether those can be told from the glare cases by how the OCR matched
+(`set_number` against the weaker `name_number` / `name_set_digit`) is being measured on the live pipeline (`scripts/experiments/image_match/measure_contradiction_live.py`); the rule is not to be
+considered finished until that is settled. With the picture alone on, 12 of the 15 are added as the right printing (`verify_deadpool.py`).
+
+*Not done* (decided or deferred): the single worker pool that would replace the OCR and AI workers is **decided against** (see the plan); the finish hint covers review items only.
 
 ## Database
 
@@ -2588,10 +2603,10 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 | Page → server | Server → page |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
-| `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
+| `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name; `candidates`: the printings the picture looks like, `[]` without an index), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
 | `set_game` | `game_changed` (to every page; stops every camera's auto scanning; downloads the game's card data if it has none). Captures still waiting to be read keep their game (`game_id` in `route_identified`): they are not looked up as cards of the new game but go, unread, to their own game's review queue |
 
 HTTP endpoints are listed in the README. The collection page adds no Socket.IO events; it only
@@ -2678,7 +2693,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 `scripts/check_settings_lock.py`): the pages have no login, but the few actions that can hurt beyond one
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
-quit, network access, Debug mode (`toggle_debug_mode`) and, of the backups, restore, upload, download, delete and
+quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
 making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`, and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the

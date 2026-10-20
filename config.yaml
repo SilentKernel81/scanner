@@ -146,7 +146,8 @@ printing_check:
 #            printing_check) and the strip's collector line decide first - the vision AI is asked only when they do not decide, and its answer is
 #            checked against the picture. Cards OCR confirms are read as before. NEVER TRIED ON LIVE SCANS: leave on cascade until the shadow log
 #            (scripts/printing_check_report.py) meets the exit criteria in docs/PROGRAM_DOCUMENTATION.md ("Printing check")
-# data/settings.json's "reading_mode" (set on the machine, then restart) wins over this default - no rebuild of the image needed
+# The person's choice wins over this default and needs no rebuild and no restart: Settings > Card reading (guarded by the settings password when there is one),
+# remembered in data/settings.json as "reading_mode" and "reading_accept_image_alone"
 reading:
   mode: cascade
   # evidence mode: also add a card when only the picture decided (the strip did not name a printing the picture agrees with). OFF by default: those

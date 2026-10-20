@@ -56,7 +56,7 @@ re-exports `AGREE_BELOW`, `IMAGE_LEAD`); `Identification` (`submit`, `identify`,
 | 2a | `core/reading/`: the pure `decide_printing`; the lookup is rebuilt on it. **No behaviour change**, proved picture by picture against the previous implementation | 1 | No |
 | 2b | The finish as evidence: the strip's symbol and the foil network's probability are gathered and `decide_finish` answers in its own log field, next to the finish the server chose | 2a | No (log only) |
 | 3 | The decision drives add / review; the AI becomes the fallback for what is still open (its answer checked against the picture); one worker pool replaces the OCR worker and the AI workers | The exit criteria in PROGRAM_DOCUMENTATION.md met on live scans, and the owner's decision | **Yes** |
-| 4 | The review screen shows the picture's candidates; an unsure finish is flagged | 3 | Yes (a screen) |
+| 4 | The review screen shows the picture's candidates; an unsure finish is flagged | 3 | Yes (a screen). **Built** (2026-10-20): the five nearest printings as tiles, and a hint for an unread foil marker - in the review only; a card added automatically with an unread marker is still filed as regular, unflagged |
 | 5 | The AI is off by default; its code (providers, prompts, keys, the endpoint checks) is deleted one release later | 3 in use for a release | Yes |
 | 6 | The Android app: the same fingerprint, the foil network through OpenCV, the same decision, passing the same test files as Python | 2a (the files exist) | The app |
 | 7 | The index as a downloaded file built when sets are released (instead of every installation downloading the pictures), rebuilt automatically after a card-data update | The open question below | No |
@@ -80,13 +80,16 @@ re-exports `AGREE_BELOW`, `IMAGE_LEAD`); `Identification` (`submit`, `identify`,
 full-card OCR did **not** confirm, in front of the AI: `PrintingCheck.live_read` -> `Identification._read_by_picture`; the AI keeps the cards the picture cannot decide, and **its answer is
 checked against the picture** (`disagree` -> review). The decided printing is carried by id (the lookup by name and number fails for 14% of printings: `verify_roundtrip.py`). Details and
 numbers: PROGRAM_DOCUMENTATION.md, "Reading mode: evidence". Deliberately **not** in this step:
-- the single worker pool replacing the OCR and AI workers (restructuring, no decision changes - its own step);
-- a rule for an OCR-confirmed card the picture contradicts (the Secret Lair case stays as OCR reads it);
-- a page switch for the mode;
+- the single worker pool replacing the OCR and AI workers: **decided against** (see below);
+- a rule for an OCR-confirmed card the picture contradicts is built for the `same_card` case only and is **not finished** (PROGRAM_DOCUMENTATION.md: 4 of the 15 Deadpool captures would still be added wrongly - garbled OCR names that fuzzily match another card);
 - the picture alone adding a card is OFF by default (`reading.accept_image_alone: false`): a printing newer than the index whose strip is unreadable could be added by it even after the two guards (4% in a simulation on 428 pictures; with it off, 0 of 428) - the strip-confirmed decisions alone give 58.6% of the AI-read cards and none wrong;
 - the shadow log cannot judge the mode's own adds (it would compare the choice with itself): the exit criteria stay measured in `cascade`.
 
 ## What stays decided against
+
+**The single worker pool.** The plan's phase 3 named one pool replacing the OCR worker and the AI workers. Not built, on purpose: the OCR reader takes one request at a time, so the one serial OCR worker is
+deliberate, and merging the stages would change no decision while putting the riskiest part of the live path at stake. If throughput ever matters in the evidence mode, the narrower fix is to move only
+the picture search (CPU, no reader lock; 18 ms median) off the OCR worker. Measure first.
 
 The neural embeddings (the hash beat them by a wide margin) and the fine-tuned network (it passed its bar on thin evidence and was not adopted): see the report.
 The index's manifest names its descriptor, so a better one can replace the hash later without a new design.

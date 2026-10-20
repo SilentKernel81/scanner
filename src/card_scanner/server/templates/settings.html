@@ -163,6 +163,27 @@
                             <input type="checkbox" class="switch" id="toggle-ocr">
                         </label>
                     </div>
+                    <div class="settings-card" id="reading-evidence-card">
+                        <h3>Read by the picture first (experimental)</h3>
+                        <p class="hint">For a card OCR could not confirm: a fingerprint of the picture, matched against every printing, and the collector line decide before the vision AI is
+                            asked, and the AI's answer is checked against the picture. Needs the image index and OCR. <strong>Never tried on live scans</strong> - leave it off until you have
+                            looked at the shadow log (docs/PROGRAM_DOCUMENTATION.md, "Printing check").</p>
+                        <label class="switch-row">
+                            <span class="switch-text">
+                                <span class="switch-title">Read by picture and collector line first</span>
+                                <span class="switch-desc" id="reading-evidence-desc">Off: OCR, then the vision AI, as always</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="toggle-reading-evidence">
+                        </label>
+                        <label class="switch-row">
+                            <span class="switch-text">
+                                <span class="switch-title">Also add a card only the picture decided</span>
+                                <span class="switch-desc">Off (recommended): such a card goes to the AI. On: it is added by the picture alone - a printing newer than the image index whose collector line is unreadable can then be added as another printing</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="toggle-picture-alone">
+                        </label>
+                        <p class="hint" id="reading-status"></p>
+                    </div>
                     <div class="settings-card">
                         <h3>Vision AI</h3>
                         <div class="input-group">
@@ -341,6 +362,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=24"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=8"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=9"></script>
 </body>
 </html>

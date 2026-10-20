@@ -192,6 +192,21 @@ class LiveRead(unittest.TestCase):
         self.assertTrue(shadow.wait())
         self.assertTrue((self.root / 'shadow.jsonl').exists())
 
+    def test_contradicts_is_true_only_for_another_printing_of_the_same_card(self):
+        class SameCard(Cards):
+            def get_card_by_id(self, printing_id):
+                card = super().get_card_by_id(printing_id)
+                if card and printing_id in ('p3', 'p4'):
+                    card['oracle_id'] = 'one-card'            # p3 and p4: two printings of one card, with different art
+                return card
+        check = self.make(SameCard())
+        picture = degraded(synthetic_card(3))
+        self.assertTrue(check.contradicts(picture, 'p4'))         # the picture is p3: the Secret Lair case
+        self.assertFalse(check.contradicts(picture, 'p3'))        # it agrees
+        self.assertFalse(check.contradicts(picture, 'p5'))        # another CARD: a glare or a misread, not this rule's business
+        self.assertFalse(check.contradicts(picture, 'p9'))        # a printing the index does not have
+        self.assertFalse(self.make(SameCard(), self.root / 'no-index').contradicts(picture, 'p4'))
+
     def test_verdict_of_says_whether_the_picture_agrees_with_an_answer(self):
         self.assertEqual(self.check.verdict_of(degraded(synthetic_card(3)), 'p3'), 'agree')
         self.assertEqual(self.check.verdict_of(degraded(synthetic_card(3)), 'p2'), 'disagree')
@@ -207,6 +222,9 @@ class FakeGame:
     def confirmed_read(self, name, number, set_code):
         return self.confirm
 
+    def confirmed_card(self, name, number=None, set_code=None):
+        return {'id': 'ocr-printing', 'name': name, 'number': number, 'set_code': set_code} if self.confirm else None
+
     def identify(self, name, number=None, set_code=None, ai_model=None):
         return self.found
 
@@ -214,9 +232,15 @@ class FakeGame:
 class FakeEvidence:
     """What Identification is given as `evidence`: a reading it was told to give (or to raise), and a verdict"""
 
-    def __init__(self, reading=None, error=None, verdict='agree'):
-        self.reading, self.error, self.verdict = reading, error, verdict
-        self.reads, self.verdicts, self.verdict_images = [], [], []
+    def __init__(self, reading=None, error=None, verdict='agree', contradicted=False):
+        self.reading, self.error, self.verdict, self.contradicted = reading, error, verdict, contradicted
+        self.reads, self.verdicts, self.verdict_images, self.contradictions = [], [], [], []
+
+    def contradicts(self, image, printing_id):
+        self.contradictions.append((image, printing_id))
+        if isinstance(self.contradicted, Exception):
+            raise self.contradicted
+        return self.contradicted
 
     def live_read(self, image, card_image, ocr, foil_net, accept_image_alone):
         self.reads.append((image, card_image, accept_image_alone))
@@ -332,13 +356,70 @@ class InIdentification(unittest.TestCase):
         self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
         self.assertEqual(self.ident.evidence.reads, [])
 
-    def test_a_card_the_ocr_confirmed_is_read_as_before_in_evidence_mode_too(self):
+    # ----- a card the OCR confirmed: read as before, unless the picture is another printing of that very card (Secret Lair)
+    def confirmed_ocr(self):
         self.game = FakeGame(confirm=True)
         self.ocr_read.update(collector_number='242', set_code='hob', foil='non-foil')
+
+    def test_a_card_the_ocr_confirmed_is_read_as_before_in_evidence_mode_too(self):
+        # (the contract changed on 2026-10-20: this used to say the picture is never asked about a confirmed card - it is asked ONE thing now,
+        # whether it is another printing of the same card; the answer 'no' leaves the card exactly as it was)
+        self.confirmed_ocr()
         info, task = self.ident._read_with_ocr(self.image, self.image)
-        self.assertEqual((info['name'], info['foil'], task), ('Gandalf', 'non-foil', None))
+        self.assertEqual((info['name'], info['collector_number'], info['foil'], task), ('Gandalf', '242', 'non-foil', None))
         self.assertNotIn('printing_id', info)
-        self.assertEqual(self.ident.evidence.reads, [])
+        self.assertEqual(self.ident.evidence.reads, [])                                    # no reading by picture and strip
+        self.assertEqual(self.ident.evidence.contradictions, [(self.image, 'ocr-printing')])   # the one question, about the printing the OCR read
+
+    def test_the_picture_is_asked_with_the_flat_card(self):
+        self.confirmed_ocr()
+        flat = np.ones((100, 70, 3), np.uint8)
+        self.ident._read_with_ocr(self.image, flat)
+        self.assertIs(self.ident.evidence.contradictions[0][0], flat)
+
+    def test_an_ocr_read_the_picture_contradicts_is_no_longer_confirmed_and_goes_to_review_without_an_ai(self):
+        self.confirmed_ocr()
+        self.ident.evidence.contradicted = True
+        self.ident.evidence.reading = None
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertIsNone(task)
+        self.assertEqual((info['name'], info['collector_number'], info['set_code']), ('Gandalf', '', ''))     # the name only: review shows the card
+        self.assertEqual(info['foil'], 'non-foil')
+
+    def test_an_ocr_read_the_picture_contradicts_goes_to_the_ai_when_there_is_one(self):
+        self.confirmed_ocr()
+        self.ident.evidence.contradicted = True
+        self.ident.evidence.reading = None
+        self.ident.card_identifier = object()
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual(task, identification.IDENTIFY)
+        self.assertEqual(info['collector_number'], '')
+
+    def test_an_ocr_read_the_picture_contradicts_is_read_by_the_picture_when_that_decides(self):
+        # (the picture alone is switched on and decided: the Deadpool card is added as the printing the picture is)
+        self.confirmed_ocr()
+        self.ident.evidence.contradicted = True
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['printing_id'], info['reader']), ('p3', printing_check.EVIDENCE_READER))
+
+    def test_a_failing_check_leaves_the_ocr_read_standing(self):
+        self.confirmed_ocr()
+        self.ident.evidence.contradicted = RuntimeError('index went away')
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['collector_number'], task), ('242', None))
+
+    def test_without_the_printing_check_or_in_cascade_the_ocr_read_is_not_questioned(self):
+        self.confirmed_ocr()
+        self.ident.evidence.contradicted = True
+        self.mode('cascade')
+        self.game.confirmed_card = None                                          # cascade never asks for it: confirmed_read is the old look-up
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['collector_number'], task), ('242', None))
+        self.assertEqual(self.ident.evidence.contradictions, [])
+        self.mode('evidence')
+        self.game.confirmed_card = lambda *a, **k: {'id': 'ocr-printing'}
+        self.ident.evidence = None
+        self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[0]['collector_number'], '242')
 
     # ----- the AI's answer against the picture
     def asked(self, **extra):
@@ -450,6 +531,19 @@ class Routing(unittest.TestCase):
 
 
 class Magic(unittest.TestCase):
+    def test_confirmed_card_is_confirmed_read_with_the_card_from_one_look_up(self):
+        from card_scanner.games.mtg import Magic as Game
+        db = mock.Mock()
+        db.search_card_exact.side_effect = lambda name, number, set_code: {'id': 'x', 'match': 'set_number'} if set_code == 'hob' else {'id': 'y', 'match': 'name'}
+        game = Game(db)
+        self.assertEqual(game.confirmed_card('Gandalf', '242', 'hob'), {'id': 'x', 'match': 'set_number'})
+        self.assertTrue(game.confirmed_read('Gandalf', '242', 'hob'))                       # the old yes / no, unchanged
+        self.assertIsNone(game.confirmed_card('Gandalf', '242', 'zzz'))                     # found, but not confirmed
+        self.assertFalse(game.confirmed_read('Gandalf', '242', 'zzz'))
+        db.search_card_exact.reset_mock()
+        self.assertIsNone(game.confirmed_card('Gandalf', '', 'hob'))                        # every confirmed match needs the number
+        db.search_card_exact.assert_not_called()
+
     def test_a_decided_printing_is_a_confirmed_match_and_nothing_else_is_tagged_so(self):
         from card_scanner.core.database import CONFIRMED_MATCHES
         from card_scanner.games.mtg import Magic as Game

@@ -9,7 +9,7 @@ from flask_socketio import emit, join_room
 from card_scanner import games
 from card_scanner.core.review import REVIEW_DIR
 
-from card_scanner.server.state import app, database, inventory, maintenance_barrier, review, scan_inventory, socketio, stations
+from card_scanner.server.state import app, database, inventory, maintenance_barrier, printing_check, review, scan_inventory, socketio, stations
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import GENERAL_ROOM, desk, desk_for, emit_desk, log_to_client, page_stations, scanner
 from card_scanner.server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
@@ -243,6 +243,12 @@ def handle_review_open(data=None):
         card['match'] = item['match']
     desk().current_card_info = card
     set_pending_capture(review.image_path(item))  # goes with whatever card is added for this item
+    # What the picture looks like (the printing check's index): offered beside the AI's read, nothing is chosen for the person. Never stops the item opening
+    try:
+        candidates = printing_check.candidates(review.image_path(item)) if printing_check else []
+    except Exception as e:
+        logger.debug(f"Review item {item['id']}: no candidates ({e})")
+        candidates = []
     emit('review_item', {
         'id': item['id'],
         'total': total,
@@ -251,6 +257,7 @@ def handle_review_open(data=None):
         'captured_at': item['created_at'],
         'station': (stations.get(item['station']) or {'name': item['station']})['name'] if item.get('station') else None,
         'card': game.card_payload(card) if card else None,
+        'candidates': candidates,
     })
 
 

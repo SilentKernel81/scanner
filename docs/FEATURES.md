@@ -67,7 +67,7 @@ game sits behind one interface (`games/`), so another could be added.
   confirm, the fingerprint of the picture and the strip's collector number and set decide first, the
   AI is asked only when they do not, and its answer is checked against the picture. On the
   experiment's pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (84% if the picture alone may also add, which is off by default), none wrong. Needs the image
-  index; switched on in `data/settings.json`, not in the pages.
+  index; switched on in Settings > Card reading (with a warning), and it takes effect on the next card.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (`scripts/build_image_index.py`, about 15 MB) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
@@ -79,7 +79,8 @@ game sits behind one interface (`games/`), so another could be added.
   review). Thresholds from 20 known-wrong labels, never run on live scans, a Pi or the Android app.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
-  the printing, finish and quantity, and add it. Scanning goes on meanwhile.
+  the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read.
+  Scanning goes on meanwhile.
 - **Send back to review:** a button on any entry of the collection or the scanned cards sends
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.

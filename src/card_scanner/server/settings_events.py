@@ -14,7 +14,7 @@ from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
 from card_scanner.config import Config
 from card_scanner import games
 
-from card_scanner.server.state import app, app_settings, identification, inventory, maintenance_barrier, services, socketio, stations
+from card_scanner.server.state import app, app_settings, identification, inventory, maintenance_barrier, printing_check, services, socketio, stations
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
@@ -137,6 +137,21 @@ def saved_debug_mode():
     return bool(app_settings.get('debug_mode', Config.DEBUG)) if app_settings else bool(Config.DEBUG)
 
 
+def reading_status():
+    """
+    How cards are read, for the Settings page: the mode (reading.mode: 'cascade' or 'evidence'), whether a card only the picture decided may be added, and
+    what the evidence mode needs - the image index (its number of printings; None without one) and OCR switched on. The page warns when it is missing.
+    """
+    try:
+        index = printing_check.index() if printing_check else None
+    except Exception:
+        index = None
+    return {'mode': identification.reading_mode if identification else 'cascade',
+            'accept_image_alone': bool(identification.accept_image_alone) if identification else False,
+            'index_printings': len(index) if index is not None else None,
+            'ocr_enabled': bool(identification.ocr_enabled) if identification else False}
+
+
 @app.route('/api/scan_settings')
 def get_scan_settings():
     """Scanning preferences the page needs on load"""
@@ -144,6 +159,7 @@ def get_scan_settings():
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
         'ocr_first': bool(identification.ocr_enabled) if identification else True,
         'ocr_installed': CardOcr.installed(),
+        'reading': reading_status(),
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'debug_mode': saved_debug_mode(),
         'debug_mode_running': bool(services.debug_mode_running),
@@ -357,6 +373,32 @@ def handle_toggle_ocr(data):
         return
     identification.set_ocr_enabled(bool(data.get('enabled', False)))
     emit('ocr_toggled', {'enabled': identification.ocr_enabled, 'installed': CardOcr.installed()})
+
+
+@socketio.on('set_reading_mode')
+@guarded_event
+def handle_set_reading_mode(data=None):
+    """
+    How cards are read (remembered; the next card takes it, no restart): data['mode'] 'cascade' (OCR, then the vision AI) or 'evidence' (the picture and the
+    strip before the AI - docs/PROGRAM_DOCUMENTATION.md, "Reading mode: evidence"), and data['accept_image_alone'] (a card only the picture decided may be added).
+    Guarded like the other settings that decide what is added. Either may be sent alone.
+    """
+    data = data or {}
+    mode = data.get('mode')
+    alone = data.get('accept_image_alone')
+    if (mode is not None and mode not in ('cascade', 'evidence')) or (alone is not None and not isinstance(alone, bool)):
+        emit('error', {'message': 'Not a reading mode'})
+        return
+    if mode is not None:
+        app_settings.set('reading_mode', mode)
+    if alone is not None:
+        app_settings.set('reading_accept_image_alone', alone)
+    status = reading_status()
+    emit('reading_mode_changed', status)
+    log_to_client(f"Card reading: {status['mode']}" + (' (the picture alone may add a card)' if status['mode'] == 'evidence' and status['accept_image_alone'] else ''),
+                  level="info")
+    if status['mode'] == 'evidence' and (status['index_printings'] is None or not status['ocr_enabled']):
+        log_to_client("Evidence reading needs the image index and OCR - until they are there every card is read as before", level="warning")
 
 
 @socketio.on('toggle_debug_trace')

@@ -88,6 +88,11 @@ class Magic(Game):
     def identify(self, name, number=None, set_code=None, ai_model=None):
         return self.searcher.search_by_name(name, number, ai_model=ai_model, set_code=set_code)
 
+    def confirmed_card(self, name, number=None, set_code=None):
+        # confirmed_read's look-up (no log lines of identify), keeping the card: every confirmed match needs the collector number
+        card = self.db.search_card_exact(name, number, set_code) if number else None
+        return card if self.is_confirmed(card) else None
+
     def card_by_printing(self, printing_id):
         # Not a search: the printing was chosen by its picture (printing_check.live_read) and is fetched by its id. Looking it up again by
         # name and number cannot be trusted for it - for about one printing in seven of the card data (promos, 'CMR-77', '245p', '185★')
