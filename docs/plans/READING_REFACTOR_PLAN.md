@@ -91,6 +91,13 @@ numbers: PROGRAM_DOCUMENTATION.md, "Reading mode: evidence". Deliberately **not*
 The neural embeddings (the hash beat them by a wide margin) and the fine-tuned network (it passed its bar on thin evidence and was not adopted): see the report.
 The index's manifest names its descriptor, so a better one can replace the hash later without a new design.
 
+**Changing the card finder for the sake of the fingerprint.** Not needed: a separate analysis (2026-10-20, outside this repository; 34 labelled frames, one camera - the Pi, and it is not
+recorded which finder produced the corners) found that the finder's corner error costs the colour-hash lookup nothing measurable (top-1 94.1% with the station's corners and with human-marked
+ones). It is mostly a consistent outward bias - the station's corners sit about 1.85% of the card width outside the human ones - and the fingerprint's edge cut (`image_index.EDGE`: 2.5% top
+and bottom, 3.5% left and right) lies inside it; "the cut absorbs the bias" is a reading that was not tested. **The condition that goes with it:** an alignment-sensitive descriptor (the HOG
+descriptor the analysis tried lost 12 points, 91.2% -> 79.4%, with the station's corners) would need the finder retrained to the human edge definition first - so a descriptor change in the
+manifest is also a detection decision.
+
 ## Risks and open questions
 
 - **Cards the picture cannot speak for:** a printing newer than the index (the strip then has no second source), old cards that print no collector line. A rule for the first
@@ -99,6 +106,10 @@ The index's manifest names its descriptor, so a better one can replace the hash 
 - **Throughput and the GPU** next to the local model: the lookup's second OCR reader has not been measured on the server (the deploy plan's rehearsal does).
 - **Open: may the fingerprints be published?** Phase 7 would distribute a file of 96-byte hashes derived from Scryfall's pictures. Whether Scryfall's and Wizards of the Coast's
   terms allow that has **not been checked**; until it is, each installation builds its own index (hours, once).
+- **Corner error and the fingerprint** (from that analysis): random corner noise leaves the hash flat up to about 1.25% of the card width and falls off between 2.5% and 5% (top-1 88.0% -> 82.5%
+  -> 50.1%); the finder's worst single corner in the 34 frames was 9.2%. Such a frame matches badly and is caught by the guards (the similarity floor, the lead, the strip rule) and goes to
+  the AI - which is the intended failure. **Not known:** the phone station, a card in a sleeve or on a playmat, and whether the corner net improves on the corners used. These are the cases
+  to look at first when the live log shows picture misses, before suspecting the index.
 - **The live numbers** are still to come: the thresholds were set from 20 wrong labels, and phase 1 exists to replace that with live evidence.
 
 ## Rollback
