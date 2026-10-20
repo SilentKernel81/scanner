@@ -200,6 +200,21 @@ right printing (the Deadpool foil / confetti ones the picture's, not the printed
 went to the AI, and the time per card is not worse (the mode adds about 60 ms in the OCR worker on the laptop - **not measured next to Ollama on the server**). Switching it on for
 the live server is the owner's decision after the exit criteria are met, with the same switch on the live Settings page (the next card takes it); **to switch it off again**, turn it off there (or set `cascade` in `data/settings.json`) - nothing else changed on disk (no schema, nothing to undo; cards it added stay as added).
 
+## What happened (2026-10-20, the server's local time, CDT) - deployed
+
+Main at `69ee17a` (its code is `883870b` plus this plan's own edits), evidence mode OFF, nothing pushed. **Step 1**: the server differed from the repo only in this work (24 changed, 23 new files; one harmless
+leftover `stations_api.py.bak-20261017` in `src/`); `user` is uid 1000 there. **Step 2**: backups `~/scanner-backups/scanner-backup-20261020_161506.tar.gz` (2.8 GB) and `code-20261020_161717.tar.gz`.
+**Steps 3-5**: the image built as `mtg-scanner-server:rehearsal` and imported correctly; the rehearsal ran on a copy of the real data (8,925 cards / 4,176 unique / $16,503.46 / 23 decks identical to production)
+with the same 39 pictures as the local one, through the real `qwen3.5:9b-q8_0`: no errors; cascade read as before; evidence added 8 cards by picture and strip in 0.18-0.41 s and sent the two `Sol Ring` cards the
+9B model also misreads (as `Worn Powerstone`) to review. **The GPU question is answered**: with the 9B model loaded, the production container's OCR reader and the rehearsal's TWO readers, the GPU peaked at
+**11,188 MiB of 16,376** (5,188 MiB of headroom); the second reader costs about 350 MiB. **Step 6**: the index and the code copied (a second dry run showed 0 differences), `build`, the image checked, `up -d` with both
+GPU files at 16:32:42 (production had been idle for over ten minutes). **Step 7**: `light-ocr ready (webgpu)` at 16:32:43, no errors, collection / decks / finish split / review identical (8,925 / 4,176 / $16,503.46 / 23 /
+0), `pi` and `rpi-scanner` reconnected (the phone was not connected at the time), the Settings page shows the new section off, the image index loaded. **After**: the index extended inside the container to all 112,818
+printings (53 new, 7 s; the server followed the new generation by itself). The rehearsal's container, image and data copy were removed. **Learned**: the real server has a settings password, so the Settings switch
+(a guarded event) is refused without it - verified on production, which has no `reading_mode` key - and a rehearsal copy needs its `settings_login.json` deleted to be driven by a script; `/tmp` there is a 7 GB
+RAM-backed filesystem (the backup was extracted under `~` instead, without the picture folders); `docker logs` does not show `light-ocr ready` (it is in `data/logs/app.log`); no previous image remains after a rebuild
+(the way back is the code backup and a rebuild, as the notes said). Left alone: `nomad_homebox` is in a restart loop (not ours).
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
