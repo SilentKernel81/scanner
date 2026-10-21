@@ -188,17 +188,18 @@
                         <div class="input-group">
                             <label>Picture index</label>
                             <div class="storage-usage" id="index-status">Loading...</div>
-                            <label class="switch-row">
-                                <span class="switch-text">
-                                    <span class="switch-title">Extend the index after a card data update</span>
-                                    <span class="switch-desc">On: when a card database download has finished and an index exists, the new printings' pictures are fetched from Scryfall by themselves. It never starts the first build - that is the button below</span>
-                                </span>
-                                <input type="checkbox" class="switch" id="toggle-extend-index">
-                            </label>
                             <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
                             <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
-                            <div class="hint" id="index-hint">A fingerprint of every printing's picture, for reading a card by its picture (above) and for the check against what was read. After a card database update, press this: only the new pictures are downloaded from Scryfall (a few seconds for a handful). The first time it downloads the pictures of the whole game, about 12 GB, and takes hours; it can be stopped and goes on where it stopped.</div>
+                            <div class="hint" id="index-hint">A fingerprint of every printing's picture. An update downloads only the new pictures from Scryfall; the first build downloads the whole game, about 12 GB, and takes hours - it can be stopped and goes on where it stopped.</div>
                         </div>
+                        <!-- a direct child of the card, like every other switch: inside .input-group it took that group's input styles (a full-width bar) -->
+                        <label class="switch-row">
+                            <span class="switch-text">
+                                <span class="switch-title">Update the index after a card data update</span>
+                                <span class="switch-desc">Fetches the new printings' pictures by itself; never the first build</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="toggle-extend-index">
+                        </label>
                     </div>
 
                     <!-- 2. OCR: read on this computer, for what the picture does not settle (and the collector line for the picture) -->
