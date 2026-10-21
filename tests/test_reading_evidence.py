@@ -102,6 +102,25 @@ class LiveRead(unittest.TestCase):
         self.assertIsNone(small.live_read(picture, None, FakeReader([])))
         self.assertIsNone(small.live_read(picture, None, FakeReader(strip_lines(7))))     # ... with or without a strip
 
+    def test_codex_2026_10_20_a_poor_picture_is_not_a_strong_decision_because_the_strip_names_a_nearby_candidate(self):
+        # synthetic_card(11) matches nothing in the index: its best match is only 0.057 similar, and p4, p2, p6 and p0 are all within 0.02 of it. A collector line that names
+        # p2 (or p6) was enough for 'strong' - and an add by the default reading - before 'strong' had a floor of its own
+        picture = degraded(synthetic_card(11))
+        search = self.check._search(picture)
+        self.assertLess(search['sims'][0], printing_check.STRONG_MIN_SIMILARITY)
+        self.assertGreaterEqual(search['sims'][2] if len(search['sims']) > 2 else 0, search['sims'][0] - 0.02)     # candidates close to the best: the hazard is real
+        for named in (2, 6):
+            self.assertIsNone(self.check.live_read(picture, None, FakeReader(strip_lines(named))), named)
+            self.assertIsNone(self.check.live_read(picture, None, FakeReader(strip_lines(named)), accept_image_alone=True), named)
+        with mock.patch.object(printing_check, 'STRONG_MIN_SIMILARITY', -1.0):        # the floor off: the very reading the review described
+            self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(2)))['path'], 'strong')
+
+    def test_a_good_strong_decision_is_not_refused_by_its_floor(self):
+        reading = self.check.live_read(degraded(synthetic_card(3)), None, FakeReader(strip_lines(3)))
+        self.assertEqual(reading['path'], 'strong')
+        self.assertGreater(reading['similarity'], printing_check.IMAGE_MIN_SIMILARITY)     # a clearly matching picture is far above both floors
+        self.assertLess(printing_check.STRONG_MIN_SIMILARITY, printing_check.IMAGE_MIN_SIMILARITY)
+
     def test_a_strip_that_names_a_printing_the_index_lacks_stops_the_picture_alone(self):
         # The index has p0..p6 but not p5's picture; the strip names p5 (the card database has it). The best match then is some other card: no add
         pictures = self.root / 'pictures2'

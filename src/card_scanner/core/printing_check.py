@@ -62,6 +62,12 @@ DISAGREE_FROM = 0.06
 # cards (they go to the AI). A higher floor costs more than it helps: a covered camera picture is only 0.66 similar to Scryfall's scan (median), and the
 # same-art reprints of an uncovered one stay in the index and score high.
 IMAGE_MIN_SIMILARITY = 0.5
+# A 'strong' decision (the strip names a printing the picture agrees with) needs a floor of its own, far lower: a Codex review of 2026-10-20 showed that without one a collector line
+# naming ANY of the five nearest printings was enough, even when every candidate looked unlike the capture (a probe gave 'strong' at a similarity of 0.10) - a degraded capture with a
+# misread collector line would then bypass the AI and be added. Measured (scripts/experiments/image_match/calibrate_strong.py, 1,517 'strong' decisions on real pictures, none wrong):
+# the printings they pick have a similarity of at least 0.245 (1st percentile 0.355, median 0.68); 0.30 refuses 5 of them (0.33%, they go to the AI) and everything near the 0.10 of
+# the probe. A backstop calibrated against the correct ones - no wrong 'strong' decision exists in the data to calibrate against.
+STRONG_MIN_SIMILARITY = 0.30
 EVIDENCE_READER = 'picture+strip'     # what a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
@@ -373,7 +379,9 @@ class PrintingCheck:
         card = cards.get(decision['printing_id'])
         if not card:                                   # an indexed printing the card database no longer has: not a card to add
             return None
-        if decision['path'] == 'image' and (decision['similarity'] < IMAGE_MIN_SIMILARITY or self._names_unindexed(search['index'], strip)):
+        if decision['similarity'] < (IMAGE_MIN_SIMILARITY if decision['path'] == 'image' else STRONG_MIN_SIMILARITY):
+            return None                                # a picture that looks little like the printing decides nothing, not even with a collector line that names it
+        if decision['path'] == 'image' and self._names_unindexed(search['index'], strip):
             return None                                # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),

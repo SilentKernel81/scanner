@@ -1528,6 +1528,12 @@ For such a card, in `Identification._read_with_ocr` (so also in `identify()`, wh
 the check of the AI's answer: a fixed area's capture is the area as drawn, not a card, and the index was built from whole-card pictures. The shadow log, by contrast, hashes the saved capture
 file, so its numbers for a fixed-area station carry that difference. `verify_live_read.py` uses flat-card pictures only: **a fixed-area station was never tried with this mode.**
 
+**A floor for `strong` too** (a Codex review of the whole branch, 2026-10-20): the floor below applied only to the picture-alone path, so a collector line naming ANY of the five nearest printings was enough for
+`strong` even when every candidate looked unlike the capture (a probe gave `strong` at a similarity of 0.10), and the default reading would have added it. `STRONG_MIN_SIMILARITY` is 0.30: measured on 1,517 `strong`
+decisions on real pictures (`scripts/experiments/image_match/calibrate_strong.py`, none wrong), the printing they pick is at least 0.245 similar (1st percentile 0.355, median 0.68), so 0.30 refuses 5 of them (0.33%; they go
+to the AI) and everything near 0.10. It is a backstop calibrated against the correct decisions - no wrong `strong` one exists in the data. On the same 1,628 pictures the picture-alone path (switched on for the measurement)
+made 47 decisions, 4 of which differ from the stored label - and in all 4 it is the label that is wrong (an older run's misread number; the OCR read the name the picture chose, and one is the Deadpool `Lightning Bolt`).
+
 **A printing the index lacks (Codex review, 2026-10-20).** The lead of the best match over the second is *relative*: with an index that lacks the card's printing (a set newer than the
 index, or a stale index) an unrelated best match can still lead, and the picture alone would add it. Two guards apply to a decision by the picture alone (not to `strong`, whose printing
 the strip names and the picture confirms): the best match must be at least `IMAGE_MIN_SIMILARITY` (0.5) similar in absolute terms, and the strip must not name a printing the card
