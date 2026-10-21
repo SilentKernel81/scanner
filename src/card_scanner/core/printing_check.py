@@ -165,11 +165,13 @@ def ocr_agrees(read, card, printing_at, lead=None, strip=None):
 
 def printing_named_by_line(lookup, set_code, number):
     """
-    The printing a whole collector line names: lookup is database.get_card_by_set_number(set, number, exact=False). A number with a LETTER SUFFIX ("233a",
-    "0245p", "IFIYW-5") is looked up WITH it first - leading zeros off ("0233a" -> "233a"), then as read - and only then by its digits as before, for a
-    suffix the OCR may have misread. The digits alone (database.collector_number_variants) take "233a" for "233": a Codex review of 2026-10-21 - the
-    index holds ZEN 233 AND ZEN 233a (Plains), so a line saying 233a was taken for the chosen 233 and the same-card check never saw the contradiction.
-    A number of digits alone is looked up as always.
+    The printing a whole collector line names, or None: lookup is database.get_card_by_set_number(set, number, exact=False). A number with a LETTER SUFFIX
+    ("233a", "0245p") is looked up AS WRITTEN only - leading zeros off ("0233a" -> "233a"), then as read - and when the card data has no such printing the
+    answer is None (unknown: a printing the card data lacks - the picture alone is then refused, strip_names_unknown / line_names unknown). Never by its
+    digits: two Codex reviews of 2026-10-21 - the digits alone (database.collector_number_variants) take "233a" for "233" (ZEN has both Plains), which
+    hid a line naming another printing; and falling back to the digits when the suffixed printing is MISSING from the card data (card data older than
+    the card) made the line "confirm" the base printing the picture chose. An OCR-misread suffix therefore costs a review, never a wrong printing (unknown
+    strips were 13 of 47 picture-alone decisions on the server, all right: time, not errors). A number of digits alone is looked up as always.
     """
     number = (number or '').strip()
     if re.search(r'\d', number) and re.search(r'[^\d]', number):
@@ -178,6 +180,7 @@ def printing_named_by_line(lookup, set_code, number):
             found = lookup(set_code, written, exact=True)
             if found:
                 return found
+        return None                                            # fail closed: the suffixed printing is not in the card data
     return lookup(set_code, number)
 
 

@@ -834,11 +834,16 @@ class InIdentification(unittest.TestCase):
         self.assertEqual(named('0233a'), 'p233a')          # leading zeros off, the suffix kept
         self.assertEqual(named('233'), 'p233')
         self.assertEqual(named('0233'), 'p233')
-        self.assertEqual(named('233z'), 'p233')            # a suffix no printing has: the digits, as before (an OCR misread)
+        self.assertIsNone(named('233z'))                   # a suffix no printing has: unknown, never the base printing (fail closed)
         # ... and the full-card OCR's line check sees ZEN 233a as ANOTHER printing of the chosen ZEN 233's card
         chosen = plains[('zen', '233')]
         printing_at = lambda set_code, number: printing_check.printing_named_by_line(lookup, set_code, number)
         self.assertEqual(printing_check.ocr_facts({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at)['line_names'], 'same_card')
+        self.assertFalse(printing_check.ocr_agrees({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at))
+        # card data OLDER than the card: 233 there, 233a not (a second Codex review) - the line is a printing the card data lacks, never the chosen 233
+        del plains[('zen', '233a')]
+        self.assertIsNone(named('233a'))
+        self.assertEqual(printing_check.ocr_facts({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at)['line_names'], 'unknown')
         self.assertFalse(printing_check.ocr_agrees({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at))
 
     def test_a_strip_naming_another_existing_card_and_an_ocr_that_disagrees_keep_the_picture_from_adding_it(self):
