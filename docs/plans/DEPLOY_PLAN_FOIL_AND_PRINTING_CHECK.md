@@ -227,6 +227,13 @@ with nothing saved, the index 112,818 of 112,818, the Settings page shows the ne
 `rpi-scanner` reconnected at once; **the `pi` station was not connected: its machine (192.168.1.88) does not answer ping or SSH - it went off at 17:29:03, 80 minutes before this deploy**, so it is powered off or off the network (not
 the server's doing; the other Pi, 192.168.1.199, is fine). The vision AI is now the last step on the real server; **nothing has been scanned in this mode there yet** - the first live evidence is `picture+strip` in `scanned_cards.log`.
 
+## Third deploy (2026-10-20, 19:25 CDT): a floor of picture similarity for `strong` decisions
+
+Main at `be7294d` (nothing pushed): `STRONG_MIN_SIMILARITY` 0.30 (a Codex review of the whole branch: a collector line naming any of the five nearest printings was enough for `strong`, even for a picture that looks
+like nothing). Backups `scanner-backup-20261020_192118.tar.gz` and `code-20261020_192320.tar.gz`; the comparison showed exactly five files; rehearsed on a copy (the 39 pictures, the mode left at its default): 7 cards by picture
+and strip instead of 8 - `Mystic Confluence`'s match is under the floor, so the AI read it, to the same card - every other outcome identical, no errors. Then `build` + `up -d` at 19:25:52 (production idle). After: `light-ocr ready (webgpu)`,
+no errors, collection / decks / review identical (8,925 / 4,176 / $16,503.46 / 23 / 0), mode `evidence`, index 112,818 of 112,818, the page and the guard as before. The `pi` station (the Pi 5, 192.168.1.88) was still offline.
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
