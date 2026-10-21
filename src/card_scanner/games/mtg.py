@@ -147,6 +147,17 @@ class Magic(Game):
             return 'regular'
         return foil_kind if foil == 'foil' else 'regular'
 
+    def finish_known(self, card, foil='unknown'):
+        """
+        Whether the finish is known: a printing that exists in one finish only, or a ★ / • the reading read (foil 'foil' / 'non-foil'). A printing made in both
+        with the marker unread is NOT known (since 2026-10-21, the owner's choice): it goes to review with its printing, instead of being added as regular -
+        suggested_finish's guess, which put a foil the marker reading missed in as regular (a confetti foil on the Pixel, the same day)
+        """
+        finishes = card.get('finishes') or []
+        has_foil = 'foil' in finishes or 'etched' in finishes
+        has_nonfoil = 'nonfoil' in finishes
+        return not (has_foil and has_nonfoil) or foil in ('foil', 'non-foil')
+
     def inventory_fields(self, card, finish):
         colors = card.get('colors') or []
         # Foil and surge foil copies are priced as foils; fall back to the other price if missing

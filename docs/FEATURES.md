@@ -126,7 +126,8 @@ game sits behind one interface (`games/`), so another could be added.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
   the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read.
-  Scanning goes on meanwhile.
+  Scanning goes on meanwhile. Since 2026-10-21 a confirmed printing made in foil AND non-foil whose ★ / • nothing read (OCR, the foil network, the AI) is not
+  added as regular either: it waits for review with its printing filled in, "finish not read" (the same rule in the Android app's standalone mode).
 - **Send back to review:** a button on any entry of the collection or the scanned cards sends
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.

@@ -1094,7 +1094,9 @@ With **Add cards automatically** (default; internally `fast_scan_mode`, saved pe
 `auto_add`): the capture is uploaded, put on record and queued (`submit_capture`), read in the background (`Identification.submit`: OCR, then the AI
 workers - see [The two queues](#the-two-queues)), and a confirmed printing
 is added immediately by the server (`add_automatically`: one Near Mint copy in
-`Game.suggested_finish` - the same rule as the page's `suggestedFinish`), never through the
+`Game.suggested_finish` - the same rule as the page's `suggestedFinish`) - when its finish is known (`Game.finish_known`, since 2026-10-21: a printing
+made in one finish only, or a ★ / • read; a printing made in both with the marker unread is queued for review, reason "finish not read (printed in foil and
+non-foil)", instead of being added as regular - a confetti foil the Pixel's network could not read had gone in as regular), never through the
 current card, so it can't replace a card being reviewed. It used to be the page that sent the
 add; a tab still running an older script then sent every add without its card and all confirmed
 cards ended in the review queue - and with no page open (phone asleep) nothing was added. The

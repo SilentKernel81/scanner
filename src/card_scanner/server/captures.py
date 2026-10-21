@@ -206,7 +206,10 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review
     # queue and scanning goes on
     confirmed = game.is_confirmed(db_card_info)
-    auto_add = was_fast_scan_mode and confirmed
+    # ... and whose finish is known: a printing made in foil and non-foil with the ★ / • unread waits for review, its printing filled in (Game.finish_known;
+    # the owner's choice of 2026-10-21 - before, it was added as regular)
+    finish_known = bool(db_card_info) and game.finish_known(db_card_info, foil)
+    auto_add = was_fast_scan_mode and confirmed and finish_known
 
     # Log scanned card
     log_scanned_card(
@@ -220,7 +223,9 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
 
     if not auto_add and (was_fast_scan_mode or desk().current_review_id is not None):
         why = queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info,
-                               why=None if was_fast_scan_mode else 'captured during a review', station=station)
+                               why=('captured during a review' if not was_fast_scan_mode
+                                    else 'finish not read (printed in foil and non-foil)' if confirmed and not finish_known else None),
+                               station=station)
         return {'status': 'review', 'reason': why}
     if auto_add:
         # Added here, not through the current card: an open review keeps its card

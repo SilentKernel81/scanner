@@ -1142,6 +1142,40 @@ class Routing(unittest.TestCase):
         game.identify.assert_called_once()
         self.assertEqual(outcome['status'], 'added')
 
+    def test_a_confirmed_printing_whose_finish_nothing_read_waits_for_review(self):
+        # (the owner's choice, 2026-10-21: a confetti foil whose star the marker reading missed went in as regular) - Game.finish_known decides; the real rule here
+        from card_scanner.games.mtg import Magic
+        magic = Magic(mock.Mock())
+        both = {'id': 'p3', 'name': 'Lightning Bolt', 'match': 'picture', 'finishes': ['nonfoil', 'foil']}
+        outcome, game, mocks = self.route_with(both, magic, foil='unknown')
+        self.assertEqual(outcome['status'], 'review')
+        mocks['add_automatically'].assert_not_called()
+        self.assertEqual(mocks['queue_for_review'].call_args.kwargs['why'], 'finish not read (printed in foil and non-foil)')
+        # ... the marker read, or a printing made in one finish only: added as before
+        self.assertEqual(self.route_with(both, magic, foil='foil')[0]['status'], 'added')
+        self.assertEqual(self.route_with(both, magic, foil='non-foil')[0]['status'], 'added')
+        self.assertEqual(self.route_with({**both, 'finishes': ['nonfoil']}, magic, foil='unknown')[0]['status'], 'added')
+        self.assertEqual(self.route_with({**both, 'finishes': ['foil']}, magic, foil='unknown')[0]['status'], 'added')
+
+    def route_with(self, card, magic, foil):
+        """search_and_emit_card for a decided printing `card`, with the real Magic.finish_known and the marker `foil`"""
+        from card_scanner.server import captures
+        game = mock.MagicMock()
+        game.card_by_printing.return_value = card
+        game.is_confirmed.side_effect = lambda c: bool(c) and c.get('match') in ('picture', 'set_number')
+        game.finish_known.side_effect = magic.finish_known
+        mocks = {}
+        for name, value in (('printing_check', mock.MagicMock()), ('games', mock.MagicMock(**{'active.return_value': game})), ('log_to_client', mock.Mock()),
+                            ('log_scanned_card', mock.Mock()), ('get_ai_model_info', mock.Mock(return_value='ai')), ('desk', mock.MagicMock()),
+                            ('queue_for_review', mock.Mock(return_value='finish not read (printed in foil and non-foil)')),
+                            ('station_prefix', mock.Mock(return_value='')), ('add_automatically', mock.Mock(return_value={'id': 'added'}))):
+            patcher = mock.patch.object(captures, name, value)
+            mocks[name] = patcher.start()
+            self.addCleanup(patcher.stop)
+        outcome = captures.search_and_emit_card(card['name'], '2', was_fast_scan_mode=True, set_code='sld', image_path='c.jpg', station='phone',
+                                               foil=foil, reader=printing_check.PICTURE_READER, printing_id=card['id'])
+        return outcome, game, mocks
+
     def test_the_decided_printing_travels_from_what_identification_read(self):
         from card_scanner.server import captures
         with mock.patch.object(captures, 'route_identified', return_value={'status': 'added'}) as route, \
