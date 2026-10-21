@@ -246,6 +246,13 @@ no errors, collection / decks / review identical (8,925 / 4,176 / $16,503.46 / 2
   `code-20261020_220650.tar.gz`. Checked on the live server with plain GETs: the three files (22.3 MB) match their sizes and SHA-256 (ETag equal), `Range` resume returns the right slice, a wrong generation / a
   table without its version are 409, an unknown kind 404, 116,329 ids = 116,329 hashes = rows of the table, none missing. Collection numbers identical before and after (8,925 / 4,176 / $16,503.46 / 23 decks).
 
+## Deploy 7 (2026-10-20, 23:16 CDT): the foil network at a fixed place, behind three guards (`1fbade6`)
+
+OCR off no longer sends the finish to the vision AI: the network reads the set line at its fixed place, behind the orientation, marker-layout (every tied printing) and AI-resolved-printing guards (six Codex rounds). Backups
+`scanner-backup-20261020_231156.tar.gz`, `code-20261020_231403.tar.gz`. **Rehearsed in the owner's real configuration** (the copy inherited OCR off + picture alone on): the same 39 outcomes as the earlier run in it, finishes
+included (0 differences); the median time of a picture-decided card 0.42 s -> 0.07 s (the 21 s maximum in both runs is the first AI call loading the model). Live afterwards: no errors, collection numbers identical (8,925 /
+4,176 / $16,503.46 / 23 decks), reading `evidence` with OCR off and picture alone on (the owner's test, kept), the download route answering. Not tried live on a scan yet.
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
