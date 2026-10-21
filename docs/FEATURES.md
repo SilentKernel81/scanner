@@ -81,7 +81,7 @@ game sits behind one interface (`games/`), so another could be added.
   fingerprint of the picture and the strip's collector number and set decide first, the AI is asked
   only when they do not, and its answer is checked against the picture. On the experiment's
   pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (81% if the
-  picture alone may also add, which is off by default), none wrong. Needs the picture index
+  picture alone may also add, which is on by default since 2026-10-20, with guards), none wrong. Needs the picture index
   (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
   turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
   copy of the real data).

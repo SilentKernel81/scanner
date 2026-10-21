@@ -1543,7 +1543,7 @@ printing, so the AI is the **last** step - kept as the fallback until it can be 
 **without them every card is read as in `cascade`**, so a new installation behaves as before until its index is built); asking for the picture alone to add cards asks for confirmation. **`cascade` is exactly the reading as it was before the picture matching existed**: OCR, then the vision AI; nothing in this section runs in it (the foil-marker tests, which predate the mode,
 pass unedited, and `cascade` never calls the code of this section - a test pins that). A `reading_mode` that is not understood is `cascade`, not `evidence`.
 
-**The order - the picture first (decided and built on 2026-10-20, the same day the mode became the default; it first changed only a card the full-card OCR did not confirm).** In `Identification._read_with_ocr`
+**The order - the picture first (decided and built on 2026-10-20, the same day the mode became the default; it first changed only a card the full-card OCR did not confirm; that is history, the order below is the present one).** In `Identification._read_with_ocr`
 (so also in `identify()`, which the synchronous station route uses), in this order, each step only for what the one before did not settle:
 1. **the picture** (steps 1-4 below), with the collector line read from its strip when OCR is on - a card it settles is settled, and the full-card OCR is never read for it;
 2. **in doubt, the full-card OCR** (when OCR is on): a confirmed read stands, with the one question below (does the picture look like another printing of the same card, or - for a name only partly read - like any other card?);
@@ -1599,11 +1599,14 @@ the strip names and the picture confirms): the best match must be at least `IMAG
 database has but the index lacks (if the card database cannot say, the picture alone is not enough). Measured with `scripts/experiments/image_match/calibrate_uncovered.py` on 428 real
 pictures, each also with its own printing removed from the index (every add is then wrong): the lead alone still added **36%** of those; the strip rule brought it to 5.4% at no cost to
 covered cards; adding the floor, **4.0%**, at 1.1 points of covered cards (which go to the AI). A higher floor costs more than it helps - a covered camera picture is only 0.66 similar to
-Scryfall's scan (median), and the same-art reprints of an uncovered printing stay in the index and score high - so the floor is a backstop, not the protection. **Residual risk, and why the picture alone is OFF by default** (second Codex review, same day): with the two guards, a printing newer than the index whose strip is unreadable can still be added by
-the picture alone (4% in that simulation), and a stale index makes that likelier. So `reading.accept_image_alone` defaults to **false** (config, `Config`, and the `live_read` signature): such cards
-go to the AI as before, and only the decisions the strip confirms are made without it. With that default the same simulation added **0 of 428** pictures whose printing was not indexed, while
-359 of 428 covered ones (83.9%) were still decided by picture and strip, none wrong. Turning the picture alone on is a separate decision (it was 24 more of the 128 AI-read cards); rebuild the
-index after every card data update either way (`not_indexed` in the report says when).
+Scryfall's scan (median), and the same-art reprints of an uncovered printing stay in the index and score high - so the floor is a backstop, not the protection. **Residual risk of the picture alone, and the history of its default** (second Codex review, same day). With the two guards above, a printing newer than the index whose strip is unreadable can still be added by
+the picture alone (4% in that simulation), and a stale index makes that likelier. For part of 2026-10-20 `reading.accept_image_alone` was therefore **false** by default: such cards went to the AI, and only the decisions the strip
+confirms were made without it. With that setting the same simulation added **0 of 428** pictures whose printing was not indexed, while 359 of 428 covered ones (83.9%) were still decided by picture and strip, none wrong;
+allowing the picture alone was 24 more of the 128 AI-read cards. That was changed the same day, when the picture became the first step: the setting is **true** now (`config.yaml`, `Config.READING_ACCEPT_IMAGE_ALONE`; the Settings
+page's choice wins), and what makes it acceptable are the guards, which are all in the code: the picture alone adds nothing while the index lacks any printing of the card data (`PrintingCheck.missing_printings() == 0`, checked in
+`Identification._read_by_picture`), it needs `IMAGE_MIN_SIMILARITY`, it is refused when the strip names a printing the card database has and the index lacks (`_names_unindexed`) or one the card data lacks (`_names_unknown`),
+and with OCR on the full-card OCR must confirm the printing (`printing_check.ocr_agrees`). `PrintingCheck.live_read`'s own parameter `accept_image_alone` still defaults to `False` (a caller that says nothing gets the strip-confirmed
+decisions only); `Identification` always passes the setting. Rebuild the index after every card data update either way (`not_indexed` in the report says when).
 
 **The decided printing travels by its id.** `route_identified` / `search_and_emit_card` take `printing_id` and use `Game.card_by_printing` (tag `picture`, in
 `CONFIRMED_MATCHES`) instead of looking the card up again by name and number. Measured with `scripts/experiments/image_match/verify_roundtrip.py`: on a seeded sample of 3,000
@@ -1622,7 +1625,7 @@ guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wro
 
 **An OCR-confirmed card is asked one thing** (`Identification._contradicted_by_picture`, `PrintingCheck.contradicts`; 2026-10-20): whether the picture clearly looks like *another printing of
 the same card* than the one the OCR read (the Secret Lair case: the card prints the set and number of the card it is made from). If so, the OCR read is no longer a confirmed read: its
-number and set are dropped, and it goes to the picture (when the picture alone is on), to the AI (whose answer is checked as above) or, without either, to review under its name. It fails open
+number and set are dropped, and it goes on to the AI (whose answer is checked as above) or, without it, to review under its name (the picture was asked first and has already declined). It fails open
 to the OCR: no index, no verdict or a failure leaves the read standing. The look-up is one (`Game.confirmed_card`, `confirmed_read` unchanged) and the search costs 18 ms (median) on the
 development machine, on the single OCR worker, for every OCR-confirmed card in this mode. **Two rules, one question each.** (1) `contradicts`: the picture clearly looks like *another printing of the same card* - always believed. Measured on the stored labels of 10,568 OCR-confirmed
 pictures, 82 disagree: 6 `same_card` (all the Deadpool Secret Lair cards, genuine) and 76 `other_card`, a mix of foil glare / showcase backgrounds / printings newer than the index on correct reads and a few
@@ -1633,7 +1636,7 @@ title leaves the printed set + number to confirm the card, and a Secret Lair pri
 cannot tell. The rule is the conjunction, because each half alone is a poor reason. **Measured on the 6,374 OCR-confirmed pictures:** 18 reads are a fragment; for 15 of them the picture agrees (no effect) and
 for 3 it disagrees - exactly the three `Lightning Strike` confirmations; the other 40 disagreements (glare, showcase, new printings) are untouched. Run through the real OCR, lookup, index and gate on the 15
 Deadpool captures: the gate fires on all three Lightning captures (1038, 1043, 1048) and on nothing else; the other 12 are not OCR-confirmed and go on to the picture / AI as before. What it does to such a card:
-it is no longer confirmed (number and set dropped) and goes to the picture (when the picture alone is on: all 15 are the right printing, 1,085 of 1,628 evaluation pictures decided with 0 wrong - see the OCR-off paragraph),
+it is no longer confirmed (number and set dropped) and goes on to the AI or review (as the picture is the first step, it has already declined; measured on the picture alone, all 15 are the right printing, 1,085 of 1,628 evaluation pictures decided with 0 wrong - see the OCR-off paragraph),
 to the AI (checked as above) or to review. **Not covered:** a card whose name was read *whole* but wrongly, or a Secret Lair of another card entirely read in full, with a picture that disagrees - those are
 indistinguishable from glare by these signals; the picture alone (`accept_image_alone`) is the route for them.
 

@@ -12,10 +12,11 @@ looking a card up and adding it holds up neither stage. identify() runs both sta
 caller's thread.
 
 reading.mode (config.yaml, data/settings.json): 'cascade' is what is described above. 'evidence' puts
-the picture and the strip in front of the AI (printing_check.live_read): for a card the full-card OCR
-did not confirm, a fingerprint of the picture matched against every printing and the strip's
-collector line decide first; the AI is asked only when they do not, and its answer is checked
-against the picture. A card OCR confirms is read exactly as before. Phase 3 of
+the picture first (printing_check.live_read): a fingerprint of the picture matched against every
+printing, and the collector line read from its strip when OCR is on, decide a card by themselves; only
+when they do not is the full-card OCR read (a confirmed read stands, asked one question: is the
+picture another printing of the same card?), and the vision AI is last, its answer checked
+against the picture. Phase 3 of
 docs/plans/READING_REFACTOR_PLAN.md; the default since 2026-10-20 - the vision AI was only ever there because OCR was weak, so it is the last step.
 """
 
@@ -255,11 +256,11 @@ class Identification:
 
     def _read_by_picture(self, image, foil_image):
         """
-        reading.mode 'evidence': the card read by its picture and its strip (printing_check.live_read) - (card_info, what the AI is still needed
-        for) like _read_with_ocr, or None when they do not decide (review, no image index, or any failure): the card then goes on to the AI
-        as in 'cascade'. Never loses a card: whatever goes wrong here is a reason to ask the AI, which is what would have happened anyway.
+        reading.mode 'evidence': the card read by its picture and its strip (printing_check.live_read) - the FIRST step of _read_with_ocr - (card_info, what the AI is still needed
+        for) like _read_with_ocr, or None when they do not decide (review, no image index, or any failure): the card then goes on to the full-card OCR
+        and, if that does not settle it, to the AI as in 'cascade'. Never loses a card: whatever goes wrong here is a reason to ask the AI, which is what would have happened anyway.
         With OCR switched off there is no strip (the reader is not handed over, so it is not run): only the picture alone can decide, and only when the
-        person allowed it (accept_image_alone) - otherwise the card goes to the AI at once. Switching OCR off to try the picture alone is the use of this.
+        person allowed it (accept_image_alone, which is on by default) - otherwise the card goes to the AI at once. Switching OCR off to try the picture alone is the use of this.
         """
         if self.reading_mode != EVIDENCE or self.evidence is None:
             return None

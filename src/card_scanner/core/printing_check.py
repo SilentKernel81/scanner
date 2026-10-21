@@ -1,7 +1,7 @@
 # printing_check.py
 # Does the picture look like the printing the server resolved? A second opinion that does not go
-# through the OCR or the AI - and, in SHADOW MODE (the only mode there is for now), one that only
-# writes down where it disagrees and changes nothing.
+# through the OCR or the AI - and, in SHADOW MODE (`observe`, which is log-only and changes nothing: it
+# writes down where it disagrees), one that only watches. `live_read` is the part that acts: it is the first step of reading.mode 'evidence', the default.
 #
 # What it is for (docs/plans/IMAGE_MATCH_EXPERIMENT.md): the collector line does not always name the
 # printing (a Secret Lair card prints the set and number of the card it is made from, so the server
@@ -534,14 +534,14 @@ class PrintingCheck:
     def live_read(self, image, card_image, ocr, foil_net=None, accept_image_alone=False):
         """
         The reading of a capture by its picture and its strip - the live counterpart of lookup, used by Identification only in reading.mode
-        'evidence' (docs/plans/READING_REFACTOR_PLAN.md, phase 3), for a card the full-card OCR did not confirm, in place of asking the vision AI.
+        'evidence' (docs/plans/READING_REFACTOR_PLAN.md, phase 3), as the FIRST step of a capture's reading (before the full-card OCR and the vision AI).
         image: the capture (RGB); card_image: the flat card (the perspective-corrected one when there is one, else image). BOTH the fingerprint and
         the strip are made of the flat card: a fixed area's `image` is the area as drawn, not a card, and the index was built from whole-card pictures
         (the shadow log hashes the saved capture file, so its numbers for such a station carry that difference). ocr: the LIVE reader (here the read IS the live path - the shadow lookup's isolated reader exists to protect
         the live one from shadow work); foil_net: the foil network, asked only where the OCR read no symbol.
         Returns None when the picture cannot speak (no index, nothing found, or a candidate the card database does not have) and for a decision
         of 'review' - the caller then goes on as it always did; or {'path', 'card' (the database's card of the decided printing), 'strip',
-        'finish' (decide_finish's answer), 'similarity', 'lead'}. 'image' (the picture alone; OFF unless asked for: a Codex review of 2026-10-20 - a printing newer than the index with an unreadable strip can still be added by it) is returned only with accept_image_alone.
+        'finish' (decide_finish's answer), 'similarity', 'lead'}. 'image' (the picture alone) is returned only with accept_image_alone: this parameter defaults to False, but Identification passes the setting, which is ON by default (config.yaml; it was off for part of 2026-10-20 because a printing newer than the index with an unreadable strip can still be added by it - the guards in Identification._read_by_picture and PrintingCheck now cover that).
         Raises nothing the caller must handle except what the OCR reader raises.
         """
         card_image = image if card_image is None else card_image
