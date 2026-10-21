@@ -1669,7 +1669,7 @@ capture by capture before and after (`tests/test_reading_capture.py` pins "once 
 
 *Measured* (`verify_live_read.py --no-image-alone` - the strip-confirmed decisions only, the shipped default for part of 2026-10-20 - with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
 (58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
-guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
+guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%) when first measured; re-run on 2026-10-21 with the code of that day (all the guards since added): **95 of 128 (74.2%: 74 strong, 21 by the picture alone) and 286 of 300 (95.3%), 0 wrong** - the cause of the difference was not looked into. About 60 ms per card
 (median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker. On the server, rehearsed on a copy of the real data with the real 9B model (0.18-0.41 s per card read this way, GPU peak 11.2 of 16.4 GB with two OCR readers up); *not yet run on live scans: the first live evidence is what the collection and `scanned_cards.log` (`ai_model` = `picture+strip`) show*.
 
 **An OCR-confirmed card is asked one thing** (`Identification._contradicted_by_picture`, `PrintingCheck.contradicts`; 2026-10-20): whether the picture clearly looks like *another printing of
