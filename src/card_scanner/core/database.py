@@ -752,6 +752,21 @@ class CardDatabase:
         with self._lock:
             return [(row['id'], row['image_uri']) for row in self.conn.execute('SELECT id, image_uri FROM cards ORDER BY id')]
 
+    def printing_facts(self):
+        """
+        {Scryfall id: (name, set code, collector number, oracle id, finishes as 'nonfoil,foil')} of every printing: the little table that goes beside the image
+        index to a phone (core/image_index.py: printings_table) - what the decision about a printing (core/reading/decide.py) needs of each candidate.
+        """
+        facts = {}
+        with self._lock:
+            for row in self.conn.execute('SELECT id, name, set_code, collector_number, oracle_id, finishes FROM cards'):
+                try:
+                    finishes = ','.join(json.loads(row['finishes'] or '[]'))
+                except (ValueError, TypeError):
+                    finishes = ''
+                facts[row['id']] = (row['name'], row['set_code'], row['collector_number'], row['oracle_id'], finishes)
+        return facts
+
     def get_card_by_id(self, card_id):
         """Get a single printing by its Scryfall id"""
         with self._lock:

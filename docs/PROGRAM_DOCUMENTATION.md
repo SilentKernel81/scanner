@@ -1377,6 +1377,15 @@ them all), the rest downloaded from Scryfall at the card database's `image_uri` 
 apart, one 429 / 403 is waited out and a refusal that goes on stops the run), hashed and thrown away. A first build from nothing downloads
 ~12 GB and takes hours; a later run only does the printings added since (new sets), so it belongs after a card data update. It
 checkpoints every 5,000 printings and can be stopped and run again.
+**The index for a phone** (since 2026-10-20; the first step of a standalone phone that reads cards by their picture - the Android side is not written): a phone cannot build the index (118,000 pictures, hours, 12 GB),
+so it takes this server's - `GET /api/image_index/download` (the generation and each file's address, size and SHA-256; 404 without an index) and `GET /api/image_index/download/<hashes|ids|printings>?generation=<g>`
+(`server/stations_api.py`: `index_for_download`, `index_printings_table`; resumable with `Range`, the ETag is the SHA-256). `hashes` and `ids` are the files of the current generation as they are on disk; `printings` is a
+gzipped tab-separated table (`id, set, number, oracle_id, finishes, name`, `image_index.printings_table`, from `database.printing_facts`) for the printings of the index the card data has, joined by id - the part of
+the decision's evidence (`decide.py`: set, number, oracle id, finishes) a phone needs of each candidate without asking Scryfall. **Only the current generation** is served: another one is a 409 that names the current
+one, so a phone never holds the hashes of one build and the ids of another. **The table is pinned by its own checksum too** (a Codex review, 2026-10-20): it follows the card data, which changes without a new generation, so its address in the listing carries `&version=<sha256>` and a request with another one - a card data update since the listing, also a resumed `Range` request - is a 409 naming the current version, never other bytes with a 200. Behind the station token (open without one, like the other station routes), read-only; the table is built once per generation and card data
+download (0.7 s, in memory). **Measured on the development machine's index (112,765 printings): 22 MB in all - hashes 10.8, ids 4.2, table 6.6 MB gzipped (the oracle ids do not compress).** Tried with a Flask test client
+and a synthetic index (`tests/test_index_download.py`); **not tried from a phone**, and nothing in the app reads it yet.
+
 **The same run is a button** (since 2026-10-20): Settings > Storage > *Picture index* shows how many printings of the card database the index covers
 ("Covers 112,765 of 112,818 printings - 53 to add") and downloads the missing ones in the background (`server/card_data.py`: `index_status`,
 `start_index_update`; `GET /api/image_index`, `POST /api/image_index/update` and `/stop`, the last two behind the settings password). The page asks for the

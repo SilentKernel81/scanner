@@ -78,6 +78,8 @@ game sits behind one interface (`games/`), so another could be added.
 - **A Secret Lair that hides its title is not misread** (since 2026-10-20): when the OCR read only a fragment of the card's name (`Lightning` of `Lightning Strike`, a sticker over the rest) and the
   picture looks like another card, the read is not confirmed - it goes to the picture or the AI. On the evaluation set it fires on 3 of 6,374 OCR-confirmed cards, all three genuine misreads (Deadpool's `Lightning Bolt`
   read as `Lightning Strike`); a glare or showcase disagreement with a name read whole is left alone. Not yet seen on a live scan.
+- **The picture index can be downloaded by a phone** (since 2026-10-20): the server serves the 22 MB index and a table of set, number and finishes to a station (`/api/image_index/download`), the first
+  step of letting the Android app read cards by their picture without a server. Tried with synthetic data only; **not tried from a phone**, and the app does not use it yet.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (Settings > Storage > Picture index, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
