@@ -159,6 +159,8 @@ def get_scan_settings():
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
         'ocr_first': bool(identification.ocr_enabled) if identification else True,
         'ocr_installed': CardOcr.installed(),
+        'ai_enabled': bool(identification.ai_enabled) if identification else True,
+        'ai_available': bool(identification and identification.card_identifier),
         'reading': reading_status(),
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'debug_mode': saved_debug_mode(),
@@ -373,6 +375,14 @@ def handle_toggle_ocr(data):
         return
     identification.set_ocr_enabled(bool(data.get('enabled', False)))
     emit('ocr_toggled', {'enabled': identification.ocr_enabled, 'installed': CardOcr.installed()})
+
+
+@socketio.on('toggle_ai')
+def handle_toggle_ai(data):
+    """Ask the vision AI at all, or send what OCR and the picture cannot decide to the review queue (remembered; open like the OCR switch: it adds nothing, it only stops asking)"""
+    identification.set_ai_enabled(bool((data or {}).get('enabled', False)))
+    emit('ai_toggled', {'enabled': identification.ai_enabled, 'available': bool(identification.card_identifier)})
+    log_to_client(f"Vision AI: {'on' if identification.ai_enabled else 'off - what OCR and the picture cannot decide goes to the review queue'}", level="info")
 
 
 @socketio.on('set_reading_mode')

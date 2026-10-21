@@ -540,6 +540,43 @@ class InIdentification(unittest.TestCase):
         self.ident.card_identifier = object()
         self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
 
+    # ----- the vision AI switched off (Settings): what OCR and the picture cannot decide goes to review, nothing is asked of any AI
+    def ai_off(self):
+        self.ident.ai_enabled = False
+        identifier = mock.Mock()
+        self.ident.card_identifier = identifier            # a provider IS set up: the switch, not a missing key, is why it is not asked
+        return identifier
+
+    def test_with_the_ai_off_an_undecided_card_is_not_sent_to_it(self):
+        identifier = self.ai_off()
+        self.ident.evidence.reading = None                 # the picture cannot decide it either
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertIsNone(task)                            # no IDENTIFY: _finish with what OCR read, which goes to review under its name
+        self.assertEqual(info['name'], 'Gandalf')
+        identifier.identify_card.assert_not_called()
+
+    def test_with_the_ai_off_the_picture_still_decides(self):
+        identifier = self.ai_off()
+        info, task = self.ident._read_with_ocr(self.image, self.image)                         # READING: a strong decision
+        self.assertEqual((info['printing_id'], task), ('p3', None))
+        identifier.identify_card.assert_not_called()
+
+    def test_with_the_ai_off_there_is_no_foil_check_by_the_ai_either(self):
+        self.ai_off()
+        self.assertFalse(self.ident._ai_foil_check(np.zeros((10, 10, 3), np.uint8)))
+
+    def test_a_card_already_waiting_for_the_ai_when_it_is_switched_off_comes_back_as_read(self):
+        identifier = self.ai_off()
+        ocr_info = {'name': 'Gandalf', 'collector_number': '', 'set_code': '', 'foil': 'unknown'}
+        self.assertIs(self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, ocr_info), ocr_info)
+        identifier.identify_card.assert_not_called()
+        identifier.read_foil_symbol.assert_not_called()
+
+    def test_with_the_ai_on_nothing_changes(self):
+        self.ident.card_identifier = object()
+        self.ident.evidence.reading = None
+        self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
+
     def test_with_ocr_switched_off_the_picture_is_asked_without_a_reader(self):
         # the person switched OCR off to try the picture alone: no strip is read - the reader is not even handed over - and what the picture cannot
         # decide goes to the AI at once

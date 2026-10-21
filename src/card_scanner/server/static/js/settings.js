@@ -93,6 +93,7 @@ function connect() {
 
     // Card reading
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
+    socket.on('ai_toggled', data => applyAiState(data.enabled, data.available));
     socket.on('reading_mode_changed', applyReadingState);
     socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running, data.debugger));
     socket.on('ai_provider_set', data => {
@@ -215,6 +216,7 @@ async function loadCameraSettings() {
     // The server's own settings come with the same answer
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
+    applyAiState(data.ai_enabled, data.ai_available);
     applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
 }
@@ -351,6 +353,17 @@ function bindSounds() {
 // ============================================================================
 
 const OCR_DESC = $('ocr-desc').textContent;
+
+const AI_DESC = $('ai-desc').textContent;
+
+// The vision AI switch: off sends what OCR and the picture cannot decide to the review queue; without a provider set up there is nothing to switch
+function applyAiState(enabled, available) {
+    const toggle = $('toggle-ai');
+    toggle.checked = Boolean(enabled) && Boolean(available);
+    toggle.disabled = !available;
+    $('ai-desc').textContent = !available ? 'No vision AI is set up (a provider and its key)'
+        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service - what OCR and the picture cannot decide goes to the review queue';
+}
 
 function applyOcrState(enabled, installed) {
     const toggle = $('toggle-ocr');
@@ -508,6 +521,7 @@ async function loadPromptSummary() {
 
 function bindReading() {
     $('toggle-ocr').addEventListener('change', event => socket.emit('toggle_ocr', {enabled: event.target.checked}));
+    $('toggle-ai').addEventListener('change', event => socket.emit('toggle_ai', {enabled: event.target.checked}));
     // The mode is the program's design (the vision AI last): no question either way. The picture-alone switch decides what is added with no one asking: ON asks first,
     // and the page goes back if it is declined
     $('toggle-reading-evidence').addEventListener('change', event =>

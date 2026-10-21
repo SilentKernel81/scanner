@@ -60,6 +60,10 @@ class Job:
 class Identification:
     """The OCR reader, the vision AI and the queues in front of them"""
 
+    # Whether the vision AI is asked at all (the Settings switch, remembered as 'ai_enabled'), and the AI itself; defaults here for an Identification made without __init__ (tests of one stage)
+    ai_enabled = True
+    card_identifier = None
+
     # Set by the server once the printing check exists (see __init__); a default here so that an Identification made without __init__ (tests of
     # one stage) reads in 'cascade' mode like any other
     evidence = None
@@ -96,6 +100,7 @@ class Identification:
         self.ocr_enabled = bool(settings.get('ocr_first', True))
         if self.ocr_enabled:
             self.card_ocr.warm_up()
+        self.ai_enabled = bool(settings.get('ai_enabled', True))
 
         # The printing check (core/printing_check.py: the image index and the reading by picture and strip), given by the server after both exist;
         # None: reading.mode 'evidence' has nothing to read with and every card is read as in 'cascade'
@@ -176,6 +181,15 @@ class Identification:
             self.log(f"Error changing AI provider: {e}", level="error")
             return {'success': False, 'message': f"Error: {str(e)}"}
 
+    def _ai(self):
+        """The vision AI's identifier - or None when there is none or the person switched it off: every place that would ask it asks this, so the one switch covers the identification, the foil check and a card already in the queue"""
+        return self.card_identifier if self.ai_enabled else None
+
+    def set_ai_enabled(self, enabled):
+        """Ask the vision AI at all (remembered). Off: what OCR and the picture cannot decide goes to the review queue under the name OCR read; the provider and its key are kept"""
+        self.ai_enabled = bool(enabled)
+        self.settings.set('ai_enabled', self.ai_enabled)
+
     def set_ocr_enabled(self, enabled):
         """Read cards with light-ocr before asking the vision AI (remembered)"""
         self.ocr_enabled = enabled
@@ -195,7 +209,7 @@ class Identification:
         Whether the AI can be asked about the star/dot foil marker: only on a perspective-
         corrected card (the marker's corner is at a known position)
         """
-        return bool(self.card_identifier and foil_image is not None and Config.VISION_AI_DETECT_FOIL
+        return bool(self._ai() and foil_image is not None and Config.VISION_AI_DETECT_FOIL
                     and prompts.has('foil', games.active_id()))
 
     def _read_foil_locally(self, image, foil_image=None):
@@ -344,22 +358,25 @@ class Identification:
                     return ocr_info, FOIL
                 self.log(self._said_by_ocr(ocr_info), level="success")
                 return ocr_info, None
-            if ocr_info and self.card_identifier:
+            if ocr_info and self._ai():
                 self.log("OCR read is not a confirmed match - asking the vision AI")
 
         # reading.mode 'evidence': the picture and the strip decide before the AI is asked (None: they did not)
         by_picture = self._read_by_picture(image, foil_image)
         if by_picture:
             return by_picture
-        if self.card_identifier:
+        if self._ai():
             return ocr_info, IDENTIFY
         if not ocr_info:
-            self.log("⚠ Vision AI not enabled - set API key to enable automatic identification", level="warning")
+            if self.card_identifier:      # there is one, and it is switched off
+                self.log("Vision AI is switched off - this card goes to the review queue", level="warning")
+            else:
+                self.log("⚠ Vision AI not enabled - set API key to enable automatic identification", level="warning")
         return ocr_info, None
 
     def _ask_ai(self, task, image, foil_image, ocr_info):
         """AI stage: the foil marker of a card OCR confirmed, or the whole identification"""
-        identifier = self.card_identifier  # a provider change swaps it; this card stays with one
+        identifier = self._ai()  # a provider change swaps it; this card stays with one (None: none, or switched off while this card waited in the queue)
         if identifier is None:
             return ocr_info
 

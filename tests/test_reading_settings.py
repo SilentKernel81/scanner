@@ -116,6 +116,42 @@ class TheEvent(unittest.TestCase):
         data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
         self.assertEqual(set(data['reading']), {'mode', 'accept_image_alone', 'index_printings', 'ocr_enabled'})
 
+    # ----- the vision AI's switch (toggle_ai): like the OCR's, open, remembered, and what Identification reads on the next card
+    def toggle_ai(self, enabled):
+        self.client.emit('toggle_ai', {'enabled': enabled})
+        return {e['name']: e['args'][0] for e in self.client.get_received()}
+
+    def test_the_ai_is_on_by_default_and_the_page_is_told(self):
+        self.ident.card_identifier = object()
+        data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
+        self.assertEqual((data['ai_enabled'], data['ai_available']), (True, True))
+
+    def test_without_a_provider_there_is_no_ai_to_switch(self):
+        data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
+        self.assertEqual((data['ai_enabled'], data['ai_available']), (True, False))      # the page disables the switch and says so
+
+    def test_switching_the_ai_off_is_remembered_answered_and_logged(self):
+        self.ident.card_identifier = object()
+        got = self.toggle_ai(False)
+        self.assertEqual(got['ai_toggled'], {'enabled': False, 'available': True})
+        self.assertEqual(self.settings.saved['ai_enabled'], False)
+        self.assertFalse(self.ident.ai_enabled)                                               # what the next card reads: no restart
+        self.assertIn('off', self.log.call_args[0][0])
+        self.assertEqual(self.toggle_ai(True)['ai_toggled']['enabled'], True)
+        self.assertTrue(self.ident.ai_enabled)
+        self.assertEqual(self.settings.saved['ai_enabled'], True)
+
+    def test_the_ai_switch_does_not_need_the_settings_password_like_the_ocr_switch(self):
+        # it adds nothing, it only stops asking: what is added is still decided by the same rules
+        self.login.set_password('correct horse')
+        stranger = socketio.test_client(app, flask_test_client=app.test_client())
+        stranger.get_received()
+        stranger.emit('toggle_ai', {'enabled': False})
+        got = {e['name']: e['args'][0] for e in stranger.get_received()}
+        stranger.disconnect()
+        self.assertNotIn('error', got)
+        self.assertEqual(got['ai_toggled']['enabled'], False)
+
     def test_with_a_settings_password_a_stranger_is_locked_out(self):
         self.login.set_password('correct horse')
         stranger = socketio.test_client(app, flask_test_client=app.test_client())
