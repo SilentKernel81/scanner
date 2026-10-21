@@ -1616,9 +1616,31 @@ route (hand the server the database's name, number and set) would have added ano
 **Not recorded in the shadow log.** `PrintingCheck.observe` ignores a card whose reader is `picture+strip` (comparing the picture with the printing it chose would only
 compare the choice with itself). **The exit criteria's evidence is therefore collected in `cascade` mode only**: with the mode on, the shadow log covers just the cards the AI
 still handles and says nothing about the cards the mode adds itself. What the mode adds is in the scanned-cards log (`ai_model` = `picture+strip`) and the app log
-(`Picture and strip: ...`); the collection itself is the test (cards added with the wrong printing).
+(`Picture and strip: ...`) - and, since 2026-10-21, in the reading log below.
 
-*Measured* (`verify_live_read.py --no-image-alone`, the shipped default, with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
+**The reading log** (`data/logs/reading.jsonl`, `core/reading/record.py`; since 2026-10-21, step 2 of `docs/plans/READING_REVIEW_2026-10-21_PLAN.md`): one JSON line per capture,
+in **either** mode, of what each step of the reading saw and did - so that the thresholds and guards above, set on 20 known-wrong labels and simulations, can be judged on live scans.
+It is not the shadow log and does not replace it. A record has `time`, `station`, `capture` (the file name), `capture_key` (the capture's uid, for a queued capture), `mode`, `ocr_on`,
+`ai_on`, `accept_image_alone`, `game`, `index_covers` / `index_missing` (asked only when the picture alone is allowed), `seconds` per step (`picture`, `ocr`, `ai`, `total`);
+`picture` (`rotated`, `lead`, the five `candidates`: id, set, number, similarity), `strip` (`number`, `set`, `symbol`, `net`), `decision` (rule A2's `path`, `printing_id`, `similarity`,
+`lead`; `accepted: true` when the card was taken), `refused` - `null` or **the name of the guard** that stopped the picture's decision (`record.GUARDS`: `image_alone_off`,
+`index_incomplete`, `card_not_in_data`, `below_image_floor`, `below_strong_floor`, `strip_names_unindexed`, `strip_names_unknown`, `ocr_did_not_confirm` with `refused_ocr_name` /
+`refused_ocr_line` - both null when the OCR read nothing, which is also what a reader in its cool-down gives); `ocr` (the full-card read: `name`, `collector_number`, `set_code`, `foil`,
+`confirmed`, `contradicted` + `why`); `ai` (`asked`: `identify` / `foil`, `answer`, `verdict` of the picture against it: `agree` / `weak` / `disagree` / `not_indexed` / `not_found`);
+`result` (`reader`, `printing_id`, name / number / set, `foil`, and `outcome` + `reason` from the router: `added` / `review` / `shown`). A second kind of line, `review: true`, is
+written when a review item is settled by picking a printing (`scan_events.add_selected_card`): `picked`, the `candidates` the review screen showed (kept on the desk by
+`handle_review_open`), and the picked one's `rank` among them - 0: the picture's best match was right and a guard (or the AI) sent it to review; null: the picture had it wrong or showed
+nothing. It joins the capture's record by `capture_key` (a review item keeps its picture under a name of its own).
+How it travels: the thread reading a capture holds its record as the *current* one (`record.using`; the OCR worker, then the AI worker, with the record on the `Job`), every step adds
+to whatever record is current (`record.note`, `record.refuse` - `PrintingCheck.live_read` names its guards so, `Identification` the others), and the record is then *handed over* to
+the code that routes the card in the same thread (the results thread's `on_done`, or the station's route after `identify`): `captures.announce_and_route` completes it with the
+outcome (`record.complete`), and one nobody completes is written without an outcome. Nothing of it is in the outcome a phone parses (`ServerOutcome.parse`). It never raises: a
+failed write is a debug line in `ai.log`. Renamed to `.1` beyond 10 MB, in no backup. The summary: `scripts/reading_report.py` (`core/reading/report.py`): captures by configuration,
+by reader and outcome, the refusals by guard, the review picks by rank and joined to the guard that sent the card there (the cost of each guard in live numbers), seconds per step
+(median, 95th percentile), and the captures to look at by eye (picture-alone adds under 0.6 similarity, strong decisions whose strip and full-card OCR read different numbers, AI
+answers the picture only weakly agrees with). *Tested with stand-ins and the synthetic index (`tests/test_reading_log.py`); not yet run on live scans.*
+
+*Measured* (`verify_live_read.py --no-image-alone` - the strip-confirmed decisions only, the shipped default for part of 2026-10-20 - with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
 (58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
 guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
 (median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker. On the server, rehearsed on a copy of the real data with the real 9B model (0.18-0.41 s per card read this way, GPU peak 11.2 of 16.4 GB with two OCR readers up); *not yet run on live scans: the first live evidence is what the collection and `scanned_cards.log` (`ai_model` = `picture+strip`) show*.
@@ -2828,7 +2850,7 @@ inside the container still listens on all of its addresses.
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Backups (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
-| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `requests.log` (debug mode) |
+| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `printing_check.jsonl` (the shadow check), `reading.jsonl` (the reading log: one record per capture of what each step saw and did, and the review's picks - see "Reading mode: evidence"), `requests.log` (debug mode) |
 | `scanned_cards/` | Captured images as uploaded (deleted after `cleanup.days`) |
 
 **Camera station** - nothing it must keep:

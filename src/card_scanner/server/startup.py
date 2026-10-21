@@ -24,6 +24,7 @@ from card_scanner.core.identification import Identification
 from card_scanner.core.inventory import InventoryManager
 from card_scanner.core.pending import PendingCaptures
 from card_scanner.core.printing_check import PrintingCheck, StripReader
+from card_scanner.core.reading.record import ReadingLog
 from card_scanner.core.recommendations import Recommendations
 from card_scanner.core.remote_scanner import CameraHub, RemoteScanner
 from card_scanner.core.review import ReviewQueue
@@ -116,6 +117,9 @@ def initialize_components():
         finish_for=lambda card, foil: games.active().suggested_finish(card, foil))
     # reading.mode 'evidence' reads a card by its picture and strip with the printing check's image index (the live reading's counterpart of its lookup)
     services.identification.evidence = services.printing_check
+    # The reading log: one line per capture of what each step of the reading saw and did, in either mode (core/reading/record.py; the report:
+    # scripts/reading_report.py) - the live evidence the picture's thresholds and guards are to be judged on
+    services.identification.reading_log = ReadingLog(Config.DATA_DIR / 'logs' / 'reading.jsonl')
 
     # The automatic backup of the collection, scanned cards and decks, if one is due
     # (run_backup_schedule asks again while the app runs)

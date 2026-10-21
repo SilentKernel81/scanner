@@ -31,6 +31,7 @@ from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
 from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_agrees, prints_a_marker
+from card_scanner.core.reading import record as reading_record
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
@@ -56,6 +57,7 @@ class Job:
         self.submitted = time.time()
         self.ocr_info = None
         self.task = None  # IDENTIFY or FOIL, once OCR has passed it on
+        self.record = None  # what its reading saw and did (core/reading/record.py), when the reading log is on
 
 
 class Identification:
@@ -68,6 +70,9 @@ class Identification:
     # Set by the server once the printing check exists (see __init__); a default here so that an Identification made without __init__ (tests of
     # one stage) reads in 'cascade' mode like any other
     evidence = None
+
+    # The reading log (core/reading/record.ReadingLog: data/logs/reading.jsonl), set by the server; None: nothing is recorded (tests of one stage, scripts)
+    reading_log = None
 
     def __init__(self, settings, log_callback=None, ai_workers=None):
         self.settings = settings
@@ -106,6 +111,7 @@ class Identification:
         # The printing check (core/printing_check.py: the image index and the reading by picture and strip), given by the server after both exist;
         # None: reading.mode 'evidence' has nothing to read with and every card is read as in 'cascade'
         self.evidence = None
+        self.reading_log = None     # data/logs/reading.jsonl, given by the server (startup.py)
 
         self._ocr_queue = queue.Queue()
         self._ai_queue = queue.Queue()
@@ -181,6 +187,20 @@ class Identification:
         except Exception as e:
             self.log(f"Error changing AI provider: {e}", level="error")
             return {'success': False, 'message': f"Error: {str(e)}"}
+
+    def _new_record(self):
+        """
+        A record of one capture's reading for the reading log (core/reading/record.py), with the configuration it is read in - or None without a log.
+        Never raises: a reading log that cannot be started is no reason to lose the card.
+        """
+        if self.reading_log is None:
+            return None
+        try:
+            return self.reading_log.new(mode=self.reading_mode, ocr_on=bool(self.ocr_enabled), ai_on=self._ai() is not None,
+                                        accept_image_alone=self.accept_image_alone, game=games.active_id())
+        except Exception as e:
+            logger.debug(f"Reading log: no record for this capture ({e})")
+            return None
 
     def _ai(self):
         """The vision AI's identifier - or None when there is none or the person switched it off: every place that would ask it asks this, so the one switch covers the identification, the foil check and a card already in the queue"""
@@ -267,12 +287,20 @@ class Identification:
         try:
             # The picture alone may add a card only while the index covers the whole card data (PrintingCheck.missing_printings == 0): after a card data update and before the
             # index is extended, a new printing is not in it, and its best match would be another printing - then only the collector line (or OCR, the AI, review) decides
-            alone = self.accept_image_alone and self.evidence.missing_printings() == 0
-            reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, alone)
+            missing = self.evidence.missing_printings() if self.accept_image_alone else None
+            alone = self.accept_image_alone and missing == 0
+            # the reading log: whether the index covers the card data (None: not asked - the picture alone is off - or it cannot be said)
+            reading_record.note(None, index_covers=None if missing is None else missing == 0, index_missing=missing)
+            with reading_record.timed('picture'):
+                reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, alone)
         except Exception as e:
             self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
+            reading_record.note(None, picture_error=str(e))
             return None
         if reading is None:
+            if reading_record.refused() == reading_record.IMAGE_ALONE_OFF and self.accept_image_alone:
+                # live_read was told not to take the picture alone - here because the index lacks printings of the card data, not because the person said no
+                reading_record.refuse(reading_record.INDEX_INCOMPLETE, missing=missing)
             return None
         card = reading['card']
         if reading['path'] == 'image' and self.ocr_enabled:
@@ -283,6 +311,7 @@ class Identification:
             if not self._ocr_names(image, card):
                 self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
                 return None
+        reading_record.note('decision', accepted=True)
         # The finish, as the 'foil' field the server's finish rule (Game.suggested_finish) has always taken: an unread marker stays 'unknown'
         foil = {'foil': 'foil', 'regular': 'non-foil'}.get(reading['finish']['finish'], 'unknown')
         info = {'name': card['name'], 'collector_number': card['number'], 'set_code': card['set_code'], 'foil': foil,
@@ -300,12 +329,19 @@ class Identification:
         another printing - not a set code or a number that are not the card's. False when it reads nothing, contradicts it, or fails.
         """
         try:
-            read = self.card_ocr.read_card(image, games.active_id())
+            with reading_record.timed('ocr'):
+                read = self.card_ocr.read_card(image, games.active_id())
             printing_at = self.evidence.database.get_card_by_set_number       # what the OCR's collector line names (ocr_agrees looks it up)
         except Exception as e:
             self.log(f"OCR could not confirm the picture ({e})", level="warning")
+            reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=None, ocr_line=None, ocr_error=str(e))
             return False
-        return ocr_agrees(read, card, printing_at)
+        agrees = ocr_agrees(read, card, printing_at)
+        if not agrees:
+            # the reading log: what the OCR read instead - nothing (None: the reader read nothing, or was down in its cool-down), another name, or a line naming another printing
+            line = f"{read.get('set_code') or ''} {read.get('collector_number') or ''}".strip() if read else None
+            reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=read.get('name') if read else None, ocr_line=line or None)
+        return agrees
 
     def _contradicted_by_picture(self, image, foil_image, ocr_info, ocr_card):
         """
@@ -326,6 +362,7 @@ class Identification:
         except Exception as e:
             self.log(f"The OCR read could not be checked against the picture ({e})", level="warning")
             return False
+        reading_record.note('ocr', contradicted=bool(contradicted), why=why if contradicted else None)
         if contradicted:
             self.log(f"The OCR read {ocr_info['name']} [{ocr_info['set_code']} {ocr_info['collector_number']}] but the picture looks like "
                      f"{why} - not taken as a confirmed read", level="warning")
@@ -342,8 +379,11 @@ class Identification:
         try:
             found = games.active().identify(card_info['name'], card_info.get('collector_number'), card_info.get('set_code'))
             if not found or not found.get('id'):
+                reading_record.note('ai', verdict='not_found')
                 return card_info
-            if self.evidence.verdict_of(image, found['id']) != 'disagree':
+            verdict = self.evidence.verdict_of(image, found['id'])
+            reading_record.note('ai', verdict=verdict)
+            if verdict != 'disagree':
                 return card_info
         except Exception as e:
             self.log(f"The AI's answer could not be checked against the picture ({e})", level="warning")
@@ -365,7 +405,8 @@ class Identification:
             return by_picture
         ocr_info = None
         if self.ocr_enabled:
-            ocr_info = self.card_ocr.read_card(image, games.active_id())
+            with reading_record.timed('ocr'):
+                ocr_info = self.card_ocr.read_card(image, games.active_id())
             confirmed, ocr_card = False, None
             if ocr_info:
                 if self.reading_mode == EVIDENCE and self.evidence is not None:
@@ -375,6 +416,9 @@ class Identification:
                     confirmed = ocr_card is not None
                 else:
                     confirmed = games.active().confirmed_read(ocr_info['name'], ocr_info['collector_number'], ocr_info['set_code'])
+            # the reading log: the full-card read (before a contradiction below drops its number and set)
+            reading_record.note('ocr', read=bool(ocr_info), name=(ocr_info or {}).get('name'), collector_number=(ocr_info or {}).get('collector_number'),
+                                set_code=(ocr_info or {}).get('set_code'), foil=(ocr_info or {}).get('foil'), confirmed=bool(confirmed))
             if confirmed and self._contradicted_by_picture(image, foil_image, ocr_info, ocr_card):
                 # reading.mode 'evidence': the OCR read a printing the picture clearly is another printing of (Secret Lair). It is no longer a
                 # confirmed read: without its number and set it can only go to review under its name, if nothing below settles it
@@ -407,8 +451,11 @@ class Identification:
         if identifier is None:
             return ocr_info
 
+        reading_record.note('ai', asked=task)
         if task == FOIL:
-            ocr_info['foil'] = identifier.read_foil_symbol(foil_image)
+            with reading_record.timed('ai'):
+                ocr_info['foil'] = identifier.read_foil_symbol(foil_image)
+            reading_record.note('ai', answer={'foil': ocr_info['foil']})
             self.log(self._said_by_ocr(ocr_info), level="success")
             return ocr_info
 
@@ -432,7 +479,10 @@ class Identification:
                 target=lambda: foil_result.update(foil=identifier.read_foil_symbol(foil_image)),
                 daemon=True)
             foil_thread.start()
-        card_info = identifier.identify_card(image)
+        with reading_record.timed('ai'):
+            card_info = identifier.identify_card(image)
+        reading_record.note('ai', answer={'name': card_info.get('name'), 'collector_number': card_info.get('collector_number'),
+                                          'set_code': card_info.get('set_code')} if card_info else None)
         if provisional and not self._resolved_prints_a_marker(card_info):
             # The printing the AI named is not one that prints a marker (or cannot be found): the network's answer was about whatever sat in the box. Discarded - the AI's own check answers.
             foil_result.pop('foil', None)
@@ -482,8 +532,15 @@ class Identification:
         card - or None
         """
         self.last_capture = (image, foil_image)
-        ocr_info, task = self._read_with_ocr(image, foil_image)
-        return self._ask_ai(task, image, foil_image, ocr_info) if task else ocr_info
+        record = self._new_record()
+        with reading_record.using(record):
+            ocr_info, task = self._read_with_ocr(image, foil_image)
+            card_info = self._ask_ai(task, image, foil_image, ocr_info) if task else ocr_info
+        if record is not None:
+            # the caller routes the card next, in this thread (stations_api: announce_and_route), and completes the record with what became of it
+            record.finish(card_info)
+            reading_record.hand_over(record)
+        return card_info
 
     # ------------------------------------------------------------------------
     # Queues
@@ -527,10 +584,16 @@ class Identification:
             if done is None:
                 continue
             job, card_info, seconds = done
+            if job.record is not None:
+                # what was read; on_done (the server's router, captures.announce_and_route) adds what became of it and writes it - or, if it does not, it is written below
+                job.record.finish(card_info)
+                reading_record.hand_over(job.record)
             try:
                 job.on_done(card_info, seconds)
             except Exception as e:
                 logger.exception(f"Handling an identified card failed: {e}")
+            finally:
+                reading_record.flush_handed()
 
     def _next(self, jobs):
         """The next job of a queue, or None once a second (so the worker sees a stop)"""
@@ -550,7 +613,8 @@ class Identification:
                     # the other game (the caller keeps it for its own game's review)
                     self._finish(job, None)
                     continue
-                with job.scope():
+                job.record = self._new_record()
+                with job.scope(), reading_record.using(job.record):
                     job.ocr_info, job.task = self._read_with_ocr(job.image, job.foil_image)
                 if job.task:
                     self._ai_queue.put(job)
@@ -570,7 +634,7 @@ class Identification:
             card_info = None
             try:
                 if job.game_id == games.active_id():
-                    with job.scope():
+                    with job.scope(), reading_record.using(job.record):
                         card_info = self._ask_ai(job.task, job.image, job.foil_image, job.ocr_info)
             except Exception as e:
                 logger.exception(f"AI stage failed: {e}")

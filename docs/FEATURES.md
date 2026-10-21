@@ -86,6 +86,9 @@ game sits behind one interface (`games/`), so another could be added.
   (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
   turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
   copy of the real data).
+- **The reading log** (since 2026-10-21): `data/logs/reading.jsonl` records, for every capture and in either reading mode, what the picture, the strip, the OCR and the AI said,
+  which guard (by name) refused the picture's decision, and what became of the card; a card settled in review notes which of the picture's candidates the person picked.
+  `scripts/reading_report.py` sums it up. Tested with stand-ins only; not yet run on live scans.
 - **A switch for the vision AI** (Settings > Card reading, since 2026-10-20), like the one for OCR: off, nothing is sent to an AI service - the picture (and OCR when it is on) decides what it can and the rest goes to
   the review queue under the name OCR read; the provider and its key are kept, and a card already waiting for the AI comes back as read. Remembered (`ai_enabled`); the page disables it, and says so, when no provider is set up.
   Tried with tests only, never from the page in a browser.

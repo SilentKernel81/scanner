@@ -12,6 +12,7 @@ import threading
 from card_scanner.config import Config
 from card_scanner import games
 from card_scanner.core import frames
+from card_scanner.core.reading import record as reading_record
 
 from card_scanner.server.state import (
     app_settings, capture_outcomes, capture_outcomes_lock, identification, maintenance_barrier,
@@ -272,6 +273,11 @@ def announce_and_route(image_path, card_info, card_number, game_id, processing_t
     outcome['read'] = {'name': info.get('name', ''), 'number': info.get('collector_number', ''),
                        'set': info.get('set_code', ''), 'foil': info.get('foil', 'unknown'),
                        'reader': info.get('reader') or get_ai_model_info()} if info else None
+    # The reading log (data/logs/reading.jsonl): the record of this card's reading - handed over by Identification in this thread - gets what became of
+    # the card and is written. The capture's uid (capture_key) is what joins it to the review's pick later: a review item keeps a copy of the picture
+    # under a name of its own. Never raises; nothing of it goes into the outcome (a phone parses that: ServerOutcome.parse)
+    reading_record.complete(card_info, outcome, capture=Path(image_path).name if image_path else None, station=desk().id,
+                            capture_key=capture_key())
     return outcome
 
 

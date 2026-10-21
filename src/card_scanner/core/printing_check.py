@@ -51,6 +51,7 @@ from card_scanner.core import card_ocr, foil_marker, image_index
 from card_scanner.core.database import names_match as database_names_match, search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
+from card_scanner.core.reading import record as reading_record
 from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
 
 logger = logging.getLogger('ai')
@@ -556,15 +557,36 @@ class PrintingCheck:
         strip = read_strip_evidence(ocr, upright, net_at_a_fixed_place)
         picture, cards = self._picture_evidence(search)
         decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
-        if decision['path'] == 'review' or (decision['path'] == 'image' and not accept_image_alone):
+        # The reading log (core/reading/record.py: data/logs/reading.jsonl) - what the picture and the strip said and what rule A2 answered, and below, by
+        # its name, the guard that refused the decision. Written into the record of the capture being read, if there is one; it changes nothing here.
+        lead = None if decision['lead'] is None else round(float(decision['lead']), 4)
+        reading_record.note('picture', rotated=bool(search['rotated']), lead=lead,
+                            candidates=[{'id': c['id'], 'set': c['set'], 'number': c['number'], 'similarity': round(c['similarity'], 4)} for c in picture['candidates']])
+        reading_record.note('strip', number=strip['number'], set=strip['set'], symbol=strip['symbol'],
+                            net=None if strip['net'] is None else round(float(strip['net']), 4))
+        reading_record.note('decision', path=decision['path'], printing_id=decision['printing_id'], lead=lead,
+                            similarity=None if decision['similarity'] is None else round(decision['similarity'], 4))
+        if decision['path'] == 'review':
+            return None
+        if decision['path'] == 'image' and not accept_image_alone:
+            reading_record.refuse(reading_record.IMAGE_ALONE_OFF)
             return None
         card = cards.get(decision['printing_id'])
         if not card:                                   # an indexed printing the card database no longer has: not a card to add
+            reading_record.refuse(reading_record.CARD_NOT_IN_DATA)
             return None
         if decision['similarity'] < (IMAGE_MIN_SIMILARITY if decision['path'] == 'image' else STRONG_MIN_SIMILARITY):
-            return None                                # a picture that looks little like the printing decides nothing, not even with a collector line that names it
-        if decision['path'] == 'image' and (self._names_unindexed(search['index'], strip) or self._names_unknown(strip)):
-            return None                                # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
+            # a picture that looks little like the printing decides nothing, not even with a collector line that names it
+            reading_record.refuse(reading_record.BELOW_IMAGE_FLOOR if decision['path'] == 'image' else reading_record.BELOW_STRONG_FLOOR)
+            return None
+        if decision['path'] == 'image':
+            # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
+            if self._names_unindexed(search['index'], strip):
+                reading_record.refuse(reading_record.STRIP_NAMES_UNINDEXED)
+                return None
+            if self._names_unknown(strip):
+                reading_record.refuse(reading_record.STRIP_NAMES_UNKNOWN)
+                return None
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
                 'similarity': decision['similarity'], 'lead': decision['lead']}
