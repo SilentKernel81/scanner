@@ -31,7 +31,7 @@ from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
 from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_agrees, prints_a_marker
-from card_scanner.core.reading import record as reading_record
+from card_scanner.core.reading import capture as reading_capture, record as reading_record
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
@@ -58,6 +58,9 @@ class Job:
         self.ocr_info = None
         self.task = None  # IDENTIFY or FOIL, once OCR has passed it on
         self.record = None  # what its reading saw and did (core/reading/record.py), when the reading log is on
+        # what its reading has worked out about its picture (core/reading/capture.py: the picture search, the strip, the full-card OCR), so that the
+        # AI stage does not search the picture again; let go of when it is finished
+        self.capture = None
 
 
 class Identification:
@@ -250,7 +253,12 @@ class Identification:
         if self.foil_marker is None or card is None:
             return 'unknown'
         try:
-            if self.ocr_enabled:
+            # the strip live_read read for this capture (reading.mode 'evidence', OCR on): its symbol and the network's answer are already there - for the card turned
+            # UPRIGHT, where foil_marker.read reads it as given (an upside-down card gave 'unknown' and the AI's check). Kept only for this very picture
+            kept, strip = reading_capture.recall('strip', card) if self.ocr_enabled else (False, None)
+            if kept:
+                foil, probability = self._foil_of_strip(strip)
+            elif self.ocr_enabled:
                 foil, probability = self.foil_marker.read(card, self.card_ocr)
             else:
                 # no OCR to find the set line: the network is asked about it at its fixed place (foil_marker.FIXED_BOX), which beats the AI's 25 s on a cold model - but only for a
@@ -268,6 +276,26 @@ class Identification:
             how = 'by OCR on the strip' if probability is None else f'by the network ({probability:.2f})'
             self.log(f"Foil marker read {how}: {foil}")
         return foil
+
+    @staticmethod
+    def _foil_of_strip(strip):
+        """
+        The marker from the strip's evidence (printing_check.read_strip_evidence), exactly as foil_marker.read answers from the same read: the symbol the OCR read
+        stands (probability None); otherwise the network's probability, believed one way or the other at foil_marker.SURE; nothing: 'unknown'
+        """
+        if strip['symbol'] != 'unknown':
+            return strip['symbol'], None
+        if strip['net'] is None:
+            return 'unknown', None
+        return foil_marker.answer_for(strip['net'])
+
+    def _read_card(self, image):
+        """
+        The full-card OCR of a capture - ONE read per capture (core/reading/capture.py): _ocr_names (the picture alone's confirmation) and _read_with_ocr ask about
+        the same image, and the second ask is the first's answer. A copy each time: the caller changes the read (its foil, its number and set).
+        """
+        read = reading_capture.get('ocr', image, lambda: self.card_ocr.read_card(image, games.active_id()))
+        return dict(read) if read else read
 
     @staticmethod
     def _said_by_ocr(ocr_info):
@@ -330,7 +358,7 @@ class Identification:
         """
         try:
             with reading_record.timed('ocr'):
-                read = self.card_ocr.read_card(image, games.active_id())
+                read = self._read_card(image)
             printing_at = self.evidence.database.get_card_by_set_number       # what the OCR's collector line names (ocr_agrees looks it up)
         except Exception as e:
             self.log(f"OCR could not confirm the picture ({e})", level="warning")
@@ -406,7 +434,7 @@ class Identification:
         ocr_info = None
         if self.ocr_enabled:
             with reading_record.timed('ocr'):
-                ocr_info = self.card_ocr.read_card(image, games.active_id())
+                ocr_info = self._read_card(image)      # (read already when the picture alone asked it to confirm: not read again)
             confirmed, ocr_card = False, None
             if ocr_info:
                 if self.reading_mode == EVIDENCE and self.evidence is not None:
@@ -533,7 +561,7 @@ class Identification:
         """
         self.last_capture = (image, foil_image)
         record = self._new_record()
-        with reading_record.using(record):
+        with reading_record.using(record), reading_capture.using(reading_capture.CaptureEvidence()):
             ocr_info, task = self._read_with_ocr(image, foil_image)
             card_info = self._ask_ai(task, image, foil_image, ocr_info) if task else ocr_info
         if record is not None:
@@ -576,6 +604,7 @@ class Identification:
         return self._ocr_queue.qsize(), self._ai_queue.qsize()
 
     def _finish(self, job, card_info):
+        job.capture = None          # the picture search's distances to the whole index: not kept while the card waits to be routed
         self._done_queue.put((job, card_info, time.time() - job.submitted))
 
     def _done_worker(self):
@@ -614,7 +643,8 @@ class Identification:
                     self._finish(job, None)
                     continue
                 job.record = self._new_record()
-                with job.scope(), reading_record.using(job.record):
+                job.capture = reading_capture.CaptureEvidence()
+                with job.scope(), reading_record.using(job.record), reading_capture.using(job.capture):
                     job.ocr_info, job.task = self._read_with_ocr(job.image, job.foil_image)
                 if job.task:
                     self._ai_queue.put(job)
@@ -634,7 +664,7 @@ class Identification:
             card_info = None
             try:
                 if job.game_id == games.active_id():
-                    with job.scope(), reading_record.using(job.record):
+                    with job.scope(), reading_record.using(job.record), reading_capture.using(job.capture):
                         card_info = self._ask_ai(job.task, job.image, job.foil_image, job.ocr_info)
             except Exception as e:
                 logger.exception(f"AI stage failed: {e}")

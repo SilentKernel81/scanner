@@ -1640,6 +1640,19 @@ by reader and outcome, the refusals by guard, the review picks by rank and joine
 (median, 95th percentile), and the captures to look at by eye (picture-alone adds under 0.6 similarity, strong decisions whose strip and full-card OCR read different numbers, AI
 answers the picture only weakly agrees with). *Tested with stand-ins and the synthetic index (`tests/test_reading_log.py`); not yet run on live scans.*
 
+**One body of evidence per capture** (`core/reading/capture.py`, since 2026-10-21; step 4 of the same plan). The steps of the reading ask about the same flat card more than once:
+the picture search (`PrintingCheck._search`: two fingerprints, two passes over the whole index, 18 ms median) by `live_read`, then `contradicts` / `disagrees` for an OCR-confirmed
+card, `upright` for the foil network with OCR off, and `verdict_of` for the AI's answer; the strip by `live_read` and again by `foil_marker.read` for an OCR-confirmed card whose
+marker the full-card OCR missed; the full-card OCR by `_ocr_names` (the picture alone's confirmation) and again by `_read_with_ocr`. Each is now worked out once: the thread
+reading a capture holds a `CaptureEvidence` as its current one (`capture.using`; on the `Job` between the OCR and the AI worker, let go of in `_finish`), and `_search`, the strip
+(`capture.remember` in `live_read`, `recall` in `Identification._read_foil_locally`) and `Identification._read_card` ask it first. A value is kept for one picture only - the
+very array it was made of - and a step with no current capture (the shadow worker, the review screen's candidates, scripts) computes as before. The strip's marker is taken as
+`foil_marker.read` would answer from the same read (`_foil_of_strip`: the symbol, else the network at `SURE`), but of the card turned **upright**: an upside-down OCR-confirmed card
+got `unknown` (and the AI's check) before. The two guards on the strip's printing share one lookup (`PrintingCheck._strip_printing`). *Not done:* the AI's answer is still looked up
+twice (`_resolved_prints_a_marker`: `confirmed_card`; `_checked_against_picture`: `identify`) - the two lookups are not the same rule, and folding them would change what is checked.
+*Checked:* the reading tests pass unedited; `verify_live_read.py` gives the same counts before and after; the full `Identification` path on real captures gives the same answer
+capture by capture before and after (`tests/test_reading_capture.py` pins "once per capture").
+
 *Measured* (`verify_live_read.py --no-image-alone` - the strip-confirmed decisions only, the shipped default for part of 2026-10-20 - with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
 (58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
 guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card

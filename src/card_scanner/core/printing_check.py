@@ -51,7 +51,7 @@ from card_scanner.core import card_ocr, foil_marker, image_index
 from card_scanner.core.database import names_match as database_names_match, search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
-from card_scanner.core.reading import record as reading_record
+from card_scanner.core.reading import capture as reading_capture, record as reading_record
 from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
 
 logger = logging.getLogger('ai')
@@ -129,6 +129,10 @@ PICTURE_READERS = (PICTURE_READER, EVIDENCE_READER)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
+
+# What PrintingCheck._strip_printing answers besides a card or None (no such printing): the strip read no whole line; the card database could not say;
+# and the default of the two guards that take its answer - not looked up yet
+NO_LINE, LOOKUP_FAILED, NOT_LOOKED_UP = object(), object(), object()
 
 
 def read_strip(ocr, card_rgb):
@@ -385,7 +389,14 @@ class PrintingCheck:
         """
         The capture against every printing, in both orientations (the better one counts): the index, the distance to every row, whether the
         card was upside down, and the five nearest rows with their similarities (nearest first). None without an index.
+        Done ONCE per capture while the reading has a current capture (core/reading/capture.py): live_read, contradicts / disagrees, upright and
+        verdict_of all ask about the same flat card, and the second ask is the first's answer. Without one (the shadow worker, the review screen) it is
+        computed every time, as before.
         """
+        return reading_capture.get('search', rgb, lambda: self._search_now(rgb))
+
+    def _search_now(self, rgb):
+        """_search, computed (see there)"""
         index = self.index()
         if index is None or not len(index):
             return None
@@ -555,6 +566,10 @@ class PrintingCheck:
         # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
         net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
         strip = read_strip_evidence(ocr, upright, net_at_a_fixed_place)
+        if ocr is not None:
+            # kept for the capture: the foil marker of a card the full-card OCR then confirms is this strip's symbol / network answer - the same reading
+            # foil_marker.read would do again, but of the card turned UPRIGHT (Identification._read_foil_locally)
+            reading_capture.remember('strip', card_image, strip)
         picture, cards = self._picture_evidence(search)
         decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
         # The reading log (core/reading/record.py: data/logs/reading.jsonl) - what the picture and the strip said and what rule A2 answered, and below, by
@@ -580,32 +595,44 @@ class PrintingCheck:
             reading_record.refuse(reading_record.BELOW_IMAGE_FLOOR if decision['path'] == 'image' else reading_record.BELOW_STRONG_FLOOR)
             return None
         if decision['path'] == 'image':
-            # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
-            if self._names_unindexed(search['index'], strip):
+            # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY). The strip's printing is looked up once for both guards
+            named = self._strip_printing(strip)
+            if self._names_unindexed(search['index'], strip, named):
                 reading_record.refuse(reading_record.STRIP_NAMES_UNINDEXED)
                 return None
-            if self._names_unknown(strip):
+            if self._names_unknown(strip, named):
                 reading_record.refuse(reading_record.STRIP_NAMES_UNKNOWN)
                 return None
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
                 'similarity': decision['similarity'], 'lead': decision['lead']}
 
-    def _names_unindexed(self, index, strip):
+    def _strip_printing(self, strip):
+        """
+        The printing the strip's whole line (a number AND a set) names - a card dict, None when the card data has no such printing, NO_LINE without a whole line,
+        LOOKUP_FAILED when the card database cannot say. The one lookup _names_unindexed and _names_unknown share (they are asked one after the other).
+        """
+        if not (strip['number'] and strip['set']):
+            return NO_LINE
+        try:
+            return self.database.get_card_by_set_number(strip['set'], strip['number'])
+        except Exception as e:
+            logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
+            return LOOKUP_FAILED
+
+    def _names_unindexed(self, index, strip, named=NOT_LOOKED_UP):
         """
         Whether the strip names a printing the card database has and the image index LACKS: then the picture cannot have seen that printing, and its best
         match is another card's (or another printing's) - no add by the picture alone. Fails closed: if the card database cannot say, True.
         """
-        if not (strip['number'] and strip['set']):
+        named = self._strip_printing(strip) if named is NOT_LOOKED_UP else named
+        if named is NO_LINE:
             return False
-        try:
-            named = self.database.get_card_by_set_number(strip['set'], strip['number'])
-        except Exception as e:
-            logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
+        if named is LOOKUP_FAILED:
             return True
         return bool(named) and index.row(named['id']) is None
 
-    def _names_unknown(self, strip):
+    def _names_unknown(self, strip, named=NOT_LOOKED_UP):
         """
         Whether the strip names a printing (a number AND a set) the card database does not have at all - the sign of a card newer than the card data, which is in neither the
         data nor the index, so the picture's best match is another printing (a third Codex review of 2026-10-20: a complete index of a stale card data still let it through).
@@ -613,13 +640,12 @@ class PrintingCheck:
         strip, all 13 right - OCR misreads of special printings ('spm 2099' for Spider-Man 2099) - so they go on to the full-card OCR instead. Fails closed: True when the card
         database cannot say.
         """
-        if not (strip['number'] and strip['set']):
+        named = self._strip_printing(strip) if named is NOT_LOOKED_UP else named
+        if named is NO_LINE:
             return False
-        try:
-            return not self.database.get_card_by_set_number(strip['set'], strip['number'])
-        except Exception as e:
-            logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
+        if named is LOOKUP_FAILED:
             return True
+        return not named
 
     def candidates(self, image_path):
         """
