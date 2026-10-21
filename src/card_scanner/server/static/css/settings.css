@@ -266,3 +266,14 @@
     font-size: 13px;
     color: var(--text-muted);
 }
+
+/* A setting that does not act in the present state of another (settings.js: setDependents): greyed out, its value kept */
+.is-dependent-off {
+    opacity: 0.45;
+}
+.is-dependent-off .switch,
+.is-dependent-off select,
+.is-dependent-off input,
+.is-dependent-off button {
+    cursor: not-allowed;
+}

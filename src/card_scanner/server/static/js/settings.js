@@ -29,6 +29,18 @@ async function api(path, options = {}) {
     }
 }
 
+// A setting that only acts while another one is in some state is greyed out and cannot be changed otherwise - the locked-focus checks while the camera's autofocus is on,
+// the sounds while sound effects are off. Its value is kept: it applies again as soon as the other setting allows it.
+function setDependents(ids, enabled) {
+    for (const id of ids) {
+        const control = $(id);
+        if (!control) continue;
+        control.disabled = !enabled;
+        const row = control.closest('.switch-row, .input-group, .volume-row');
+        if (row) row.classList.toggle('is-dependent-off', !enabled);
+    }
+}
+
 function remember(key, value) {
     try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ }
 }
@@ -204,6 +216,7 @@ async function loadCameraSettings() {
     if (!data || mine !== cameraRequest) return;
     $('toggle-auto-add').checked = Boolean(data.auto_add);
     $('toggle-autofocus').checked = Boolean(data.autofocus);
+    applyFocusMode(Boolean(data.autofocus));
     $('refocus-every').value = String(data.refocus_every);
     showRefocusOnDrop(data.refocus_on_drop);
     $('camera-rotation').value = String(data.camera_rotation || 0);
@@ -219,6 +232,11 @@ async function loadCameraSettings() {
     applyAiState(data.ai_enabled, data.ai_available);
     applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
+}
+
+// The two focus checks act on a LOCKED focus only (autofocus off): greyed out while the camera focuses by itself
+function applyFocusMode(autofocus) {
+    setDependents(['refocus-every', 'refocus-on-drop'], !autofocus);
 }
 
 function showRefocusOnDrop(ratio) {
@@ -281,6 +299,7 @@ function bindCameras() {
         notify(`Cards are added ${event.target.checked ? 'automatically' : 'after you confirm them'}`, 'success');
     });
     $('toggle-autofocus').addEventListener('change', event => {
+        applyFocusMode(event.target.checked);
         socket.emit('set_autofocus', {enabled: event.target.checked});
         notify(`Autofocus ${event.target.checked ? 'on' : 'off'}`, 'success');
     });
@@ -307,10 +326,16 @@ function applySound(sound) {
     $('volume-value').textContent = sound.volume + '%';
     $('toggle-sound-capture').checked = sound.capture;
     $('toggle-sound-added').checked = sound.added;
+    applySoundsEnabled(sound.enabled);
     audioManager.setEnabled(sound.enabled);
     audioManager.setVolume(sound.volume / 100);
     audioManager.setMuted('capture', !sound.capture);
     audioManager.setMuted('added', !sound.added);
+}
+
+// The single sounds and the volume only matter with sound effects on
+function applySoundsEnabled(enabled) {
+    setDependents(['toggle-sound-capture', 'toggle-sound-added', 'audio-volume', 'audio-test'], enabled);
 }
 
 function saveSound(change) {
@@ -319,6 +344,7 @@ function saveSound(change) {
 
 function bindSounds() {
     $('toggle-audio').addEventListener('change', event => {
+        applySoundsEnabled(event.target.checked);
         audioManager.setEnabled(event.target.checked);
         saveSound({enabled: event.target.checked});
         if (event.target.checked) audioManager.playSuccess();
