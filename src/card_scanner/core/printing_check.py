@@ -38,6 +38,7 @@
 # one background thread behind a small queue: a capture never waits for it, and nothing it does can fail one.
 
 import json
+import re
 import logging
 import queue
 import threading
@@ -160,6 +161,24 @@ def ocr_agrees(read, card, printing_at, lead=None, strip=None):
     # lead: the picture's lead over the second printing - from decide.LEAD_WAIVES_NAME on, the name is not needed (decide.confirm_by_ocr)
     # strip: the strip's read ({'set', 'number'}), the second line a name naming another card is checked against (ocr_facts)
     return confirm_by_ocr(ocr_facts(read, card, printing_at, strip), lead)['accepted']
+
+
+def printing_named_by_line(lookup, set_code, number):
+    """
+    The printing a whole collector line names: lookup is database.get_card_by_set_number(set, number, exact=False). A number with a LETTER SUFFIX ("233a",
+    "0245p", "IFIYW-5") is looked up WITH it first - leading zeros off ("0233a" -> "233a"), then as read - and only then by its digits as before, for a
+    suffix the OCR may have misread. The digits alone (database.collector_number_variants) take "233a" for "233": a Codex review of 2026-10-21 - the
+    index holds ZEN 233 AND ZEN 233a (Plains), so a line saying 233a was taken for the chosen 233 and the same-card check never saw the contradiction.
+    A number of digits alone is looked up as always.
+    """
+    number = (number or '').strip()
+    if re.search(r'\d', number) and re.search(r'[^\d]', number):
+        plain = re.sub(r'^0+(?=\d)', '', number)
+        for written in dict.fromkeys((plain, number)):        # each once, in that order
+            found = lookup(set_code, written, exact=True)
+            if found:
+                return found
+    return lookup(set_code, number)
 
 
 def _line_names(set_code, number, card, printing_at):
@@ -649,7 +668,7 @@ class PrintingCheck:
         if not (strip['number'] and strip['set']):
             return NO_LINE
         try:
-            return self.database.get_card_by_set_number(strip['set'], strip['number'])
+            return printing_named_by_line(self.database.get_card_by_set_number, strip['set'], strip['number'])    # a letter suffix kept first ("233a")
         except Exception as e:
             logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
             return LOOKUP_FAILED

@@ -818,6 +818,29 @@ class InIdentification(unittest.TestCase):
             self.ocr_read.update(collector_number='0242', set_code='HOB')                                           # ... the one the picture chose: added
             self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
 
+    def test_a_collector_number_with_a_letter_suffix_names_its_own_printing(self):
+        # (a Codex review of 2026-10-21: the lookup kept only the digits, so a line saying ZEN 233a was taken for the chosen ZEN 233 - both Plains are in the
+        # index - and the same-card check never saw the contradiction) - printing_check.printing_named_by_line keeps the suffix first
+        plains = {('zen', '233'): {'id': 'p233', 'name': 'Plains', 'set_code': 'zen', 'number': '233', 'oracle_id': 'o-plains'},
+                  ('zen', '233a'): {'id': 'p233a', 'name': 'Plains', 'set_code': 'zen', 'number': '233a', 'oracle_id': 'o-plains'}}
+
+        def lookup(set_code, number, exact=False):
+            if exact:
+                return plains.get((set_code.lower(), number))
+            digits = ''.join(c for c in number if c.isdigit()).lstrip('0') or '0'      # what collector_number_variants does: the digits
+            return plains.get((set_code.lower(), digits))
+        named = lambda number: (printing_check.printing_named_by_line(lookup, 'ZEN', number) or {}).get('id')
+        self.assertEqual(named('233a'), 'p233a')
+        self.assertEqual(named('0233a'), 'p233a')          # leading zeros off, the suffix kept
+        self.assertEqual(named('233'), 'p233')
+        self.assertEqual(named('0233'), 'p233')
+        self.assertEqual(named('233z'), 'p233')            # a suffix no printing has: the digits, as before (an OCR misread)
+        # ... and the full-card OCR's line check sees ZEN 233a as ANOTHER printing of the chosen ZEN 233's card
+        chosen = plains[('zen', '233')]
+        printing_at = lambda set_code, number: printing_check.printing_named_by_line(lookup, set_code, number)
+        self.assertEqual(printing_check.ocr_facts({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at)['line_names'], 'same_card')
+        self.assertFalse(printing_check.ocr_agrees({'name': 'Plains', 'collector_number': '233a', 'set_code': 'ZEN'}, chosen, printing_at))
+
     def test_a_strip_naming_another_existing_card_and_an_ocr_that_disagrees_keep_the_picture_from_adding_it(self):
         # (fourth Codex review: a readable strip that contradicts the picture skipped the name check)
         # (lead 0.0625: a picture not sure enough for its lead alone to stand in for the name - decide.LEAD_WAIVES_NAME, 2026-10-21)

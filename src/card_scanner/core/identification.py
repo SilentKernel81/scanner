@@ -30,7 +30,7 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_facts, prints_a_marker
+from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_facts, printing_named_by_line, prints_a_marker
 from card_scanner.core.reading.decide import confirm_by_ocr
 from card_scanner.core.reading import capture as reading_capture, record as reading_record
 from card_scanner.config import Config
@@ -361,7 +361,9 @@ class Identification:
         try:
             with reading_record.timed('ocr'):
                 read = self._read_card(image)
-            printing_at = self.evidence.database.get_card_by_set_number       # what the OCR's collector line names (ocr_agrees looks it up)
+            # what the OCR's collector line names (ocr_agrees looks it up): a letter suffix kept first ("233a" is not "233": printing_named_by_line)
+            lookup = self.evidence.database.get_card_by_set_number
+            printing_at = lambda set_code, number: printing_named_by_line(lookup, set_code, number)
         except Exception as e:
             self.log(f"OCR could not confirm the picture ({e})", level="warning")
             reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=None, ocr_line=None, ocr_error=str(e))
