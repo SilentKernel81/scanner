@@ -19,7 +19,7 @@ from card_scanner.core import inventory as inv  # noqa: E402
 from card_scanner.core import pending as pending_store  # noqa: E402
 from card_scanner.core import recommendations  # noqa: E402
 from card_scanner.core import review as review_store  # noqa: E402
-from card_scanner.core.database import CardDatabase  # noqa: E402
+from card_scanner.core.database import CONFIRMED_MATCHES, CardDatabase  # noqa: E402
 from test_ownership import CARD, GAME, OTHER, TemporaryData  # noqa: E402
 
 
@@ -623,6 +623,26 @@ class CardDataImport(TemporaryData):
     def card(self, number):
         return {'id': f'id-{number}', 'name': f'Card {number}', 'set': 'tst', 'set_name': 'Test', 'collector_number': str(number),
                 'layout': 'normal', 'prices': {}, 'image_uris': {'normal': ''}}
+
+    def test_tokens_and_emblems_are_kept_and_art_cards_are_not(self):
+        # Scryfall's own records: the Cadet of Fallout (set 'tfra', number 1; its strip prints "T 0001" over "FRA")
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            token = {**self.card(1), 'id': 'tok', 'name': 'Cadet', 'set': 'tfra', 'set_name': 'Fallout Tokens', 'collector_number': '1',
+                     'layout': 'token', 'type_line': 'Token Creature \u2014 Wizard Soldier', 'rarity': 'common'}
+            emblem = {**token, 'id': 'emb', 'name': 'Ajani Resolute Emblem', 'collector_number': '16', 'layout': 'emblem', 'type_line': 'Emblem'}
+            art = {**token, 'id': 'art', 'name': 'Some Art', 'collector_number': '9', 'layout': 'art_series', 'type_line': 'Card // Card'}
+            kept = cards.populate_database([self.card(n) for n in range(40)] + [token, emblem, art])
+            self.assertEqual(kept, 42)
+            ids = {row[0] for row in cards.conn.execute('SELECT id FROM cards')}
+            self.assertTrue({'tok', 'emb'} <= ids)
+            self.assertNotIn('art', ids)
+            # Found by what the parser writes for it (card_ocr.parse_magic: 'TFRA', '0001'), and as a confirmed match
+            found = cards.search_card_exact('Cadet', '0001', 'TFRA')
+            self.assertEqual((found['name'], found['set_code'], found['number']), ('Cadet', 'tfra', '1'))
+            self.assertIn(found['match'], CONFIRMED_MATCHES)
+        finally:
+            cards.conn.close()
 
     def test_an_import_on_its_own_connection(self):
         cards = CardDatabase(db_file=self.tmp / 'cards.db')

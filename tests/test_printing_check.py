@@ -506,6 +506,37 @@ class TheStripParse(unittest.TestCase):
         self.assertEqual(card_ocr.parse_strip([line('U 0172', 5)]), ('172', ''))
 
 
+class TheTokenLetter(unittest.TestCase):
+    """A token prints "T 0001" over "FRA • EN" (read from the picture of a Cadet, 2026-10-20): the printed code is its parent set's, and Scryfall files it as 'tfra'"""
+
+    def card_lines(self, name, collector, set_line):
+        """The lines of a whole card (1000 x 1000): the title, then the collector line and the set line at the bottom left"""
+        return [{'text': name, 'confidence': 0.9, 'box': [[60, 50], [400, 50], [400, 90], [60, 90]]},
+                {'text': collector, 'confidence': 0.9, 'box': [[60, 930], [200, 930], [200, 950], [60, 950]]},
+                {'text': set_line, 'confidence': 0.9, 'box': [[60, 960], [400, 960], [400, 980], [60, 980]]}]
+
+    def test_the_strip_of_a_token_names_the_token_set(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('T 0001', 5), line('FRA • EN Elizabeth Peiró', 40)]), ('1', 'tfra'))
+        self.assertEqual(card_ocr.parse_strip([line('T0013', 5), line('SPM ★ EN', 40)]), ('13', 'tspm'))
+
+    def test_a_card_of_the_same_set_keeps_its_own(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('U 0208', 5), line('FRA • EN Danny Schwartz', 40)]), ('208', 'fra'))
+        self.assertEqual(card_ocr.parse_strip([line('0208', 5), line('FRA • EN', 40)]), ('208', 'fra'))      # no letter read: no token
+
+    def test_the_whole_card_read_of_a_token(self):
+        from card_scanner.core import card_ocr
+        token = card_ocr.parse_magic(self.card_lines('Cadet', 'T 0001', 'FRA • EN Elizabeth Peiró'), 1000, 1000)
+        self.assertEqual((token['name'], token['collector_number'], token['set_code'], token['foil']), ('Cadet', '0001', 'TFRA', 'non-foil'))
+        card = card_ocr.parse_magic(self.card_lines('Way of the Mentor', 'U 0208', 'FRA • EN Danny Schwartz'), 1000, 1000)
+        self.assertEqual((card['collector_number'], card['set_code']), ('0208', 'FRA'))
+
+    def test_nothing_to_file_without_a_set(self):
+        from card_scanner.core import card_ocr
+        self.assertEqual(card_ocr.parse_strip([line('T 0001', 5)]), ('1', ''))        # a token whose set line was not read: no 't' alone
+
+
 class FakeReader:
     """Stands in for a light-ocr reader (CardOcr): read_lines gives the lines it is told to - or stalls until released, fails, or times out (None)"""
 

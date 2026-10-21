@@ -43,6 +43,21 @@ MAGIC_NUMBER_OF_TOTAL = re.compile(r'(\d{1,3})\s*/\s*\d{3}(?!\d)')
 # "HOB·EN", "HOB★EN", "SPM *EN", "HOBEN", "SPM·ENLADRAWS" (artist name run into the line)
 MAGIC_SET = re.compile(rf'([A-Z0-9]{{3,4}})\s*(?:([^A-Za-z0-9\s])\s*(?:{LANGUAGES})|(?:{LANGUAGES})\b)')
 DIGIT_LOOKALIKES = str.maketrans('OoDBIlSZ', '00081152')
+
+
+def prints_token_letter(match):
+    """
+    Whether a MAGIC_NUMBER match is a TOKEN's collector line: a token (and an emblem) prints "T" where a card prints its rarity
+    ("T 0001" over "FRA • EN"; no card has the rarity "T"), with the set code of the set it came with. Scryfall keeps tokens in a set
+    of their own - "t" + that code ("tfra", number 1) - so a token read as "FRA" 1 would be looked up as another card, the first
+    one of the set. Only the letter group counts (the digits-alone alternative has no letter).
+    """
+    return bool(match and match.group(1) and match.group(0).lstrip()[:1] == 'T')
+
+
+def token_set_code(set_code):
+    """The set a token printed with the code `set_code` is filed under: 't' + the code, in the case it was written in (tokens: 'TFRA', the strip: 'tfra')"""
+    return ('t' if set_code[:1].islower() else 'T') + set_code
 STARS, DOTS = '*★☆', '·•.'
 
 
@@ -73,6 +88,7 @@ def parse_magic(lines, width, height):
     # a pile may take in the edge of the card underneath, which moves both lines up
     number = set_code = ''
     foil = 'unknown'
+    token = False
     for line in sorted((l for l in lines if top(l) > 0.84 and left(l) < 0.6), key=top):
         text = line['text'].strip()
         if not number:
@@ -80,6 +96,7 @@ def parse_magic(lines, width, height):
             digits = match and (match.group(1) or match.group(2))
             if digits and sum(c.isdigit() for c in digits) >= 2:
                 number = digits.translate(DIGIT_LOOKALIKES)
+                token = prints_token_letter(match)
                 continue
             match = MAGIC_NUMBER_OF_TOTAL.match(text)
             if match:
@@ -93,6 +110,8 @@ def parse_magic(lines, width, height):
                 # Only a marker that was read counts: a missed one says nothing (measured:
                 # no symbol was read on 52 foils and 3 regular cards)
                 foil = 'foil' if marker and marker in STARS else 'non-foil' if marker and marker in DOTS else 'unknown'
+    if token and set_code:
+        set_code = token_set_code(set_code)       # "T 0001" over "FRA": the token set 'TFRA', not the card FRA #1
     return {'name': name, 'collector_number': number, 'set_code': set_code, 'foil': foil}
 
 
@@ -104,6 +123,7 @@ def parse_strip(lines):
     The same reading parse_magic does of those two lines, for the printing check's picture lookup (printing_check.py).
     """
     number = set_code = ''
+    token = False
     for line in sorted(lines, key=lambda l: l['box'][0][1]):
         text = line['text'].strip()
         if not number:
@@ -111,6 +131,7 @@ def parse_strip(lines):
             digits = match and (match.group(1) or match.group(2))
             if digits and sum(c.isdigit() for c in digits) >= 2:
                 number = digits.translate(DIGIT_LOOKALIKES)
+                token = prints_token_letter(match)
                 continue
             match = MAGIC_NUMBER_OF_TOTAL.match(text)
             if match:
@@ -120,7 +141,10 @@ def parse_strip(lines):
             match = MAGIC_SET.match(text)
             if match:
                 set_code = match.group(1)
-    return number.lstrip('0'), set_code.lower()
+    set_code = set_code.lower()
+    if token and set_code:
+        set_code = token_set_code(set_code)       # a token's strip says "T 0001" over "FRA": the picture's candidate is the printing 'tfra' 1
+    return number.lstrip('0'), set_code
 
 
 # Game id -> parser(lines, width, height); a game without one is read by the vision AI only
