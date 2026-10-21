@@ -30,7 +30,8 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_agrees, prints_a_marker
+from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_facts, prints_a_marker
+from card_scanner.core.reading.decide import confirm_by_ocr
 from card_scanner.core.reading import capture as reading_capture, record as reading_record
 from card_scanner.config import Config
 
@@ -365,9 +366,16 @@ class Identification:
             self.log(f"OCR could not confirm the picture ({e})", level="warning")
             reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=None, ocr_line=None, ocr_error=str(e))
             return False
-        agrees = ocr_agrees(read, card, printing_at)
+        # printing_check.ocr_agrees, in its two halves, so that the reading log gets the facts as well as the answer
+        facts = ocr_facts(read, card, printing_at)
+        agrees = confirm_by_ocr(facts)['accepted']
+        # The reading log: what the full-card OCR read for this confirmation, whether it confirmed the picture or not (before 2026-10-21 only a refusal was
+        # written down, so a confirmed picture-alone card showed no OCR at all) - and the two facts the decision was made on (decide.confirm_by_ocr)
+        reading_record.note('ocr', read=bool(read), name=(read or {}).get('name'), collector_number=(read or {}).get('collector_number'),
+                            set_code=(read or {}).get('set_code'), foil=(read or {}).get('foil'), confirms_picture=agrees,
+                            name_matches=facts['name_matches'], line_names=facts['line_names'])
         if not agrees:
-            # the reading log: what the OCR read instead - nothing (None: the reader read nothing, or was down in its cool-down), another name, or a line naming another printing
+            # what the OCR read instead - nothing (None: the reader read nothing, or was down in its cool-down), another name, or a line naming another printing
             line = f"{read.get('set_code') or ''} {read.get('collector_number') or ''}".strip() if read else None
             reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=read.get('name') if read else None, ocr_line=line or None)
         return agrees

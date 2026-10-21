@@ -265,6 +265,22 @@ class InIdentification(unittest.TestCase):
         self.assertEqual((data['refused'], data['refused_ocr_name'], data['refused_ocr_line']), (record.OCR_DID_NOT_CONFIRM, 'Frodo', 'LTR 17'))
         self.assertEqual(data['ocr']['name'], 'Frodo')  # and the full-card read that followed
 
+    def test_an_ocr_that_confirms_the_picture_alone_is_recorded_too(self):
+        # (before 2026-10-21 only a refusal wrote the OCR's read: a picture-alone card the OCR confirmed showed no OCR at all)
+        self.ident.evidence.reading = {**READING, 'path': 'image'}
+        self.ocr_read = {'name': 'Gandalf', 'collector_number': '242', 'set_code': 'HOB', 'foil': 'unknown'}      # the very printing the picture chose
+        info, data = self.identify()
+        self.assertEqual(info['printing_id'], 'p3')
+        self.assertIsNone(data['refused'])
+        self.assertEqual((data['ocr']['name'], data['ocr']['set_code'], data['ocr']['collector_number']), ('Gandalf', 'HOB', '242'))
+        self.assertEqual((data['ocr']['confirms_picture'], data['ocr']['name_matches'], data['ocr']['line_names']), (True, True, 'chosen'))
+
+    def test_a_refusal_records_the_facts_it_was_made_on(self):
+        self.ident.evidence.reading = {**READING, 'path': 'image'}
+        self.ocr_read = {'name': 'Worn', 'collector_number': '', 'set_code': 'SCD', 'foil': 'unknown'}     # a Secret Lair printing another card's name
+        _info, data = self.identify('review')
+        self.assertEqual((data['ocr']['confirms_picture'], data['ocr']['name_matches'], data['ocr']['line_names']), (False, False, None))
+
     def test_an_ocr_that_read_nothing_is_named_with_nothing(self):
         self.ident.evidence.reading = {**READING, 'path': 'image'}
         self.ocr_read = None                            # the reader read nothing (or was down in its cool-down)

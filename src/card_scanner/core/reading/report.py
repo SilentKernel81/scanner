@@ -76,12 +76,26 @@ def report(log_file, show=15, out=print):
     for name, n in refused.items():
         out(f"  {n:6d}  {name}")
     unread = [r for r in captures if r.get('refused') == 'ocr_did_not_confirm']
+    ocr_split = {}
     if unread:
-        nothing = sum(1 for r in unread if not r.get('refused_ocr_name'))
-        line = sum(1 for r in unread if r.get('refused_ocr_name') and r.get('refused_ocr_line'))
-        out(f"  ocr_did_not_confirm: {nothing} with nothing read (the name unreadable, or the reader down), {len(unread) - nothing} with a name"
-            f" ({line} of them with a whole collector line)")
-        out(f"  ... and then answered by the AI: {sum(1 for r in unread if (r.get('ai') or {}).get('asked'))}")
+        # Step 6 of docs/plans/READING_REVIEW_2026-10-21_PLAN.md: WHY the full-card OCR did not confirm the picture alone. Records written since 2026-10-21 carry the two
+        # facts the decision was made on (ocr.name_matches, ocr.line_names - decide.confirm_by_ocr); older ones only what was read, and are counted apart
+        def why(r):
+            ocr = r.get('ocr') or {}
+            if 'name_matches' not in ocr:
+                return 'nothing read' if not r.get('refused_ocr_name') else '(recorded before the facts were: a name was read)'
+            if not ocr.get('read'):
+                return 'nothing read'
+            if not ocr['name_matches']:
+                return 'name not the card\'s'
+            return f"line names {ocr.get('line_names')}"
+        for r in unread:
+            group = ocr_split.setdefault(why(r), {'n': 0, 'ai_asked': 0})
+            group['n'] += 1
+            group['ai_asked'] += bool((r.get('ai') or {}).get('asked'))
+        out("  ocr_did_not_confirm, by why (and how many then went to the AI):")
+        for name, group in sorted(ocr_split.items(), key=lambda kv: -kv[1]['n']):
+            out(f"    {group['n']:6d}  {name}  (AI asked {group['ai_asked']})")
 
     # --- the review's picks: was the picture right when a guard refused it? ---
     by_rank = _count(p.get('rank') for p in picks)
@@ -133,7 +147,7 @@ def report(log_file, show=15, out=print):
         out(f"    {r['time']} {r.get('capture')}: {answer.get('name')} [{answer.get('set_code')} {answer.get('collector_number')}]")
 
     return {'captures': len(captures), 'by_mode': by_mode, 'by_reader': by_reader, 'by_outcome': by_outcome, 'refused': refused,
-            'picks_by_rank': by_rank, 'refused_then_picked': refused_then_picked, 'seconds': seconds}
+            'ocr_split': ocr_split, 'picks_by_rank': by_rank, 'refused_then_picked': refused_then_picked, 'seconds': seconds}
 
 
 def main(argv=None):

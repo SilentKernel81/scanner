@@ -73,7 +73,7 @@ game sits behind one interface (`games/`), so another could be added.
   collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
-- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a checkbox in Settings > Card reading turns it off. Never starts the first build. Tested with stand-ins only, **never tried on a live server**.
+- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a checkbox in Settings > Card reading turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
@@ -88,7 +88,7 @@ game sits behind one interface (`games/`), so another could be added.
   copy of the real data).
 - **The reading log** (since 2026-10-21): `data/logs/reading.jsonl` records, for every capture and in either reading mode, what the picture, the strip, the OCR and the AI said,
   which guard (by name) refused the picture's decision, and what became of the card; a card settled in review notes which of the picture's candidates the person picked.
-  `scripts/reading_report.py` sums it up. Tested with stand-ins only; not yet run on live scans.
+  `scripts/reading_report.py` sums it up. First live run 2026-10-21: 133 captures, every record written, the review's picks joined to their captures.
 - **A switch for the vision AI** (Settings > Card reading, since 2026-10-20), like the one for OCR: off, nothing is sent to an AI service - the picture (and OCR when it is on) decides what it can and the rest goes to
   the review queue under the name OCR read; the provider and its key are kept, and a card already waiting for the AI comes back as read. Remembered (`ai_enabled`); the page disables it, and says so, when no provider is set up.
   Tried with tests only, never from the page in a browser.
