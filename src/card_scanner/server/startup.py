@@ -114,7 +114,7 @@ def initialize_components():
     services.printing_check = PrintingCheck(
         services.database, Config.DATA_DIR / 'image_index', Config.DATA_DIR / 'logs' / 'printing_check.jsonl', Config.PRINTING_CHECK_MODE,
         Config.PRINTING_CHECK_LOOKUP, strip_reader=StripReader(lambda: services.identification.ocr_enabled, foil_net=foil_marker.load(Config.OCR_FOIL_MARKER)),
-        finish_for=lambda card, foil: games.active().suggested_finish(card, foil))
+        finish_for=lambda card, foil: games.active().suggested_finish(card, foil), game_id=games.active_id)
     # reading.mode 'evidence' reads a card by its picture and strip with the printing check's image index (the live reading's counterpart of its lookup)
     services.identification.evidence = services.printing_check
     # The reading log: one line per capture of what each step of the reading saw and did, in either mode (core/reading/record.py; the report:

@@ -102,7 +102,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
-| `reading/evidence.py`, `reading/decide.py` | server | The decision about a printing as a pure function of plain data (`decide_printing`, rule A2): what `printing_check.py`'s lookup used to do inline, now with test files another program can pass too (see *Printing check*) |
+| `reading/evidence.py`, `reading/decide.py` | server | The decision about a printing as a pure function of plain data (`decide_printing`, rule A2; `decide_finish`; the guards around it, `accept_printing` and `confirm_by_ocr`, since 2026-10-21): what `printing_check.py`'s lookup used to do inline, now with test files another program can pass too (see *Printing check*) |
 | `image_index.py`, `printing_check.py` | server | The printing check, shadow mode (see *Printing check*): a 96-byte fingerprint of every printing's picture (`hash_card`, `ImageIndex`, the builder `build`) and the check that a capture looks like the printing the server resolved (`PrintingCheck`) |
 | `foil_marker.py`, `foil_net.onnx` | server | The foil marker (★ / •) read from the set line by a small network where OCR left it unread (`FoilMarker`, `load`); the network is the file beside the module, run with OpenCV's dnn (310 KB) |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
@@ -1639,6 +1639,20 @@ failed write is a debug line in `ai.log`. Renamed to `.1` beyond 10 MB, in no ba
 by reader and outcome, the refusals by guard, the review picks by rank and joined to the guard that sent the card there (the cost of each guard in live numbers), seconds per step
 (median, 95th percentile), and the captures to look at by eye (picture-alone adds under 0.6 similarity, strong decisions whose strip and full-card OCR read different numbers, AI
 answers the picture only weakly agrees with). *Tested with stand-ins and the synthetic index (`tests/test_reading_log.py`); not yet run on live scans.*
+
+**The guards as a pure function** (since 2026-10-21; step 5 of the same plan). What `PrintingCheck.live_read` and `Identification._read_by_picture` checked inline is now two pure
+functions in `core/reading/decide.py`, beside rule A2, with exactly the same rules in the same order: `accept_printing(decision, facts)` - review is no decision; the picture alone
+needs the setting (`image_alone_off`) and an index that covers the card data (`index_incomplete`); the printing must be in the card data (`card_not_in_data`); each path its floor
+(`below_image_floor` 0.5, `below_strong_floor` 0.30); the picture alone, a strip naming a printing the index lacks or that cannot be looked up (`strip_names_unindexed`) or one the
+card data lacks (`strip_names_unknown`) - and, for the picture alone with OCR on, `needs_ocr`: then `confirm_by_ocr(ocr)` decides (`ocr_did_not_confirm`). The facts are gathered
+outside (`PrintingCheck._strip_names`: one lookup of the strip's line; `printing_check.ocr_facts`: the name and the full-card OCR's line - `ocr_agrees`, which
+`confirm_cost.py` calls, is the two halves together). On the server the index's coverage is folded into the setting by `_read_by_picture` before `live_read` (as before), so
+`live_read` passes it as covered and the log's `index_incomplete` is named by `_read_by_picture`. The case file is `tests/data/reading_guard_cases.json` (29 cases, hand-written: one
+per guard, one per way through, and the order between them); the Android app's `Decide.kt` (`acceptPrinting`, `confirmByOcr`) passes a copy of it. The guards' names are defined
+there once (`decide.GUARDS`; `record.py` imports them). `missing_printings` takes the game from the server (`PrintingCheck(..., game_id=games.active_id)`) instead of naming one.
+*Checked:* `verify_live_read.py` and `compare_lookup_versions.py` unchanged (95/128, 286/300, 0 wrong; 444 of 444); the `Identification` path on 529 real captures, the tree of step 4
+against this one, identical record by record, with 6 `ocr_did_not_confirm`, 10 `strip_names_unknown`, 3 + 3 below a floor and 17 picture-alone adds among them. `strip_names_unindexed`,
+`card_not_in_data`, `index_incomplete` and `image_alone_off` did not occur in those captures (the development index covers its card data): the case file and the unit tests cover them.
 
 **One body of evidence per capture** (`core/reading/capture.py`, since 2026-10-21; step 4 of the same plan). The steps of the reading ask about the same flat card more than once:
 the picture search (`PrintingCheck._search`: two fingerprints, two passes over the whole index, 18 ms median) by `live_read`, then `contradicts` / `disagrees` for an OCR-confirmed

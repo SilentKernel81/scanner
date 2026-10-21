@@ -407,5 +407,14 @@ class InIdentification(unittest.TestCase):
         identifier.read_foil_symbol.assert_called_once()
 
 
+
+
+class OneNumberForSure(unittest.TestCase):
+    def test_the_finish_rule_and_the_network_believe_at_the_same_probability(self):
+        # core/reading/decide.py may import nothing, so it has its own copy of foil_marker.SURE: they must stay equal (finding F9 of the reading review)
+        from card_scanner.core.reading import decide
+        self.assertEqual(decide.FINISH_SURE, foil_marker.SURE)
+
+
 if __name__ == '__main__':
     unittest.main()

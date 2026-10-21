@@ -331,6 +331,7 @@ class Identification:
                 reading_record.refuse(reading_record.INDEX_INCOMPLETE, missing=missing)
             return None
         card = reading['card']
+        # (decide.accept_printing's needs_ocr: the picture alone with OCR on - the second half of the guards, decide.confirm_by_ocr, through ocr_agrees)
         if reading['path'] == 'image' and self.ocr_enabled:
             # The picture ALONE decided (the collector line did not name the printing it chose): with OCR on, its name must agree before the card is added - whatever the strip
             # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);

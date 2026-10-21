@@ -52,7 +52,7 @@ from card_scanner.core.database import names_match as database_names_match, sear
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
 from card_scanner.core.reading import capture as reading_capture, record as reading_record
-from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
+from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, accept_printing, confirm_by_ocr, decide_finish, decide_printing, plain_number
 
 logger = logging.getLogger('ai')
 
@@ -130,9 +130,8 @@ LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
 
-# What PrintingCheck._strip_printing answers besides a card or None (no such printing): the strip read no whole line; the card database could not say;
-# and the default of the two guards that take its answer - not looked up yet
-NO_LINE, LOOKUP_FAILED, NOT_LOOKED_UP = object(), object(), object()
+# What PrintingCheck._strip_printing answers besides a card or None (no such printing): the strip read no whole line; the card database could not say
+NO_LINE, LOOKUP_FAILED = object(), object()
 
 
 def read_strip(ocr, card_rgb):
@@ -154,32 +153,42 @@ def ocr_agrees(read, card, printing_at):
       - a DIFFERENT card - a Secret Lair prints another card's line by design (Deadpool's Lightning Bolt reads `GN2 042`, Lightning Strike), or the OCR misread the number
         (`SPM 069` is Swarm, the card is Shocker #89): that line is no evidence about this card's printing, and the name decides. Rejecting these too refused 28 of 49 correct
         picture decisions and prevented no error (confirm_cost.py).
-    A part of the line (only a set, only a number) names no printing and is not used. A pure function apart from the lookup it is handed: the server (Identification._ocr_names)
-    and the measurement (scripts/experiments/image_match/confirm_cost.py) both ask this one.
+    A part of the line (only a set, only a number) names no printing and is not used. The server (Identification._ocr_names) and the measurement
+    (scripts/experiments/image_match/confirm_cost.py) both ask this one. Since step 5 of docs/plans/READING_REVIEW_2026-10-21_PLAN.md it is two halves: ocr_facts gathers (the
+    names_match, the lookup, the oracle-id comparison) and the pure core/reading/decide.confirm_by_ocr decides - so the Android app passes the same case file.
+    """
+    return confirm_by_ocr(ocr_facts(read, card, printing_at))['accepted']
+
+
+def ocr_facts(read, card, printing_at):
+    """
+    What a full-card OCR read says about the printing the picture alone chose, as decide.confirm_by_ocr takes it: {'name_matches', 'line_names'} (see there). Every lookup is
+    here; a read of nothing, no card, or a name that is not the card's is {'name_matches': False} (the line is not looked up then - it could not change the answer).
     """
     if not read or not read.get('name') or not card:
-        return False
+        return {'name_matches': False, 'line_names': None}
     if not database_names_match(read['name'], {'name': card.get('name'), 'flavor_name': card.get('flavor_name')}):
-        return False
+        return {'name_matches': False, 'line_names': None}
     number, set_code = (read.get('collector_number') or '').strip(), (read.get('set_code') or '').strip().lower()
     if not (number and set_code):
-        return True
+        return {'name_matches': True, 'line_names': None}                  # no whole line: the name decides
     if set_code == (card.get('set_code') or '').lower() and plain_number(number).lower() == plain_number(card.get('number')).lower():
-        return True                                                         # the very printing the picture chose
+        return {'name_matches': True, 'line_names': 'chosen'}              # the very printing the picture chose
     try:
         named = printing_at(set_code, number)
     except Exception as e:
         logger.debug(f"Printing check: the OCR's collector line could not be looked up: {e}")
-        return False                                                        # cannot say what it names: not confirmed
+        return {'name_matches': True, 'line_names': 'lookup_failed'}       # cannot say what it names: not confirmed
     if not named:
-        return False                                                        # a printing the card data does not have
+        return {'name_matches': True, 'line_names': 'unknown'}             # a printing the card data does not have
     # The same card: the same oracle id - or, when either lacks one, the same name exactly (never names_match's forgiveness, which is for OCR misreads: it takes
     # Lightning Strike for Lightning Bolt, and the Secret Lair's printed line would then count as another printing of the Bolt)
     if named.get('oracle_id') and card.get('oracle_id'):
         same_card = named['oracle_id'] == card['oracle_id']
     else:
         same_card = (database_search_key(named.get('name')) or '') == (database_search_key(card.get('name')) or '-')
-    return not same_card                                                    # another printing of this card: no; another card's line: no evidence
+    # another printing of this card: not confirmed; another card's line: no evidence about this card's printing, the name decides
+    return {'name_matches': True, 'line_names': 'same_card' if same_card else 'other_card'}
 
 
 def prints_a_marker(card):
@@ -317,8 +326,11 @@ class PrintingCheck:
     the lookup then goes by the picture alone.
     """
 
-    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None):
+    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None, game_id=None):
         self.database = database
+        # game_id(): the game whose card data the index is measured against (missing_printings) - the server passes games.active_id; a script that makes one without
+        # it gets Magic, the one game an index exists for
+        self.game_id = game_id or (lambda: 'mtg')
         self.index_folder = Path(index_folder)
         self.log_file = Path(log_file)
         self.mode = mode if mode in ('shadow', 'off') else 'shadow'
@@ -351,7 +363,7 @@ class PrintingCheck:
         if index is None:
             return None
         try:
-            stamp = (self._index_stamp, (self.database.get_data_info('mtg') or {}).get('downloaded_at'))
+            stamp = (self._index_stamp, (self.database.get_data_info(self.game_id()) or {}).get('downloaded_at'))
         except Exception as e:
             logger.debug(f"Printing check: the card data's date could not be read: {e}")
             return None
@@ -581,28 +593,20 @@ class PrintingCheck:
                             net=None if strip['net'] is None else round(float(strip['net']), 4))
         reading_record.note('decision', path=decision['path'], printing_id=decision['printing_id'], lead=lead,
                             similarity=None if decision['similarity'] is None else round(decision['similarity'], 4))
-        if decision['path'] == 'review':
-            return None
-        if decision['path'] == 'image' and not accept_image_alone:
-            reading_record.refuse(reading_record.IMAGE_ALONE_OFF)
-            return None
-        card = cards.get(decision['printing_id'])
-        if not card:                                   # an indexed printing the card database no longer has: not a card to add
-            reading_record.refuse(reading_record.CARD_NOT_IN_DATA)
-            return None
-        if decision['similarity'] < (IMAGE_MIN_SIMILARITY if decision['path'] == 'image' else STRONG_MIN_SIMILARITY):
-            # a picture that looks little like the printing decides nothing, not even with a collector line that names it
-            reading_record.refuse(reading_record.BELOW_IMAGE_FLOOR if decision['path'] == 'image' else reading_record.BELOW_STRONG_FLOOR)
-            return None
-        if decision['path'] == 'image':
-            # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY). The strip's printing is looked up once for both guards
-            named = self._strip_printing(strip)
-            if self._names_unindexed(search['index'], strip, named):
-                reading_record.refuse(reading_record.STRIP_NAMES_UNINDEXED)
-                return None
-            if self._names_unknown(strip, named):
-                reading_record.refuse(reading_record.STRIP_NAMES_UNKNOWN)
-                return None
+        # May the server add it on this evidence? The guards are a pure function (core/reading/decide.accept_printing, with its own case file) on facts gathered here:
+        # every lookup is done in this method, the function only compares. The index's coverage of the card data is folded into accept_image_alone by the caller
+        # (Identification._read_by_picture: the picture alone only while PrintingCheck.missing_printings is 0), so it is given as covered here. The floors are read
+        # at call time (this module's IMAGE_MIN_SIMILARITY / STRONG_MIN_SIMILARITY, which tests and the measurement scripts set).
+        card = cards.get(decision['printing_id']) if decision['printing_id'] is not None else None
+        alone = decision['path'] == 'image'
+        facts = {'accept_image_alone': bool(accept_image_alone), 'index_covers': True, 'in_data': bool(card), 'ocr_on': ocr is not None,
+                 # what the strip's whole line names: looked up only where a guard asks it (the picture alone, when allowed)
+                 'strip_names': self._strip_names(search['index'], strip, decision['printing_id']) if alone and accept_image_alone and card else None}
+        verdict = accept_printing(decision, facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
+        if verdict['refused']:
+            reading_record.refuse(verdict['refused'])
+        if not (verdict['accepted'] or verdict['needs_ocr']):
+            return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
                 'similarity': decision['similarity'], 'lead': decision['lead']}
@@ -610,7 +614,7 @@ class PrintingCheck:
     def _strip_printing(self, strip):
         """
         The printing the strip's whole line (a number AND a set) names - a card dict, None when the card data has no such printing, NO_LINE without a whole line,
-        LOOKUP_FAILED when the card database cannot say. The one lookup _names_unindexed and _names_unknown share (they are asked one after the other).
+        LOOKUP_FAILED when the card database cannot say (_strip_names turns it into what accept_printing takes).
         """
         if not (strip['number'] and strip['set']):
             return NO_LINE
@@ -620,32 +624,24 @@ class PrintingCheck:
             logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
             return LOOKUP_FAILED
 
-    def _names_unindexed(self, index, strip, named=NOT_LOOKED_UP):
+    def _strip_names(self, index, strip, chosen_id):
         """
-        Whether the strip names a printing the card database has and the image index LACKS: then the picture cannot have seen that printing, and its best
-        match is another card's (or another printing's) - no add by the picture alone. Fails closed: if the card database cannot say, True.
+        What the strip's whole line names, as accept_printing takes it (decide.STRIP_NAMES): None without a whole line (a number AND a set), 'lookup_failed' when the card
+        database cannot say, 'unknown' for a printing the card data does not have - the sign of a card newer than the card data, in neither the data nor the index (a third Codex
+        review of 2026-10-20; measured, scripts/experiments/image_match/unknown_strip.py: 13 of 47 picture-alone decisions had such a strip, all 13 right - OCR misreads of special
+        printings - so they go on to the full-card OCR instead), 'unindexed' for one the card data has and the index LACKS (the picture cannot have seen it: its best match is
+        another printing's), 'chosen' for the printing decided on, 'indexed_other' for another printing in the index. One lookup.
         """
-        named = self._strip_printing(strip) if named is NOT_LOOKED_UP else named
+        named = self._strip_printing(strip)
         if named is NO_LINE:
-            return False
+            return None
         if named is LOOKUP_FAILED:
-            return True
-        return bool(named) and index.row(named['id']) is None
-
-    def _names_unknown(self, strip, named=NOT_LOOKED_UP):
-        """
-        Whether the strip names a printing (a number AND a set) the card database does not have at all - the sign of a card newer than the card data, which is in neither the
-        data nor the index, so the picture's best match is another printing (a third Codex review of 2026-10-20: a complete index of a stale card data still let it through).
-        No add by the picture alone then. The cost, measured (scripts/experiments/image_match/unknown_strip.py, 1,628 pictures): 13 of 47 picture-alone decisions had such a
-        strip, all 13 right - OCR misreads of special printings ('spm 2099' for Spider-Man 2099) - so they go on to the full-card OCR instead. Fails closed: True when the card
-        database cannot say.
-        """
-        named = self._strip_printing(strip) if named is NOT_LOOKED_UP else named
-        if named is NO_LINE:
-            return False
-        if named is LOOKUP_FAILED:
-            return True
-        return not named
+            return 'lookup_failed'
+        if not named:
+            return 'unknown'
+        if index.row(named['id']) is None:
+            return 'unindexed'
+        return 'chosen' if named['id'] == chosen_id else 'indexed_other'
 
     def candidates(self, image_path):
         """

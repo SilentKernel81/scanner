@@ -22,22 +22,17 @@ import threading
 import time
 from pathlib import Path
 
+from card_scanner.core.reading.decide import (BELOW_IMAGE_FLOOR, BELOW_STRONG_FLOOR, CARD_NOT_IN_DATA, GUARDS, IMAGE_ALONE_OFF,  # noqa: F401
+                                              INDEX_INCOMPLETE, OCR_DID_NOT_CONFIRM, STRIP_NAMES_UNINDEXED, STRIP_NAMES_UNKNOWN)
+
 logger = logging.getLogger('ai')
 
 # The log is renamed to .1 beyond this (the old .1 goes) - as printing_check.jsonl (printing_check.LOG_LIMIT)
 LOG_LIMIT = 10 * 1024 * 1024
 
-# The names of the guards that can stop a decision of the picture (the 'refused' field). In the order the reading meets them.
-IMAGE_ALONE_OFF = 'image_alone_off'              # the picture alone decided, and the person has not allowed that (reading.accept_image_alone)
-INDEX_INCOMPLETE = 'index_incomplete'            # ... allowed, but the index lacks printings of the card data (PrintingCheck.missing_printings > 0)
-CARD_NOT_IN_DATA = 'card_not_in_data'            # the decided printing is in the index and no longer in the card data
-BELOW_IMAGE_FLOOR = 'below_image_floor'          # the picture alone, and it looks too little like its best match (printing_check.IMAGE_MIN_SIMILARITY)
-BELOW_STRONG_FLOOR = 'below_strong_floor'        # the strip named the printing, and the picture looks too little like it (STRONG_MIN_SIMILARITY)
-STRIP_NAMES_UNINDEXED = 'strip_names_unindexed'  # the picture alone, and the strip names a printing the card data has and the index lacks
-STRIP_NAMES_UNKNOWN = 'strip_names_unknown'      # the picture alone, and the strip names a printing the card data does not have
-OCR_DID_NOT_CONFIRM = 'ocr_did_not_confirm'      # the picture alone, with OCR on, and the full-card OCR did not confirm that printing (printing_check.ocr_agrees)
-GUARDS = (IMAGE_ALONE_OFF, INDEX_INCOMPLETE, CARD_NOT_IN_DATA, BELOW_IMAGE_FLOOR, BELOW_STRONG_FLOOR, STRIP_NAMES_UNINDEXED, STRIP_NAMES_UNKNOWN,
-          OCR_DID_NOT_CONFIRM)
+# The names of the guards that can stop a decision of the picture (the 'refused' field), in the order the reading meets them: defined once, in decide.py (the pure
+# functions that apply them, the case file and the Android app use the same spelling)
+# (imported at the top of the file)
 
 _current = threading.local()     # .record: the record of the capture this thread is reading; .handed: one read here and handed to its router
 

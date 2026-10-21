@@ -1,7 +1,8 @@
 """
 core/reading/decide.py: the decision (rule A2) as a pure function of plain data.
 
-Two files of cases, made from different sources on purpose (docs/plans/READING_REFACTOR_PLAN.md, "How phase 2 is checked"):
+Two files of cases for rule A2 (and one each for the finish and for the guards - tests/data/reading_finish_cases.json, reading_guard_cases.json - both
+hand-written), made from different sources on purpose (docs/plans/READING_REFACTOR_PLAN.md, "How phase 2 is checked"):
   tests/data/reading_decision_cases.json    HAND-WRITTEN: each edge with the answer a person working the rule out by hand expects;
   tests/data/reading_regression_cases.json  CAPTURED from the previous implementation (PrintingCheck.lookup as committed in a84dcb9, before it was
                                             rebuilt on `decide`) on real pictures: the evidence it used and the answer it gave. Ids and similarities only.
@@ -24,6 +25,7 @@ DATA = Path(__file__).with_name('data')
 HAND = json.loads((DATA / 'reading_decision_cases.json').read_text())['cases']
 FINISH = json.loads((DATA / 'reading_finish_cases.json').read_text())['cases']
 REGRESSION = json.loads((DATA / 'reading_regression_cases.json').read_text())['cases']
+GUARD = json.loads((DATA / 'reading_guard_cases.json').read_text())['cases']
 
 
 class HandWrittenCases(unittest.TestCase):
@@ -161,6 +163,50 @@ class Finish(unittest.TestCase):
         plain = decide.decide_printing(case['picture'], case['strip'])
         with_foil = decide.decide_printing(case['picture'], {**case['strip'], 'symbol': 'foil', 'net': 0.99})
         self.assertEqual(plain, with_foil)
+
+
+
+
+class Guards(unittest.TestCase):
+    """accept_printing and confirm_by_ocr (the guards of a decision: step 5 of docs/plans/READING_REVIEW_2026-10-21_PLAN.md) on the hand-written file"""
+
+    def test_every_case_of_the_shared_file_gives_its_answer(self):
+        # tests/data/reading_guard_cases.json: hand-written, and passed by the Android app too (its copy is made by reading_reference.py, never by hand)
+        for case in GUARD:
+            if case['kind'] == 'accept':
+                got = decide.accept_printing(case['decision'], case['facts'], case.get('thresholds'))
+            else:
+                got = decide.confirm_by_ocr(case['ocr'])
+            self.assertEqual(got, case['expected'], case['name'])
+
+    def test_every_guard_and_every_way_through_has_a_case(self):
+        refused = {c['expected']['refused'] for c in GUARD}
+        self.assertEqual(refused - {None}, set(decide.GUARDS))
+        accepted = [c for c in GUARD if c['expected']['accepted']]
+        self.assertTrue(any(c['kind'] == 'accept' and c['decision']['path'] == 'strong' for c in accepted))
+        self.assertTrue(any(c['kind'] == 'accept' and c['decision']['path'] == 'image' for c in accepted))
+        self.assertTrue(any(c['kind'] == 'accept' and c['expected']['needs_ocr'] for c in GUARD))
+        self.assertTrue(any(c['kind'] == 'confirm' for c in accepted))
+
+    def test_the_inputs_are_not_changed(self):
+        for case in GUARD:
+            given = copy.deepcopy(case)
+            if case['kind'] == 'accept':
+                decide.accept_printing(given['decision'], given['facts'])
+            else:
+                decide.confirm_by_ocr(given['ocr'])
+            self.assertEqual(given, case, case['name'])
+
+    def test_the_floors_are_the_servers(self):
+        # the server passes printing_check's own floors at call time (where their measurements are documented); the defaults here must be the same numbers
+        from card_scanner.core import printing_check
+        self.assertEqual((decide.IMAGE_MIN_SIMILARITY, decide.STRONG_MIN_SIMILARITY),
+                         (printing_check.IMAGE_MIN_SIMILARITY, printing_check.STRONG_MIN_SIMILARITY))
+        self.assertEqual(decide.ACCEPT_THRESHOLDS, {'image_min_similarity': 0.5, 'strong_min_similarity': 0.30})
+
+    def test_the_log_writes_the_same_names(self):
+        from card_scanner.core.reading import record
+        self.assertIs(record.GUARDS, decide.GUARDS)
 
 
 if __name__ == '__main__':

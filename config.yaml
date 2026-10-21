@@ -160,7 +160,7 @@ reading:
   # best match, another printing (4% of the simulated missing printings with no readable strip). Left open: a card newer than the card data itself. OFF: such a
   # card needs the collector line or OCR to agree, else it goes on to the AI or review.
   accept_image_alone: true
-  # After a card data download that succeeded, extend the picture index by the new printings' pictures (a few seconds for a handful, from Scryfall), so the picture alone
+  # After a card data download that succeeded, extend the picture index by the new printings' pictures (fetched from Scryfall; how long it takes after a real update was never measured), so the picture alone
   # is not held back for long (see accept_image_alone). Only when an index exists already - the first build (hours, ~12 GB) is only ever started by the button in
   # Settings > Card reading > Picture. Remembered per person in data/settings.json as "reading_extend_index".
   extend_index_after_update: true
