@@ -1,10 +1,21 @@
 # OCR on the phone: the light-ocr reader ported to Android
 
-**PAUSED (2026-10-21, the owner's decision).** The phone reads by the picture first instead (`ANDROID_PICTURE_STANDALONE_PLAN.md`), with no
-OCR. What still speaks for this plan, from that day's numbers: the server's picture+strip path - the strip read is OCR - settled 121 of 133
-live captures; without OCR the phone has no `strong` decision, and the OCR's name check behind a picture-alone decision (`confirmByOcr`) cannot
-run. What would bring it back: the picture-first phone settling clearly fewer cards than the server's "OCR off" configuration, or a wish for
-OCR-first reading in standalone. Nothing below has changed since it was written.
+**RESUMED (2026-10-21, the owner's decision), with a new order.** The phone now reads by the picture first (`ANDROID_PICTURE_STANDALONE_PLAN.md`: built,
+on the Pixel) and reads the foil marker with the network at a fixed place - which left a confetti-foil Lightning Bolt unread (0.742, under SURE) where the
+server's OCR read its star; and without OCR there is no `strong` decision and no `confirmByOcr`. What changed against the steps below:
+- **Every step is checked on the Pixel itself**, step 0 included: debug builds are `com.cardscanner.debug` and install BESIDE the release app (the
+  "cannot be installed over it" of step 5 no longer holds); the emulator is optional.
+- **The strip first, then the full card.** The first piece wired in is the STRIP read (detection on the strip only, recognition of its two or three
+  lines - the cheap half): `parse_strip` + `symbol_read` into `Decide.Strip(number, set, symbol, net)` in `PictureReader.read` - which gives the
+  `strong` decision and the `picture+strip` label, and the OCR's own star / dot AHEAD of the network (`symbol_read` stands; the network only where the
+  symbol is unread, as on the server). Measured on the 41 Pixel captures before going on. Then the full-card OCR (`parse_magic`), then `confirmByOcr`
+  (its facts: names_match and the line's oracle id - the phone's card data has no oracle id, the index's table has it for indexed printings; write down
+  which case falls through). "Where it fits on the phone" below (the cascade order) is replaced by the server's evidence order: picture, strip, full-card
+  OCR, then the AI.
+- **The gate stays parity on TEXTS** (not boxes): the confetti Bolt's star must come out of the Kotlin reader as the character the server's reader gives.
+- The strip-only read is timed on its own: it decides whether the full-card OCR is needed for most cards.
+Checked before resuming: the recognizer's dictionary has the star and the dot (and the lookalikes the parser treats: `·`, `*`, `☆`, `●`). Since the same day a
+confirmed printing whose finish nothing read goes to review on both sides (never added as regular): an unread marker costs a review, not a wrong finish.
 
 *Plan, 2026-10-21. Nothing of it is built yet. Written for the sessions that will build it: every
 step says what to make, what to run, and what has to be true before the next step starts. Read
