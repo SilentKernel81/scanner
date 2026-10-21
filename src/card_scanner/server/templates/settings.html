@@ -74,6 +74,13 @@
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-auto-add">
                             </label>
+                            <label class="switch-row">
+                                <span class="switch-text">
+                                    <span class="switch-title">Stop at a card back</span>
+                                    <span class="switch-desc">A card dropped face down stops auto-capture: put one at the end of a stack. The back is not added. Not for sleeved cards.</span>
+                                </span>
+                                <input type="checkbox" class="switch" id="toggle-stop-at-back">
+                            </label>
                             <div class="input-group">
                                 <label for="camera-rotation">Camera rotation</label>
                                 <select id="camera-rotation" class="select narrow">
@@ -400,6 +407,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=26"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=21"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=22"></script>
 </body>
 </html>

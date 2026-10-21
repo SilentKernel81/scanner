@@ -28,7 +28,7 @@ from card_scanner.server.desks import (
 )
 from card_scanner.server.captures import (
     announce_and_route, foil_file, remember_outcome, scan_stats, set_pending_capture, station_prefix,
-    submit_capture,
+    stop_at_card_back, submit_capture,
 )
 from card_scanner.server.inventory_api import clear_camera
 
@@ -227,9 +227,11 @@ def station_capture(station_id):
       capture_id  optional: the station's own id for this capture - sent again, it is not a new one
       foil_is_image  optional, '1': image is the perspective-corrected card (no foil_image needed)
       camera, mode   station_client.py: mode 'review' = show it on the station's page, don't add
+      accepts     optional, comma-separated: answers the sender understands beyond added / review / pending / error - 'card_back' (the phone app)
     The card is read (OCR, then the vision AI), and - as when adding automatically - added to
     the scanned cards if its printing is confirmed, else queued for review.
-    Answers {'capture': n, 'status': 'added' | 'review' | 'pending', ...}; 202 while pending.
+    Answers {'capture': n, 'status': 'added' | 'review' | 'pending', ...}; 202 while pending; 'card_back' when the capture was the back of a card, which
+    stopped the camera's auto-capture (captures.stop_at_card_back) - only to a sender that understands it.
     A settled answer also has 'sync_key', the capture's identity here: the station can then
     ask where that copy is, or remove it (station_capture_sync).
     """
@@ -282,6 +284,16 @@ def station_capture(station_id):
     emit_desk('capture_received', {'url': url_for('capture_image', name=image_path.name), 'number': number})
 
     # From here on desk() is this station's (the URL names it, and it exists now).
+    # A card back stops the camera (captures.stop_at_card_back) - checked HERE, before the branch below, so that an 'auto' upload and a 'review' one (auto-capture
+    # waiting for Add / Skip, a manual capture) are both covered. Only for a sender that understands the answer: a computer station (camera=1: it reads only the
+    # capture's number, and its auto-capture follows the server's) or one that says so (accepts=card_back: the phone app since it knows the status - an older one maps an
+    # unknown status to an error). Its outcome is remembered under the upload's key like any other, so a repeated upload gets the same answer and stops nothing twice.
+    if request.form.get('camera') == '1' or 'card_back' in (request.form.get('accepts') or '').split(','):
+        outcome = stop_at_card_back(image_path, image, foil_image, number, station)
+        if outcome is not None:
+            remember_outcome(key, outcome)
+            return capture_outcome_response(*key)
+
     # station_client.py's mode 'review': the card is shown on the station's page, not added
     if request.form.get('camera') == '1' and request.form.get('mode') == 'review':
         # A manual capture, or auto scanning that waits for Add / Skip: read now and shown
@@ -384,6 +396,8 @@ def station_capture_sync(station_id, number):
             return refuse_sync('No such capture (its outcome is not on record here)', 404)
         key = outcome.get('sync_key')
         if not key:
+            if outcome.get('status') == 'card_back':
+                return refuse_sync('This capture was the back of a card: it stopped the camera, nothing was added for it')
             if outcome.get('status') == 'error':
                 return refuse_sync('This capture failed on the server: nothing was added for it')
             return refuse_sync('This capture cannot be followed (it is from before scan synchronization, '

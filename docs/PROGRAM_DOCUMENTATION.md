@@ -1126,6 +1126,34 @@ With the switch off, each capture is uploaded with `mode: review`, read at once
 the station holds its next capture until then (`card_under_review`), and a card dropped
 meanwhile is captured right after.
 
+### A card back stops auto-capture
+
+A face-down Magic card is a stop sign (since 2026-10-21; `docs/plans/CARD_BACK_STOP_PLAN.md`): put one at the end of a stack and the camera stops by itself
+instead of capturing whatever is dropped next. **How it is recognised** (`core/card_back.py`): the picture index's own fingerprint (`image_index.hash_card`) of
+the flat card - `foil_image` when the station sends it - as given and turned 180 degrees, against the fingerprint of Scryfall's picture of the standard back,
+pinned in the code as hex (`CARD_BACK_FINGERPRINT`, made with `image_index.DESCRIPTOR` - a test pins that; recomputed by
+`scripts/experiments/image_match/card_back_fingerprint.py`); a back from `CARD_BACK_MIN_SIMILARITY` on. **That threshold, 0.35, is provisional**: the 16,881
+saved captures of card fronts on the development machine reach at most 0.219 (99.9% below 0.177), Scryfall's back degraded on purpose stays above 0.92 when
+blurred, darkened, tinted or compressed and near 0.71 with a glare spot or a 3% perspective error, but falls to 0.35 cropped by 5% and 0.42 with everything
+together - **no real camera capture of a back has been measured yet** (`scripts/experiments/image_match/card_back_measure.py --backs ... --fronts ...`).
+
+**Where it acts**: `stations_api.station_capture`, after the upload is saved and its repeat check, BEFORE it branches into mode `review` (read at once) or
+`submit_capture` - so both are covered (`captures.stop_at_card_back`). Only for a sender that understands the answer: a computer station (`camera=1`; it reads
+only the capture's number from the answer, and its auto-capture follows the server's) or one that says so (`accepts=card_back`: the Android app since it knows
+the status - an older one maps an unknown status to an error, so its captures are read as before). With the camera's setting on (**Settings > Cameras >
+Scanning: Stop at a card back**, per station as `stop_at_card_back` in `data/stations.json`, on unless switched off; event `toggle_stop_at_card_back`), a back
+is answered `{'status': 'card_back', 'similarity'}` and remembered under the upload's key (`remember_outcome`: a repeat gets the same answer and stops nothing
+twice); it is not put on record in `pending`, not read, not added, not reviewed; the station's `auto_capture_enabled` and `card_under_review` go to False (the
+latter releases a `review` capture's hold); the camera's pages get `auto_capture_toggled` and `card_back_seen` (a log line, a notice, the queue alert's beeps - and the
+Start / Stop button now follows `auto_capture_toggled`, which it did not before: a game switch stopped the cameras with the button still saying Stop); `scanned_cards.log`
+gets `(card back)` with the reader `card-back`, the reading log a record with `card_back` (the similarity) and `result.outcome: card_back`. The picture stays in
+`scanned_cards/` (the clean-up removes it with the others) - it is what the threshold will be measured on. The phone's sync route refuses a back (409: nothing
+was added). A failing check is "not a back": the capture is read as before.
+
+Not covered: a capture waiting in `pending` when the server stopped is read as before when it resumes (`resume_pending` does not check: every capture on
+record there passed the check at its upload, or came before the check existed); a sleeved card shows the SLEEVE's back; other products' own backs and a
+double-faced card's back are read as cards (they land in review). The standalone phone app reads cards itself and does not check.
+
 ## Identification (vision AI)
 
 ### The two queues
@@ -2749,7 +2777,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 | Page → server | Server → page |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name; `candidates`: the printings the picture looks like, `[]` without an index), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -2936,6 +2964,10 @@ confirming removes the copies with their photos and leaves a record, a confirm t
 changes nothing, and backups (a restore brings a trade back with its entries, over an open
 trade, from before trades). The routes and the page were tried in headless Chromium against
 the server's code on a temporary copy of test data (2026-10-10), not against the server.
+
+`tests/test_card_back.py` covers the card-back check on synthetic pictures (the pinned fingerprint swapped for one of a synthetic "back"), and that the pinned
+one was made with today's fingerprint; `tests/test_card_back_stop.py` the upload route with a back - modes `auto` and `review`, a repeat, the setting off, a
+front, an older phone app, a failing check, the sync route's 409 - through Flask's test client on temporary data, with a reading that fails the test if asked.
 
 `tests/test_arena_collection.py` covers the digital collection and the decks' two kinds, on
 temporary files and made-up exports: reading the exporter's two files and refusing others,

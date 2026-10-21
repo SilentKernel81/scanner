@@ -94,6 +94,7 @@ function connect() {
 
     // Camera
     socket.on('fast_scan_toggled', () => {});
+    socket.on('stop_at_card_back_toggled', data => { $('toggle-stop-at-back').checked = Boolean(data.enabled); });
     socket.on('camera_rotation_updated', data => {
         $('camera-rotation').value = String(data.rotation);
         notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
@@ -215,6 +216,7 @@ async function loadCameraSettings() {
     const data = await api('/api/scan_settings' + query);
     if (!data || mine !== cameraRequest) return;
     $('toggle-auto-add').checked = Boolean(data.auto_add);
+    $('toggle-stop-at-back').checked = data.stop_at_card_back !== false;     // on unless switched off
     $('toggle-autofocus').checked = Boolean(data.autofocus);
     applyFocusMode(Boolean(data.autofocus));
     $('refocus-every').value = String(data.refocus_every);
@@ -294,6 +296,10 @@ function bindCameras() {
     });
     $('camera-forget').addEventListener('click', forgetCamera);
 
+    $('toggle-stop-at-back').addEventListener('change', event => {
+        socket.emit('toggle_stop_at_card_back', {enabled: event.target.checked});
+        notify(event.target.checked ? 'A card back stops auto-capture' : 'A card back no longer stops auto-capture', 'success');
+    });
     $('toggle-auto-add').addEventListener('change', event => {
         socket.emit('toggle_fast_scan', {enabled: event.target.checked});
         notify(`Cards are added ${event.target.checked ? 'automatically' : 'after you confirm them'}`, 'success');

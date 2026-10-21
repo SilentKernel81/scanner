@@ -26,6 +26,12 @@ game sits behind one interface (`games/`), so another could be added.
   station beeps. It checks movement, drift and sharpness, ignores a card that has not changed,
   and notices when a new card lands on the pile (about 1.7 s per card). Manual capture and a
   fixed-area mode for a box with a known spot are there too.
+- **A card back stops the camera** (since 2026-10-21): put a card face down at the end of a stack and the
+  camera's auto-capture switches itself off, with a notice and a sound; the back is not added. Per camera,
+  on by default (Settings > Cameras > Scanning). Computer and Pi stations, and the Android app in client mode
+  from its next version. **Never tried with a real camera yet**: the threshold is a first guess from
+  pictures of card fronts (none came near) and an edited copy of Scryfall's picture of the back. Not for
+  sleeved cards (the sleeve's back is not the card's).
 - **Cuts out and flattens the card** (perspective correction), with crop, rotation and shape
   choices (4:5, 16:9, free) drawn on the station's setup page.
 - **Focus on a USB webcam:** finds the sharpest position by sweeping, locks it, follows drift

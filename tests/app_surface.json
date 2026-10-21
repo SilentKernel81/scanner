@@ -736,6 +736,7 @@
   "toggle_detection",
   "toggle_fast_scan",
   "toggle_ocr",
+  "toggle_stop_at_card_back",
   "undo_last_add",
   "update_database"
  ]

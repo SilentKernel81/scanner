@@ -18,7 +18,7 @@ from card_scanner.server.state import app, app_settings, identification, invento
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
-from card_scanner.server.captures import scan_location, set_pending_capture
+from card_scanner.server.captures import CARD_BACK_SETTING, scan_location, set_pending_capture, stops_at_card_back
 from card_scanner.server.card_data import extend_index_wanted, index_progress, start_card_data_update
 
 
@@ -167,6 +167,7 @@ def get_scan_settings():
     """Scanning preferences the page needs on load"""
     return jsonify({
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
+        'stop_at_card_back': stops_at_card_back(),     # this camera's: a face-down card stops its auto-capture (captures.stop_at_card_back)
         'ocr_first': bool(identification.ocr_enabled) if identification else True,
         'ocr_installed': CardOcr.installed(),
         'ai_enabled': bool(identification.ai_enabled) if identification else True,
@@ -375,6 +376,18 @@ def handle_toggle_fast_scan(data):
     emit('fast_scan_toggled', {'enabled': enabled})
     logger.info(f"Auto-add toggled: {enabled} (required frames: {scanner.required_stable_frames})")
     log_to_client(f"Add cards automatically: {'on' if enabled else 'off - review each card'}", level="info")
+
+
+@socketio.on('toggle_stop_at_card_back')
+def handle_toggle_stop_at_card_back(data):
+    """Whether a card back captured by this camera stops its auto-capture (docs/plans/CARD_BACK_STOP_PLAN.md; remembered per camera, like auto_add)"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    enabled = bool(data.get('enabled', True))
+    scanner.settings.set(CARD_BACK_SETTING, enabled)
+    emit_desk('stop_at_card_back_toggled', {'enabled': enabled})      # every page of this camera (the Settings page shows its switch)
+    log_to_client(f"A card back {'stops' if enabled else 'no longer stops'} auto-capture", level="info")
 
 
 @socketio.on('toggle_ocr')

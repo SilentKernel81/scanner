@@ -1,6 +1,13 @@
 # A card back stops the auto-capture
 
-*Plan, 2026-10-21. Nothing of it is built yet. Revised the same day after a Codex review: the check sits before the upload route branches, not in `submit_capture`.*
+*Plan, 2026-10-21. Revised the same day after a Codex review: the check sits before the upload route branches, not in `submit_capture`.*
+
+**Built 2026-10-21 (steps 2-6), step 1 half done, step 7 not.** The owner's answers: stop auto-capture (not only the adds), on by default, "Teach this back" later.
+What differs from the design below, and why: the setting is kept like `auto_add` (`scanner.settings`), not in `CAMERA_SETTINGS` - the station never needs it; the
+back's picture is KEPT in `scanned_cards/` (the measurement of step 1 needs real backs; the clean-up removes it with the others); who is answered `card_back` is told
+by the upload (`camera=1`: a computer station; `accepts=card_back`: the phone app from now on), not by the station's id; and `resume_pending` does NOT check - every
+capture on record there passed the check at its upload (see PROGRAM_DOCUMENTATION.md, "A card back stops auto-capture"). Step 1: the fronts are measured (16,881
+captures, at most 0.219), the backs are not - `CARD_BACK_MIN_SIMILARITY` is 0.35 until they are.
 
 ## What it is for
 
