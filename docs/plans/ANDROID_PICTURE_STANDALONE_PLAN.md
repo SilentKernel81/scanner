@@ -3,6 +3,15 @@
 *Plan, 2026-10-21. Nothing of it is built yet. Asked for by the owner instead of the OCR port (`ANDROID_OCR_PLAN.md`): standalone mode with picture
 detection only, tried on the Pixel; client mode is unchanged (the server reads).*
 
+**Built 2026-10-21 (steps 0-4 and 6; step 5, the Pixel test with cards, is the owner's).** Step 0: `FingerprintParityTest` and `FoilNetParityTest`
+pass on the owner's Pixel 10 (debug builds are now `com.cardscanner.debug`, installed beside the release app - never over it). Steps 1-3:
+`picture_reference.py` -> `PictureReaderParityTest`: the server's decision for each of the 41 Pixel captures on the phone (28 added by the picture
+alone; ties among exactly equal similarities ordered differently, which cannot change a decision without a strip), 24 ms a card, 131 ms at most;
+`IndexDownloadTest` against the real server: 116,331 printings, 21 MB in 3.5 s, loaded in 0.95 s, resumed. Step 4: the two switches, the picture
+first in `identifyOnce`, the add by id (`match: picture`), the reader on the row. What differs from the design: the printings table's file is named
+per version in the phone's manifest, so a new download never rewrites a file a reader has open; the station token for the download is the client
+mode's (the owner's server has none).
+
 **The owner's answers (2026-10-21):** a switch for the vision AI in standalone mode - on, what the picture cannot settle goes to the AI as today;
 off, it goes to the phone's review queue (no AI call at all); **Read by the picture first ON by default** (not off until measured: the Pixel
 tests come before a release, and the guards keep it from adding what the index cannot vouch for); the index comes from the server; the OCR

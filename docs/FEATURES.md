@@ -106,7 +106,12 @@ game sits behind one interface (`games/`), so another could be added.
   picture looks like another card, the read is not confirmed - it goes to the picture or the AI. On the evaluation set it fires on 3 of 6,374 OCR-confirmed cards, all three genuine misreads (Deadpool's `Lightning Bolt`
   read as `Lightning Strike`); a glare or showcase disagreement with a name read whole is left alone. Not yet seen on a live scan.
 - **The picture index can be downloaded by a phone** (since 2026-10-20): the server serves the 22 MB index and a table of set, number and finishes to a station (`/api/image_index/download`), the first
-  step of letting the Android app read cards by their picture without a server. Tried with synthetic data only; **not tried from a phone**, and the app does not use it yet.
+  step of letting the Android app read cards by their picture without a server. Downloaded by the owner's Pixel 10 on 2026-10-21 (the app's `IndexDownloadTest`:
+  116,331 printings, 21 MB in 3.5 s, a file cut in half resumed).
+- **The Android app reads by the picture in standalone mode** (since 2026-10-21; the app's own repository): the index above, the same decisions as the server's
+  code with OCR off on the owner's 41 Pixel captures (28 added by the picture alone, 24 ms a card on the phone), then the vision AI - or, with the app's new
+  AI switch off, review. On by default. **Not yet tried on cards with the phone** (only its parity tests); no OCR on the phone, so no collector line and no
+  foil marker of its own (a printing made in both finishes needs the AI's foil check).
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (Settings > Card reading > Picture, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
