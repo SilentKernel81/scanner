@@ -253,6 +253,16 @@ OCR off no longer sends the finish to the vision AI: the network reads the set l
 included (0 differences); the median time of a picture-decided card 0.42 s -> 0.07 s (the 21 s maximum in both runs is the first AI call loading the model). Live afterwards: no errors, collection numbers identical (8,925 /
 4,176 / $16,503.46 / 23 decks), reading `evidence` with OCR off and picture alone on (the owner's test, kept), the download route answering. Not tried live on a scan yet.
 
+## Deploys 8 and 9 (2026-10-20 23:41 and 2026-10-21 06:37 CDT): the AI switch; picture first, the page, the guards
+
+- **23:41:35, the vision AI's switch** (`b79f692`): rehearsed - with the AI on the same 39 outcomes; switched off on the copy through the page's own event, exactly the 10 cards the AI had read went to review, the 29 picture
+  ones unchanged, no AI request.
+- **06:37:43, picture first** (`aa45967`): the order picture -> OCR in doubt -> AI; Settings > Card reading in three cards (Picture with the index button, OCR, Vision AI); the Scanner pages' banner for a stale index; the picture alone
+  guarded (index coverage of the whole card data, a strip naming an unknown printing, the OCR confirming the printing when it is on) - seven Codex rounds. Rehearsed in all four OCR / AI combinations with every answer scored
+  (`rehearse_matrix.py`): **0 added wrong in any**; OCR on + AI on 28 of 39 added, 11 to review; OCR off + AI on 39 of 39; OCR off + AI off 29, 10 to review. Backups `scanner-backup-20261021_063509.tar.gz`,
+  `code-20261021_063723.tar.gz`. Live afterwards: no errors, collection numbers identical (8,925 / 4,176 / $16,503.46 / 23 decks), the owner's settings kept (OCR off, AI on, picture alone on - so the OCR confirmation does not
+  run for them yet), index 116,329 with 0 missing, the page's three cards and the banner element served. The phone app's `picture` label is committed (`0df270b`) but not installed.
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.
