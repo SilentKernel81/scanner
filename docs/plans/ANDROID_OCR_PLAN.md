@@ -1,5 +1,11 @@
 # OCR on the phone: the light-ocr reader ported to Android
 
+**PAUSED (2026-10-21, the owner's decision).** The phone reads by the picture first instead (`ANDROID_PICTURE_STANDALONE_PLAN.md`), with no
+OCR. What still speaks for this plan, from that day's numbers: the server's picture+strip path - the strip read is OCR - settled 121 of 133
+live captures; without OCR the phone has no `strong` decision, and the OCR's name check behind a picture-alone decision (`confirmByOcr`) cannot
+run. What would bring it back: the picture-first phone settling clearly fewer cards than the server's "OCR off" configuration, or a wish for
+OCR-first reading in standalone. Nothing below has changed since it was written.
+
 *Plan, 2026-10-21. Nothing of it is built yet. Written for the sessions that will build it: every
 step says what to make, what to run, and what has to be true before the next step starts. Read
 "Rules for the sessions that build it" at the end first.*
