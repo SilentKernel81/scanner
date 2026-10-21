@@ -374,8 +374,11 @@ function applyReadingState(reading) {
     if (reading.index_printings === null || reading.index_printings === undefined) {
         missing.push('there is no picture index (Storage > Picture index)');
     }
-    if (!reading.ocr_enabled) missing.push('OCR is switched off');
+    // OCR off is no strip: only the picture alone can decide then, so it is a gap only while that is off too
+    if (!reading.ocr_enabled && !reading.accept_image_alone) missing.push('OCR is switched off and the picture alone is not allowed');
+    const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
     $('reading-status').textContent = (reading.index_printings ? `Image index: ${reading.index_printings.toLocaleString()} printings. ` : '')
+        + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
         + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
 }
 

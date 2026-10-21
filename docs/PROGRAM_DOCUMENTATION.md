@@ -1520,7 +1520,10 @@ For such a card, in `Identification._read_with_ocr` (so also in `identify()`, wh
 2. `strong` (the strip names a printing the picture agrees with) or, only when `reading.accept_image_alone: true` (**off by default**, see below), `image` (the picture alone leads
    clearly; otherwise those cards go to the AI): the card is returned with its **printing id**, `reader: picture+strip`, and a `foil` field from `decide_finish` (printing's finishes, then the symbol, then the
    network; an unknown finish still gets the AI's foil check where that was possible, and otherwise stays `unknown`, which `Game.suggested_finish` files as regular, as before).
-3. `review`, no index, a printing the card data lacks, OCR switched off, or any failure: the card goes to the vision AI as in `cascade`. **The AI's answer is then checked
+3. `review`, no index, a printing the card data lacks, or any failure: the card goes to the vision AI as in `cascade`. **With OCR switched off there is no strip** (`live_read` is handed no reader and reads none): only the picture alone can decide, and only with `reading.accept_image_alone` on - the way to try the picture on its own; with it off every card goes to the AI at once. No strip also means the guard against a printing newer than the index (`_names_unindexed`) has nothing to compare, so the similarity floor and the lead are all that stand - the 4% of the simulation. **Measured with no strip at all** (`scripts/experiments/image_match/calibrate_picture_only.py`, 1,628 evaluation pictures, picture alone allowed): it decided 1,085 (66.6%) and left 543 to the AI;
+4 of the 1,085 differ from the stored label, and in all 4 the picture is right and the label is wrong (looked at by eye 2026-10-20: `Shocker, Unshakable` SPM 89 - the strip's "69" was a misread -, `Super Strength` MSH 189,
+`Living Brain` SPM 167, and the Deadpool `Lightning Bolt` IFIYW-2, whose art has no rainbow), so 0 wrong - **on printings that are in the index**. A printing newer than the index is the hazard this mode cannot see:
+extend the index (Settings > Storage) after every card-data update before trusting it. **The AI's answer is then checked
    against the picture** (`PrintingCheck.verdict_of`): if the picture clearly looks like another printing (`disagree`), its number and set are dropped and the card goes to
    the review queue under the name the AI gave; any other verdict, or a failed check, leaves the answer alone.
 
@@ -1565,12 +1568,18 @@ guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wro
 the same card* than the one the OCR read (the Secret Lair case: the card prints the set and number of the card it is made from). If so, the OCR read is no longer a confirmed read: its
 number and set are dropped, and it goes to the picture (when the picture alone is on), to the AI (whose answer is checked as above) or, without either, to review under its name. It fails open
 to the OCR: no index, no verdict or a failure leaves the read standing. The look-up is one (`Game.confirmed_card`, `confirmed_read` unchanged) and the search costs 18 ms (median) on the
-development machine, on the single OCR worker, for every OCR-confirmed card in this mode. **Interim and incomplete - not yet a finished rule:** it covers only `same_card`. Measured on the stored labels of
-10,568 OCR-confirmed pictures, 82 disagree: 6 `same_card` (all the Deadpool Secret Lair cards, genuine) and 76 `other_card`, a mix of foil glare / showcase backgrounds on correct reads and genuine OCR
-misreads (3 of 4 looked at were glare). Run end to end on the 15 Deadpool captures with no vision AI and the picture alone off, **4 of 15 would still be added wrongly** - garbled OCR names that fuzzily
-match another card (`Lightning` #042, `under DEADLY DiSPUTe 1` -> `2XM #080: Costly Plunder`), which are `other_card`. Whether those can be told from the glare cases by how the OCR matched
-(`set_number` against the weaker `name_number` / `name_set_digit`) is being measured on the live pipeline (`scripts/experiments/image_match/measure_contradiction_live.py`); the rule is not to be
-considered finished until that is settled. With the picture alone on, 12 of the 15 are added as the right printing (`verify_deadpool.py`).
+development machine, on the single OCR worker, for every OCR-confirmed card in this mode. **Two rules, one question each.** (1) `contradicts`: the picture clearly looks like *another printing of the same card* - always believed. Measured on the stored labels of 10,568 OCR-confirmed
+pictures, 82 disagree: 6 `same_card` (all the Deadpool Secret Lair cards, genuine) and 76 `other_card`, a mix of foil glare / showcase backgrounds / printings newer than the index on correct reads and a few
+genuine misreads - so a disagreement about *another card* is NOT believed by itself (0.67% of correct reads, 43 of 6,374 on today's pipeline). (2) `disagrees` (added 2026-10-20, after the Deadpool `Lightning Bolt`
+was confirmed as `Lightning Strike` in 3 of 15 captures of the first rehearsal): a disagreement about another card IS believed when **the name the OCR read is only a fragment of the matched card's name**
+(`printing_check.name_only_partly_read`: `Lightning` of `Lightning Strike`; not a whole name, a face of a double-faced card, the flavor name, a legendary name cut at the comma, or noise). A sticker over the
+title leaves the printed set + number to confirm the card, and a Secret Lair prints another card's set + number; `names_match` takes a prefix for a name (for `Thanos` of `Thanos, the Mad Titan`), so the lookup
+cannot tell. The rule is the conjunction, because each half alone is a poor reason. **Measured on the 6,374 OCR-confirmed pictures:** 18 reads are a fragment; for 15 of them the picture agrees (no effect) and
+for 3 it disagrees - exactly the three `Lightning Strike` confirmations; the other 40 disagreements (glare, showcase, new printings) are untouched. Run through the real OCR, lookup, index and gate on the 15
+Deadpool captures: the gate fires on all three Lightning captures (1038, 1043, 1048) and on nothing else; the other 12 are not OCR-confirmed and go on to the picture / AI as before. What it does to such a card:
+it is no longer confirmed (number and set dropped) and goes to the picture (when the picture alone is on: all 15 are the right printing, 1,085 of 1,628 evaluation pictures decided with 0 wrong - see the OCR-off paragraph),
+to the AI (checked as above) or to review. **Not covered:** a card whose name was read *whole* but wrongly, or a Secret Lair of another card entirely read in full, with a picture that disagrees - those are
+indistinguishable from glare by these signals; the picture alone (`accept_image_alone`) is the route for them.
 
 *Not done* (decided or deferred): the single worker pool that would replace the OCR and AI workers is **decided against** (see the plan); the finish hint covers review items only.
 

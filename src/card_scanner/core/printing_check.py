@@ -48,6 +48,7 @@ import cv2
 import numpy as np
 
 from card_scanner.core import card_ocr, foil_marker, image_index
+from card_scanner.core.database import search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
 from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
@@ -55,6 +56,40 @@ from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_fin
 logger = logging.getLogger('ai')
 
 DISAGREE_FROM = 0.06
+
+
+def name_only_partly_read(read_name, card):
+    """
+    Whether the name the OCR read is only a FRAGMENT of the name of the card it was resolved to - the sign that the name did not confirm the card
+    and the printed set + number did all the work. Deadpool's Secret Lair `Lightning Bolt` has a sticker over the title, the OCR reads "Lightning",
+    and its printed line "GN2 042" is the Game Night card `Lightning Strike`: the lookup takes a prefix as a name (names_match accepts one, for a
+    legendary name shortened to its first word) and confirms the wrong card. Measured on the 6,374 OCR-confirmed pictures of the evaluation set
+    (scripts/experiments/image_match/measure_contradiction_live.py): 18 reads were a fragment, 15 of them a card the picture agrees with and the
+    other 3 exactly those Lightning Strikes.
+    Not a fragment: the whole name, a whole face of a double-faced card ("A // B"), the flavor name (a Secret Lair is printed under it), a legendary name
+    cut at its comma ("Thanos" of "Thanos, the Mad Titan"), or noise that is more than a fragment (a stray glyph, a mana symbol): those are whole or
+    different names, and a different name is not this rule's business (the name check of the lookup has them).
+    """
+    def key(text):
+        return ''.join(ch for ch in database_search_key(text) or '' if ch.isalnum())
+
+    read = key(read_name)
+    if not read:
+        return False
+    names = []
+    for full in (card.get('name'), card.get('flavor_name')):
+        for face in (full or '').split('//'):
+            names.append(face)
+    explained, fragment = False, False
+    for face in names:
+        whole = key(face)
+        if not whole:
+            continue
+        if read == whole or read == key(face.split(',')[0]):
+            explained = True                                 # the whole name, or a legendary name cut at the comma
+        elif whole.startswith(read) or whole.endswith(read):
+            fragment = True                                  # a piece of it, from either end
+    return fragment and not explained
 # Guards for a decision made by the picture ALONE (live_read, reading.mode 'evidence'). The lead over the second printing is relative: with an index that
 # lacks the card's printing (newer than the index, or a stale index) an unrelated best match can still lead. Measured with
 # scripts/experiments/image_match/calibrate_uncovered.py on 428 real pictures, each also with its own printing removed from the index (every add is then wrong):
@@ -371,7 +406,8 @@ class PrintingCheck:
         if search is None:
             return None
         upright = cv2.rotate(card_image, cv2.ROTATE_180) if search['rotated'] else card_image
-        strip = read_strip_evidence(ocr, upright, foil_net)
+        # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader
+        strip = read_strip_evidence(ocr, upright, foil_net) if ocr is not None else {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
         picture, cards = self._picture_evidence(search)
         decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
         if decision['path'] == 'review' or (decision['path'] == 'image' and not accept_image_alone):
@@ -434,6 +470,16 @@ class PrintingCheck:
         """
         result = self.check(image, printing_id)
         return bool(result and result['verdict'] == 'disagree' and result['kind'] == 'same_card')
+
+    def disagrees(self, image, printing_id):
+        """
+        Whether the picture clearly looks like something else than printing_id, of ANY kind: another printing of the card or another card (the 'disagree'
+        verdict). Alone this is a poor reason to doubt an OCR read - on correctly read cards 0.67% (43 of 6,374) disagree, nearly all a foil's glare, a
+        showcase background or a printing newer than the index - so it is only asked of a read whose NAME was not read in full (name_only_partly_read),
+        where it is what separates the Lightning Strike from the Deadpool Lightning Bolt. False without an index.
+        """
+        result = self.check(image, printing_id)
+        return bool(result and result['verdict'] == 'disagree')
 
     def verdict_of(self, image, printing_id):
         """
