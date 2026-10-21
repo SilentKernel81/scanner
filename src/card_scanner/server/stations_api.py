@@ -292,6 +292,12 @@ def station_capture(station_id):
         outcome = stop_at_card_back(image_path, image, foil_image, number, station)
         if outcome is not None:
             remember_outcome(key, outcome)
+            # ... and on record like any settled capture (settled_captures, read above by pending.settled): the lists of this run are gone after a restart,
+            # and a station that got no answer sends the same capture again - it must get this answer back, not stop the camera a second time
+            try:
+                pending.settle_unrecorded(capture_id, station_id, number, outcome)
+            except Exception as e:
+                logger.warning(f"Card back {image_path.name}: not kept on record ({e}) - a retry after a restart would stop the camera again")
             return capture_outcome_response(*key)
 
     # station_client.py's mode 'review': the card is shown on the station's page, not added

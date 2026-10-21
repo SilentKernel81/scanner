@@ -1142,8 +1142,9 @@ together - **no real camera capture of a back has been measured yet** (`scripts/
 only the capture's number from the answer, and its auto-capture follows the server's) or one that says so (`accepts=card_back`: the Android app since it knows
 the status - an older one maps an unknown status to an error, so its captures are read as before). With the camera's setting on (**Settings > Cameras >
 Scanning: Stop at a card back**, per station as `stop_at_card_back` in `data/stations.json`, on unless switched off; event `toggle_stop_at_card_back`), a back
-is answered `{'status': 'card_back', 'similarity'}` and remembered under the upload's key (`remember_outcome`: a repeat gets the same answer and stops nothing
-twice); it is not put on record in `pending`, not read, not added, not reviewed; the station's `auto_capture_enabled` and `card_under_review` go to False (the
+is answered `{'status': 'card_back', 'similarity'}` and remembered under the upload's key (`remember_outcome`) and on record (`pending.settle_unrecorded`, in
+`settled_captures` by its `capture_id`: a Codex review found that a station sending it again after a restart stopped the camera a second time) - a repeat gets the same answer and stops nothing
+twice, across a restart too; it is not put on record in `pending`, not read, not added, not reviewed; the station's `auto_capture_enabled` and `card_under_review` go to False (the
 latter releases a `review` capture's hold); the camera's pages get `auto_capture_toggled` and `card_back_seen` (a log line, a notice, the queue alert's beeps - and the
 Start / Stop button now follows `auto_capture_toggled`, which it did not before: a game switch stopped the cameras with the button still saying Stop); `scanned_cards.log`
 gets `(card back)` with the reader `card-back`, the reading log a record with `card_back` (the similarity) and `result.outcome: card_back`. The picture stays in

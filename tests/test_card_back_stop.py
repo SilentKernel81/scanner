@@ -1,7 +1,7 @@
 """
 A card back stops the camera (server/captures.py: stop_at_card_back, from stations_api.station_capture; docs/plans/CARD_BACK_STOP_PLAN.md), through Flask's test client
 with the server's shared objects replaced by temporary ones and the reading a stand-in that FAILS the test if it is asked: a back uploaded in mode 'auto' and in mode
-'review' stops the camera, is answered 'card_back' and is never read; a repeated upload of it gets the same answer and stops nothing twice; a 'review' back releases the
+'review' stops the camera, is answered 'card_back' and is never read; a repeated upload of it gets the same answer and stops nothing twice, after a restart too; a 'review' back releases the
 station's hold; the setting off, a front, or a sender that does not understand the answer (an older phone app) go on exactly as before; the sync route refuses (409) a back;
 and a failing check is "not a back". The "back" is a synthetic picture whose fingerprint replaces the real one (core/card_back.py's tests say why).
 
@@ -149,6 +149,24 @@ class CardBackStop(TemporaryData):
         self.assertEqual((first.json['status'], second.json['status'], second.json['capture']), ('card_back', 'card_back', first.json['capture']))
         self.assertTrue(self.camera.auto_capture_enabled)            # the repeat stopped nothing
         self.assertEqual(len(self.stopped()), 1)
+
+    def test_the_same_back_sent_again_after_a_restart_stops_nothing(self):
+        # (a Codex review of 2026-10-21: the answer was kept only in this run's memory - a station that got no answer and sent the back again after a restart
+        # stopped the camera a second time, in the middle of the next stack)
+        first = self.upload(BACK, capture_id='before-restart')
+        self.state.capture_outcomes.clear()                          # what a restart forgets
+        self.state.seen_captures.clear()
+        self.camera.auto_capture_enabled = True                      # the next stack has started
+        again = self.upload(BACK, capture_id='before-restart')
+        self.assertEqual((again.status_code, again.json['status'], again.json['capture']), (200, 'card_back', first.json['capture']))
+        self.assertTrue(self.camera.auto_capture_enabled)
+        self.assertEqual(len(self.stopped()), 1)
+        # ... and the phone's sync route still knows what it was
+        number = self.upload(BACK, station='phone-a', capture_id='phone-back', camera=None, mode=None, accepts='card_back').json['capture']
+        self.state.capture_outcomes.clear()
+        answer = self.client.get(f'/api/stations/phone-a/captures/{number}/sync')
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn('back of a card', answer.json['message'])
 
     def test_the_phone_app_that_knows_the_answer_gets_it(self):
         answer = self.upload(BACK, station='phone-a', camera=None, mode=None, accepts='card_back')

@@ -133,6 +133,23 @@ class PendingCaptures:
                 self.conn.rollback()
                 raise
 
+    def settle_unrecorded(self, capture_id, sender, number, outcome):
+        """
+        A capture settled at once, never put on record (a card back: server/captures.py: stop_at_card_back): what became of it, kept like a settled capture's - so that
+        the same capture sent again after a restart (the station got no answer) gets the same answer and is not taken as a new one (a Codex review of 2026-10-21: a
+        back sent again would stop the camera a second time, in the middle of the next stack). Without capture_id there is nothing to know it again by: nothing kept.
+        """
+        if not capture_id:
+            return
+        with self._lock:
+            try:
+                self.conn.execute('INSERT OR REPLACE INTO settled_captures VALUES (?, ?, ?, ?, ?)',
+                                  (capture_id, sender, number, json.dumps(outcome, default=str), timestamp()))
+                self.conn.commit()
+            except BaseException:
+                self.conn.rollback()
+                raise
+
     def fail(self, pending_id, error, outcome):
         """
         A capture's result could not be applied. It stays on record to be tried again at the
