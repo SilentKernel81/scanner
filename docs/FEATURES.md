@@ -48,9 +48,19 @@ game sits behind one interface (`games/`), so another could be added.
 
 ## 2. Reading and matching (the server)
 
-- **OCR first:** a local text reader gets the name, collector number and set code in about
-  0.1 s on a GPU (0.7 s on a CPU).
-- **A vision AI second,** only when OCR cannot confirm (full-art and borderless cards, a soft
+- **The picture first** (since 2026-10-20): a fingerprint of the card is matched against every printing of
+  the card data (the picture index; about 0.02 s) and a clear match settles the card, with the collector
+  line read from its strip when OCR is on. On a rehearsal of 39 pictures in all four combinations of OCR and
+  the vision AI, nothing was added wrong and the AI was asked for 2 cards (20 in the old order); not yet run on a live
+  scan with OCR on. Without the index it is OCR first, as before; while the index lacks any printing of the card data (after a card
+  data update, until its button is pressed), a picture alone adds nothing - the Scanner pages and the Picture settings say so, with a link.
+  With OCR on, a card the picture alone decides must also be confirmed - its collector line must not name a printing the card data lacks,
+  and OCR must read the same name and no other printing of the same card - so a card newer than the card data is not added as its best
+  match. The price: cards whose title OCR cannot read (a Secret Lair's sticker, a styled title) - 20 of 49 such decisions in the data, all
+  of them right - go on to OCR, the AI or review instead.
+- **OCR in doubt:** a local text reader gets the name, collector number and set code in about
+  0.1 s on a GPU (0.7 s on a CPU) for what the picture does not settle.
+- **A vision AI last,** only when neither the picture nor OCR can confirm (full-art and borderless cards, a soft
   collector line): Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model through
   Ollama. The prompts can be edited per model and tested; API keys are stored masked and the
   browser can only replace or remove them.
@@ -86,7 +96,7 @@ game sits behind one interface (`games/`), so another could be added.
 - **The picture index can be downloaded by a phone** (since 2026-10-20): the server serves the 22 MB index and a table of set, number and finishes to a station (`/api/image_index/download`), the first
   step of letting the Android app read cards by their picture without a server. Tried with synthetic data only; **not tried from a phone**, and the app does not use it yet.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
-  printing's picture (Settings > Storage > Picture index, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
+  printing's picture (Settings > Card reading > Picture, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
   printing's set and number, and cards the AI misread. For now it only writes down where it
   disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it

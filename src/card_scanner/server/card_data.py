@@ -165,7 +165,7 @@ def handle_rebuild_database():
 
 # ============================================================================
 # The picture index (core/image_index.py): a fingerprint of every printing's picture, for reading a card by its picture.
-# It is extended from Scryfall's pictures when the person asks (Settings > Storage), after a card database update: only the printings
+# It is extended from Scryfall's pictures when the person asks (Settings > Card reading > Picture), after a card database update: only the printings
 # that are new since are downloaded (a few seconds for a handful, hours the first time: about 12 GB for the whole game). One build at a
 # time; it can be stopped, and started again where it stopped. The readers (printing_check.index) follow the new index by themselves.
 # ============================================================================

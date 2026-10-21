@@ -70,16 +70,19 @@ class TheEvent(unittest.TestCase):
         self.client.emit('set_reading_mode', payload)
         return {e['name']: e['args'][0] for e in self.client.get_received()}
 
-    def test_the_default_is_evidence_and_the_picture_alone_is_off(self):
+    def test_the_default_is_evidence_and_the_picture_alone_is_on(self):
+        # (on since 2026-10-20: the picture comes first and a clear one settles a card - the person can still turn it off, and what they chose is what is kept)
         status = settings_events.reading_status()
-        self.assertEqual((status['mode'], status['accept_image_alone']), ('evidence', False))
+        self.assertEqual((status['mode'], status['accept_image_alone']), ('evidence', True))
+        self.settings.saved['reading_accept_image_alone'] = False
+        self.assertFalse(settings_events.reading_status()['accept_image_alone'])           # a stored choice wins over the default
 
     def test_evidence_is_remembered_and_the_next_card_takes_it(self):
         got = self.emit({'mode': 'evidence'})
         self.assertEqual(self.settings.saved, {'reading_mode': 'evidence'})
-        self.assertEqual(got['reading_mode_changed'], {'mode': 'evidence', 'accept_image_alone': False, 'index_printings': 112765, 'ocr_enabled': True})
+        self.assertEqual(got['reading_mode_changed'], {'mode': 'evidence', 'accept_image_alone': True, 'index_printings': 112765, 'index_missing': None, 'ocr_enabled': True})
         self.assertEqual(self.ident.reading_mode, 'evidence')                       # no restart: Identification reads the setting
-        self.assertFalse(self.ident.accept_image_alone)
+        self.assertTrue(self.ident.accept_image_alone)                              # the default (the picture comes first)
         self.emit({'mode': 'cascade'})
         self.assertEqual(self.ident.reading_mode, 'cascade')
         self.assertEqual(self.settings.saved['reading_mode'], 'cascade')           # turning it OFF is remembered too: the default would turn it on again
@@ -114,7 +117,7 @@ class TheEvent(unittest.TestCase):
 
     def test_the_page_gets_the_status_with_the_other_scan_settings(self):
         data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
-        self.assertEqual(set(data['reading']), {'mode', 'accept_image_alone', 'index_printings', 'ocr_enabled'})
+        self.assertEqual(set(data['reading']), {'mode', 'accept_image_alone', 'index_printings', 'index_missing', 'ocr_enabled'})
 
     # ----- the vision AI's switch (toggle_ai): like the OCR's, open, remembered, and what Identification reads on the next card
     def toggle_ai(self, enabled):

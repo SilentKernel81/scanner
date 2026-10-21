@@ -48,7 +48,7 @@ import cv2
 import numpy as np
 
 from card_scanner.core import card_ocr, foil_marker, image_index
-from card_scanner.core.database import search_key as database_search_key
+from card_scanner.core.database import names_match as database_names_match, search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
 from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
@@ -120,7 +120,11 @@ MARKER_FRAME = '2015'
 # More printings than this that the picture cannot tell apart from its best match (a blank or featureless picture ties thousands) is too ambiguous to say the card prints a marker, and each one is a
 # database read: past it the answer is 'no' without looking. Same-art reprints are a handful to a few dozen (basic lands the most).
 MARKER_MAX_TIED = 200
-EVIDENCE_READER = 'picture+strip'     # what a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log)
+# What a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log): the picture ALONE (its printing is the best match, clear of the next; nothing else decided it)
+# or the picture WITH the collector line (the strip named a printing the picture agrees with: 'strong'). Two names so the log says which: how much OCR contributes is the question the metrics are for.
+PICTURE_READER = 'picture'
+EVIDENCE_READER = 'picture+strip'
+PICTURE_READERS = (PICTURE_READER, EVIDENCE_READER)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
@@ -133,6 +137,44 @@ def read_strip(ocr, card_rgb):
     """
     lines = ocr.read_lines(foil_marker.strip_of(card_rgb))
     return card_ocr.parse_strip(lines) if lines else ('', '')
+
+
+def ocr_agrees(read, card, printing_at):
+    """
+    Whether a full-card OCR read (card_ocr.parse_magic: name, collector_number, set_code) CONFIRMS the printing the picture alone chose (a card dict: name, flavor_name, set_code,
+    number). Its name must be the card's (database.names_match - a face, the flavor name, a misread forgiven). And when it read a whole collector line (a set AND a number) that is
+    not the chosen printing's, `printing_at(set, number)` (database.get_card_by_set_number) says what that line names:
+      - another printing of the SAME card - the OCR read printing B where the picture chose A (a fifth Codex review of 2026-10-20): not confirmed;
+      - nothing in the card data - perhaps a card newer than it: not confirmed;
+      - a DIFFERENT card - a Secret Lair prints another card's line by design (Deadpool's Lightning Bolt reads `GN2 042`, Lightning Strike), or the OCR misread the number
+        (`SPM 069` is Swarm, the card is Shocker #89): that line is no evidence about this card's printing, and the name decides. Rejecting these too refused 28 of 49 correct
+        picture decisions and prevented no error (confirm_cost.py).
+    A part of the line (only a set, only a number) names no printing and is not used. A pure function apart from the lookup it is handed: the server (Identification._ocr_names)
+    and the measurement (scripts/experiments/image_match/confirm_cost.py) both ask this one.
+    """
+    if not read or not read.get('name') or not card:
+        return False
+    if not database_names_match(read['name'], {'name': card.get('name'), 'flavor_name': card.get('flavor_name')}):
+        return False
+    number, set_code = (read.get('collector_number') or '').strip(), (read.get('set_code') or '').strip().lower()
+    if not (number and set_code):
+        return True
+    if set_code == (card.get('set_code') or '').lower() and plain_number(number).lower() == plain_number(card.get('number')).lower():
+        return True                                                         # the very printing the picture chose
+    try:
+        named = printing_at(set_code, number)
+    except Exception as e:
+        logger.debug(f"Printing check: the OCR's collector line could not be looked up: {e}")
+        return False                                                        # cannot say what it names: not confirmed
+    if not named:
+        return False                                                        # a printing the card data does not have
+    # The same card: the same oracle id - or, when either lacks one, the same name exactly (never names_match's forgiveness, which is for OCR misreads: it takes
+    # Lightning Strike for Lightning Bolt, and the Secret Lair's printed line would then count as another printing of the Bolt)
+    if named.get('oracle_id') and card.get('oracle_id'):
+        same_card = named['oracle_id'] == card['oracle_id']
+    else:
+        same_card = (database_search_key(named.get('name')) or '') == (database_search_key(card.get('name')) or '-')
+    return not same_card                                                    # another printing of this card: no; another card's line: no evidence
 
 
 def prints_a_marker(card):
@@ -287,8 +329,36 @@ class PrintingCheck:
         self._lock = threading.Lock()       # starting the thread, loading the index
         self._said_no_index = False
         self._failures = 0
+        self._coverage_lock = threading.Lock()
+        self._coverage = (None, None)       # (the index's stamp and the card data's download time it was counted for, how many printings the index lacks)
 
     # ------------------------------------------------------------------ the index
+
+    def missing_printings(self):
+        """
+        How many printings of the card data the index LACKS - every one, with a picture address or without (a printing with no picture can never be indexed, so it can never be
+        the picture's match either: a card of it would be added as another printing; a second Codex review of 2026-10-20; there were none in the card data then): 0 when it covers the card data, None when that cannot be said (no index, or the card data could not
+        be read). A card the picture alone decides may be added only at 0 (a Codex review of 2026-10-20: a printing the index lacks cannot be the picture's best match, so with no
+        strip to say otherwise another printing would be added in its place - 4% of the simulated missing printings). Counted once per index generation and card data download
+        (a pass over every printing, a few tenths of a second), then remembered: the next card update or index build counts again.
+        """
+        index = self.index()
+        if index is None:
+            return None
+        try:
+            stamp = (self._index_stamp, (self.database.get_data_info('mtg') or {}).get('downloaded_at'))
+        except Exception as e:
+            logger.debug(f"Printing check: the card data's date could not be read: {e}")
+            return None
+        with self._coverage_lock:
+            if self._coverage[0] != stamp:
+                try:
+                    missing = sum(1 for printing, _address in self.database.printing_images() if index.row(printing) is None)
+                except Exception as e:
+                    logger.debug(f"Printing check: the index's coverage could not be counted: {e}")
+                    return None                                             # not remembered: asked again on the next card
+                self._coverage = (stamp, missing)
+            return self._coverage[1]
 
     def index(self):
         """The image index, loaded when first needed and again when it was rebuilt; None when there is none (said once in the log)"""
@@ -493,7 +563,7 @@ class PrintingCheck:
             return None
         if decision['similarity'] < (IMAGE_MIN_SIMILARITY if decision['path'] == 'image' else STRONG_MIN_SIMILARITY):
             return None                                # a picture that looks little like the printing decides nothing, not even with a collector line that names it
-        if decision['path'] == 'image' and self._names_unindexed(search['index'], strip):
+        if decision['path'] == 'image' and (self._names_unindexed(search['index'], strip) or self._names_unknown(strip)):
             return None                                # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
@@ -512,6 +582,22 @@ class PrintingCheck:
             logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
             return True
         return bool(named) and index.row(named['id']) is None
+
+    def _names_unknown(self, strip):
+        """
+        Whether the strip names a printing (a number AND a set) the card database does not have at all - the sign of a card newer than the card data, which is in neither the
+        data nor the index, so the picture's best match is another printing (a third Codex review of 2026-10-20: a complete index of a stale card data still let it through).
+        No add by the picture alone then. The cost, measured (scripts/experiments/image_match/unknown_strip.py, 1,628 pictures): 13 of 47 picture-alone decisions had such a
+        strip, all 13 right - OCR misreads of special printings ('spm 2099' for Spider-Man 2099) - so they go on to the full-card OCR instead. Fails closed: True when the card
+        database cannot say.
+        """
+        if not (strip['number'] and strip['set']):
+            return False
+        try:
+            return not self.database.get_card_by_set_number(strip['set'], strip['number'])
+        except Exception as e:
+            logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
+            return True
 
     def candidates(self, image_path):
         """
@@ -604,7 +690,7 @@ class PrintingCheck:
         foil: the marker the server read for the capture ('foil', 'non-foil', 'unknown'; None = not given), for the comparison of the finish.
         Returns at once and never raises: the capture goes on whatever happens here.
         """
-        if reader == EVIDENCE_READER:
+        if reader in PICTURE_READERS:
             return          # the picture and the strip chose this printing: comparing the picture with it would only compare it with itself
         resolved = card if card and card.get('id') else None
         lookup = self.wants_lookup(reader, resolved)

@@ -109,7 +109,7 @@ function connect() {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `Updated: ${data.total_cards.toLocaleString()} cards loaded.`;
-        notify('Card data updated - the picture index can be updated now (Storage)', 'success');
+        notify('Card data updated - the picture index can be updated now (Card reading > Picture)', 'success');
         loadDatabaseState();
         loadIndex();
     });
@@ -381,17 +381,20 @@ function applyReadingState(reading) {
     $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
     $('toggle-picture-alone').disabled = !evidence;
     $('reading-evidence-desc').textContent = evidence
-        ? 'On: OCR, then the picture and the collector line, then the vision AI (the last step)'
+        ? 'On: the picture, then OCR in doubt, then the vision AI (the last step)'
         : 'Off: OCR, then the vision AI, as before the picture matching existed';
     const missing = [];
     if (reading.index_printings === null || reading.index_printings === undefined) {
-        missing.push('there is no picture index (Storage > Picture index)');
+        missing.push('there is no picture index (the button below)');
     }
     // OCR off is no strip: only the picture alone can decide then, so it is a gap only while that is off too
     if (!reading.ocr_enabled && !reading.accept_image_alone) missing.push('OCR is switched off and the picture alone is not allowed');
     const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
-    $('reading-status').textContent = (reading.index_printings ? `Image index: ${reading.index_printings.toLocaleString()} printings. ` : '')
-        + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
+    // While the index lacks printings of the card data, the picture alone adds nothing (the server refuses it: a missing printing would be added as another one)
+    const stale = evidence && reading.accept_image_alone && reading.index_missing
+        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (below), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
+    // (the index's size is not repeated here: the picture index's own status sits right below, in the same card)
+    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
         + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
 }
 
@@ -531,7 +534,7 @@ function bindReading() {
         if (toggle.checked) {
             const ok = await confirmDialog({
                 title: 'Add cards the picture alone decided?',
-                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. Leave it off unless you rebuild the index after every card data update and look at what is added.',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: extend the picture index after every card data update (Settings > Storage) and look at what is added.',
                 confirmText: 'Turn on', danger: true
             });
             if (!ok) { toggle.checked = false; return; }

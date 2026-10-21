@@ -29,7 +29,7 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER, name_only_partly_read, prints_a_marker
+from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_agrees, prints_a_marker
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
@@ -250,7 +250,7 @@ class Identification:
 
     @staticmethod
     def _said_by_ocr(ocr_info):
-        how = 'picture and strip' if ocr_info.get('reader') == EVIDENCE_READER else 'OCR'
+        how = {EVIDENCE_READER: 'picture and strip', PICTURE_READER: 'picture'}.get(ocr_info.get('reader'), 'OCR')
         return f"✓ Card identified by {how}: {ocr_info['name']} #{ocr_info['collector_number']}"
 
     def _read_by_picture(self, image, foil_image):
@@ -264,23 +264,47 @@ class Identification:
         if self.reading_mode != EVIDENCE or self.evidence is None:
             return None
         try:
-            reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, self.accept_image_alone)
+            # The picture alone may add a card only while the index covers the whole card data (PrintingCheck.missing_printings == 0): after a card data update and before the
+            # index is extended, a new printing is not in it, and its best match would be another printing - then only the collector line (or OCR, the AI, review) decides
+            alone = self.accept_image_alone and self.evidence.missing_printings() == 0
+            reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, alone)
         except Exception as e:
             self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
             return None
         if reading is None:
             return None
         card = reading['card']
+        if reading['path'] == 'image' and self.ocr_enabled:
+            # The picture ALONE decided (the collector line did not name the printing it chose): with OCR on, its name must agree before the card is added - whatever the strip
+            # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);
+            # and a strip naming ANOTHER existing printing is a contradiction the picture alone must not overrule unconfirmed (a fourth). Not agreeing: the card is in doubt,
+            # and the OCR path below reads it as any other.
+            if not self._ocr_names(image, card):
+                self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
+                return None
         # The finish, as the 'foil' field the server's finish rule (Game.suggested_finish) has always taken: an unread marker stays 'unknown'
         foil = {'foil': 'foil', 'regular': 'non-foil'}.get(reading['finish']['finish'], 'unknown')
         info = {'name': card['name'], 'collector_number': card['number'], 'set_code': card['set_code'], 'foil': foil,
-                'printing_id': card['id'], 'reader': EVIDENCE_READER}
+                'printing_id': card['id'], 'reader': EVIDENCE_READER if reading['path'] == 'strong' else PICTURE_READER}
         self.log(f"Picture and strip: {card['name']} [{card['set_code']} {card['number']}] ({reading['path']}, "
                  f"{'strip ' + reading['strip']['set'] + ' ' + reading['strip']['number'] if reading['strip']['number'] else 'no strip'})")
         if foil == 'unknown' and self._ai_foil_check(foil_image):
             return info, FOIL       # as for an OCR-confirmed card whose marker nothing read: the AI's foil check
         self.log(self._said_by_ocr(info), level="success")
         return info, None
+
+    def _ocr_names(self, image, card):
+        """
+        Whether the full-card OCR confirms the printing the picture alone chose (printing_check.ocr_agrees): the same name, and nothing of the collector line it read naming
+        another printing - not a set code or a number that are not the card's. False when it reads nothing, contradicts it, or fails.
+        """
+        try:
+            read = self.card_ocr.read_card(image, games.active_id())
+            printing_at = self.evidence.database.get_card_by_set_number       # what the OCR's collector line names (ocr_agrees looks it up)
+        except Exception as e:
+            self.log(f"OCR could not confirm the picture ({e})", level="warning")
+            return False
+        return ocr_agrees(read, card, printing_at)
 
     def _contradicted_by_picture(self, image, foil_image, ocr_info, ocr_card):
         """
@@ -329,9 +353,15 @@ class Identification:
 
     def _read_with_ocr(self, image, foil_image):
         """
-        OCR stage. Returns (ocr_info or None, what the AI is still needed for): None when the
-        card is settled - OCR's read is a confirmed match, or there is no vision AI to ask.
+        The reading before the AI. Returns (ocr_info or None, what the AI is still needed for): None when the card is settled - the picture decided it, OCR's read is a confirmed
+        match, or there is no vision AI to ask.
+        Order (reading.mode 'evidence', the default): the PICTURE first - with the collector line read from its strip when OCR is on - and a card it settles is settled; in doubt the
+        full-card OCR reads it (when OCR is on); what is still open goes to the vision AI (when it is on) and otherwise to review. OCR off and AI off: the picture alone, then review.
+        Mode 'cascade' (and a server without an image index): OCR, then the AI, as before the picture matching existed.
         """
+        by_picture = self._read_by_picture(image, foil_image)       # None: not in evidence mode, no index, or the picture does not settle it
+        if by_picture:
+            return by_picture
         ocr_info = None
         if self.ocr_enabled:
             ocr_info = self.card_ocr.read_card(image, games.active_id())
@@ -361,10 +391,6 @@ class Identification:
             if ocr_info and self._ai():
                 self.log("OCR read is not a confirmed match - asking the vision AI")
 
-        # reading.mode 'evidence': the picture and the strip decide before the AI is asked (None: they did not)
-        by_picture = self._read_by_picture(image, foil_image)
-        if by_picture:
-            return by_picture
         if self._ai():
             return ocr_info, IDENTIFY
         if not ocr_info:

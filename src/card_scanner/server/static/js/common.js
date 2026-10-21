@@ -608,6 +608,36 @@ function watchCardData() {
 }
 document.addEventListener('DOMContentLoaded', watchCardData);
 
+// The picture index on the Scanner pages (the banner is only there: _topbar.html): cards are read by their picture first, so a missing or stale index changes what is read -
+// said at the top, with a link to where it is updated (Settings > Card reading > Picture). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
+function showIndexNotice(reading) {
+    const banner = document.getElementById('index-banner');
+    if (!banner) return;
+    let text = '';
+    if (reading && reading.mode === 'evidence') {
+        if (reading.index_printings === null || reading.index_printings === undefined) {
+            text = 'There is no picture index: cards are read by OCR and the vision AI only.';
+        } else if (reading.index_missing) {
+            const n = reading.index_missing;
+            text = `The picture index is out of date: it lacks ${n.toLocaleString()} printing${n === 1 ? '' : 's'} of the card data. ` +
+                'Until it is updated, a card the picture alone would decide is read by OCR or the vision AI instead.';
+        }
+    }
+    banner.hidden = !text;
+    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">Update it (Settings &rarr; Card reading)</a>` : '';
+}
+
+// Asked when the page opens, now and then (an index built from the Settings page sends no event), and after a card data update (scanner.js), which is what makes it stale
+function loadIndexNotice() {
+    if (!document.getElementById('index-banner')) return;
+    fetch('/api/scan_settings', {cache: 'no-store'}).then(response => response.json()).then(data => showIndexNotice(data.reading)).catch(() => {});
+}
+document.addEventListener('DOMContentLoaded', () => {
+    if (!document.getElementById('index-banner')) return;
+    loadIndexNotice();
+    setInterval(loadIndexNotice, 5 * 60 * 1000);
+});
+
 // Settings -> Program: restart, quit (only there when started as a desktop program), and who
 // may open the pages
 

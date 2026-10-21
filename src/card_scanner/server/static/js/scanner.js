@@ -942,6 +942,7 @@ socket.on('database_update_complete', function(data) {
     audioManager.playQueueAlert();  // triple beep: a long operation finished
     addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
     loadStats();
+    loadIndexNotice();          // new printings: the picture index now lacks them until it is updated (common.js)
 });
 
 socket.on('database_update_error', function(data) {

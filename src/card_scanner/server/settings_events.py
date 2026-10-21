@@ -146,9 +146,16 @@ def reading_status():
         index = printing_check.index() if printing_check else None
     except Exception:
         index = None
+    try:
+        missing = printing_check.missing_printings() if printing_check and index is not None else None
+    except Exception:
+        missing = None
+    missing = missing if isinstance(missing, int) else None        # a plain number for the page, or nothing
     return {'mode': identification.reading_mode if identification else 'cascade',
             'accept_image_alone': bool(identification.accept_image_alone) if identification else False,
             'index_printings': len(index) if index is not None else None,
+            # printings of the card data the index lacks: while not 0, the picture alone adds nothing (None: not known)
+            'index_missing': missing,
             'ocr_enabled': bool(identification.ocr_enabled) if identification else False}
 
 

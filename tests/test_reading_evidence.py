@@ -85,9 +85,9 @@ class LiveRead(unittest.TestCase):
         reading = self.check.live_read(picture, None, FakeReader([]), accept_image_alone=True)
         self.assertEqual((reading['path'], reading['card']['id']), ('image', 'p3'))
         self.assertIsNone(self.check.live_read(picture, None, FakeReader([]), accept_image_alone=False))
-        self.assertIsNone(self.check.live_read(picture, None, FakeReader([])))              # OFF unless asked for (Codex review, second finding)
+        self.assertIsNone(self.check.live_read(picture, None, FakeReader([])))              # live_read itself is OFF unless told (Codex review, second finding) ...
         self.assertFalse(inspect.signature(printing_check.PrintingCheck.live_read).parameters['accept_image_alone'].default)
-        self.assertFalse(Config.READING_ACCEPT_IMAGE_ALONE)
+        self.assertTrue(Config.READING_ACCEPT_IMAGE_ALONE)                                  # ... and the setting Identification passes on is ON by default since 2026-10-20 (the picture is first)
         # ... and a strip that did decide is not affected by that refusal
         self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(3)), accept_image_alone=False)['path'], 'strong')
 
@@ -284,6 +284,102 @@ class LiveRead(unittest.TestCase):
         self.assertEqual(self.check.live_read(picture, None, None, accept_image_alone=True)['card']['id'], 'p3')
         self.assertEqual(reader.calls, 0)
 
+    def test_missing_printings_counts_what_the_index_lacks_of_the_card_data_and_remembers_it(self):
+        class CardData(Cards):
+            def __init__(self, ids):
+                super().__init__()
+                self.ids, self.counted, self.stamp = ids, 0, '2026-10-20T12:00:00'
+            def printing_images(self):
+                self.counted += 1
+                return [(i, f'https://cards.example/{i}.jpg') for i in self.ids]
+            def get_data_info(self, game):
+                return {'downloaded_at': self.stamp}
+        data = CardData([f'p{n}' for n in range(7)])
+        check = self.make(data)
+        self.assertEqual(check.missing_printings(), 0)                                # p0..p6 all indexed
+        self.assertEqual(check.missing_printings(), 0)
+        self.assertEqual(data.counted, 1)                                             # counted once ...
+        data.ids.append('p-new')
+        data.stamp = '2026-10-21T08:00:00'                                            # ... and again after a card data update
+        self.assertEqual(check.missing_printings(), 1)
+        self.assertEqual(data.counted, 2)
+        self.assertIsNone(self.make(data, self.root / 'no-index').missing_printings())   # no index: nothing to say
+        # a printing with no picture address is missing too: it can never be indexed, so a card of it could only be matched as another printing (second Codex finding)
+        data.ids.append('no-picture')
+        data.stamp = '2026-10-21T09:00:00'
+        original = data.printing_images
+        data.printing_images = lambda: [(i, None if i == 'no-picture' else f'https://cards.example/{i}.jpg') for i in data.ids]
+        self.assertEqual(check.missing_printings(), 2)                                # p-new and the one with no picture
+        data.printing_images = original
+        self.assertIsNone(self.make(Cards()).missing_printings())                    # card data that cannot say: not covered (the caller refuses the picture alone)
+
+    def test_codex_2026_10_20_a_printing_the_index_lacks_is_not_added_as_another_with_the_default_settings(self):
+        # The index lacks p5 and p6 (the card data has them); a picture of p5, no strip (OCR off), the picture alone ON (the default since the picture comes first): nothing is added -
+        # before, the best match (another printing) was added if it was clear enough. Once the index covers the card data again, the picture decides p5 itself.
+        class CardData(Cards):
+            def printing_images(self):
+                return [(f'p{n}', f'https://cards.example/p{n}.jpg') for n in range(7)]
+            def get_data_info(self, game):
+                return {'downloaded_at': '2026-10-20T12:00:00'}
+        pictures = self.root / 'pictures-stale'
+        pictures.mkdir()
+        write_pictures(pictures, range(5))
+        image_index.build([(f'p{n}', None) for n in range(5)], self.root / 'stale', image_dir=pictures, fetch=False, log=lambda m: None)
+        ident = identification.Identification.__new__(identification.Identification)
+        ident.log_callback, ident.ocr_enabled, ident.ai_enabled, ident.foil_marker, ident.card_ocr = None, False, False, None, None
+        ident.settings = mock.Mock(get=lambda key, default=None: default)            # nothing chosen: every default (evidence, picture alone ON)
+        ident._ai_foil_check = lambda foil_image: False
+        self.assertTrue(ident.accept_image_alone)
+        picture = degraded(synthetic_card(5))
+        ident.evidence = self.make(CardData(), self.root / 'stale')
+        self.assertEqual(ident.evidence.missing_printings(), 2)
+        with mock.patch.object(printing_check, 'IMAGE_MIN_SIMILARITY', -1.0):         # whatever the floor: it is the coverage that refuses
+            self.assertIsNone(ident._read_by_picture(picture, picture))
+        ident.evidence = self.make(CardData())                                        # the index extended: p0..p6
+        self.assertEqual(ident.evidence.missing_printings(), 0)
+        info, task = ident._read_by_picture(picture, picture)
+        self.assertEqual(info['printing_id'], 'p5')
+        # ... and one printing of the card data with NO picture address (it can never be indexed): the picture alone is off again (second Codex finding)
+        class WithoutPicture(CardData):
+            def printing_images(self):
+                return super().printing_images() + [('no-picture', None)]
+        ident.evidence = self.make(WithoutPicture())
+        self.assertEqual(ident.evidence.missing_printings(), 1)
+        self.assertIsNone(ident._read_by_picture(picture, picture))
+
+    def test_codex_2026_10_20_a_card_newer_than_the_card_data_is_not_added_as_its_best_match(self):
+        # p5 is in neither the card data nor the index (both "complete" and both stale): its picture's best match is another printing
+        class StaleData(Cards):
+            def get_card_by_id(self, printing_id):
+                return None if printing_id in ('p5', 'p6') else super().get_card_by_id(printing_id)
+            def get_card_by_set_number(self, set_code, collector_number, exact=False):
+                return None if int(collector_number) in (5, 6) else super().get_card_by_set_number(set_code, collector_number, exact)
+            def printing_images(self):
+                return [(f'p{n}', f'https://cards.example/p{n}.jpg') for n in range(5)]
+            def get_data_info(self, game):
+                return {'downloaded_at': '2026-10-20T12:00:00'}
+        pictures = self.root / 'pictures-newer'
+        pictures.mkdir()
+        write_pictures(pictures, range(5))
+        image_index.build([(f'p{n}', None) for n in range(5)], self.root / 'newer', image_dir=pictures, fetch=False, log=lambda m: None)
+        check = self.make(StaleData(), self.root / 'newer')
+        self.assertEqual(check.missing_printings(), 0)                                  # "complete": the index covers the (stale) card data
+        picture = degraded(synthetic_card(5))
+        with mock.patch.object(printing_check, 'IMAGE_MIN_SIMILARITY', -1.0), mock.patch.object(printing_check, 'IMAGE_LEAD', -1.0):    # whatever the thresholds
+            self.assertIsNone(check.live_read(picture, None, FakeReader(strip_lines(5)), accept_image_alone=True))    # the strip names a printing the data lacks
+            # ... and the strip unread: the full-card OCR must read the chosen card's name, which it does not - the card is another one (a real name: the synthetic
+            # 'Card p5' / 'Card p3' are close enough for names_match, which forgives OCR misreads)
+            ident = identification.Identification.__new__(identification.Identification)
+            ident.log_callback, ident.ocr_enabled, ident.ai_enabled, ident.foil_marker = None, True, False, None
+            ident.settings = mock.Mock(get=lambda key, default=None: default)
+            ident._ai_foil_check = lambda foil_image: False
+            ident.card_ocr = FakeReader([])
+            ident.card_ocr.read_card = lambda image, game: {'name': 'Shocker, Unshakable', 'collector_number': '', 'set_code': '', 'foil': 'unknown'}
+            ident.evidence = check
+            with mock.patch.object(identification, 'games') as games:
+                games.active_id.return_value = 'mtg'
+                self.assertIsNone(ident._read_by_picture(picture, picture))
+
     def test_a_strip_that_names_a_printing_the_index_lacks_stops_the_picture_alone(self):
         # The index has p0..p6 but not p5's picture; the strip names p5 (the card database has it). The best match then is some other card: no add
         pictures = self.root / 'pictures2'
@@ -295,7 +391,9 @@ class LiveRead(unittest.TestCase):
         with mock.patch.object(printing_check, 'IMAGE_MIN_SIMILARITY', -1.0):              # the floor off: only the strip rule is under test
             self.assertEqual(check.live_read(picture, None, FakeReader([]), accept_image_alone=True)['path'], 'image')      # nothing read: the lead decided (the hazard)
             self.assertIsNone(check.live_read(picture, None, FakeReader(strip_lines(5)), accept_image_alone=True))           # the strip names p5, which the index lacks
-            self.assertIsNotNone(check.live_read(picture, None, FakeReader(strip_lines(9)), accept_image_alone=True))        # a printing the database lacks too (p9): no reason to stop
+            # a printing the database lacks too (p9): refused since a third Codex review of 2026-10-20 - a card newer than the card data is in neither, and the strip naming
+            # an unknown printing is its sign (it was allowed before; what that costs: 13 of 47 correct picture-alone decisions, which go on to OCR - unknown_strip.py)
+            self.assertIsNone(check.live_read(picture, None, FakeReader(strip_lines(9)), accept_image_alone=True))
             # ... and with the picture alone off (the default) neither is added, the unreadable strip included: the stale-index hazard of the second review
             self.assertIsNone(check.live_read(picture, None, FakeReader([])))
             self.assertIsNone(check.live_read(picture, None, FakeReader(strip_lines(9))))
@@ -367,9 +465,10 @@ class LiveRead(unittest.TestCase):
         shadow = printing_check.PrintingCheck(Cards(), self.root / 'index', self.root / 'shadow.jsonl', 'shadow', 'all')
         capture = self.root / 'capture.jpg'
         cv2.imwrite(str(capture), cv2.cvtColor(degraded(synthetic_card(3)), cv2.COLOR_RGB2BGR))
-        shadow.observe(capture, {'id': 'p3'}, 'phone', printing_check.EVIDENCE_READER)
-        self.assertTrue(shadow.wait())
-        self.assertFalse((self.root / 'shadow.jsonl').exists())
+        for reader in printing_check.PICTURE_READERS:                             # the picture alone and the picture with the collector line: both are the picture's choice
+            shadow.observe(capture, {'id': 'p3'}, 'phone', reader)
+            self.assertTrue(shadow.wait())
+            self.assertFalse((self.root / 'shadow.jsonl').exists(), reader)
         shadow.observe(capture, {'id': 'p3'}, 'phone', 'qwen3.5:9b')                      # ... while the AI's answer still is
         self.assertTrue(shadow.wait())
         self.assertTrue((self.root / 'shadow.jsonl').exists())
@@ -426,8 +525,14 @@ class FakeEvidence:
     def __init__(self, reading=None, error=None, verdict='agree', contradicted=False, disagreed=False):
         self.reading, self.error, self.verdict, self.contradicted = reading, error, verdict, contradicted
         self.disagreed, self.disagreements = disagreed, []          # the picture looks like something else (any kind); what it was asked about
+        self.missing = 0                                            # printings of the card data the index lacks (missing_printings): 0, it covers them
+        self.printings = {}                                         # (set, plain number) -> card: what a collector line names (database.get_card_by_set_number)
+        self.database = mock.Mock(get_card_by_set_number=lambda set_code, number, exact=False: self.printings.get((set_code.lower(), number.lstrip('0') or '0')))
         self.reads, self.verdicts, self.verdict_images, self.contradictions = [], [], [], []
         self.ocr_given = []                          # the reader live_read was handed (None: OCR was switched off)
+
+    def missing_printings(self):
+        return self.missing
 
     def contradicts(self, image, printing_id):
         self.contradictions.append((image, printing_id))
@@ -494,7 +599,7 @@ class InIdentification(unittest.TestCase):
         self.assertEqual(identification.Config.READING_MODE, 'evidence')
         self.ident.settings = mock.Mock(get=lambda key, default=None: default)             # nothing chosen: the default
         self.assertEqual(self.ident.reading_mode, 'evidence')
-        self.assertFalse(self.ident.accept_image_alone)                                    # ... and the picture alone is still off
+        self.assertTrue(self.ident.accept_image_alone)                                     # ... and a clear picture settles a card by itself (since 2026-10-20: the picture is first)
 
     # ----- a card the OCR did not confirm
     def test_a_decided_card_is_returned_with_its_printing_and_never_goes_to_the_ai(self):
@@ -577,6 +682,18 @@ class InIdentification(unittest.TestCase):
         self.ident.evidence.reading = None
         self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
 
+    def test_a_stale_index_takes_the_picture_alone_away_and_a_covering_one_gives_it_back(self):
+        # (Codex review, 2026-10-20: with the picture alone on by default, a printing the index lacks would be added as its best match - another printing)
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            for missing, allowed in ((0, True), (3, False), (None, False)):          # covers / lacks three printings / cannot say
+                self.ident.evidence.missing = missing
+                self.ident._read_by_picture(self.image, self.image)
+                self.assertEqual(self.ident.evidence.reads[-1][2], allowed, missing)
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=False):
+            self.ident.evidence.missing = 0
+            self.ident._read_by_picture(self.image, self.image)
+            self.assertFalse(self.ident.evidence.reads[-1][2])                          # the person's "off" still wins over a covering index
+
     def test_with_ocr_switched_off_the_picture_is_asked_without_a_reader(self):
         # the person switched OCR off to try the picture alone: no strip is read - the reader is not even handed over - and what the picture cannot
         # decide goes to the AI at once
@@ -594,13 +711,13 @@ class InIdentification(unittest.TestCase):
         with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):    # the person's setting
             info, task = self.ident._read_by_picture(self.image, self.image)
         self.assertTrue(self.ident.evidence.reads[-1][2])                                # the setting reached the reading
-        self.assertEqual((info['printing_id'], info['reader']), ('p3', identification.EVIDENCE_READER))
+        self.assertEqual((info['printing_id'], info['reader']), ('p3', printing_check.PICTURE_READER))        # the picture alone: no collector line took part
         self.assertIsNone(self.ident.evidence.ocr_given[-1])
 
     def test_without_the_printing_check_the_default_reads_as_the_cascade_to_the_last_call(self):
         # the default mode is 'evidence', so a server without the printing check (and every test of one stage) must not reach for what only evidence needs
-        self.ident.evidence = None
         self.confirmed_ocr()
+        self.ident.evidence = None
         self.game.confirmed_card = None                                          # evidence's look-up: calling it would fail
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual((info['collector_number'], task), ('242', None))        # read by confirmed_read, as in the cascade
@@ -617,20 +734,163 @@ class InIdentification(unittest.TestCase):
         self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[1], identification.IDENTIFY)
         self.assertEqual(self.ident.evidence.reads, [])
 
-    # ----- a card the OCR confirmed: read as before, unless the picture is another printing of that very card (Secret Lair)
+    # ----- the picture first; in doubt the OCR, which then reads as before - unless the picture is another printing of that very card (Secret Lair)
     def confirmed_ocr(self):
+        """The OCR confirms its read - and the picture, which comes first, is in doubt (the cases below that follow the OCR path)"""
         self.game = FakeGame(confirm=True)
         self.ocr_read.update(collector_number='242', set_code='hob', foil='non-foil')
+        self.ident.evidence.reading = None
 
-    def test_a_card_the_ocr_confirmed_is_read_as_before_in_evidence_mode_too(self):
-        # (the contract changed on 2026-10-20: this used to say the picture is never asked about a confirmed card - it is asked ONE thing now,
-        # whether it is another printing of the same card; the answer 'no' leaves the card exactly as it was)
+    def test_in_doubt_the_picture_leaves_the_card_to_the_ocr_which_reads_it_as_before(self):
+        # (the contract changed on 2026-10-20, twice: the picture was never asked about a confirmed card; then it was asked ONE thing about it; now it comes FIRST and a card
+        # it does not settle is the OCR's, read exactly as before, with that one question about the printing it read)
         self.confirmed_ocr()
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual((info['name'], info['collector_number'], info['foil'], task), ('Gandalf', '242', 'non-foil', None))
         self.assertNotIn('printing_id', info)
-        self.assertEqual(self.ident.evidence.reads, [])                                    # no reading by picture and strip
+        self.assertEqual(len(self.ident.evidence.reads), 1)                                # the picture was tried first, and did not settle it
         self.assertEqual(self.ident.evidence.contradictions, [(self.image, 'ocr-printing')])   # the one question, about the printing the OCR read
+
+    # ----- the order: picture, then OCR in doubt, then the AI - with each of the two switched off
+    def test_a_card_the_picture_settles_is_never_read_by_the_ocr(self):
+        self.confirmed_ocr()
+        self.ident.evidence.reading = READING                                              # the picture decides it
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['printing_id'], task), ('p3', None))
+        self.ident.card_ocr.read_card.assert_not_called()                                  # the full-card OCR never ran
+        self.assertEqual(self.ident.evidence.contradictions, [])                           # and nothing is asked about a printing it read
+
+    def test_a_secret_lair_the_picture_settles_is_added_as_the_picture_says_whatever_the_ocr_would_read(self):
+        # (replaces: "an OCR read the picture contradicts is read by the picture when that decides" - the picture is first now, so the wrong confirmation is never reached)
+        # (the Deadpool Bolt: its strip names an existing printing - the Game Night card - that the picture clearly is not; the picture decides, once the full-card OCR has read
+        # the same name - since a fourth Codex review of 2026-10-20 a contradicting strip is not overruled unconfirmed)
+        self.confirmed_ocr()
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '42', 'set': 'gn2'}}
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['printing_id'], info['reader']), ('p3', printing_check.PICTURE_READER))
+        self.ident.card_ocr.read_card.assert_called_once()                         # the OCR's name ('Gandalf') agreed with the picture's card
+
+    def test_ocr_agrees_needs_the_name_and_no_contradicting_collector_line(self):
+        # (fifth Codex review: a name alone let the picture's printing A stand where the OCR had read printing B of the same card)
+        card = {'name': 'Gandalf the Grey', 'flavor_name': None, 'set_code': 'hob', 'number': '242', 'oracle_id': 'o-gandalf'}
+        printings = {('hob', '245'): {'name': 'Gandalf the Grey', 'oracle_id': 'o-gandalf'},                        # another printing of the same card
+                     ('ltr', '242'): {'name': 'Gandalf the Grey', 'oracle_id': 'o-gandalf'},
+                     ('gn2', '42'): {'name': 'Lightning Strike', 'oracle_id': 'o-strike'},                          # another card's printing
+                     ('spm', '69'): {'name': 'Swarm, Being of Bees', 'oracle_id': 'o-swarm'}}
+        def printing_at(set_code, number, exact=False):
+            return printings.get((set_code.lower(), number.lstrip('0') or '0'))
+        def agrees(read, of=card):
+            return printing_check.ocr_agrees(read, of, printing_at)
+        self.assertTrue(agrees({'name': 'Gandalf the Grey', 'collector_number': '0242', 'set_code': 'HOB'}))     # the same printing (zeros and case aside)
+        self.assertTrue(agrees({'name': 'Gandalf the Grey', 'collector_number': '', 'set_code': ''}))            # nothing of the line read: the name decides
+        self.assertTrue(agrees({'name': 'Gandalf the Grey', 'collector_number': '242', 'set_code': ''}))         # a part of the line names no printing
+        self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '0245', 'set_code': 'HOB'}))    # ANOTHER printing of the same card (Codex)
+        self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '242', 'set_code': 'LTR'}))     # same number, another set: the same card again
+        self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '0009', 'set_code': 'ZZZ'}))    # a printing the card data does not have
+        self.assertFalse(agrees({'name': 'Saruman', 'collector_number': '242', 'set_code': 'HOB'}))              # another name
+        # a line that names a DIFFERENT card says nothing about this card's printing: a Secret Lair's printed line, an OCR misread of the number
+        bolt = {'name': 'Lightning Bolt', 'flavor_name': None, 'set_code': 'sld', 'number': 'IFIYW-2', 'oracle_id': 'o-bolt'}
+        self.assertTrue(agrees({'name': 'Lightning', 'collector_number': '042', 'set_code': 'GN2'}, bolt))
+        shocker = {'name': 'Shocker, Unshakable', 'flavor_name': None, 'set_code': 'spm', 'number': '89', 'oracle_id': 'o-shocker'}
+        self.assertTrue(agrees({'name': 'Shocker, Unshakable', 'collector_number': '0069', 'set_code': 'SPM'}, shocker))
+        self.assertTrue(agrees({'name': 'Elektra, Deadly Assassin', 'collector_number': '67', 'set_code': 'MAR'},
+                               {'name': 'Massacre Girl', 'flavor_name': 'Elektra, Deadly Assassin', 'set_code': 'mar', 'number': '67'}))   # the flavor name
+        def broken(set_code, number, exact=False):
+            raise RuntimeError('database is locked')
+        self.assertFalse(printing_check.ocr_agrees({'name': 'Gandalf the Grey', 'collector_number': '245', 'set_code': 'HOB'}, card, broken))   # cannot say: no
+        for nothing in (None, {}, {'name': ''}):
+            self.assertFalse(agrees(nothing))
+
+    def test_the_picture_alone_is_not_added_when_ocr_reads_another_printing_of_the_same_card(self):
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}}            # the picture chose Gandalf [hob 242]
+        self.ident.evidence.printings[('ltr', '301')] = {'name': 'Gandalf', 'oracle_id': 'o-p3'}                    # LTR 301: another printing of Gandalf
+        self.ocr_read.update(name='Gandalf', collector_number='0301', set_code='LTR')                               # the OCR read that one
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            self.ocr_read.update(collector_number='0242', set_code='HOB')                                           # ... the one the picture chose: added
+            self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
+
+    def test_a_strip_naming_another_existing_card_and_an_ocr_that_disagrees_keep_the_picture_from_adding_it(self):
+        # (fourth Codex review: a readable strip that contradicts the picture skipped the name check)
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '42', 'set': 'gn2'}}
+        self.ocr_read.update(name='Lightning Strike')                              # OCR reads what the strip says, not what the picture chose
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+
+    # ----- the picture alone with nothing from the strip: with OCR on, its name must agree (third Codex review: a card newer than the card data)
+    def picture_alone_without_strip(self):
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}}       # READING's card: 'Gandalf'
+        return mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True)
+
+    def test_the_picture_alone_is_added_when_ocr_reads_the_same_name(self):
+        self.ocr_read.update(name='Gandalf')
+        with self.picture_alone_without_strip():
+            info, task = self.ident._read_by_picture(self.image, self.image)
+        self.assertEqual(info['printing_id'], 'p3')
+        self.ident.card_ocr.read_card.assert_called_once()
+
+    def test_the_picture_alone_is_not_added_when_ocr_reads_another_name(self):
+        self.ocr_read.update(name='Dwalin, Weaponmaster')                          # a card newer than the card data: its best match was another card
+        with self.picture_alone_without_strip():
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+
+    def test_the_picture_alone_is_not_added_when_ocr_reads_nothing_or_fails(self):
+        with self.picture_alone_without_strip():
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: None
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            self.ident.card_ocr.read_card.side_effect = RuntimeError('reader gone')
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+
+    def test_with_ocr_off_the_picture_alone_is_not_asked_to_agree_with_anything(self):
+        # the person's 'picture only' configuration: nothing else to agree with - its trade-off, documented
+        self.ident.ocr_enabled = False
+        with self.picture_alone_without_strip():
+            info, task = self.ident._read_by_picture(self.image, self.image)
+        self.assertEqual(info['printing_id'], 'p3')
+        self.ident.card_ocr.read_card.assert_not_called()
+
+    def test_a_strip_decision_is_not_asked_to_agree_with_the_ocr(self):
+        self.ident.evidence.reading = READING                                       # 'strong': the collector line named it
+        info, task = self.ident._read_by_picture(self.image, self.image)
+        self.assertEqual(info['printing_id'], 'p3')
+        self.ident.card_ocr.read_card.assert_not_called()
+
+    def test_in_doubt_an_unconfirmed_ocr_read_goes_to_the_ai_and_with_the_ai_off_to_review(self):
+        self.ident.evidence.reading = None
+        self.ident.card_identifier = object()
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['name'], task), ('Gandalf', identification.IDENTIFY))      # picture -> OCR (not confirmed) -> AI
+        self.ident.ai_enabled = False
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['name'], task), ('Gandalf', None))                          # picture -> OCR -> review under the name it read
+
+    def test_ocr_and_ai_both_off_is_the_picture_alone_then_review(self):
+        self.ident.ocr_enabled = False
+        self.ident.ai_enabled = False
+        self.ident.card_identifier = object()
+        self.ident.evidence.reading = None
+        self.assertEqual(self.ident._read_with_ocr(self.image, self.image), (None, None))  # nothing read, nothing asked: review
+        self.ident.card_ocr.read_card.assert_not_called()
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}}
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual((info['printing_id'], task), ('p3', None))                        # a clear picture still adds the card
+
+    def test_only_the_ocr_off_is_the_picture_then_the_ai(self):
+        self.ident.ocr_enabled = False
+        self.ident.card_identifier = object()
+        self.ident.evidence.reading = None
+        self.assertEqual(self.ident._read_with_ocr(self.image, self.image), (None, identification.IDENTIFY))
+        self.ident.card_ocr.read_card.assert_not_called()
+
+    def test_the_label_says_whether_the_collector_line_took_part(self):
+        self.ident.evidence.reading = READING                                              # path 'strong': the strip named the printing
+        self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[0]['reader'], printing_check.EVIDENCE_READER)
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}}
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.assertEqual(self.ident._read_with_ocr(self.image, self.image)[0]['reader'], printing_check.PICTURE_READER)
+        self.assertEqual(printing_check.PICTURE_READERS, (printing_check.PICTURE_READER, printing_check.EVIDENCE_READER))
 
     def test_the_picture_is_asked_with_the_flat_card(self):
         self.confirmed_ocr()
@@ -696,13 +956,6 @@ class InIdentification(unittest.TestCase):
         self.mode('cascade')
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual((info['collector_number'], task), ('042', None))                      # as before the picture matching existed
-
-    def test_an_ocr_read_the_picture_contradicts_is_read_by_the_picture_when_that_decides(self):
-        # (the picture alone is switched on and decided: the Deadpool card is added as the printing the picture is)
-        self.confirmed_ocr()
-        self.ident.evidence.contradicted = True
-        info, task = self.ident._read_with_ocr(self.image, self.image)
-        self.assertEqual((info['printing_id'], info['reader']), ('p3', printing_check.EVIDENCE_READER))
 
     def test_a_failing_check_leaves_the_ocr_read_standing(self):
         self.confirmed_ocr()
