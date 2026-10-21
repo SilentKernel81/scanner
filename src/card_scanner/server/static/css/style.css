@@ -252,6 +252,11 @@ a {
     flex-shrink: 0;
     margin-left: 12px;
 }
+/* ... and when the page's own part is hidden (the deck page hides its tabs while one deck is open), nothing before Settings has the auto margin:
+   without this it slid left to sit next to Decks. Two auto margins would split the free space, so only then does Settings take it */
+.topbar-page[hidden] + .topbar-settings-link {
+    margin-left: auto;
+}
 
 .game-label {
     font-size: 13px;
