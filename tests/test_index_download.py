@@ -27,7 +27,7 @@ stations_api = sys.modules['card_scanner.server.stations_api']
 BASE = 'http://localhost'
 IDS = ['id-a', 'id-b', 'id-c']
 HASHES = [bytes([n]) * image_index.HASH_BYTES for n in (1, 2, 3)]
-FACTS = {'id-a': ('Lightning Bolt', 'SLD', 'IFIYW-2', 'oracle-1', 'nonfoil,foil'),
+FACTS = {'id-a': ('Lightning Bolt', 'SLD', 'IFIYW-2', 'oracle-1', 'nonfoil,foil', '2023-06-23', '2015'),
          'id-b': ("Tab\tand\nnewline", 'tfra', '1', 'oracle-2', 'nonfoil'),
          'id-c-gone': ('Not in the index', 'x', '9', 'o', '')}              # in the card data, not in the index; and 'id-c' is in the index, not the card data
 
@@ -129,10 +129,11 @@ class ThePrintingsTable(Download):
 
     def test_one_row_per_printing_of_the_index_that_the_card_data_has_in_the_index_order(self):
         header, rows = self.rows()
-        self.assertEqual(header, ['id', 'set', 'number', 'oracle_id', 'finishes', 'name'])
+        # released_at and frame (since 2026-10-21, for the phone's fixed-place foil reading) come LAST: a reader of the first six columns is undisturbed
+        self.assertEqual(header, ['id', 'set', 'number', 'oracle_id', 'finishes', 'name', 'released_at', 'frame'])
         self.assertEqual([row[0] for row in rows], ['id-a', 'id-b'])                       # id-c: not in the card data; id-c-gone: not in the index
-        self.assertEqual(rows[0], ['id-a', 'sld', 'IFIYW-2', 'oracle-1', 'nonfoil,foil', 'Lightning Bolt'])   # the set in lower case, as the card data writes it
-        self.assertEqual(rows[1][1:], ['tfra', '1', 'oracle-2', 'nonfoil', 'Tab and newline'])                 # a tab or a newline in a name cannot break a row
+        self.assertEqual(rows[0], ['id-a', 'sld', 'IFIYW-2', 'oracle-1', 'nonfoil,foil', 'Lightning Bolt', '2023-06-23', '2015'])   # the set in lower case, as the card data writes it
+        self.assertEqual(rows[1][1:], ['tfra', '1', 'oracle-2', 'nonfoil', 'Tab and newline', '', ''])        # a tab or a newline in a name cannot break a row; a fact of five: empty
 
     def test_the_same_input_gives_the_same_bytes(self):
         ids = list(IDS)

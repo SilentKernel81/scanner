@@ -110,8 +110,10 @@ game sits behind one interface (`games/`), so another could be added.
   116,331 printings, 21 MB in 3.5 s, a file cut in half resumed).
 - **The Android app reads by the picture in standalone mode** (since 2026-10-21; the app's own repository): the index above, the same decisions as the server's
   code with OCR off on the owner's 41 Pixel captures (28 added by the picture alone, 24 ms a card on the phone), then the vision AI - or, with the app's new
-  AI switch off, review. On by default. **Not yet tried on cards with the phone** (only its parity tests); no OCR on the phone, so no collector line and no
-  foil marker of its own (a printing made in both finishes needs the AI's foil check).
+  AI switch off, review. On by default. **Not yet tried on cards with the phone** (only its parity tests); no OCR on the phone, so no collector line. The
+  ★ / • foil marker IS read (since 2026-10-21): the foil network at the fixed place, as the server with OCR off - only for a card the search turned upright and
+  whose printings all print a marker (from The Lord of the Rings on, modern frame); on the 28 Pixel captures the picture adds, 17 finishes from it, the same
+  as the server's code. Needs a server whose index table carries the release date and frame (this version); an older server's table: no marker reading.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (Settings > Card reading > Picture, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
