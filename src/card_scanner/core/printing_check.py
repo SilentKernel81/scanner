@@ -103,6 +103,23 @@ IMAGE_MIN_SIMILARITY = 0.5
 # the printings they pick have a similarity of at least 0.245 (1st percentile 0.355, median 0.68); 0.30 refuses 5 of them (0.33%, they go to the AI) and everything near the 0.10 of
 # the probe. A backstop calibrated against the correct ones - no wrong 'strong' decision exists in the data to calibrate against.
 STRONG_MIN_SIMILARITY = 0.30
+# Which way up a card is, as the picture search says (it compares a picture in both orientations and the better one counts), is believed only when the better orientation is similar enough
+# to a printing AND clearly better than the other one. Measured on 1,628 evaluation pictures (scripts/experiments/image_match/orientation_margin.py): the better orientation matches at a
+# median of 0.68 (5th percentile 0.43) and beats the other by a median of 0.44 (5th percentile 0.18, 1st 0.06); these two floors leave 6.2% of the pictures 'unknown'. What it is for: the foil
+# network cut at a fixed place of the card (foil_marker.FIXED_BOX) must not be fed an upside-down card (a Codex review of 2026-10-20: 5 of 30 turned pictures got a confident wrong finish) -
+# 'unknown' costs only the AI's check, a wrong orientation costs a silent wrong finish, so the margin is the conservative one.
+ORIENTATION_MIN_SIMILARITY = 0.30
+ORIENTATION_MIN_MARGIN = 0.20
+# Which printings print the ★ / • marker the foil network reads (a Codex review of 2026-10-20: knowing which way up a card is does not say it has a marker, and the network has only the two outputs
+# foil / non-foil - on an older frame it would classify whatever sits in the box, with a confident answer). The evaluation set the network was trained and measured on holds only releases of 2023,
+# 2025 and 2026, all in the modern frame; the earliest set where the OCR reads a marker is The Lord of the Rings (2023-06-23, on 83% of its cards, nothing older is in the data to say
+# otherwise). So a printing counts as marker-bearing from that date on, in the '2015' frame only (a retro frame in a new set prints the old collector line). Conservative on purpose: a card that
+# prints a marker but is older, or whose frame is another, is left to the AI's check - never guessed.
+MARKER_FROM = '2023-06-23'
+MARKER_FRAME = '2015'
+# More printings than this that the picture cannot tell apart from its best match (a blank or featureless picture ties thousands) is too ambiguous to say the card prints a marker, and each one is a
+# database read: past it the answer is 'no' without looking. Same-art reprints are a handful to a few dozen (basic lands the most).
+MARKER_MAX_TIED = 200
 EVIDENCE_READER = 'picture+strip'     # what a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
@@ -118,12 +135,35 @@ def read_strip(ocr, card_rgb):
     return card_ocr.parse_strip(lines) if lines else ('', '')
 
 
+def prints_a_marker(card):
+    """Whether a printing (card dict: released_at, frame) is one the foil network was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False for anything missing or unreadable."""
+    return bool(card) and (card.get('released_at') or '') >= MARKER_FROM and card.get('frame') == MARKER_FRAME
+
+
+def orientation_established(search):
+    """
+    Whether a search (PrintingCheck._search) says which way up the card is with confidence: the better orientation looks like a printing (ORIENTATION_MIN_SIMILARITY) and is clearly ahead
+    of the other one (ORIENTATION_MIN_MARGIN). Nothing else says so: a decision about a PRINTING compares the nearest printings within the winning orientation, not the two orientations -
+    a picture can pass 0.5 similarity and a lead of 0.05 and still be as near to the other orientation (a Codex review of 2026-10-20). The one test for everything that reads a place that
+    is only where it should be on an upright card (PrintingCheck.upright, live_read's fixed foil crop).
+    """
+    as_given, turned = search['nearest']
+    best, other = (turned, as_given) if search['rotated'] else (as_given, turned)
+    similarity = float(image_index.similarity(best))
+    margin = similarity - float(image_index.similarity(other))
+    return similarity >= ORIENTATION_MIN_SIMILARITY and margin >= ORIENTATION_MIN_MARGIN
+
+
 def read_strip_evidence(ocr, card_rgb, net=None):
     """
     The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
     set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked only when the OCR read no symbol and there is a network (a
     foil_marker.FoilMarker; a separate instance from the live path's) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
     """
+    if ocr is None:
+        # OCR switched off: no number, no set, no symbol - but the foil network can still be asked about the set line at its fixed place (foil_marker.FIXED_BOX)
+        crop = foil_marker.fixed_crop(card_rgb) if net is not None else None
+        return {'number': '', 'set': '', 'symbol': 'unknown', 'net': net.probability(crop) if crop is not None else None}
     strip = foil_marker.strip_of(card_rgb)
     lines = ocr.read_lines(strip)
     if not lines:
@@ -285,7 +325,40 @@ class PrintingCheck:
         k = min(5, len(distances))
         top = np.argpartition(distances, k - 1)[:k]
         top = top[np.argsort(distances[top], kind='stable')]
-        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top])}
+        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top]),
+                # the nearest row of each orientation (bits): how far the better orientation is ahead of the other (upright())
+                'nearest': (int(upright.min()), int(turned.min()))}
+
+    def marker_expected(self, search):
+        """
+        Whether the card the picture shows prints a foil marker, judged by EVERY printing of the index the picture cannot tell apart from its best match (less than AGREE_BELOW under it - the same ones
+        decide_printing counts as agreeing, the best match included): ALL of them must be marker-bearing (prints_a_marker). Taken from the distances to the whole index, not from the five nearest rows
+        of `top`: with five or more same-art reprints tied, an older one just outside those five would never be looked at (a Codex review of 2026-10-20). The printing itself is not known yet when the AI is
+        about to identify the card. Measured on real pictures (the guard's first form, all five nearest, let only 15% of modern cards through): this rule lets 100% of 60 modern Scryfall scans and 100%
+        of 374 of the owner's modern captures through and 0 of 60 old-frame scans, because a reprint in an older frame looks different enough to fall outside it. Fails closed: a printing the card
+        data does not have, a read that fails, or more than MARKER_MAX_TIED printings tied, is False.
+        """
+        similarities = image_index.similarity(search['distances'])
+        tied = np.flatnonzero(float(similarities.max()) - similarities < AGREE_BELOW)       # the best match is always among them
+        if len(tied) > MARKER_MAX_TIED:
+            return False
+        try:
+            return all(prints_a_marker(self.database.get_card_by_id(search['index'].ids[int(row)])) for row in tied)
+        except Exception as e:
+            logger.debug(f"Printing check: the marker layout could not be judged: {e}")
+            return False
+
+    def upright(self, rgb, needs_marker=False):
+        """
+        The card (RGB) the right way up, as the picture search says - or None when that cannot be established: no index, or the better orientation does not look enough like any printing
+        (ORIENTATION_MIN_SIMILARITY) or is not clearly better than the other (ORIENTATION_MIN_MARGIN). For what reads a place on the card that is only where it should be on an upright one
+        (foil_marker.read_fixed); None must then mean 'unknown', never a guess. A card that is upright comes back as it is (the same array).
+        needs_marker: also None unless the card prints a foil marker at all (marker_expected) - what the fixed foil crop needs, since the network answers foil / non-foil about whatever is in the box.
+        """
+        search = self._search(rgb)
+        if search is None or not orientation_established(search) or (needs_marker and not self.marker_expected(search)):
+            return None
+        return cv2.rotate(rgb, cv2.ROTATE_180) if search['rotated'] else rgb
 
     def check(self, rgb, printing_id, search=None):
         """
@@ -406,8 +479,11 @@ class PrintingCheck:
         if search is None:
             return None
         upright = cv2.rotate(card_image, cv2.ROTATE_180) if search['rotated'] else card_image
-        # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader
-        strip = read_strip_evidence(ocr, upright, foil_net) if ocr is not None else {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+        # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader; the foil network is still asked, at a fixed place - but only
+        # when the search is sure which way up the card is (the fixed place is the set line on an UPRIGHT card): not sure, no network (net None), and the finish falls back as it always did
+        # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
+        net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
+        strip = read_strip_evidence(ocr, upright, net_at_a_fixed_place)
         picture, cards = self._picture_evidence(search)
         decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
         if decision['path'] == 'review' or (decision['path'] == 'image' and not accept_image_alone):

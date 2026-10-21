@@ -29,7 +29,7 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER, name_only_partly_read
+from card_scanner.core.printing_check import EVIDENCE_READER, name_only_partly_read, prints_a_marker
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
@@ -201,8 +201,10 @@ class Identification:
     def _read_foil_locally(self, image, foil_image=None):
         """
         The foil marker read by the small network (core/foil_marker.py) from the set line of the
-        flat card: 'foil', 'non-foil', or 'unknown' - not sure, no set line found, no network, or
-        OCR off (it needs the OCR reader to find the line). Never raises: a failure here is not
+        flat card: 'foil', 'non-foil', or 'unknown' - not sure, no set line found, or no network.
+        With OCR off nothing finds the set line, so the network is asked about it at its fixed place on the flat card (foil_marker.FIXED_BOX; a little less
+        sure than at the OCR's own box, and without the OCR's own symbol to stand first) - after the picture search has said which way up the card is, and 'unknown' when it cannot
+        (no printing check, no index, an ambiguous picture): the AI's check follows. Never raises: a failure here is not
         a reason to lose the card, the OCR's marker and the AI's check still follow.
         Which picture: the network cuts the strip where a FLAT card has its set line, so it reads
         foil_image - the perspective-corrected card, the same picture the AI's foil check gets - when
@@ -210,10 +212,19 @@ class Identification:
         area's `image` is the area as drawn, not a flat card: stations_api.station_capture).
         """
         card = foil_image if foil_image is not None else image
-        if self.foil_marker is None or not self.ocr_enabled or card is None:
+        if self.foil_marker is None or card is None:
             return 'unknown'
         try:
-            foil, probability = self.foil_marker.read(card, self.card_ocr)
+            if self.ocr_enabled:
+                foil, probability = self.foil_marker.read(card, self.card_ocr)
+            else:
+                # no OCR to find the set line: the network is asked about it at its fixed place (foil_marker.FIXED_BOX), which beats the AI's 25 s on a cold model - but only for a
+                # card whose orientation is established AND that prints a marker at all (an upside-down card would feed it art and title pixels, a card of an older frame whatever sits in the box:
+                # a confident wrong answer either way - Codex reviews, 2026-10-20)
+                upright = self.evidence.upright(card, needs_marker=True) if self.evidence is not None else None
+                if upright is None:
+                    return 'unknown'
+                foil, probability = self.foil_marker.read_fixed(upright)
         except Exception as e:
             self.log(f"Foil marker network failed ({e}) - left to the AI's check", level="warning")
             return 'unknown'
@@ -362,18 +373,27 @@ class Identification:
         # Ollama, more with cloud providers that serve requests in parallel)
         foil_result = {}
         foil_thread = None
+        provisional = False
         if not ocr_info or ocr_info['foil'] == 'unknown':
             # the small network first (a card OCR confirmed was tried in the OCR stage already
             # and comes here as FOIL, not IDENTIFY, so this does not read the same set line twice)
             local = self._read_foil_locally(image, foil_image)
             if local != 'unknown':
                 foil_result['foil'] = local
+                # With OCR off that answer is the network at a FIXED place, judged fit by the nearest INDEXED printings - a card the index lacks can borrow a modern lookalike's
+                # marker layout. So it stands only until the AI says which printing this really is (a Codex review, 2026-10-20): see below.
+                provisional = not self.ocr_enabled
         if 'foil' not in foil_result and self._ai_foil_check(foil_image) and (not ocr_info or ocr_info['foil'] == 'unknown'):
             foil_thread = threading.Thread(
                 target=lambda: foil_result.update(foil=identifier.read_foil_symbol(foil_image)),
                 daemon=True)
             foil_thread.start()
         card_info = identifier.identify_card(image)
+        if provisional and not self._resolved_prints_a_marker(card_info):
+            # The printing the AI named is not one that prints a marker (or cannot be found): the network's answer was about whatever sat in the box. Discarded - the AI's own check answers.
+            foil_result.pop('foil', None)
+            if self._ai_foil_check(foil_image):
+                foil_result['foil'] = identifier.read_foil_symbol(foil_image)
         if foil_thread:
             foil_thread.join(timeout=60)
         # A marker OCR did read stands (it agreed with the AI on 480 of 481 scans)
@@ -396,6 +416,17 @@ class Identification:
             ocr_info['foil'] = foil
             return ocr_info
         return card_info
+
+    @staticmethod
+    def _resolved_prints_a_marker(card_info):
+        """Whether the printing the AI's answer resolves to prints a foil marker (printing_check.prints_a_marker); False for no answer, no number, no such printing, or a lookup that fails"""
+        if not card_info or not card_info.get('name'):
+            return False
+        try:
+            card = games.active().confirmed_card(card_info['name'], card_info.get('collector_number', ''), card_info.get('set_code', ''))
+        except Exception:
+            return False
+        return prints_a_marker(card)
 
     def identify(self, image, foil_image=None):
         """

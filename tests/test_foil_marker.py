@@ -90,6 +90,47 @@ class TheGeometry(unittest.TestCase):
         self.assertIsNone(foil_marker.set_line_crop(strip, [[700, 10], [800, 10], [800, 30], [700, 30]]))   # outside it: nothing
 
 
+class TheFixedPlace(unittest.TestCase):
+    """foil_marker.fixed_crop / read_fixed: the set line at its place on a flat card, for when no OCR can find it (measured: foil_fixed_crop.py)"""
+
+    def card_with_the_box_dark(self, height=1462, width=1046):
+        card = np.full((height, width, 3), 255, np.uint8)
+        y0, y1, x0, x1 = foil_marker.FIXED_BOX
+        card[int(y0 * height):int(y1 * height), int(x0 * width):int(x1 * width)] = 0
+        return card
+
+    def test_the_crop_is_the_box_with_its_margin(self):
+        for size in ((1462, 1046), (500, 350)):                               # a large card as cut, a small one that is enlarged first
+            crop = foil_marker.fixed_crop(self.card_with_the_box_dark(*size))
+            self.assertEqual((crop.shape, crop.dtype), ((32, 128), np.uint8))
+            self.assertLess(crop[10:22, 20:110].mean(), 30, size)             # the dark box fills the middle ...
+            self.assertGreater(crop[0:3, :].mean(), 200, size)                # ... and the quarter-line margin above it is the card
+            self.assertGreater(crop[:, 125:].mean(), 200, size)               # ... and to its right
+
+    def test_a_box_that_lies_on_the_strip_of_the_card_the_ocr_cuts(self):
+        y0, y1, x0, x1 = foil_marker.FIXED_BOX
+        s = foil_marker.STRIP
+        self.assertTrue(s[0] < y0 < y1 < s[1] and s[2] <= x0 < x1 < s[3])   # inside the strip training cut (lowest 14%, left 62%)
+
+    def test_the_answers_are_the_ones_the_network_gives_at_sure(self):
+        marker = foil_marker.FoilMarker.__new__(foil_marker.FoilMarker)
+        card = self.card_with_the_box_dark()
+        # (1 - 0.9 is 0.09999999999999998 in floating point, so 0.1 is not "sure it is regular": the same edge the Kotlin port keeps on purpose)
+        for probability, expected in ((0.99, 'foil'), (0.9, 'foil'), (0.05, 'non-foil'), (0.09, 'non-foil'), (0.1, 'unknown'), (0.5, 'unknown'), (0.85, 'unknown')):
+            marker.probability = lambda crop, p=probability: p
+            self.assertEqual(marker.read_fixed(card), (expected, probability), probability)
+
+    def test_a_card_too_small_to_cut_is_unknown(self):
+        marker = foil_marker.FoilMarker.__new__(foil_marker.FoilMarker)
+        marker.probability = lambda crop: 0.99
+        self.assertEqual(marker.read_fixed(np.zeros((1, 1, 3), np.uint8)), ('unknown', None))
+
+    def test_the_read_with_an_ocr_is_not_changed_by_it(self):
+        # read() still asks the OCR first and cuts at the OCR's box (the shipped, measured behaviour); only the 'sure' decision is shared
+        self.assertEqual(foil_marker.answer_for(0.95), ('foil', 0.95))
+        self.assertEqual(foil_marker.answer_for(0.5), ('unknown', 0.5))
+
+
 class FakeOcr:
     """Stands in for CardOcr.read_lines: answers the given lines and remembers what image it was asked about"""
 
@@ -235,11 +276,110 @@ class InIdentification(unittest.TestCase):
         self.ident._ask_ai(identification.IDENTIFY, area, flat, None)
         self.assertIs(self.ident.foil_marker.read.call_args[0][0], flat)
 
-    def test_ocr_switched_off_means_no_network_either(self):
-        # the network needs the OCR reader to find the set line
+    def ocr_off_with_orientation(self, upright=lambda card, needs_marker=False: card):
+        """OCR switched off, and a printing check that says which way up a card is (upright(): the card itself when it is). Not in setUp: having one puts _read_with_ocr in evidence mode."""
         self.ident.ocr_enabled = False
-        self.assertEqual(self.ident._read_foil_locally(self.image), 'unknown')
+        self.ident.evidence = mock.Mock()
+        self.ident.evidence.upright.side_effect = upright
+
+    def test_ocr_switched_off_asks_the_network_at_the_fixed_place(self):
+        # (until 2026-10-20 this said "no OCR, no network": nothing found the set line. It is cut at its fixed place now - FIXED_BOX - and the OCR is not asked)
+        self.ocr_off_with_orientation()
+        self.ident.foil_marker.read_fixed.return_value = ('foil', 0.95)
+        self.assertEqual(self.ident._read_foil_locally(self.image), 'foil')
+        self.ident.foil_marker.read_fixed.assert_called_once()
         self.ident.foil_marker.read.assert_not_called()
+        self.ident.card_ocr.read_lines.assert_not_called()
+
+    def test_ocr_switched_off_a_card_put_in_upside_down_is_turned_before_it_is_cut(self):
+        # (Codex review, 2026-10-20: the fixed place is only the set line on an UPRIGHT card)
+        card = np.arange(100 * 70 * 3, dtype=np.uint8).reshape(100, 70, 3)
+        turned = card[::-1, ::-1].copy()
+        self.ocr_off_with_orientation(lambda given, needs_marker=False: turned)                     # the search says it was upside down
+        self.ident.foil_marker.read_fixed.return_value = ('non-foil', 0.02)
+        self.assertEqual(self.ident._read_foil_locally(card), 'non-foil')
+        self.assertIs(self.ident.foil_marker.read_fixed.call_args[0][0], turned)   # the network got the turned card, not the one as given
+        self.assertEqual(self.ident.evidence.upright.call_args.kwargs, {'needs_marker': True})   # and the search was asked for a card that prints a marker at all
+
+    def test_ocr_switched_off_a_card_whose_orientation_is_not_established_is_unknown_and_left_to_the_ai(self):
+        self.ocr_off_with_orientation(lambda card, needs_marker=False: None)
+        self.ident.foil_marker.read_fixed.return_value = ('foil', 0.99)           # it would answer, confidently - and might be reading the art
+        self.assertEqual(self.ident._read_foil_locally(self.image), 'unknown')
+        self.ident.foil_marker.read_fixed.assert_not_called()
+
+    def test_ocr_switched_off_without_a_printing_check_there_is_no_orientation_and_so_no_answer(self):
+        self.ocr_off_with_orientation()
+        self.ident.evidence = None
+        self.assertEqual(self.ident._read_foil_locally(self.image), 'unknown')
+        self.ident.foil_marker.read_fixed.assert_not_called()
+
+    def test_ocr_switched_off_an_upside_down_card_on_the_ai_path_keeps_the_ais_foil_check(self):
+        # the path Codex named: the picture could not decide, the AI identifies, and the finish is asked of the network first - which must not guess
+        self.ocr_off_with_orientation(lambda card, needs_marker=False: None)
+        identifier = mock.Mock()
+        identifier.identify_card.return_value = {'name': 'Gandalf', 'collector_number': '242', 'set_code': 'HOB'}
+        identifier.read_foil_symbol.return_value = 'star'
+        self.ident.card_identifier = identifier
+        flat = np.ones((100, 70, 3), np.uint8)
+        self.ident._ask_ai(identification.IDENTIFY, flat, flat, None)
+        self.ident.foil_marker.read_fixed.assert_not_called()                     # no guess from the network ...
+        identifier.read_foil_symbol.assert_called_once()                          # ... the AI's check answered
+
+    # ----- OCR off, the AI identifies: the network's answer is provisional until the printing the AI named is known to print a marker (Codex review, 2026-10-20)
+    def ai_path_with_ocr_off(self, resolves_to):
+        """OCR off, the printing check sure of the orientation and the layout, the network confident it is a foil, and the AI naming a card the card data resolves to `resolves_to`"""
+        self.ocr_off_with_orientation()
+        self.ident.foil_marker.read_fixed.return_value = ('foil', 0.97)
+        identifier = mock.Mock()
+        identifier.identify_card.return_value = {'name': 'Gandalf', 'collector_number': '242', 'set_code': 'HOB'}
+        identifier.read_foil_symbol.return_value = 'dot'
+        self.ident.card_identifier = identifier
+        identification.games.active.return_value.confirmed_card = lambda name, number, set_code: resolves_to
+        return identifier
+
+    def test_ocr_off_the_networks_finish_stands_when_the_printing_the_ai_named_prints_a_marker(self):
+        identifier = self.ai_path_with_ocr_off({'released_at': '2024-05-01', 'frame': '2015'})
+        info = self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, None)
+        self.assertEqual(info['foil'], 'foil')
+        identifier.read_foil_symbol.assert_not_called()                              # no extra AI request: the network answered
+
+    def test_ocr_off_the_networks_finish_is_discarded_when_the_printing_the_ai_named_has_no_marker(self):
+        # the card the picture search compared with was a modern lookalike in the index; the printing it really is (not in the index) is an older one
+        identifier = self.ai_path_with_ocr_off({'released_at': '2019-11-01', 'frame': '2015'})
+        info = self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, None)
+        identifier.read_foil_symbol.assert_called_once()                             # the AI's own check ran ...
+        self.assertEqual(info['foil'], 'dot')                                        # ... and its answer is the finish, not the network's
+
+    def test_ocr_off_the_networks_finish_is_discarded_when_the_printing_cannot_be_resolved(self):
+        for unresolved in (None, {}):
+            identifier = self.ai_path_with_ocr_off(unresolved)
+            self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, None)
+            identifier.read_foil_symbol.assert_called_once()
+
+    def test_ocr_off_a_lookup_that_fails_is_a_discard_not_a_lost_card(self):
+        identifier = self.ai_path_with_ocr_off(None)
+        def broken(name, number, set_code):
+            raise RuntimeError('database is locked')
+        identification.games.active.return_value.confirmed_card = broken
+        info = self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, None)
+        self.assertEqual(info['name'], 'Gandalf')                                    # the card still comes back
+        identifier.read_foil_symbol.assert_called_once()
+
+    def test_ocr_on_the_networks_answer_is_not_provisional(self):
+        # with OCR the network is cut at the OCR's own box and the symbol the OCR read stands: nothing changes
+        identifier = mock.Mock()
+        identifier.identify_card.return_value = {'name': 'Gandalf', 'collector_number': '242', 'set_code': 'HOB'}
+        self.ident.card_identifier = identifier
+        self.ident.foil_marker.read.return_value = ('non-foil', 0.03)
+        identification.games.active.return_value.confirmed_card = lambda *a: None       # even a card that cannot be resolved
+        info = self.ident._ask_ai(identification.IDENTIFY, self.image, self.image, None)
+        self.assertEqual(info['foil'], 'non-foil')
+        identifier.read_foil_symbol.assert_not_called()
+
+    def test_ocr_switched_off_and_a_network_that_is_not_sure_is_unknown(self):
+        self.ocr_off_with_orientation()
+        self.ident.foil_marker.read_fixed.return_value = ('unknown', 0.6)
+        self.assertEqual(self.ident._read_foil_locally(self.image), 'unknown')
 
     def test_a_symbol_read_by_the_strip_ocr_is_logged_and_settles_the_card(self):
         # FoilMarker.read answers (foil, None) for a symbol the OCR read itself: no probability to print

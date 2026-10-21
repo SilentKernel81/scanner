@@ -75,6 +75,8 @@ game sits behind one interface (`games/`), so another could be added.
   (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
   turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
   copy of the real data).
+- **Foil or regular without the OCR** (since 2026-10-20): with OCR switched off the foil network reads the set line at its fixed place on the flat card instead of asking the vision AI (4 ms against up to 25 s on
+  a cold model): on 600 held-out cards 91.7% answered and 99.5% of those right (97.8% / 99.8% with the OCR), also for cards put in upside down (the picture search turns them back first; when it is not sure, the AI's check answers); on 15 confetti-foil phone captures 10 answered, 9 right; only for cards released from 2023-06-23 in the modern frame (older cards print no marker: of 80 old-frame cards the unguarded network answered 53, this answers none and leaves them to the AI). Other cameras and loosely cropped cards never tried.
 - **A Secret Lair that hides its title is not misread** (since 2026-10-20): when the OCR read only a fragment of the card's name (`Lightning` of `Lightning Strike`, a sticker over the rest) and the
   picture looks like another card, the read is not confirmed - it goes to the picture or the AI. On the evaluation set it fires on 3 of 6,374 OCR-confirmed cards, all three genuine misreads (Deadpool's `Lightning Bolt`
   read as `Lightning Strike`); a glare or showcase disagreement with a name read whole is left alone. Not yet seen on a live scan.

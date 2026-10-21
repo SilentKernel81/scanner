@@ -29,14 +29,16 @@ from test_printing_check import FakeReader, degraded, line, synthetic_card, writ
 class Cards:
     """get_card_by_id for the synthetic printings: p<n> is number n of set 'tst', in both finishes; p9 does not exist"""
 
-    def __init__(self, finishes=None):
+    def __init__(self, finishes=None, old=()):
         self.finishes = finishes or {}
+        self.old = old                      # printings of an older release / frame (no foil marker): '*' for all of them
 
     def get_card_by_id(self, printing_id):
         if printing_id == 'p9':
             return None
+        older = '*' in self.old or printing_id in self.old
         return {'id': printing_id, 'name': f'Card {printing_id}', 'set_code': 'tst', 'number': printing_id[1:], 'oracle_id': f'o-{printing_id}',
-                'finishes': self.finishes.get(printing_id, ['nonfoil', 'foil'])}
+                'finishes': self.finishes.get(printing_id, ['nonfoil', 'foil']), 'frame': '2015', 'released_at': '2019-11-01' if older else '2024-05-01'}
 
     def get_card_by_set_number(self, set_code, collector_number, exact=False):
         printing_id = f'p{int(collector_number)}'
@@ -120,6 +122,154 @@ class LiveRead(unittest.TestCase):
         self.assertEqual(reading['path'], 'strong')
         self.assertGreater(reading['similarity'], printing_check.IMAGE_MIN_SIMILARITY)     # a clearly matching picture is far above both floors
         self.assertLess(printing_check.STRONG_MIN_SIMILARITY, printing_check.IMAGE_MIN_SIMILARITY)
+
+    def test_upright_says_which_way_up_a_card_is_and_only_when_it_is_sure(self):
+        # (Codex review, 2026-10-20: the foil network cut at a fixed place must not be given an upside-down card)
+        picture = degraded(synthetic_card(3))
+        turned = cv2.rotate(picture, cv2.ROTATE_180)
+        self.assertIs(self.check.upright(picture), picture)                          # as given: the same array
+        np.testing.assert_array_equal(self.check.upright(turned), picture)            # put in upside down: turned back
+        noise = np.random.default_rng(1).integers(0, 255, picture.shape, dtype=np.uint8)
+        self.assertIsNone(self.check.upright(noise))                                  # looks like nothing: it cannot say
+        self.assertIsNone(self.make(Cards(), self.root / 'no-index').upright(picture))   # no index: nothing to say
+        with mock.patch.object(printing_check, 'ORIENTATION_MIN_MARGIN', 2.0):        # the two orientations not clearly apart
+            self.assertIsNone(self.check.upright(picture))
+        with mock.patch.object(printing_check, 'ORIENTATION_MIN_SIMILARITY', 2.0):    # the better one not similar enough
+            self.assertIsNone(self.check.upright(picture))
+
+    def test_without_a_reader_the_foil_network_is_still_asked_at_the_fixed_place(self):
+        # OCR off: no number, set or symbol, but the finish is no longer the AI's alone - the network reads the set line where it is on a flat card
+        class Net:
+            def __init__(self):
+                self.crops = []
+
+            def probability(self, crop):
+                self.crops.append(crop.shape)
+                return 0.97
+        net = Net()
+        card = np.full((1462, 1046, 3), 200, np.uint8)
+        evidence = printing_check.read_strip_evidence(None, card, net)
+        self.assertEqual(evidence, {'number': '', 'set': '', 'symbol': 'unknown', 'net': 0.97})
+        self.assertEqual(net.crops, [(32, 128)])
+        self.assertEqual(printing_check.read_strip_evidence(None, card, None)['net'], None)      # no network: nothing to say
+
+    def test_prints_a_marker_is_true_only_for_the_releases_and_the_frame_the_network_was_measured_on(self):
+        modern = {'released_at': '2024-05-01', 'frame': '2015'}
+        self.assertTrue(printing_check.prints_a_marker(modern))
+        self.assertTrue(printing_check.prints_a_marker({**modern, 'released_at': printing_check.MARKER_FROM}))         # the day it starts counts
+        self.assertFalse(printing_check.prints_a_marker({**modern, 'released_at': '2023-06-22'}))                     # the day before does not
+        self.assertFalse(printing_check.prints_a_marker({**modern, 'released_at': '2015-07-17'}))                     # a modern frame, but before the marker
+        self.assertFalse(printing_check.prints_a_marker({**modern, 'frame': '1997'}))                                 # a retro frame in a new set: the old collector line
+        self.assertFalse(printing_check.prints_a_marker({**modern, 'frame': '1993'}))
+        for unreadable in (None, {}, {'frame': '2015'}, {'released_at': None, 'frame': '2015'}):
+            self.assertFalse(printing_check.prints_a_marker(unreadable))
+
+    def test_without_a_reader_the_network_is_not_asked_about_a_card_that_prints_no_marker(self):
+        # (Codex review, 2026-10-20: orientation is not layout - an older frame has no star or dot, and the network would answer about whatever sits in the box)
+        picture = degraded(synthetic_card(3))
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        top = [self.check.index().ids[int(row)] for row in self.check._search(picture)['top']]
+        for old in ({'*'}, {top[0]}):                                                      # all of them old, the best match
+            check = self.make(Cards(old=old))
+            net.probability.reset_mock()
+            reading = check.live_read(picture, None, None, net, accept_image_alone=True)
+            net.probability.assert_not_called()
+            self.assertEqual((reading['path'], reading['card']['id']), ('image', 'p3'))            # the printing is still the picture's
+            self.assertNotEqual(reading['finish']['source'], 'network')
+            self.assertIsNone(check.upright(picture, needs_marker=True))                          # and the AI path is told 'unknown' too
+            self.assertIs(check.upright(picture), picture)                                        # while orientation alone is still established
+        net.probability.reset_mock()
+        self.make(Cards()).live_read(picture, None, None, net, accept_image_alone=True)
+        net.probability.assert_called_once()                                                   # all of them modern: asked
+
+    def test_only_the_printings_the_picture_cannot_tell_apart_from_its_best_match_count(self):
+        # an older reprint that looks clearly different from the picture does not make a modern card unmarked (all five nearest would: 15% of modern cards passed) ...
+        picture = degraded(synthetic_card(3))
+        search = self.check._search(picture)
+        far = self.check.index().ids[int(search['top'][-1])]                                 # the fifth nearest: far from the best here
+        self.assertIsNotNone(self.make(Cards(old={far})).upright(picture, needs_marker=True))
+        # ... one that looks as much like it as the best match does (a twin: same art, older frame) does
+        with mock.patch.object(printing_check, 'AGREE_BELOW', 2.0):                         # every one of the five agrees with the best
+            self.assertIsNone(self.make(Cards(old={far})).upright(picture, needs_marker=True))
+
+    def twins(self, count=8):
+        """An index of the synthetic printings p0..p6 and `count` twins of p3 (the same picture, so they tie with it): the card data's ids t0..t7"""
+        pictures = self.root / 'twin-pictures'
+        pictures.mkdir(exist_ok=True)
+        write_pictures(pictures, range(7))
+        for n in range(count):
+            (pictures / f't{n}.jpg').write_bytes((pictures / 'p3.jpg').read_bytes())
+        folder = self.root / 'twin-index'
+        image_index.build([(f'p{n}', None) for n in range(7)] + [(f't{n}', None) for n in range(count)], folder, image_dir=pictures, fetch=False, log=lambda m: None)
+        return folder
+
+    def test_an_older_printing_tied_with_the_best_but_outside_the_five_nearest_is_still_found(self):
+        # (Codex review, 2026-10-20: with more than five same-art printings tied, an older one just outside `top` was never looked at)
+        folder = self.twins(8)                                                      # p3 and eight twins: nine printings with one picture
+        picture = degraded(synthetic_card(3))
+        search = self.make(Cards(), folder)._search(picture)
+        sims = image_index.similarity(search['distances'])
+        tied = int((sims.max() - sims < printing_check.AGREE_BELOW).sum())
+        self.assertEqual(tied, 9)                                                   # p3 and the eight twins: more than the five rows of `top`
+        self.assertEqual(len(search['top']), 5)
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        for older in [f't{n}' for n in range(8)] + ['p3']:                         # whichever of the nine is the old one - five of them are in `top`, four are not
+            check = self.make(Cards(old={older}), folder)
+            self.assertIsNone(check.upright(picture, needs_marker=True), older)
+            net.probability.reset_mock()
+            check.live_read(picture, None, None, net, accept_image_alone=True)
+            net.probability.assert_not_called()
+        self.assertIsNotNone(self.make(Cards(), folder).upright(picture, needs_marker=True))      # all nine modern: allowed
+
+    def test_too_many_tied_printings_is_too_ambiguous_to_say(self):
+        folder = self.twins(8)
+        picture = degraded(synthetic_card(3))
+        with mock.patch.object(printing_check, 'MARKER_MAX_TIED', 3):
+            self.assertIsNone(self.make(Cards(), folder).upright(picture, needs_marker=True))      # nine tied, all modern, but more than the cap
+        self.assertIsNotNone(self.make(Cards(), folder).upright(picture, needs_marker=True))
+
+    def test_a_printing_the_card_data_does_not_have_is_not_a_marker_layout(self):
+        class Lacking(Cards):
+            def get_card_by_id(self, printing_id):
+                return None if printing_id == 'p3' else super().get_card_by_id(printing_id)
+        picture = degraded(synthetic_card(3))
+        self.assertIsNone(self.make(Lacking()).upright(picture, needs_marker=True))
+        class Failing(Cards):
+            def get_card_by_id(self, printing_id):
+                raise RuntimeError('database is locked')
+        self.assertIsNone(self.make(Failing()).upright(picture, needs_marker=True))           # fails closed, never raises
+
+    def test_without_a_reader_an_orientation_that_is_not_established_keeps_the_network_out(self):
+        # (Codex review, 2026-10-20: the picture alone can pass 0.5 similarity and a printing lead of 0.05 and still be nearly as near to the other orientation -
+        # the fixed crop would then be cut from the wrong way up, and the network's confident answer would be recorded as the finish)
+        picture = degraded(synthetic_card(3))
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        with mock.patch.object(printing_check, 'ORIENTATION_MIN_MARGIN', 2.0):
+            reading = self.check.live_read(picture, None, None, net, accept_image_alone=True)
+        self.assertEqual((reading['path'], reading['card']['id']), ('image', 'p3'))        # the printing is still decided by the picture
+        net.probability.assert_not_called()                                                # but the network was not asked
+        self.assertNotEqual(reading['finish']['source'], 'network')                        # so the finish is not its guess
+        with mock.patch.object(printing_check, 'ORIENTATION_MIN_SIMILARITY', 2.0):
+            net.probability.reset_mock()
+            self.check.live_read(picture, None, None, net, accept_image_alone=True)
+            net.probability.assert_not_called()
+
+    def test_with_a_reader_the_orientation_floor_does_not_apply_to_the_ocr_read(self):
+        # the OCR finds the set line wherever it is: the network at the OCR's box needs no orientation confidence from the search
+        picture = degraded(synthetic_card(3))
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        reader = FakeReader(strip_lines(3, symbol=''))                      # a set line with no star or dot read: the network is asked about it
+        with mock.patch.object(printing_check, 'ORIENTATION_MIN_MARGIN', 2.0):    # an orientation margin nothing can reach
+            reading = self.check.live_read(picture, None, reader, net, accept_image_alone=True)
+        net.probability.assert_called_once()                                # still asked: at the OCR's box, which needs no orientation confidence of the search
+        self.assertEqual(reading['finish']['source'], 'network')
+
+    def test_without_a_reader_the_picture_alone_decides_the_printing_and_the_network_the_finish(self):
+        picture = degraded(synthetic_card(3))
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        reading = self.check.live_read(picture, None, None, net, accept_image_alone=True)
+        self.assertEqual((reading['path'], reading['card']['id']), ('image', 'p3'))
+        self.assertEqual((reading['finish']['finish'], reading['finish']['source']), ('foil', 'network'))    # not left to the AI
 
     def test_without_a_reader_no_strip_is_read_and_only_the_picture_alone_can_decide(self):
         # OCR switched off (Identification hands over no reader): the strip cannot name a printing, so there is no 'strong' decision and the picture alone
