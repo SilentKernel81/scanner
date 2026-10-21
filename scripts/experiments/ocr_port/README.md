@@ -36,7 +36,8 @@ differences are not a weaker reader.
 - **Recognition is one line at a time** (`runtimeDefaults.recognitionBatchSize: 1`): batches of 8 padded to the widest line (the config's
   `recognition.batch`) matched 563 of 863 strip lines against 821.
 - **The inference engine does not matter**: the networks on onnxruntime (as light-ocr runs them) instead of OpenCV dnn give the same answers on every
-  strip - so the phone's detector on OpenCV dnn and recognizer on onnxruntime (step 0: 4.14 cannot import the recognizer) change nothing.
+  strip. On the phone (step 0) OpenCV 4.14 could not import the recognizer and onnxruntime ran it; the app then moved to **OpenCV 5.0**, whose dnn loads
+  it and gives onnxruntime's answers to 2.3e-5 of a probability on the Pixel - one engine for both networks, 23 MB less native library.
 - **Tried and worse** (strip lines identical, of 865; the reference as written: 821): the crop's size rounded instead of truncated 821 (the same),
   a linear warp 765, the boxes not rounded back in the picture 582, the content width truncated 797 / rounded 811, the line resized with
   INTER_LINEAR_EXACT 764, AREA 473, CUBIC 627, normalised before resizing 714, warped straight to 48 px high 603. What is left is sub-pixel arithmetic

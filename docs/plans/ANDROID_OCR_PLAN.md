@@ -14,6 +14,10 @@ server's OCR read its star; and without OCR there is no `strong` decision and no
   OCR, then the AI.
 - **The gate stays parity on TEXTS** (not boxes): the confetti Bolt's star must come out of the Kotlin reader as the character the server's reader gives.
 - The strip-only read is timed on its own: it decides whether the full-card OCR is needed for most cards.
+**Step 0 done (2026-10-21, on the Pixel 10)**: both networks load and run - on **OpenCV 5.0**, to which the app moved (4.14 refused the recognizer:
+its input width is dynamic; onnxruntime ran it meanwhile and gives the same answers to 2.3e-5; with 5.0 it is not needed - 23 MB less native library).
+OpenCV 5 moved the geometry functions to `org.opencv.geometry.Geometry`. **Step 1 done**: `scripts/experiments/ocr_port/` (README: the numbers;
+growing the box needs Clipper's integer offset, written out - the plan's "no Clipper needed" was wrong).
 Checked before resuming: the recognizer's dictionary has the star and the dot (and the lookalikes the parser treats: `·`, `*`, `☆`, `●`). Since the same day a
 confirmed printing whose finish nothing read goes to review on both sides (never added as regular): an unread marker costs a review, not a wrong finish.
 
