@@ -48,6 +48,17 @@ IMAGE_MIN_SIMILARITY = 0.5
 STRONG_MIN_SIMILARITY = 0.30
 ACCEPT_THRESHOLDS = {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY}
 
+# How far ahead of the second printing the picture's best match must be for the full-card OCR's NAME to be no longer needed to confirm a decision by the picture
+# alone (confirm_by_ocr): the collector line is still checked. Measured 2026-10-21 (scripts/experiments/image_match/lead_waiver.py, 428 real pictures with known truth):
+# with every printing of the card removed from the index - a card newer than the card data, what the name check is there for - the picture's best match led the second
+# by a median of 0.005 and never by more than 0.052 (best similarity never above 0.58): 0 of 428 such pictures would be added as another card at 0.08 or above. With the
+# index complete, 257 of 386 right picture-alone decisions lead by 0.10 or more. 0.10 is about twice the highest lead a missing card reached. The live case it is for: a
+# Secret Lair that prints ANOTHER card's name (the Deadpool Sol Ring prints "Worn Powerstone"), which no OCR read can confirm - six live scans, leads 0.12 to 0.19.
+# What it does NOT cover: which printing, when the right one is missing from the index (the picture then picks a same-art reprint with a high lead) - that is the
+# collector line's job, which stays.
+LEAD_WAIVES_NAME = 0.10
+CONFIRM_THRESHOLDS = {'lead_waives_name': LEAD_WAIVES_NAME}
+
 # What the strip's whole line names, as the caller looked it up (facts['strip_names']); and what the full-card OCR's line names (ocr['line_names'])
 STRIP_NAMES = (None, 'chosen', 'indexed_other', 'unindexed', 'unknown', 'lookup_failed')
 LINE_NAMES = (None, 'chosen', 'same_card', 'other_card', 'unknown', 'lookup_failed')
@@ -153,16 +164,32 @@ def accept_printing(decision, facts, thresholds: Optional[dict] = None):
     return {'accepted': not needs_ocr, 'refused': None, 'needs_ocr': needs_ocr}
 
 
-def confirm_by_ocr(ocr):
+def confirm_by_ocr(ocr, lead=None, thresholds: Optional[dict] = None):
     """
     Does the full-card OCR confirm the printing the picture alone chose? ocr: {'name_matches': the name it read is the chosen card's (the caller's names_match; False when it
     read nothing or failed), 'line_names': what the whole collector line it read names, looked up by the caller - None (no whole line), 'chosen' (the very printing),
     'other_card' (another card's printing: a Secret Lair prints one by design, or a misread number - no evidence about this card), 'same_card' (another printing of the SAME
     card, by oracle id), 'unknown' (a printing the card data lacks), 'lookup_failed' (the card data could not say)}.
-    The name must match; and a line naming another printing of the same card, a printing the card data lacks, or one that cannot be looked up refuses it.
+    The name must match - unless the picture's best match leads the second by at least thresholds['lead_waives_name'] (lead: decide_printing's answer; None: not given): then
+    the picture has said which CARD it is better than a name OCR read (a Secret Lair prints another card's name; a name is misread), and an OCR that read nothing or another
+    name no longer refuses it. Nor is the name needed when the whole collector line it read (set AND number) names EXACTLY the printing the picture chose ('chosen'):
+    two independent readings agree on the printing - and a Secret Lair cannot fake that, it prints ANOTHER card's line. Either way, a line naming another printing of the same card, a printing the card data lacks, or one that cannot be looked up refuses it - the
+    printing is the line's to check, which the lead says nothing about.
+    And neither stands in for the name when the name it read is ANOTHER card's that a whole collector line names too (ocr['name_of_other_line']: the OCR's line or the
+    strip's - the caller looked it up; absent: False): two readings then agree on a different card, a contradiction no lead overrules (a Codex review of 2026-10-21) - the
+    card goes on to the OCR path and the AI as before the waiver.
+    And a STRIP whose whole line names another printing of the same card (ocr['strip_names'] == 'same_card', looked up by the caller like line_names; absent: None)
+    refuses whatever the name and the lead, exactly as the OCR's own line does: the picture chose A, a readable collector line says B (a second Codex review of
+    2026-10-21). accept_printing lets a strip naming another indexed printing through to here; this is where it is checked.
     Returns {'accepted': bool, 'refused': None | 'ocr_did_not_confirm'}.
     """
     ocr = ocr or {}
-    if ocr.get('name_matches') and ocr.get('line_names') in (None, 'chosen', 'other_card'):
+    waive = (thresholds or CONFIRM_THRESHOLDS)['lead_waives_name']
+    if ocr.get('strip_names') == 'same_card':
+        return {'accepted': False, 'refused': OCR_DID_NOT_CONFIRM}       # the strip names another printing of this card
+    if not ocr.get('name_matches') and ocr.get('name_of_other_line'):
+        return {'accepted': False, 'refused': OCR_DID_NOT_CONFIRM}       # the name and a line both name another card
+    name_ok = bool(ocr.get('name_matches')) or (lead is not None and lead >= waive) or ocr.get('line_names') == 'chosen'
+    if name_ok and ocr.get('line_names') in (None, 'chosen', 'other_card'):
         return {'accepted': True, 'refused': None}
     return {'accepted': False, 'refused': OCR_DID_NOT_CONFIRM}

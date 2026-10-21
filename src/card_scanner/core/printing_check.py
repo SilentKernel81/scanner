@@ -143,7 +143,7 @@ def read_strip(ocr, card_rgb):
     return card_ocr.parse_strip(lines) if lines else ('', '')
 
 
-def ocr_agrees(read, card, printing_at):
+def ocr_agrees(read, card, printing_at, lead=None, strip=None):
     """
     Whether a full-card OCR read (card_ocr.parse_magic: name, collector_number, set_code) CONFIRMS the printing the picture alone chose (a card dict: name, flavor_name, set_code,
     number). Its name must be the card's (database.names_match - a face, the flavor name, a misread forgiven). And when it read a whole collector line (a set AND a number) that is
@@ -157,38 +157,68 @@ def ocr_agrees(read, card, printing_at):
     (scripts/experiments/image_match/confirm_cost.py) both ask this one. Since step 5 of docs/plans/READING_REVIEW_2026-10-21_PLAN.md it is two halves: ocr_facts gathers (the
     names_match, the lookup, the oracle-id comparison) and the pure core/reading/decide.confirm_by_ocr decides - so the Android app passes the same case file.
     """
-    return confirm_by_ocr(ocr_facts(read, card, printing_at))['accepted']
+    # lead: the picture's lead over the second printing - from decide.LEAD_WAIVES_NAME on, the name is not needed (decide.confirm_by_ocr)
+    # strip: the strip's read ({'set', 'number'}), the second line a name naming another card is checked against (ocr_facts)
+    return confirm_by_ocr(ocr_facts(read, card, printing_at, strip), lead)['accepted']
 
 
-def ocr_facts(read, card, printing_at):
+def _line_names(set_code, number, card, printing_at):
     """
-    What a full-card OCR read says about the printing the picture alone chose, as decide.confirm_by_ocr takes it: {'name_matches', 'line_names'} (see there). Every lookup is
-    here; a read of nothing, no card, or a name that is not the card's is {'name_matches': False} (the line is not looked up then - it could not change the answer).
+    What a whole collector line (a set AND a number) names, next to the printing the picture chose: (None | 'chosen' | 'other_card' | 'same_card' | 'unknown' |
+    'lookup_failed', the printing it names or None) - see decide.confirm_by_ocr for the values. A part of a line (only a set, only a number) names nothing: (None, None).
     """
-    if not read or not read.get('name') or not card:
-        return {'name_matches': False, 'line_names': None}
-    if not database_names_match(read['name'], {'name': card.get('name'), 'flavor_name': card.get('flavor_name')}):
-        return {'name_matches': False, 'line_names': None}
-    number, set_code = (read.get('collector_number') or '').strip(), (read.get('set_code') or '').strip().lower()
+    number, set_code = (number or '').strip(), (set_code or '').strip().lower()
     if not (number and set_code):
-        return {'name_matches': True, 'line_names': None}                  # no whole line: the name decides
+        return None, None                                                  # no whole line
     if set_code == (card.get('set_code') or '').lower() and plain_number(number).lower() == plain_number(card.get('number')).lower():
-        return {'name_matches': True, 'line_names': 'chosen'}              # the very printing the picture chose
+        return 'chosen', None                                              # the very printing the picture chose
     try:
         named = printing_at(set_code, number)
     except Exception as e:
-        logger.debug(f"Printing check: the OCR's collector line could not be looked up: {e}")
-        return {'name_matches': True, 'line_names': 'lookup_failed'}       # cannot say what it names: not confirmed
+        logger.debug(f"Printing check: a collector line could not be looked up: {e}")
+        return 'lookup_failed', None                                       # cannot say what it names: not confirmed
     if not named:
-        return {'name_matches': True, 'line_names': 'unknown'}             # a printing the card data does not have
+        return 'unknown', None                                             # a printing the card data does not have
     # The same card: the same oracle id - or, when either lacks one, the same name exactly (never names_match's forgiveness, which is for OCR misreads: it takes
     # Lightning Strike for Lightning Bolt, and the Secret Lair's printed line would then count as another printing of the Bolt)
     if named.get('oracle_id') and card.get('oracle_id'):
         same_card = named['oracle_id'] == card['oracle_id']
     else:
         same_card = (database_search_key(named.get('name')) or '') == (database_search_key(card.get('name')) or '-')
-    # another printing of this card: not confirmed; another card's line: no evidence about this card's printing, the name decides
-    return {'name_matches': True, 'line_names': 'same_card' if same_card else 'other_card'}
+    return ('same_card' if same_card else 'other_card'), named
+
+
+def ocr_facts(read, card, printing_at, strip=None):
+    """
+    What a full-card OCR read says about the printing the picture alone chose, as decide.confirm_by_ocr takes it: {'name_matches', 'line_names', 'name_of_other_line',
+    'strip_names'} (see there). Every lookup is here. A read of nothing is {'name_matches': False, 'line_names': None, 'name_of_other_line': False} and what the strip's
+    line names (strip_names: the same values as line_names, None without a strip or a whole line in it). The line is looked up
+    WHATEVER the name says: since a clear lead can stand in for the name (decide.LEAD_WAIVES_NAME, 2026-10-21) the line is then the only check left on the printing - a
+    misread name must not hide a line naming another printing.
+    strip: the strip's own read ({'set', 'number'}, live_read's reading['strip']; None: not given) - the second collector line name_of_other_line is checked against.
+    name_of_other_line: the name the OCR read is not the chosen card's but IS the card a whole collector line names - the OCR's own line, or the strip's. Two readings
+    then point at the same OTHER card, which is a contradiction, not a misread (a Codex review of 2026-10-21: the lead waiver let a picture overrule exactly that). A
+    Secret Lair that prints another card's name shows it with a part of a line at most (the Deadpool Sol Ring: 'Worn', 'SCD' and no number), so this costs the
+    waiver nothing measured (confirm_cost.py --with-lead).
+    """
+    if not card:
+        return {'name_matches': False, 'line_names': None, 'name_of_other_line': False, 'strip_names': None}
+    # The strip's whole line, looked up whatever the OCR read - also when it read nothing: a strip naming another printing of the SAME card refuses the picture alone
+    # whatever its lead and whatever name was read (decide.confirm_by_ocr; a Codex review of 2026-10-21 - the lead says which card, never which printing)
+    strip_names, strip_named = _line_names(strip.get('set'), strip.get('number'), card, printing_at) if strip else (None, None)
+    if not read:
+        return {'name_matches': False, 'line_names': None, 'name_of_other_line': False, 'strip_names': strip_names}
+    name = read.get('name')
+    name_matches = bool(name) and database_names_match(name, {'name': card.get('name'), 'flavor_name': card.get('flavor_name')})
+    line_names, named = _line_names(read.get('set_code'), read.get('collector_number'), card, printing_at)
+    name_of_other_line = False
+    if name and not name_matches:
+        # the other cards a whole line names: the OCR's and the strip's
+        others = [o for names, o in ((line_names, named), (strip_names, strip_named)) if names == 'other_card']
+        name_of_other_line = any(database_names_match(name, {'name': o.get('name'), 'flavor_name': o.get('flavor_name')}) for o in others)
+    # another printing of this card: not confirmed; another card's line: no evidence about this card's printing, the name (or the lead) decides - unless the name
+    # read IS that other card's
+    return {'name_matches': name_matches, 'line_names': line_names, 'name_of_other_line': name_of_other_line, 'strip_names': strip_names}
 
 
 def prints_a_marker(card):

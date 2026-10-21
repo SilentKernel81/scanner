@@ -788,7 +788,14 @@ class InIdentification(unittest.TestCase):
         self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '0245', 'set_code': 'HOB'}))    # ANOTHER printing of the same card (Codex)
         self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '242', 'set_code': 'LTR'}))     # same number, another set: the same card again
         self.assertFalse(agrees({'name': 'Gandalf the Grey', 'collector_number': '0009', 'set_code': 'ZZZ'}))    # a printing the card data does not have
-        self.assertFalse(agrees({'name': 'Saruman', 'collector_number': '242', 'set_code': 'HOB'}))              # another name
+        self.assertFalse(agrees({'name': 'Saruman', 'collector_number': '', 'set_code': ''}))                    # another name, no line: refused
+        self.assertFalse(agrees({'name': 'Saruman', 'collector_number': '245', 'set_code': 'HOB'}))              # another name, and the line names another printing
+        # another name, but the whole line names EXACTLY the printing the picture chose (since 2026-10-21, decide.confirm_by_ocr): the picture and the collector line
+        # agree on the printing - the evidence a 'strong' decision of rule A2 is made on - and the name is taken as misread
+        self.assertTrue(agrees({'name': 'Saruman', 'collector_number': '242', 'set_code': 'HOB'}))
+        # and a picture far enough ahead needs no name at all, its line still checked (decide.LEAD_WAIVES_NAME)
+        self.assertTrue(printing_check.ocr_agrees({'name': 'Saruman', 'collector_number': '', 'set_code': ''}, card, printing_at, lead=0.125))
+        self.assertFalse(printing_check.ocr_agrees({'name': 'Saruman', 'collector_number': '245', 'set_code': 'HOB'}, card, printing_at, lead=0.125))
         # a line that names a DIFFERENT card says nothing about this card's printing: a Secret Lair's printed line, an OCR misread of the number
         bolt = {'name': 'Lightning Bolt', 'flavor_name': None, 'set_code': 'sld', 'number': 'IFIYW-2', 'oracle_id': 'o-bolt'}
         self.assertTrue(agrees({'name': 'Lightning', 'collector_number': '042', 'set_code': 'GN2'}, bolt))
@@ -813,14 +820,52 @@ class InIdentification(unittest.TestCase):
 
     def test_a_strip_naming_another_existing_card_and_an_ocr_that_disagrees_keep_the_picture_from_adding_it(self):
         # (fourth Codex review: a readable strip that contradicts the picture skipped the name check)
-        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '42', 'set': 'gn2'}}
+        # (lead 0.0625: a picture not sure enough for its lead alone to stand in for the name - decide.LEAD_WAIVES_NAME, 2026-10-21)
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '42', 'set': 'gn2'}, 'lead': 0.0625}
         self.ocr_read.update(name='Lightning Strike')                              # OCR reads what the strip says, not what the picture chose
         with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
             self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
 
+    def test_a_name_and_a_line_both_naming_another_card_refuse_the_picture_whatever_its_lead(self):
+        # (a Codex review of 2026-10-21: the lead waiver let a picture far ahead overrule a full-card OCR that read another card's name, where a whole collector line -
+        # the strip's or the OCR's own - names that same other card: two readings agreeing on a different card is a contradiction, not a misread)
+        self.ident.evidence.printings[('gn2', '42')] = {'name': 'Lightning Strike', 'oracle_id': 'o-strike'}
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '42', 'set': 'gn2'}, 'lead': 0.25}
+        self.ocr_read.update(name='Lightning Strike')                              # the strip's line and the OCR's name: Lightning Strike, not the picture's Gandalf
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            # the same with the OCR's OWN line naming it, and no strip
+            self.ident.evidence.reading['strip'] = {'number': '', 'set': ''}
+            self.ocr_read.update(collector_number='042', set_code='GN2')
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            # ... while another card's line under a name that is NOT that card's (a misread number, words of the text box) is still no evidence: the lead stands
+            self.ocr_read.update(name='WASHINGTONDC')
+            self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
+
+    def test_a_strip_naming_another_printing_of_the_same_card_refuses_the_picture_whatever_its_lead(self):
+        # (a second Codex review of 2026-10-21: the strip's line was only checked against the name - a strip naming printing B of the card whose printing A the picture
+        # chose let the lead add A, with an OCR that read nothing or another name. The lead says which card, never which printing: the strip's line refuses it)
+        self.ident.evidence.printings[('hob', '245')] = {'id': 'p4', 'name': 'Gandalf', 'oracle_id': 'o-gandalf'}
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '245', 'set': 'hob'}, 'lead': 0.25,
+                                       'card': {**READING['card'], 'oracle_id': 'o-gandalf'}}
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.ocr_read.update(name='Worn')                                                    # another name, no line
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: None                 # nothing read at all
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: dict(self.ocr_read, name='Gandalf')   # even the card's own name
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+            # ... and the same strip naming the printing the picture chose is no contradiction: the lead stands
+            self.ident.evidence.reading['strip'] = {'number': '242', 'set': 'hob'}
+            self.ocr_read.update(name='Worn')
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: dict(self.ocr_read)
+            self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
+
     # ----- the picture alone with nothing from the strip: with OCR on, its name must agree (third Codex review: a card newer than the card data)
     def picture_alone_without_strip(self):
-        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}}       # READING's card: 'Gandalf'
+        # READING's card: 'Gandalf'. Lead 0.0625: over the picture alone's IMAGE_LEAD, under decide.LEAD_WAIVES_NAME - the name is still needed (since 2026-10-21 a
+        # clearer lead stands in for it: see the tests of the waiver below)
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}, 'lead': 0.0625}
         return mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True)
 
     def test_the_picture_alone_is_added_when_ocr_reads_the_same_name(self):
@@ -841,6 +886,28 @@ class InIdentification(unittest.TestCase):
             self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
             self.ident.card_ocr.read_card.side_effect = RuntimeError('reader gone')
             self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+
+    def test_a_picture_far_enough_ahead_needs_no_name_but_its_line_is_still_checked(self):
+        # decide.LEAD_WAIVES_NAME (2026-10-21): the Deadpool Sol Ring prints 'Worn Powerstone' - no OCR read of its name can confirm it, the picture leads by 0.12-0.19
+        with self.picture_alone_without_strip():
+            self.ident.evidence.reading['lead'] = 0.125
+            self.ocr_read.update(name='Worn', set_code='SCD', collector_number='')
+            info, _task = self.ident._read_by_picture(self.image, self.image)
+            self.assertEqual(info['printing_id'], 'p3')
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: None                     # nothing read: the lead alone, as with OCR off
+            self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
+            # ... but a whole line naming ANOTHER printing of the same card still refuses: the lead says which card, not which printing
+            self.ident.card_ocr.read_card.side_effect = lambda image, game: {'name': 'Worn', 'collector_number': '245', 'set_code': 'HOB', 'foil': 'unknown'}
+            self.ident.evidence.printings[('hob', '245')] = {'id': 'p4', 'name': 'Gandalf', 'oracle_id': 'o-gandalf'}
+            self.ident.evidence.reading['card'] = {**READING['card'], 'oracle_id': 'o-gandalf'}
+            self.assertIsNone(self.ident._read_by_picture(self.image, self.image))
+
+    def test_a_line_naming_the_very_printing_confirms_without_the_name(self):
+        # a picture under the waiver's lead, a misread name, and the whole collector line naming exactly the printing the picture chose: two readings agree
+        self.ocr_read.update(name='Gandalph', set_code='HOB', collector_number='242')
+        with self.picture_alone_without_strip():
+            info, _task = self.ident._read_by_picture(self.image, self.image)
+        self.assertEqual(info['printing_id'], 'p3')
 
     def test_with_ocr_off_the_picture_alone_is_not_asked_to_agree_with_anything(self):
         # the person's 'picture only' configuration: nothing else to agree with - its trade-off, documented

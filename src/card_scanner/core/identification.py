@@ -338,7 +338,7 @@ class Identification:
             # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);
             # and a strip naming ANOTHER existing printing is a contradiction the picture alone must not overrule unconfirmed (a fourth). Not agreeing: the card is in doubt,
             # and the OCR path below reads it as any other.
-            if not self._ocr_names(image, card):
+            if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip')):
                 self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
                 return None
         reading_record.note('decision', accepted=True)
@@ -353,7 +353,7 @@ class Identification:
         self.log(self._said_by_ocr(info), level="success")
         return info, None
 
-    def _ocr_names(self, image, card):
+    def _ocr_names(self, image, card, lead=None, strip=None):
         """
         Whether the full-card OCR confirms the printing the picture alone chose (printing_check.ocr_agrees): the same name, and nothing of the collector line it read naming
         another printing - not a set code or a number that are not the card's. False when it reads nothing, contradicts it, or fails.
@@ -367,13 +367,15 @@ class Identification:
             reading_record.refuse(reading_record.OCR_DID_NOT_CONFIRM, ocr_name=None, ocr_line=None, ocr_error=str(e))
             return False
         # printing_check.ocr_agrees, in its two halves, so that the reading log gets the facts as well as the answer
-        facts = ocr_facts(read, card, printing_at)
-        agrees = confirm_by_ocr(facts)['accepted']
+        facts = ocr_facts(read, card, printing_at, strip)          # strip: the strip's line, the second one a name naming another card is checked against
+        agrees = confirm_by_ocr(facts, lead)['accepted']      # lead: a picture far enough ahead of the second printing needs no name (decide.LEAD_WAIVES_NAME)
         # The reading log: what the full-card OCR read for this confirmation, whether it confirmed the picture or not (before 2026-10-21 only a refusal was
         # written down, so a confirmed picture-alone card showed no OCR at all) - and the two facts the decision was made on (decide.confirm_by_ocr)
         reading_record.note('ocr', read=bool(read), name=(read or {}).get('name'), collector_number=(read or {}).get('collector_number'),
                             set_code=(read or {}).get('set_code'), foil=(read or {}).get('foil'), confirms_picture=agrees,
-                            name_matches=facts['name_matches'], line_names=facts['line_names'])
+                            name_matches=facts['name_matches'], line_names=facts['line_names'], name_of_other_line=facts['name_of_other_line'],
+                            strip_names=facts['strip_names'],
+                            name_waived=agrees and not facts['name_matches'])   # confirmed by the lead and the line, without the name
         if not agrees:
             # what the OCR read instead - nothing (None: the reader read nothing, or was down in its cool-down), another name, or a line naming another printing
             line = f"{read.get('set_code') or ''} {read.get('collector_number') or ''}".strip() if read else None

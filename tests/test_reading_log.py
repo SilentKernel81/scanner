@@ -258,7 +258,7 @@ class InIdentification(unittest.TestCase):
         self.assertEqual((data['refused'], data['index_covers']), (record.IMAGE_ALONE_OFF, None))
 
     def test_an_ocr_that_does_not_confirm_the_picture_alone_is_named_with_what_it_read(self):
-        self.ident.evidence.reading = {**READING, 'path': 'image'}
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'lead': 0.0625}      # not sure enough for the lead to stand in for the name
         self.ocr_read = {'name': 'Frodo', 'collector_number': '17', 'set_code': 'LTR', 'foil': 'unknown'}
         info, data = self.identify('review')
         self.assertNotIn('printing_id', info)          # the picture's choice was not taken
@@ -276,13 +276,13 @@ class InIdentification(unittest.TestCase):
         self.assertEqual((data['ocr']['confirms_picture'], data['ocr']['name_matches'], data['ocr']['line_names']), (True, True, 'chosen'))
 
     def test_a_refusal_records_the_facts_it_was_made_on(self):
-        self.ident.evidence.reading = {**READING, 'path': 'image'}
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'lead': 0.0625}      # not sure enough for the lead to stand in for the name
         self.ocr_read = {'name': 'Worn', 'collector_number': '', 'set_code': 'SCD', 'foil': 'unknown'}     # a Secret Lair printing another card's name
         _info, data = self.identify('review')
         self.assertEqual((data['ocr']['confirms_picture'], data['ocr']['name_matches'], data['ocr']['line_names']), (False, False, None))
 
     def test_an_ocr_that_read_nothing_is_named_with_nothing(self):
-        self.ident.evidence.reading = {**READING, 'path': 'image'}
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'lead': 0.0625}      # not sure enough for the lead to stand in for the name
         self.ocr_read = None                            # the reader read nothing (or was down in its cool-down)
         _info, data = self.identify('review')
         self.assertEqual((data['refused'], data['refused_ocr_name'], data['refused_ocr_line']), (record.OCR_DID_NOT_CONFIRM, None, None))

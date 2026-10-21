@@ -56,8 +56,10 @@ game sits behind one interface (`games/`), so another could be added.
   data update, until its button is pressed), a picture alone adds nothing - the Scanner pages and the Picture settings say so, with a link.
   With OCR on, a card the picture alone decides must also be confirmed - its collector line must not name a printing the card data lacks,
   and OCR must read the same name and no other printing of the same card - so a card newer than the card data is not added as its best
-  match. The price: cards whose title OCR cannot read (a Secret Lair's sticker, a styled title) - 20 of 49 such decisions in the data, all
-  of them right - go on to OCR, the AI or review instead.
+  match. The price: cards whose title OCR cannot read (a Secret Lair's sticker, a styled title) went on to OCR, the AI or review - 20
+  of 49 such decisions in the data, all of them right. Since 2026-10-21 a picture far ahead of the second-nearest printing needs no name
+  (6 of 49 refused then, all right, none more wrong - measured on saved pictures with the real OCR); a collector line naming another
+  printing of the same card, or another card whose name OCR read, still refuses it. Not yet seen on a live scan.
 - **OCR in doubt:** a local text reader gets the name, collector number and set code in about
   0.1 s on a GPU (0.7 s on a CPU) for what the picture does not settle.
 - **A vision AI last,** only when neither the picture nor OCR can confirm (full-art and borderless cards, a soft

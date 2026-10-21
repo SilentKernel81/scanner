@@ -127,7 +127,7 @@ class InIdentification(unittest.TestCase):
         self.ident.card_identifier = None
         self.ident.foil_marker = None
         self.ident.settings = mock.Mock(get=lambda key, default=None: {'reading_mode': 'evidence'}.get(key, default))
-        self.ident.evidence = FakeEvidence({**READING, 'path': 'image'})      # the picture alone decided
+        self.ident.evidence = FakeEvidence({**READING, 'path': 'image', 'lead': 0.0625})      # the picture alone decided, not sure enough to need no name
         self.ident._ai_foil_check = lambda foil_image: False
         self.ident.card_ocr = mock.Mock()
         self.ident.card_ocr.read_card.side_effect = lambda image, game: {'name': 'Frodo', 'collector_number': '', 'set_code': '', 'foil': 'unknown'}

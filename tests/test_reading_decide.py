@@ -176,7 +176,7 @@ class Guards(unittest.TestCase):
             if case['kind'] == 'accept':
                 got = decide.accept_printing(case['decision'], case['facts'], case.get('thresholds'))
             else:
-                got = decide.confirm_by_ocr(case['ocr'])
+                got = decide.confirm_by_ocr(case['ocr'], case.get('lead'), case.get('thresholds'))
             self.assertEqual(got, case['expected'], case['name'])
 
     def test_every_guard_and_every_way_through_has_a_case(self):
@@ -194,7 +194,7 @@ class Guards(unittest.TestCase):
             if case['kind'] == 'accept':
                 decide.accept_printing(given['decision'], given['facts'])
             else:
-                decide.confirm_by_ocr(given['ocr'])
+                decide.confirm_by_ocr(given['ocr'], given.get('lead'))
             self.assertEqual(given, case, case['name'])
 
     def test_the_floors_are_the_servers(self):
@@ -203,6 +203,7 @@ class Guards(unittest.TestCase):
         self.assertEqual((decide.IMAGE_MIN_SIMILARITY, decide.STRONG_MIN_SIMILARITY),
                          (printing_check.IMAGE_MIN_SIMILARITY, printing_check.STRONG_MIN_SIMILARITY))
         self.assertEqual(decide.ACCEPT_THRESHOLDS, {'image_min_similarity': 0.5, 'strong_min_similarity': 0.30})
+        self.assertEqual(decide.CONFIRM_THRESHOLDS, {'lead_waives_name': 0.10})     # measured: scripts/experiments/image_match/lead_waiver.py
 
     def test_the_log_writes_the_same_names(self):
         from card_scanner.core.reading import record

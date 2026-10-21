@@ -4,7 +4,8 @@ What the confirmation by OCR costs (a fourth Codex review of 2026-10-20: with OC
 whatever the strip says). Every evaluation picture and the 15 Deadpool captures through live_read with the real OCR reader and the picture alone allowed; for each 'image' decision the
 full-card OCR reads the card, and database.names_match says whether it read the chosen card's name. Counted against the truth: confirmed / refused, right / wrong.
 
-    MTG_SCANNER_HOME=<repo> venv/bin/python -I scripts/experiments/image_match/confirm_cost.py [--easy 1500]
+    MTG_SCANNER_HOME=<repo> venv/bin/python -I scripts/experiments/image_match/confirm_cost.py [--easy 1500] [--with-lead]
+--with-lead: the rule since 2026-10-21, the picture's lead given (decide.LEAD_WAIVES_NAME); without it, the name alone as before (for the comparison)
 """
 import argparse
 import json
@@ -26,6 +27,7 @@ from common import HOME, OUT, TRUTH, read
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--easy', type=int, default=1500)
+ap.add_argument('--with-lead', action='store_true', help="the rule since 2026-10-21: the picture's lead (decide.LEAD_WAIVES_NAME) given to ocr_agrees")
 arguments = ap.parse_args()
 database = CardDatabase()
 ocr = card_ocr.CardOcr()
@@ -52,7 +54,9 @@ for path, truth, name in pictures:
     card = reading['card']
     right = card['name'].lower().startswith(name.lower()) if name else card['id'] == truth
     read_info = ocr.read_card(rgb, 'mtg')
-    confirmed = ocr_agrees(read_info, card, database.get_card_by_set_number)
+    # the rule as it was (the name, or nothing) and as it is since 2026-10-21 (a lead of decide.LEAD_WAIVES_NAME stands in for the name; a line naming the very printing too)
+    confirmed = ocr_agrees(read_info, card, database.get_card_by_set_number, lead=reading['lead'] if arguments.with_lead else None,
+                            strip=reading['strip'] if arguments.with_lead else None)
     key = ('confirmed' if confirmed else 'refused', 'right' if right else 'wrong', 'deadpool' if name else 'evaluation')
     counts[key] = counts.get(key, 0) + 1
     if not confirmed:
