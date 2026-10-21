@@ -615,6 +615,27 @@ socket.on('review_item', function(data) {
     renderReview(data);
 });
 
+// What the picture looks like (the server's image index): the nearest printings, as tiles that pick the printing when clicked (the page's one
+// [data-printing] handler). Beside what the AI read, never instead of it; absent without an image index.
+function reviewCandidatesHtml(item) {
+    const candidates = item.candidates || [];
+    if (!candidates.length) return '';
+    const tiles = candidates.map((card, position) => {
+        const thumb = card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '';
+        const suggested = item.card && item.card.id === card.id;
+        const tag = suggested ? 'what was read' : (position === 0 ? 'closest' : '');
+        return `
+            <div class="printing-card review-candidate${suggested ? ' is-suggested' : ''}" data-printing="${escapeHtml(card.id)}"
+                 title="${escapeHtml(card.name || '')} - similarity ${Number(card.similarity).toFixed(2)}">
+                ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name || '')}" loading="lazy">` : ''}
+                <strong>${escapeHtml(card.name || '')}</strong><br>
+                <span class="meta">${escapeHtml((card.set_code || '').toUpperCase())} #${escapeHtml(card.number || '')}</span>
+                ${tag ? `<span class="review-candidate-tag">${tag}</span>` : ''}
+            </div>`;
+    }).join('');
+    return `<div class="review-candidates"><div class="field-label">The picture looks like</div><div class="printing-grid">${tiles}</div></div>`;
+}
+
 function renderReview(item) {
     reviewItem = item;
     setReviewCount(item.total);
@@ -636,6 +657,7 @@ function renderReview(item) {
             <div class="review-side">
                 <div class="field-label">AI read</div>
                 <div class="review-read">${escapeHtml(read)}</div>
+                ${ai.foil === 'unknown' ? '<div class="hint review-finish-hint">The foil marker was not read - check the finish before adding.</div>' : ''}
                 <div class="hint">${escapeHtml(item.captured_at)}${item.station ? ' · from ' + escapeHtml(item.station) : ''}</div>
                 <div class="review-search">
                     <input type="text" id="review-name" placeholder="Card name" value="${escapeHtml(ai.name || '')}">
@@ -643,6 +665,7 @@ function renderReview(item) {
                     <input type="text" id="review-number" placeholder="Number" value="${escapeHtml(ai.number || '')}">
                     <button class="btn btn-small" onclick="reviewSearch()">Search</button>
                 </div>
+                ${reviewCandidatesHtml(item)}
             </div>
         </div>`;
     panel.hidden = false;

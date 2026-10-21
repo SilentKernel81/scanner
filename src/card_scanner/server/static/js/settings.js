@@ -93,6 +93,7 @@ function connect() {
 
     // Card reading
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
+    socket.on('reading_mode_changed', applyReadingState);
     socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running, data.debugger));
     socket.on('ai_provider_set', data => {
         activeProvider = data.provider; activeModel = data.model;
@@ -107,8 +108,9 @@ function connect() {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `Updated: ${data.total_cards.toLocaleString()} cards loaded.`;
-        notify('Card data updated', 'success');
+        notify('Card data updated - the picture index can be updated now (Storage)', 'success');
         loadDatabaseState();
+        loadIndex();
     });
     socket.on('database_update_error', data => {
         $('update-database').disabled = false;
@@ -213,6 +215,7 @@ async function loadCameraSettings() {
     // The server's own settings come with the same answer
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
+    applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
 }
 
@@ -357,6 +360,25 @@ function applyOcrState(enabled, installed) {
         : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
 }
 
+// The reading mode (core/identification.py: reading_mode): off is OCR then the AI as always; on reads a card OCR could not confirm by its picture first
+function applyReadingState(reading) {
+    if (!reading) return;
+    const evidence = reading.mode === 'evidence';
+    $('toggle-reading-evidence').checked = evidence;
+    $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
+    $('toggle-picture-alone').disabled = !evidence;
+    $('reading-evidence-desc').textContent = evidence
+        ? 'On: OCR, then the picture and the collector line, then the vision AI (the last step)'
+        : 'Off: OCR, then the vision AI, as before the picture matching existed';
+    const missing = [];
+    if (reading.index_printings === null || reading.index_printings === undefined) {
+        missing.push('there is no picture index (Storage > Picture index)');
+    }
+    if (!reading.ocr_enabled) missing.push('OCR is switched off');
+    $('reading-status').textContent = (reading.index_printings ? `Image index: ${reading.index_printings.toLocaleString()} printings. ` : '')
+        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
+}
+
 let availableModels = {};
 let activeProvider = null, activeModel = null;
 let aiCredentials = {};
@@ -483,6 +505,22 @@ async function loadPromptSummary() {
 
 function bindReading() {
     $('toggle-ocr').addEventListener('change', event => socket.emit('toggle_ocr', {enabled: event.target.checked}));
+    // The mode is the program's design (the vision AI last): no question either way. The picture-alone switch decides what is added with no one asking: ON asks first,
+    // and the page goes back if it is declined
+    $('toggle-reading-evidence').addEventListener('change', event =>
+        socket.emit('set_reading_mode', {mode: event.target.checked ? 'evidence' : 'cascade'}));
+    $('toggle-picture-alone').addEventListener('change', async event => {
+        const toggle = event.target;
+        if (toggle.checked) {
+            const ok = await confirmDialog({
+                title: 'Add cards the picture alone decided?',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. Leave it off unless you rebuild the index after every card data update and look at what is added.',
+                confirmText: 'Turn on', danger: true
+            });
+            if (!ok) { toggle.checked = false; return; }
+        }
+        socket.emit('set_reading_mode', {accept_image_alone: toggle.checked});
+    });
     $('ai-provider').addEventListener('change', event => {
         const provider = event.target.value;
         renderCredentialField(provider);
@@ -630,6 +668,45 @@ function showCaptureUsage(usage) {
             + `<span>${usage[key].count.toLocaleString()} files, ${formatBytes(usage[key].bytes)}</span></div>`).join('');
 }
 
+// The picture index (server/card_data.py: index_status): how much of the card database it covers, and a running build's progress. The button
+// downloads the pictures of what is missing; while it runs the page asks the server every two seconds how far it is (so it also shows after a reload).
+let indexWatch = null;
+
+function showIndex(state) {
+    const status = $('index-status');
+    const covers = `${state.indexed.toLocaleString()} of ${state.printings.toLocaleString()} printings`;
+    $('update-index').disabled = !!state.running;
+    $('stop-index').hidden = !state.running;
+    $('stop-index').disabled = !!state.stopping;
+    if (state.running) {
+        status.textContent = `Building: ${state.done.toLocaleString()} of ${state.total ? state.total.toLocaleString() : '?'} new pictures done (${covers} covered before).`
+            + (state.stopping ? ' Stopping...' : '');
+        if (!indexWatch) indexWatch = setInterval(loadIndex, 2000);
+        return;
+    }
+    const wasWatching = Boolean(indexWatch);
+    if (indexWatch) { clearInterval(indexWatch); indexWatch = null; }
+    $('update-index').textContent = state.indexed ? 'Update the picture index' : 'Build the picture index';
+    status.textContent = state.indexed ? `Covers ${covers}` + (state.missing ? ` - ${state.missing.toLocaleString()} to add (press the button)` : ' - up to date')
+                                       : `Not built yet (0 of ${state.printings.toLocaleString()} printings)`;
+    if (state.error) status.textContent += ` - the last build did not finish: ${state.error}`;     // stays after a reload: it is not only a notification
+    if (state.built) status.title = `Built ${state.built}`;
+    if (wasWatching) {
+        // It has just ended: say how it went, once
+        if (state.error) notify(`Picture index: ${state.error}`, 'error');
+        else if (state.result) {
+            const r = state.result;
+            notify(r.stopped ? `Stopped: ${plural(r.new, 'picture')} added so far - press the button again to go on`
+                             : `Picture index updated: ${plural(r.new, 'new picture')}`, r.stopped ? 'info' : 'success');
+        }
+    }
+}
+
+async function loadIndex() {
+    const state = await api('/api/image_index');
+    if (state) showIndex(state);
+}
+
 let compressWatch = null;   // the timer that asks how far the compression is, while it runs
 
 function showCompress(info) {
@@ -726,6 +803,14 @@ function bindData() {
             ? `Deleted ${data.deleted_files} picture${data.deleted_files === 1 ? '' : 's'}, freed ${data.freed_megabytes} MB.`
             : `Nothing older than ${data.cleanup_days} days.`;
         showCaptureCopy(data);
+    });
+    $('update-index').addEventListener('click', async () => {
+        const state = await api('/api/image_index/update', {method: 'POST', body: {}});
+        if (state) showIndex(state);
+    });
+    $('stop-index').addEventListener('click', async () => {
+        const state = await api('/api/image_index/stop', {method: 'POST', body: {}});
+        if (state) showIndex(state);
     });
     $('compress-copies').addEventListener('click', async () => {
         const data = await api('/api/storage/compress', {method: 'POST', body: {}});
@@ -852,4 +937,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadBackups();
     loadDatabaseState();
     loadCaptureCopy();
+    loadIndex();
 });

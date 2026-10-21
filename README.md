@@ -51,6 +51,9 @@ machine can still be both here, running the server and a camera station side by 
 
 ## Features
 
+The short list; [docs/FEATURES.md](docs/FEATURES.md) goes through everything the program does,
+section by section, and says what was never tried.
+
 - **Several cameras at once**, each with its own page: live view, review queue, Undo, scanned
   count and inventory location. One shared scanned list, which can be narrowed to one camera -
   to add just that camera's cards to the collection, or clear them and scan its pile again.
@@ -69,12 +72,38 @@ machine can still be both here, running the server and a camera station side by 
   restart; a capture sent twice is one card.
 - **Focus that stays sharp** on a USB webcam: the sharpest position is found once, locked, and
   followed as the pile grows.
-- **Collection** with locations and tags, bulk edits, statistics, backups, import / export
-  (Moxfield, and the app's own CSV), and a **deck builder** for Commander and the 60-card
-  formats with ownership, legality checks, suggestions and preconstructed decks.
+- **A review queue** for what the program is not sure of: you search, pick the printing and
+  finish, and add it - and a button on any entry sends one copy **back to review** when the
+  wrong printing was added.
+- **Collection** with locations and tags, bulk edits, statistics, scheduled backups, and import /
+  export (the app's own CSV, Moxfield, and ManaBox import - not yet tried on a real ManaBox file).
+- **A deck builder** for 12 formats (Commander, Standard, Modern and more) with ownership,
+  legality and colour-identity checks, suggestions from EDHREC, preconstructed decks, and a
+  buy list of the copies you do not own.
+- **Trades and a buy list:** set cards aside for a trade until you confirm it, import someone
+  else's collection file to browse it, and put its cards in a trade as what you would receive,
+  or on a buy list grouped by seller. Kept apart from your own collection.
+- **MTG Arena:** your Arena collection and decks can be imported, and any deck exported for
+  Arena's Import button.
 - **Android app** ([mtg-scanner-android](https://github.com/SilentKernel81/mtg-scanner-android))
   as a station: the phone finds and captures, the server does the rest. It also works on its
   own, without a server.
+
+## Screenshots
+
+<p>
+<img src="docs/images/collection-grid.jpg" width="49%" alt="The collection as card images">
+<img src="docs/images/deck.jpg" width="49%" alt="A deck with its checks, mana curve and cards">
+</p>
+<p>
+<img src="docs/images/trades.jpg" width="49%" alt="A trade: the cards given and the cards received from someone else's collection">
+<img src="docs/images/other-collections.jpg" width="49%" alt="Browsing someone else's imported collection">
+</p>
+
+Left to right: the collection, a deck, a trade, and another person's imported collection. The
+[full list of features](docs/FEATURES.md) has more screenshots (the review queue, statistics,
+the buy list, a station's setup page, the Arena collection). They show the author's own
+collection; the trade and the person it is with are made-up examples.
 
 ## Requirements
 
@@ -474,12 +503,13 @@ tests/               Automated tests (camera ownership, backups, database, a sta
                      where the programs look for their folders, which module may import which)
 deploy/              Everything about Docker: the Dockerfile (images server, client, client-pi) and
                      the compose files - server, server with GPU, camera station, station with a Pi camera
-docs/                How it works, installation, the Docker guide, the manual test list; docs/plans/
+docs/                What it does (FEATURES.md), how it works, installation, the Docker guide, the manual test list; docs/plans/
 scripts/             docker-entrypoint.sh; deploy.sh, start.sh, backup.sh for a setup without Docker;
                      setup_database.py (the card data), cleanup.py (old capture pictures);
                      benchmark_db.py, benchmark_station.py
 ```
 
+[docs/FEATURES.md](docs/FEATURES.md) lists what the program does;
 [docs/PROGRAM_DOCUMENTATION.md](docs/PROGRAM_DOCUMENTATION.md) explains how everything works inside
 (stations, detection, auto-capture, identification, matching, database);
 [docs/INSTALL.md](docs/INSTALL.md) covers installation and [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) is the

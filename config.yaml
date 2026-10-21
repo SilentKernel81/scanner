@@ -119,6 +119,44 @@ database:
 # ocr/ (scripts/deploy.sh does it); switched on/off in Settings
 ocr:
   provider: auto  # auto (GPU through WebGPU/Vulkan when available, else CPU), cpu, webgpu
+  # Read the foil marker (★ foil, • regular) of a card OCR confirmed but could not read the
+  # marker of, with a small network on the set line (core/foil_marker.py) - before the AI's
+  # foil check is asked. One more small OCR request for the cards that need it: the whole read
+  # took 170 ms (median) measured while the GPU was busy training; the strip's OCR alone took
+  # 46-85 ms in the experiment; a quiet server's whole read was not measured
+  foil_marker: true
+
+# Printing check (core/printing_check.py): does the picture look like the printing the server just
+# resolved? A Secret Lair card prints the set and number of the card it is made from, and the AI
+# sometimes names a card the picture is not. shadow: written down in data/logs/printing_check.jsonl
+# (python scripts/printing_check_report.py sums it up), nothing is changed; off. It needs an image
+# index of Scryfall's pictures: Settings > Storage > Picture index, or python scripts/build_image_index.py (about 15 MB; the first build downloads about 12 GB
+# and takes hours, later ones only the new printings); without one it does nothing
+printing_check:
+  mode: shadow
+  # The lookup: also work out what the picture and the strip alone would have answered - the answer
+  # that could replace the vision AI's - and write it beside what the AI answered, to compare on live
+  # scans before anything is switched off. ai_cases: only for cards the AI read or nothing read (about
+  # 3% of the captures); all: every capture, the OCR-confirmed too, at one more small OCR request each;
+  # off. Still log-only: nothing is added, changed or sent to review by it
+  lookup: ai_cases
+
+# How a card is read (core/identification.py; docs/plans/READING_REFACTOR_PLAN.md, phase 3).
+# The vision AI came first because OCR did not read well enough; light-ocr does now, and the picture of a card can be matched against every printing,
+# so the AI is the LAST step, kept until it can be removed:
+#   evidence (the default): light-ocr reads the whole card; for what it does NOT confirm, the picture (a fingerprint matched against every printing -
+#            needs the image index: Settings > Storage > Picture index) and the strip's collector line decide next; only what they do not decide is
+#            asked of the vision AI, and the AI's answer is checked against the picture. Without an index it is the cascade.
+#   cascade: OCR, then the vision AI for what OCR cannot confirm - the reading as it was before the picture matching existed
+# The person's choice wins over this default and needs no rebuild and no restart: Settings > Card reading (guarded by the settings password when there is one),
+# remembered in data/settings.json as "reading_mode" and "reading_accept_image_alone"
+reading:
+  mode: evidence
+  # Also add a card when only the picture decided (the strip did not name a printing the picture agrees with). OFF by default: those cards go to the AI
+  # (or, with no AI, to review). Guarded when on (the best match must be 0.5 similar and the strip must not name a printing the image index lacks), none
+  # wrong on 128 AI-read pictures - but a printing newer than the index with an unreadable strip can still be added that way (4% in a simulation, a stale
+  # index makes it likelier), so it is a separate decision from the mode
+  accept_image_alone: false
 
 # Cleanup Settings
 cleanup:

@@ -1,0 +1,171 @@
+{
+ "_note": "Hand-written cases for core/reading/decide.decide_printing (rule A2): the evidence in, the answer a person working the rule out by hand expects. NOT produced by running the code. Similarities are binary fractions (0.875, 0.859375 = 0.875 - 1/64, 0.84375 = 0.875 - 1/32, 0.8125 = 0.875 - 1/16) so that every gap and lead is exact. Default thresholds: agree_below 0.02, image_lead 0.05. A candidate names the strip's printing when its plain number AND its lower-cased set equal the strip's; the first such candidate (nearest first) is the only one looked at. Any program that decides the same way must pass these files too.",
+ "cases": [
+  {"name": "strip names the best match",
+   "why": "the strip's printing is the nearest: it is confirmed by the picture",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "10", "set": "tst"},
+   "expected": {"path": "strong", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "strip names a reprint with the same art, second nearest",
+   "why": "B looks as much like the picture as A (a gap of 1/64, under 0.02): the strip decides between the two reprints",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.859375, "set": "oth", "number": "77", "oracle_id": "o1", "finishes": ["nonfoil", "foil"]}]},
+   "strip": {"number": "77", "set": "oth"},
+   "expected": {"path": "strong", "printing_id": "B", "lead": 0.015625}},
+
+  {"name": "strip names a printing that looks different (a Secret Lair card)",
+   "why": "the printed line names another printing, with other art: the strip is not believed, the picture decides (lead 0.5)",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "sld", "number": "IFIYW-2", "oracle_id": "o1", "finishes": ["foil"]},
+     {"id": "B", "similarity": 0.375, "set": "gn2", "number": "42", "oracle_id": "o9", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "42", "set": "gn2"},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "strip names a printing that is not among the candidates",
+   "why": "nothing to confirm it with: the picture alone",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "99", "set": "tst"},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "no strip, a clear lead",
+   "why": "the best match leads the second by 1/16 = 0.0625, at least 0.05",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.8125, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": ""},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.0625}},
+
+  {"name": "no strip, no lead (two reprints with one art)",
+   "why": "the picture cannot tell A from B and there is nothing else: review",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.875, "set": "oth", "number": "77", "oracle_id": "o1", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": ""},
+   "expected": {"path": "review", "printing_id": null, "lead": 0.0}},
+
+  {"name": "strip names the second nearest but it is not close enough, and the lead is small",
+   "why": "B names the strip but is 1/32 = 0.03125 below A (not under 0.02): not believed; the lead is 0.03125 (under 0.05): review",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.84375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "11", "set": "tst"},
+   "expected": {"path": "review", "printing_id": null, "lead": 0.03125}},
+
+  {"name": "leading zeros and the case of the set",
+   "why": "the database writes '0172' and 'HOB', the strip reads '172' and 'hob': the same printing",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "HOB", "number": "0172", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "HOB", "number": "0173", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "172", "set": "hob"},
+   "expected": {"path": "strong", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "only a number was read",
+   "why": "a printing is named by its number AND its set: with one of them the strip names nothing; the picture alone",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "10", "set": ""},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "only a set was read",
+   "why": "as above",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": "tst"},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "no candidates (no image index)",
+   "why": "nothing to decide with",
+   "picture": {"rotated": false, "candidates": []},
+   "strip": {"number": "10", "set": "tst"},
+   "expected": {"path": "review", "printing_id": null, "lead": null}},
+
+  {"name": "one candidate, and the strip names it",
+   "why": "the strip's printing is the picture's only candidate: strong (there is no second one, so no lead)",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "10", "set": "tst"},
+   "expected": {"path": "strong", "printing_id": "A", "lead": null}},
+
+  {"name": "one candidate, no strip",
+   "why": "no lead can be measured with one candidate: review",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": ""},
+   "expected": {"path": "review", "printing_id": null, "lead": null}},
+
+  {"name": "two candidates name the strip's printing equally",
+   "why": "the nearest comes first and is the one looked at: A",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil", "foil"]}]},
+   "strip": {"number": "10", "set": "tst"},
+   "expected": {"path": "strong", "printing_id": "A", "lead": 0.0}},
+
+  {"name": "a candidate without a set or a number never names anything",
+   "why": "A has no set and no number; B names the strip but is far below A: not believed; the picture decides",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": null, "number": null, "oracle_id": null, "finishes": []},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "11", "set": "tst"},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "a card found upside down is decided like any other",
+   "why": "the flag only says how the strip was read; the decision is the same as the first case",
+   "picture": {"rotated": true, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "10", "set": "tst"},
+   "expected": {"path": "strong", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "boundary: a gap equal to agree_below is not agreement",
+   "why": "thresholds 0.25 / 0.5, B is exactly 0.25 below A: the test is 'less than', so it is not believed; the lead 0.25 is under 0.5: review",
+   "thresholds": {"agree_below": 0.25, "image_lead": 0.5},
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 1.0, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.75, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "11", "set": "tst"},
+   "expected": {"path": "review", "printing_id": null, "lead": 0.25}},
+
+  {"name": "boundary: a gap just under agree_below is agreement",
+   "why": "thresholds 0.25 / 0.5, B is 0.1875 below A (under 0.25): strong",
+   "thresholds": {"agree_below": 0.25, "image_lead": 0.5},
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 1.0, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.8125, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "11", "set": "tst"},
+   "expected": {"path": "strong", "printing_id": "B", "lead": 0.1875}},
+
+  {"name": "boundary: a lead equal to image_lead is enough",
+   "why": "thresholds 0.25 / 0.5, the lead is exactly 0.5: 'at least', so the picture is believed",
+   "thresholds": {"agree_below": 0.25, "image_lead": 0.5},
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 1.0, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.5, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": ""},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}},
+
+  {"name": "negative similarities",
+   "why": "similarity runs from -1 to 1; only differences matter: the lead is 0.25",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": -0.25, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": -0.5, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "", "set": ""},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.25}},
+
+  {"name": "the strip's set is expected in lower case",
+   "why": "the parse of the strip writes the set lower case (card_ocr.parse_strip); an upper-case 'TST' names nothing: the picture decides",
+   "picture": {"rotated": false, "candidates": [
+     {"id": "A", "similarity": 0.875, "set": "tst", "number": "10", "oracle_id": "o1", "finishes": ["nonfoil"]},
+     {"id": "B", "similarity": 0.375, "set": "tst", "number": "11", "oracle_id": "o2", "finishes": ["nonfoil"]}]},
+   "strip": {"number": "10", "set": "TST"},
+   "expected": {"path": "image", "printing_id": "A", "lead": 0.5}}
+ ]
+}

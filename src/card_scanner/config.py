@@ -170,6 +170,19 @@ class Config:
 
     # light-ocr reader (card_ocr.py): auto (GPU when available), cpu or webgpu
     OCR_PROVIDER = config.get('ocr', 'provider', default='auto')
+    # The foil marker read by a small network where OCR left it unread (core/foil_marker.py)
+    OCR_FOIL_MARKER = config.get('ocr', 'foil_marker', default=True)
+
+    # The printing check (core/printing_check.py): 'shadow' writes down where a capture does not look like the
+    # printing the server resolved and changes nothing; 'off'. It needs an image index (scripts/build_image_index.py)
+    PRINTING_CHECK_MODE = str(config.get('printing_check', 'mode', default='shadow')).strip().lower()
+    # ... and which captures also get the lookup (what the picture and the strip alone would have answered, to compare with the AI's
+    # answer before the AI is switched off): 'ai_cases' (read by the AI, or not read), 'all', 'off'
+    PRINTING_CHECK_LOOKUP = str(config.get('printing_check', 'lookup', default='ai_cases')).strip().lower()
+
+    # How a card is read (core/identification.py): 'evidence' (the default: OCR, then the picture and the collector line, and the vision AI LAST) or 'cascade' (OCR, then the vision AI, as before the picture matching existed)
+    READING_MODE = str(config.get('reading', 'mode', default='evidence')).strip().lower()
+    READING_ACCEPT_IMAGE_ALONE = bool(config.get('reading', 'accept_image_alone', default=False))
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

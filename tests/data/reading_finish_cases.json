@@ -1,0 +1,24 @@
+{
+ "_note": "Hand-written cases for core/reading/decide.decide_finish (the finish as evidence). NOT produced by running the code. Default threshold: sure 0.9. Another program that decides the same way - the Android app - must pass this file too. `net` is the foil network's probability of a foil (null: not asked); `symbol` is what the OCR read in the set line ('foil', 'non-foil', 'unknown'). A threshold is given as {\"sure\": x} when a case needs another.",
+ "cases": [
+  {"name": "a printing that exists in foil only is certain", "finishes": ["foil"], "symbol": "non-foil", "net": 0.01, "expected": {"finish": "foil", "source": "printing"}},
+  {"name": "etched counts as a foil finish", "finishes": ["etched"], "symbol": "unknown", "net": null, "expected": {"finish": "foil", "source": "printing"}},
+  {"name": "foil and etched only is a foil", "finishes": ["foil", "etched"], "symbol": "unknown", "net": null, "expected": {"finish": "foil", "source": "printing"}},
+  {"name": "a printing that exists non-foil only is certain", "finishes": ["nonfoil"], "symbol": "foil", "net": 0.99, "expected": {"finish": "regular", "source": "printing"}},
+  {"name": "a symbol the OCR read as a star stands over the network", "finishes": ["nonfoil", "foil"], "symbol": "foil", "net": 0.01, "expected": {"finish": "foil", "source": "symbol"}},
+  {"name": "a symbol the OCR read as a dot stands over the network", "finishes": ["nonfoil", "foil"], "symbol": "non-foil", "net": 0.99, "expected": {"finish": "regular", "source": "symbol"}},
+  {"name": "no symbol, a network that is sure of a foil", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.95, "expected": {"finish": "foil", "source": "network"}},
+  {"name": "no symbol, a network that is sure of a regular card", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.05, "expected": {"finish": "regular", "source": "network"}},
+  {"name": "boundary: a probability equal to sure is believed as a foil", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.9, "expected": {"finish": "foil", "source": "network"}},
+  {"name": "boundary: 0.1 is NOT sure of a regular card, because 1 - 0.9 is 0.09999999999999998 in floating point", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.1, "expected": {"finish": "unknown", "source": "none"}},
+  {"name": "boundary: 0.09 is sure of a regular card", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.09, "expected": {"finish": "regular", "source": "network"}},
+  {"name": "a network that is not sure either way", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.5, "expected": {"finish": "unknown", "source": "none"}},
+  {"name": "an unread marker is unknown, not regular", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": null, "expected": {"finish": "unknown", "source": "none"}},
+  {"name": "no finishes known and nothing read", "finishes": [], "symbol": "unknown", "net": null, "expected": {"finish": "unknown", "source": "none"}},
+  {"name": "no finishes known, the symbol still counts", "finishes": [], "symbol": "foil", "net": null, "expected": {"finish": "foil", "source": "symbol"}},
+  {"name": "another threshold is used when given", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.7, "thresholds": {"sure": 0.6}, "expected": {"finish": "foil", "source": "network"}},
+  {"name": "another threshold, the regular side starts at 1 - sure = 0.25", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.2, "thresholds": {"sure": 0.75}, "expected": {"finish": "regular", "source": "network"}},
+  {"name": "another threshold: 0.3 is between 0.25 and 0.75, not sure either way", "finishes": ["nonfoil", "foil"], "symbol": "unknown", "net": 0.3, "thresholds": {"sure": 0.75}, "expected": {"finish": "unknown", "source": "none"}},
+  {"name": "an unrecognised symbol is not a symbol", "finishes": ["nonfoil", "foil"], "symbol": "star", "net": null, "expected": {"finish": "unknown", "source": "none"}}
+ ]
+}

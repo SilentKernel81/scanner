@@ -2412,6 +2412,32 @@ input[type="radio"] {
     font: inherit;
 }
 
+/* The printings the capture's picture looks like (scanner.js: reviewCandidatesHtml) */
+.review-candidates {
+    margin-top: 12px;
+}
+
+.review-candidate {
+    position: relative;
+    cursor: pointer;
+}
+
+.review-candidate.is-suggested {
+    outline: 2px solid var(--accent, #3b82f6);
+    outline-offset: -2px;
+}
+
+.review-candidate-tag {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.75em;
+    color: var(--text-muted);
+}
+
+.review-finish-hint {
+    color: var(--warning, #b45309);
+}
+
 @media (max-width: 600px) {
     .review-body {
         grid-template-columns: 1fr;

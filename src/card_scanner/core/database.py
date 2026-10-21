@@ -82,7 +82,9 @@ PROMO_TYPE_LABELS = {
 
 
 # Matches that identify the exact printing (safe to add to the inventory without review)
-CONFIRMED_MATCHES = {'set_number', 'name_number', 'name_set_digit'}
+# 'picture' is not a search: it is the printing the picture and the strip decided on (printing_check.live_read, reading.mode 'evidence'), fetched by its
+# id - Game.card_by_printing tags it, and nothing else produces it
+CONFIRMED_MATCHES = {'set_number', 'name_number', 'name_set_digit', 'picture'}
 
 
 def collector_number_variants(collector_number):
@@ -740,6 +742,12 @@ class CardDatabase:
             labels.append('Etched')
         labels.extend(label for promo, label in PROMO_TYPE_LABELS.items() if promo in card['promo_types'])
         return labels
+
+    def printing_images(self):
+        """(Scryfall id, picture address) of every printing, in id order: what the image index
+        (core/image_index.py) is built from. The address is None for a printing without a picture."""
+        with self._lock:
+            return [(row['id'], row['image_uri']) for row in self.conn.execute('SELECT id, image_uri FROM cards ORDER BY id')]
 
     def get_card_by_id(self, card_id):
         """Get a single printing by its Scryfall id"""

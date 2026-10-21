@@ -86,6 +86,7 @@ class Services:
     review = None             # review.ReviewQueue
     deck_store = None         # decks.DeckManager
     recommend = None          # recommendations.Recommendations
+    printing_check = None     # printing_check.PrintingCheck: does a capture look like the printing the server resolved (shadow mode)
     default_desk = None       # desks.Desk of the camera on this machine (set in server/desks.py)
     debug_mode_running = Config.DEBUG  # Flask's debug mode as this process was started (main)
     debugger_running = False           # ... and whether it includes Werkzeug's interactive debugger (program.debugger_allowed)
@@ -113,6 +114,7 @@ others = LocalProxy(lambda: services.others)
 review = LocalProxy(lambda: services.review)
 deck_store = LocalProxy(lambda: services.deck_store)
 recommend = LocalProxy(lambda: services.recommend)
+printing_check = LocalProxy(lambda: services.printing_check)
 
 # What became of the stations' last few hundred captures: {(station id, capture number): outcome}
 capture_outcomes = collections.OrderedDict()

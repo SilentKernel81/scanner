@@ -22,6 +22,8 @@ import shutil
 from collections import deque
 import logging
 import re
+import json
+from pathlib import Path
 from card_scanner.config import Config, camera_index_or_none
 from card_scanner.paths import tool
 from card_scanner.station import corner_net
@@ -175,6 +177,7 @@ class CardScanner:
         # (the camera-to-card distance is fixed, and continuous autofocus can hunt and
         # settle on a blurry position when cards are dropped quickly)
         self.focus_range = None  # (min, max) of the camera's focus_absolute control
+        self.focus_writes_blocked = False  # a camera that resets when its lens is set (_focus_reset_the_camera)
         self.focus_locked_value = self.settings.get('focus_value')  # None = continuous autofocus
         self.focus_sweep_running = False
         self.last_focus_sweep = 0.0
@@ -1031,6 +1034,14 @@ class CardScanner:
         self._run_v4l2_command('-c', 'zoom_absolute=100')  # Minimum zoom (widest field of view)
 
         self.focus_range = self._query_focus_range()
+        if self.focus_locked_value is not None and self.focus_range \
+                and not self.focus_range[0] <= int(self.focus_locked_value) <= self.focus_range[1]:
+            # The server keeps one lens position per station, not per camera: after another
+            # camera was plugged in, the saved one is that camera's. Setting it here (440 on a
+            # lens that goes 0-15) is at best meaningless
+            self.log(f"The saved focus lock ({self.focus_locked_value}) is outside this camera's focus range "
+                     f"({self.focus_range[0]}-{self.focus_range[1]}): it is not applied", level="warning")
+            self.focus_locked_value = None
         if self.focus_locked_value is not None and self.focus_range:
             self._set_manual_focus(self.focus_locked_value)
             focus = f"focus locked at {self.focus_locked_value}"
@@ -1641,12 +1652,19 @@ class CardScanner:
         program = self._v4l2_ctl()
         if not program:
             return False
+        writes_focus = 'focus_absolute' in ' '.join(args)
+        if writes_focus and getattr(self, 'focus_writes_blocked', False):
+            return False  # this camera resets when its focus is set: see _focus_reset_the_camera
+        # Its name is read before the write: a camera that resets is gone from /sys a moment later
+        identity = self._camera_identity() if writes_focus else None
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'
             cmd = [program, '-d', video_device] + list(args)
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if result.returncode != 0:
                 self.log(f"v4l2-ctl error: {result.stderr}", level="warning")
+                if writes_focus and 'Protocol error' in (result.stderr or ''):
+                    self._focus_reset_the_camera(identity)
                 return False
             return True
         except subprocess.TimeoutExpired:
@@ -1656,10 +1674,69 @@ class CardScanner:
             self.log(f"v4l2-ctl command failed: {e}", level="warning")
             return False
 
+    # ------------------------------------------------------------------------
+    # A camera whose focus control crashes it
+    # ------------------------------------------------------------------------
+    # Some cheap webcams list a focus control (the LX-260325-A "USB 2.0 Camera": 0-15) and
+    # reset themselves - a USB disconnect, a new device number a second later - whenever the
+    # lens position is written ("Protocol error" from v4l2-ctl, uvcvideo: "Failed to query
+    # (SET_CUR) UVC control 6"). Every start, focus lock or refocus then took the camera down
+    # again. The first such answer is remembered for that camera (its USB ids and name, in
+    # data/camera_quirks.json, kept across restarts); from then on it is treated as a camera
+    # without a focus control: continuous autofocus, no lock, no sweeps.
+
+    def _camera_identity(self):
+        """A stable name for the USB camera in use (vendor:product and name, read from /sys), or None"""
+        try:
+            node = Path(f'/sys/class/video4linux/video{Config.USB_CAMERA_INDEX}')
+            usb = (node / 'device').resolve().parent
+            return f"{(usb / 'idVendor').read_text().strip()}:{(usb / 'idProduct').read_text().strip()} " \
+                   f"{(node / 'name').read_text().strip()}"
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _quirks():
+        try:
+            return json.loads((Config.DATA_DIR / 'camera_quirks.json').read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _focus_is_unsafe(self):
+        identity = self._camera_identity()
+        return bool(identity and identity in self._quirks().get('focus_resets_camera', {}))
+
+    def _focus_reset_the_camera(self, identity=None):
+        """The camera answered a lens position with a USB error: remember it, and stop moving its lens.
+        identity: its name, read before the write (it may have left /sys by now)"""
+        self.focus_writes_blocked = True
+        self.focus_range = None
+        self.focus_locked_value = None
+        identity = identity or self._camera_identity()
+        self.log(f"This camera ({identity or 'unknown'}) resets itself when its focus is set: its focus control "
+                 "is not used from now on (continuous autofocus, no lock or sweeps)", level="warning")
+        if not identity:
+            return
+        try:
+            quirks = self._quirks()
+            quirks.setdefault('focus_resets_camera', {})[identity] = time.strftime('%Y-%m-%d %H:%M:%S')
+            Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+            file = Config.DATA_DIR / 'camera_quirks.json'
+            temporary = file.with_suffix('.tmp')
+            temporary.write_text(json.dumps(quirks, indent=1))
+            temporary.replace(file)
+        except OSError as e:
+            self.log(f"Could not save that note about the camera: {e}", level="warning")
+
     def _query_focus_range(self):
         """(min, max) of the camera's manual focus control, or None if it has none"""
         program = self._v4l2_ctl()
         if not program:
+            return None
+        self.focus_writes_blocked = self._focus_is_unsafe()
+        if self.focus_writes_blocked:
+            self.log("This camera reset itself when its focus was set before: its focus control is not used "
+                     "(continuous autofocus)")
             return None
         try:
             video_device = f'/dev/video{Config.USB_CAMERA_INDEX}'

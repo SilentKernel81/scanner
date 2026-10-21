@@ -14,7 +14,7 @@ try:
 except ImportError:  # not on Linux or macOS: no lock, as before
     fcntl = None
 
-from card_scanner.core import arena
+from card_scanner.core import arena, foil_marker
 from card_scanner.core.cleanup import get_images_stats
 from card_scanner.config import Config
 from card_scanner.core.database import CardDatabase
@@ -23,6 +23,7 @@ from card_scanner import games
 from card_scanner.core.identification import Identification
 from card_scanner.core.inventory import InventoryManager
 from card_scanner.core.pending import PendingCaptures
+from card_scanner.core.printing_check import PrintingCheck, StripReader
 from card_scanner.core.recommendations import Recommendations
 from card_scanner.core.remote_scanner import CameraHub, RemoteScanner
 from card_scanner.core.review import ReviewQueue
@@ -32,7 +33,7 @@ from card_scanner.core.trades import Trades
 from card_scanner.core.others import Others
 
 from card_scanner.server.state import (
-    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, services, socketio,
+    ARENA_INVENTORY_FILE, SCAN_INVENTORY_FILE, app, database, identification, maintenance_barrier, printing_check, services, socketio,
 )
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
@@ -105,6 +106,16 @@ def initialize_components():
     services.pending = PendingCaptures()
     services.deck_store = DeckManager()
     services.recommend = Recommendations()
+    # Does a capture look like the printing the server resolved for it? Shadow mode: writes down where it
+    # does not, changes nothing (core/printing_check.py). Without an image index (scripts/build_image_index.py) it does nothing.
+    # The lookup reads the strip of a capture with a light-ocr reader OF ITS OWN (StripReader: a second process, started on first use, stopped when
+    # idle) - never the live one, which a slow or failed shadow read would stall and disable - and only while OCR is on (the person's choice)
+    services.printing_check = PrintingCheck(
+        services.database, Config.DATA_DIR / 'image_index', Config.DATA_DIR / 'logs' / 'printing_check.jsonl', Config.PRINTING_CHECK_MODE,
+        Config.PRINTING_CHECK_LOOKUP, strip_reader=StripReader(lambda: services.identification.ocr_enabled, foil_net=foil_marker.load(Config.OCR_FOIL_MARKER)),
+        finish_for=lambda card, foil: games.active().suggested_finish(card, foil))
+    # reading.mode 'evidence' reads a card by its picture and strip with the printing check's image index (the live reading's counterpart of its lookup)
+    services.identification.evidence = services.printing_check
 
     # The automatic backup of the collection, scanned cards and decks, if one is due
     # (run_backup_schedule asks again while the app runs)
@@ -347,6 +358,8 @@ def main():
         logger.info("Shutdown requested by user")
     finally:
         program.stop_station()  # first: it lets go of the camera
+        if printing_check:
+            printing_check.close()  # the lookup's own OCR process, if it has one
         if identification:
             identification.stop()
         if scanner:

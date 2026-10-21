@@ -249,6 +249,27 @@
    "get_games"
   ],
   [
+   "/api/image_index",
+   [
+    "GET"
+   ],
+   "image_index_state"
+  ],
+  [
+   "/api/image_index/stop",
+   [
+    "POST"
+   ],
+   "image_index_stop"
+  ],
+  [
+   "/api/image_index/update",
+   [
+    "POST"
+   ],
+   "image_index_update"
+  ],
+  [
    "/api/import_inventory",
    [
     "POST"
@@ -690,6 +711,7 @@
   "set_camera_rotation",
   "set_fixed_area",
   "set_game",
+  "set_reading_mode",
   "set_refocus_every",
   "set_refocus_on_drop",
   "test_prompt",
