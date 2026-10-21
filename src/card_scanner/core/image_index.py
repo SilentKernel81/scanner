@@ -38,6 +38,7 @@
 
 import contextlib
 import functools
+import gzip
 import hashlib
 import json
 import logging
@@ -174,6 +175,28 @@ class ImageIndex:
                            " - build it again")
             return None
         return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'))
+
+
+TABLE_COLUMNS = ('id', 'set', 'number', 'oracle_id', 'finishes', 'name')
+
+
+def printings_table(ids, facts):
+    """
+    What a phone needs of each printing of the index besides its fingerprint, as a gzipped tab-separated text (first line the column names, then one row per
+    id, in the index's order): id, set code, collector number, oracle id, finishes ('nonfoil,foil,etched'), name. `facts` is database.printing_facts(). A
+    printing the card data no longer has is left out (the phone joins by id, never by position), and the same input always gives the same bytes (no time
+    in the gzip header), so its checksum says whether anything changed.
+    """
+    def clean(value):
+        return str(value or '').replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+
+    lines = ['\t'.join(TABLE_COLUMNS)]
+    for printing in ids:
+        fact = facts.get(printing)
+        if fact:
+            name, set_code, number, oracle_id, finishes = fact
+            lines.append('\t'.join(clean(value) for value in (printing, (set_code or '').lower(), number, oracle_id, finishes, name)))
+    return gzip.compress(('\n'.join(lines) + '\n').encode(), mtime=0)
 
 
 class BuildRunning(Exception):

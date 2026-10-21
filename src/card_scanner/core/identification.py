@@ -29,7 +29,7 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER
+from card_scanner.core.printing_check import EVIDENCE_READER, name_only_partly_read
 from card_scanner.config import Config
 
 logger = logging.getLogger('ai')
@@ -231,13 +231,15 @@ class Identification:
     def _read_by_picture(self, image, foil_image):
         """
         reading.mode 'evidence': the card read by its picture and its strip (printing_check.live_read) - (card_info, what the AI is still needed
-        for) like _read_with_ocr, or None when they do not decide (review, no image index, OCR off, or any failure): the card then goes on to the AI
+        for) like _read_with_ocr, or None when they do not decide (review, no image index, or any failure): the card then goes on to the AI
         as in 'cascade'. Never loses a card: whatever goes wrong here is a reason to ask the AI, which is what would have happened anyway.
+        With OCR switched off there is no strip (the reader is not handed over, so it is not run): only the picture alone can decide, and only when the
+        person allowed it (accept_image_alone) - otherwise the card goes to the AI at once. Switching OCR off to try the picture alone is the use of this.
         """
-        if self.reading_mode != EVIDENCE or self.evidence is None or not self.ocr_enabled:
-            return None             # (the strip is read by the OCR reader: with OCR switched off there is no strip)
+        if self.reading_mode != EVIDENCE or self.evidence is None:
+            return None
         try:
-            reading = self.evidence.live_read(image, foil_image, self.card_ocr, self.foil_marker, self.accept_image_alone)
+            reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, self.accept_image_alone)
         except Exception as e:
             self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
             return None
@@ -262,14 +264,21 @@ class Identification:
         """
         if self.reading_mode != EVIDENCE or self.evidence is None or not ocr_card or not ocr_card.get('id'):
             return False
+        picture = foil_image if foil_image is not None else image
         try:
-            contradicted = self.evidence.contradicts(foil_image if foil_image is not None else image, ocr_card['id'])
+            contradicted = self.evidence.contradicts(picture, ocr_card['id'])
+            why = 'another printing of the card'
+            if not contradicted and name_only_partly_read(ocr_info['name'], ocr_card):
+                # The name was read only in part ("Lightning" of "Lightning Strike"), so the printed set + number alone confirmed the card - and a Secret
+                # Lair prints another card's set + number. Here, and only here, a picture that looks like something else is believed.
+                contradicted = self.evidence.disagrees(picture, ocr_card['id'])
+                why = 'a different card, and the name on the card was only partly read'
         except Exception as e:
             self.log(f"The OCR read could not be checked against the picture ({e})", level="warning")
             return False
         if contradicted:
             self.log(f"The OCR read {ocr_info['name']} [{ocr_info['set_code']} {ocr_info['collector_number']}] but the picture looks like "
-                     f"another printing of the card - not taken as a confirmed read", level="warning")
+                     f"{why} - not taken as a confirmed read", level="warning")
         return contradicted
 
     def _checked_against_picture(self, image, card_info):

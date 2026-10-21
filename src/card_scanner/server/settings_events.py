@@ -397,8 +397,9 @@ def handle_set_reading_mode(data=None):
     emit('reading_mode_changed', status)
     log_to_client(f"Card reading: {status['mode']}" + (' (the picture alone may add a card)' if status['mode'] == 'evidence' and status['accept_image_alone'] else ''),
                   level="info")
-    if status['mode'] == 'evidence' and (status['index_printings'] is None or not status['ocr_enabled']):
-        log_to_client("Evidence reading needs the image index and OCR - until they are there every card is read as before", level="warning")
+    # (with OCR off there is no strip: only the picture alone can decide, so that is the gap only while it is not allowed)
+    if status['mode'] == 'evidence' and (status['index_printings'] is None or (not status['ocr_enabled'] and not status['accept_image_alone'])):
+        log_to_client("Evidence reading needs the image index, and OCR or the picture alone - until they are there every card is read as before", level="warning")
 
 
 @socketio.on('toggle_debug_trace')

@@ -234,6 +234,18 @@ like nothing). Backups `scanner-backup-20261020_192118.tar.gz` and `code-2026102
 and strip instead of 8 - `Mystic Confluence`'s match is under the floor, so the AI read it, to the same card - every other outcome identical, no errors. Then `build` + `up -d` at 19:25:52 (production idle). After: `light-ocr ready (webgpu)`,
 no errors, collection / decks / review identical (8,925 / 4,176 / $16,503.46 / 23 / 0), mode `evidence`, index 112,818 of 112,818, the page and the guard as before. The `pi` station (the Pi 5, 192.168.1.88) was still offline.
 
+## Deploys 4 to 6 (2026-10-20, evening, CDT): the header, tokens, OCR off and Secret Lair, the download route
+
+- **19:49:58, header** (`faafd86`): Settings stays in the right corner when the deck page hides its tabs (`.topbar-page[hidden] + .topbar-settings-link`), checked in headless Chromium; held until the server was quiet.
+- **20:01:21, tokens** (`572e819`): `T 0001` over the parent set's code files a token under `t` + the code; the loader keeps tokens and emblems. Rehearsed: the same 39 outcomes. The tokens reached the card data only
+  when the owner ran the card-data update and the index button afterwards (2,894 tokens and 141 emblems, 116,329 of 116,329 indexed, `Cadet tfra 1` among them).
+- **21:37:34, OCR off lets the picture alone decide + the Secret Lair gate** (`18aaece`): a first rehearsal run was not comparable - the copy had inherited the owner's settings (OCR off, picture alone on: their test of the
+  picture alone), so the copy's two keys were reset and it was run again with the shipped defaults: 3 differences in 39, the three `Lightning Strike` adds now reviews. **The owner's settings stayed** (`ocr_first: false`,
+  `reading_accept_image_alone: true`): on the server, OCR is off and the picture alone may add a card.
+- **22:07:03, the index download** (`d0f9850`): `GET /api/image_index/download[/<kind>]`, no rehearsal (read-only routes, no change to the reading). Backups `scanner-backup-20261020_220435.tar.gz`,
+  `code-20261020_220650.tar.gz`. Checked on the live server with plain GETs: the three files (22.3 MB) match their sizes and SHA-256 (ETag equal), `Range` resume returns the right slice, a wrong generation / a
+  table without its version are 409, an unknown kind 404, 116,329 ids = 116,329 hashes = rows of the table, none missing. Collection numbers identical before and after (8,925 / 4,176 / $16,503.46 / 23 decks).
+
 ## After the deploy
 
 - Update my notes of the server (they stop at 2026-10-15) with the date, the commit (`883870b`) and the backup names.

@@ -644,6 +644,19 @@ class CardDataImport(TemporaryData):
         finally:
             cards.conn.close()
 
+    def test_the_facts_a_phone_gets_of_each_printing(self):
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            token = {**self.card(1), 'id': 'tok', 'name': 'Cadet', 'set': 'tfra', 'collector_number': '1', 'layout': 'token', 'finishes': ['nonfoil', 'foil'],
+                     'oracle_id': 'oracle-cadet', 'type_line': 'Token Creature'}
+            cards.populate_database([self.card(n) for n in range(40)] + [token])
+            facts = cards.printing_facts()
+            self.assertEqual(len(facts), 41)
+            self.assertEqual(facts['tok'], ('Cadet', 'tfra', '1', 'oracle-cadet', 'nonfoil,foil'))
+            self.assertEqual(facts['id-3'][:3], ('Card 3', 'tst', '3'))
+        finally:
+            cards.conn.close()
+
     def test_an_import_on_its_own_connection(self):
         cards = CardDatabase(db_file=self.tmp / 'cards.db')
         try:

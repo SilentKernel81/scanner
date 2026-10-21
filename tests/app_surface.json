@@ -256,6 +256,20 @@
    "image_index_state"
   ],
   [
+   "/api/image_index/download",
+   [
+    "GET"
+   ],
+   "image_index_download"
+  ],
+  [
+   "/api/image_index/download/<kind>",
+   [
+    "GET"
+   ],
+   "image_index_file"
+  ],
+  [
    "/api/image_index/stop",
    [
     "POST"

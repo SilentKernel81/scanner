@@ -506,6 +506,41 @@ class TheStripParse(unittest.TestCase):
         self.assertEqual(card_ocr.parse_strip([line('U 0172', 5)]), ('172', ''))
 
 
+class TheNameThatWasOnlyPartlyRead(unittest.TestCase):
+    """printing_check.name_only_partly_read: a name that is a fragment of the card's name, not the name, a face, a flavor name or noise"""
+
+    def partly(self, read, name, flavor=None):
+        from card_scanner.core.printing_check import name_only_partly_read
+        return name_only_partly_read(read, {'name': name, 'flavor_name': flavor})
+
+    def test_a_fragment_from_either_end(self):
+        self.assertTrue(self.partly('Lightning', 'Lightning Strike'))                  # the Deadpool Bolt: a sticker over the rest of the title
+        self.assertTrue(self.partly('Feline Fury', 'Tigra, Feline Fury'))
+        self.assertTrue(self.partly('Spectacular Spid', 'Spectacular Spider-Man'))
+        self.assertTrue(self.partly('lightning', 'LIGHTNING STRIKE'))                  # case does not matter
+
+    def test_a_name_in_full_is_not_a_fragment(self):
+        self.assertFalse(self.partly('Lightning Strike', 'Lightning Strike'))
+        self.assertFalse(self.partly('Three StepsAhead', 'Three Steps Ahead'))         # spacing and symbols aside
+        self.assertFalse(self.partly('Fíli, Dwarven Prince', 'Fili, Dwarven Prince'))  # accents
+
+    def test_a_face_of_a_double_faced_card_is_a_whole_name(self):
+        self.assertFalse(self.partly('The Sensational She-Hulk', 'Jennifer Walters // The Sensational She-Hulk'))
+        self.assertFalse(self.partly('Ghost-Spider', 'Gwen Stacy // Ghost-Spider'))
+
+    def test_the_flavor_name_a_secret_lair_is_printed_under_is_a_whole_name(self):
+        self.assertFalse(self.partly('Elektra, Deadly Assassin', 'Massacre Girl', 'Elektra, Deadly Assassin'))
+
+    def test_a_legendary_name_cut_at_the_comma_is_a_whole_name(self):
+        self.assertFalse(self.partly('Thanos', 'Thanos, the Mad Titan'))               # what names_match accepts it for
+
+    def test_noise_and_other_cards_are_not_fragments(self):
+        self.assertFalse(self.partly('', 'Lightning Strike'))
+        self.assertFalse(self.partly('Lightning Bolt', 'Lightning Strike'))            # a whole other name: the lookup's name check, not this rule
+        self.assertFalse(self.partly('Master Weaver, Web Protector', 'Arasta of the Endless Web'))
+        self.assertFalse(self.partly('Anything', 'Lightning Strike', None))
+
+
 class TheTokenLetter(unittest.TestCase):
     """A token prints "T 0001" over "FRA • EN" (read from the picture of a Cadet, 2026-10-20): the printed code is its parent set's, and Scryfall files it as 'tfra'"""
 

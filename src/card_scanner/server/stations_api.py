@@ -3,21 +3,24 @@
 # Stations: cameras elsewhere that capture cards and send them here (stations.py).
 # ============================================================================
 import cv2
-from flask import jsonify, request, url_for
+from flask import jsonify, request, send_file, url_for
+import hashlib
 import hmac
+import io
 import json
 import numpy as np
 import threading
 import time
+from pathlib import Path
 
 from card_scanner.config import Config
 from card_scanner import games
-from card_scanner.core import frames
+from card_scanner.core import frames, image_index
 from card_scanner.core.stations import Stations
 
 from card_scanner.server.state import (
-    app, camera_hub, capture_accept_lock, capture_outcomes, capture_outcomes_lock, identification,
-    maintenance_barrier, pending, review, scan_inventory, seen_captures, socketio, stations,
+    app, camera_hub, capture_accept_lock, capture_outcomes, capture_outcomes_lock, database, identification,
+    maintenance_barrier, pending, printing_check, review, scan_inventory, seen_captures, socketio, stations,
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import (
@@ -38,6 +41,95 @@ def station_token_ok():
     """Whether a station's request carries the token (when one is set: stations.token)"""
     return not Config.STATION_TOKEN or hmac.compare_digest(request.headers.get('X-Station-Token', ''),
                                                            Config.STATION_TOKEN)
+
+
+# ---------------------------------------------------------------------------------------------
+# The picture index for a phone that reads cards on its own (the Android app's standalone mode)
+# ---------------------------------------------------------------------------------------------
+# A phone cannot build the index (118,000 pictures, hours, 12 GB), so it takes this server's: the two files of the current generation as they are on disk
+# plus a small table of what the decision about a printing needs (set, number, finishes), built from the card data. Read-only, behind the station token
+# like the rest of a station's routes, and only the CURRENT generation: a phone that asks for a file of an older one is told to ask again, so it can never
+# hold the hashes of one build and the ids of another.
+
+index_table_lock = threading.Lock()
+index_table_cache = {}      # {(generation, card data download time): (bytes, sha256)} - one entry at a time
+
+
+def index_for_download():
+    """(manifest, folder) of the index a phone may download, or None: the printing check has an index that loads whole (its checksums hold)"""
+    if not printing_check or printing_check.index() is None:
+        return None
+    folder = printing_check.index_folder
+    try:
+        manifest = json.loads((folder / image_index.MANIFEST).read_text())
+    except (OSError, ValueError):
+        return None
+    return manifest, folder
+
+
+def index_printings_table(manifest):
+    """The printings table of this generation (bytes, sha256), built once per generation and card data download"""
+    info = database.get_data_info('mtg') or {}
+    key = (manifest['generation'], info.get('downloaded_at'))
+    with index_table_lock:
+        if key not in index_table_cache:
+            ids = (printing_check.index_folder / manifest['ids']).read_text().split()
+            data = image_index.printings_table(ids, database.printing_facts())
+            index_table_cache.clear()
+            index_table_cache[key] = (data, hashlib.sha256(data).hexdigest())
+        return index_table_cache[key]
+
+
+@app.route('/api/image_index/download')
+def image_index_download():
+    """What a phone may download of the picture index: the generation, and each file's address, size and SHA-256 (404 without an index)"""
+    if not station_token_ok():
+        return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
+    found = index_for_download()
+    if found is None:
+        return jsonify({'success': False, 'message': 'This server has no picture index (Settings > Storage > Picture index)'}), 404
+    manifest, folder = found
+    table, table_sha = index_printings_table(manifest)
+    generation = manifest['generation']
+
+    def entry(kind, size, sha):
+        url = f'/api/image_index/download/{kind}?generation={generation}'
+        if kind == 'printings':
+            url += f'&version={sha}'      # the table follows the card data, not the generation: its own checksum pins the download (a resumed one too)
+        return {'kind': kind, 'bytes': size, 'sha256': sha, 'url': url}
+    return jsonify({
+        'success': True, 'descriptor': manifest['descriptor'], 'generation': generation, 'count': manifest['count'], 'hash_bytes': manifest['hash_bytes'],
+        'built': manifest.get('built'),
+        'files': [entry('hashes', (folder / manifest['hashes']).stat().st_size, manifest['hashes_sha256']),
+                  entry('ids', (folder / manifest['ids']).stat().st_size, manifest['ids_sha256']),
+                  entry('printings', len(table), table_sha)]})
+
+
+@app.route('/api/image_index/download/<kind>')
+def image_index_file(kind):
+    """
+    One file of the current generation (?generation=<g> is required): hashes, ids or printings. Resumable (Range) and checked by its ETag. The printings
+    table also needs ?version=<its sha256> from the listing: it follows the card data, which changes without a new generation.
+    """
+    if not station_token_ok():
+        return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
+    if kind not in ('hashes', 'ids', 'printings'):
+        return jsonify({'success': False, 'message': 'No such file'}), 404
+    found = index_for_download()
+    if found is None:
+        return jsonify({'success': False, 'message': 'This server has no picture index'}), 404
+    manifest, folder = found
+    if request.args.get('generation') != manifest['generation']:
+        return jsonify({'success': False, 'message': 'The index was rebuilt - ask for /api/image_index/download again', 'generation': manifest['generation']}), 409
+    if kind == 'printings':
+        data, sha = index_printings_table(manifest)
+        if request.args.get('version') != sha:       # a card data update since the listing: the table is another one now (also for a resumed download)
+            return jsonify({'success': False, 'message': 'The printings table changed - ask for /api/image_index/download again', 'version': sha}), 409
+        return send_file(io.BytesIO(data), mimetype='application/gzip', download_name='printings.tsv.gz', conditional=True, etag=sha, max_age=0)
+    name = manifest[kind]
+    if Path(name).name != name:                       # a file name, never a path (as ImageIndex.load requires)
+        return jsonify({'success': False, 'message': 'No such file'}), 404
+    return send_file(folder / name, mimetype='application/octet-stream', download_name=name, conditional=True, etag=manifest[f'{kind}_sha256'], max_age=0)
 
 
 def keep_camera_frame(station_id, number, capture_id, image_name):
