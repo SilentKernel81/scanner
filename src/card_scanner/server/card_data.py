@@ -8,9 +8,10 @@ import threading
 import time
 
 from card_scanner import games
+from card_scanner.config import Config
 
 from card_scanner.core import image_index
-from card_scanner.server.state import app, database, printing_check, socketio
+from card_scanner.server.state import app, app_settings, database, printing_check, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded
 
@@ -53,6 +54,7 @@ def start_card_data_update(game, retry=False):
                     data_update_errors.pop(game.id, None)
                     socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
                     logger.info(f"{game.label} card data updated: {total} cards")
+                    extend_index_after_update()
                     return
                 except Exception as e:
                     logger.exception(f"Database update failed: {e}")
@@ -173,6 +175,36 @@ def handle_rebuild_database():
 index_state = {'running': False, 'stopping': False, 'done': 0, 'total': 0, 'error': None, 'result': None}
 index_lock = threading.Lock()
 index_cancel = threading.Event()
+
+
+def extend_index_wanted():
+    """Whether the person (or config.yaml's reading.extend_index_after_update) wants the picture index extended after a card data download; their choice wins"""
+    value = app_settings.get('reading_extend_index', Config.READING_EXTEND_INDEX) if app_settings else Config.READING_EXTEND_INDEX
+    return value is True
+
+
+def extend_index_after_update():
+    """
+    Called after a card data download that SUCCEEDED: the new printings have no picture in the index yet, and until they do the picture alone adds nothing
+    (PrintingCheck.missing_printings), so extend it now rather than wait for someone to press the button. Never a first build: with no index (or no printing
+    check) it does nothing - that is hours and ~12 GB, started only by the button. Nothing here may turn a finished update into a failed one, so it never raises.
+    """
+    try:
+        if not printing_check or printing_check.index() is None or not extend_index_wanted():
+            return False
+        started = start_index_update()                # False: a build is running already, which is the extension itself
+        if started:
+            logger.info("Picture index: extending it after the card data update")
+        return started
+    except Exception as e:
+        logger.exception(f"Picture index: could not start extending it after the card data update: {e}")
+        return False
+
+
+def index_progress():
+    """A running build's progress, for the banner: {'running', 'done', 'total'} (cheap: no database, no index read)"""
+    with index_lock:
+        return {'running': bool(index_state['running']), 'done': index_state['done'], 'total': index_state['total']}
 
 
 def index_status():

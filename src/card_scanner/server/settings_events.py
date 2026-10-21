@@ -19,7 +19,7 @@ from card_scanner.server.logs import logger
 from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
 from card_scanner.server.captures import scan_location, set_pending_capture
-from card_scanner.server.card_data import start_card_data_update
+from card_scanner.server.card_data import extend_index_wanted, index_progress, start_card_data_update
 
 
 @app.route('/api/ai_provider')
@@ -153,6 +153,9 @@ def reading_status():
     missing = missing if isinstance(missing, int) else None        # a plain number for the page, or nothing
     return {'mode': identification.reading_mode if identification else 'cascade',
             'accept_image_alone': bool(identification.accept_image_alone) if identification else False,
+            # extend the index by itself after a card data download (only when it exists), and a build's progress for the banner
+            'extend_index': extend_index_wanted(),
+            'index_build': index_progress(),
             'index_printings': len(index) if index is not None else None,
             # printings of the card data the index lacks: while not 0, the picture alone adds nothing (None: not known)
             'index_missing': missing,
@@ -397,19 +400,22 @@ def handle_toggle_ai(data):
 def handle_set_reading_mode(data=None):
     """
     How cards are read (remembered; the next card takes it, no restart): data['mode'] 'cascade' (OCR, then the vision AI) or 'evidence' (the picture and the
-    strip before the AI - docs/PROGRAM_DOCUMENTATION.md, "Reading mode: evidence"), and data['accept_image_alone'] (a card only the picture decided may be added).
-    Guarded like the other settings that decide what is added. Either may be sent alone.
+    strip before the AI - docs/PROGRAM_DOCUMENTATION.md, "Reading mode: evidence"), data['accept_image_alone'] (a card only the picture decided may be added)
+    and data['extend_index'] (extend the picture index after a card data download). Guarded like the other settings that decide what is added. Any may be sent alone.
     """
     data = data or {}
     mode = data.get('mode')
     alone = data.get('accept_image_alone')
-    if (mode is not None and mode not in ('cascade', 'evidence')) or (alone is not None and not isinstance(alone, bool)):
+    extend = data.get('extend_index')
+    if (mode is not None and mode not in ('cascade', 'evidence')) or any(value is not None and not isinstance(value, bool) for value in (alone, extend)):
         emit('error', {'message': 'Not a reading mode'})
         return
     if mode is not None:
         app_settings.set('reading_mode', mode)
     if alone is not None:
         app_settings.set('reading_accept_image_alone', alone)
+    if extend is not None:
+        app_settings.set('reading_extend_index', extend)
     status = reading_status()
     emit('reading_mode_changed', status)
     log_to_client(f"Card reading: {status['mode']}" + (' (the picture alone may add a card)' if status['mode'] == 'evidence' and status['accept_image_alone'] else ''),

@@ -406,6 +406,7 @@ function applyReadingState(reading) {
     $('toggle-reading-evidence').checked = evidence;
     $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
     $('toggle-picture-alone').disabled = !evidence;
+    $('toggle-extend-index').checked = Boolean(reading.extend_index);     // independent of the mode: it only keeps the index current
     $('reading-evidence-desc').textContent = evidence
         ? 'On: the picture, then OCR in doubt, then the vision AI (the last step)'
         : 'Off: OCR, then the vision AI, as before the picture matching existed';
@@ -567,6 +568,9 @@ function bindReading() {
         }
         socket.emit('set_reading_mode', {accept_image_alone: toggle.checked});
     });
+    // (not a risk to what is added - it only fetches pictures - so no confirmation; the event itself is guarded and the page goes back if declined)
+    $('toggle-extend-index').addEventListener('change', event =>
+        socket.emit('set_reading_mode', {extend_index: event.target.checked}));
     $('ai-provider').addEventListener('change', event => {
         const provider = event.target.value;
         renderCredentialField(provider);

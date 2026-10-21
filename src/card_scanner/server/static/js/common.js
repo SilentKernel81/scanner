@@ -614,7 +614,11 @@ function showIndexNotice(reading) {
     const banner = document.getElementById('index-banner');
     if (!banner) return;
     let text = '';
-    if (reading && reading.mode === 'evidence') {
+    const build = reading && reading.index_build;
+    if (build && build.running) {
+        // A build is running (the Settings button, or the one started after a card data update): say how far it is, whatever the mode
+        text = `Extending the picture index: ${build.done.toLocaleString()} of ${build.total ? build.total.toLocaleString() : '?'} new pictures.`;
+    } else if (reading && reading.mode === 'evidence') {
         if (reading.index_printings === null || reading.index_printings === undefined) {
             text = 'There is no picture index: cards are read by OCR and the vision AI only.';
         } else if (reading.index_missing) {
@@ -624,8 +628,12 @@ function showIndexNotice(reading) {
         }
     }
     banner.hidden = !text;
-    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">Update it (Settings &rarr; Card reading)</a>` : '';
+    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card reading)</a>` : '';
+    // While a build runs, look again every few seconds so the count moves (and the banner goes when it ends); otherwise the slow timer below is enough
+    clearTimeout(indexNoticeTimer);
+    if (build && build.running) indexNoticeTimer = setTimeout(loadIndexNotice, 3000);
 }
+let indexNoticeTimer = null;
 
 // Asked when the page opens, now and then (an index built from the Settings page sends no event), and after a card data update (scanner.js), which is what makes it stale
 function loadIndexNotice() {

@@ -188,6 +188,13 @@
                         <div class="input-group">
                             <label>Picture index</label>
                             <div class="storage-usage" id="index-status">Loading...</div>
+                            <label class="switch-row">
+                                <span class="switch-text">
+                                    <span class="switch-title">Extend the index after a card data update</span>
+                                    <span class="switch-desc">On: when a card database download has finished and an index exists, the new printings' pictures are fetched from Scryfall by themselves. It never starts the first build - that is the button below</span>
+                                </span>
+                                <input type="checkbox" class="switch" id="toggle-extend-index">
+                            </label>
                             <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
                             <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
                             <div class="hint" id="index-hint">A fingerprint of every printing's picture, for reading a card by its picture (above) and for the check against what was read. After a card database update, press this: only the new pictures are downloaded from Scryfall (a few seconds for a handful). The first time it downloads the pictures of the whole game, about 12 GB, and takes hours; it can be stopped and goes on where it stopped.</div>
@@ -391,7 +398,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=25"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=20"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=26"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=21"></script>
 </body>
 </html>

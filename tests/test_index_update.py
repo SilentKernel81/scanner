@@ -336,6 +336,94 @@ class Refused(State):
         self.assertIsNone(card_data.index_status()['error'])            # a run that is not refused clears it
 
 
+class AfterTheCardDataUpdate(State):
+    """
+    F7: a card data download that succeeded extends the picture index by itself (card_data.extend_index_after_update, called from start_card_data_update) -
+    only with an index already, only with the setting on, and never while a build runs. The build itself is stood in for: only whether it was started matters.
+    """
+
+    class Game:
+        id, label, source = 'mtg', 'Magic', 'Scryfall'
+
+        def __init__(self, fail=False):
+            self.fail = fail
+
+        def download(self, progress):
+            if self.fail:
+                raise OSError('Network is unreachable')
+
+        def card_count(self):
+            return 1000
+
+    def setUp(self):
+        super().setUp()
+        self.settings = {}
+        self.started = []
+        fake_settings = mock.Mock(get=lambda key, default=None: self.settings.get(key, default))
+        for patcher in (mock.patch.object(card_data, 'app_settings', fake_settings), mock.patch.object(card_data, 'socketio'),
+                        mock.patch.object(card_data, 'start_index_update', lambda: self.started.append(1) or True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        card_data.data_updates_running.discard('mtg')
+
+    def update(self, game=None):
+        """Run the whole update task and wait for it to end"""
+        self.assertTrue(card_data.start_card_data_update(game or self.Game()))
+        for _ in range(200):
+            if 'mtg' not in card_data.data_updates_running:
+                return
+            threading.Event().wait(0.02)
+        self.fail('the update did not end')
+
+    def test_with_an_index_and_the_setting_on_the_build_is_started_once(self):
+        self.update()                                              # (the shipped default is on: nothing set)
+        self.assertEqual(len(self.started), 1)
+
+    def test_not_with_the_setting_off(self):
+        self.settings['reading_extend_index'] = False
+        self.update()
+        self.assertEqual(self.started, [])
+
+    def test_only_true_is_on(self):
+        for value in ('yes', 1, None):                             # a hand-edited file cannot turn it on by accident
+            self.settings['reading_extend_index'] = value
+            self.assertFalse(card_data.extend_index_wanted(), repr(value))
+
+    def test_never_a_first_build(self):
+        self.index = None
+        self.update()
+        self.assertEqual(self.started, [])
+
+    def test_not_without_a_printing_check(self):
+        with mock.patch.object(card_data, 'printing_check', None):
+            self.update()
+        self.assertEqual(self.started, [])
+
+    def test_a_build_that_is_running_is_left_alone(self):
+        # the real start_index_update refuses a second build: the call is made, nothing is started again
+        with mock.patch.object(card_data, 'start_index_update', lambda: False) as refused:
+            self.assertFalse(card_data.extend_index_after_update())
+        self.assertIsNotNone(refused)
+        card_data.index_state['running'] = True
+        self.assertEqual(card_data.index_progress()['running'], True)
+
+    def test_a_failed_download_starts_nothing(self):
+        self.update(self.Game(fail=True))
+        self.assertEqual(self.started, [])
+
+    def test_a_failing_start_does_not_turn_the_update_into_a_failure(self):
+        errors = []
+        card_data.socketio.emit.side_effect = lambda name, *a, **k: errors.append(name)
+        with mock.patch.object(card_data, 'start_index_update', side_effect=RuntimeError('boom')):
+            self.update()
+        self.assertIn('database_update_complete', errors)
+        self.assertNotIn('database_update_error', errors)
+
+    def test_the_banner_gets_the_progress(self):
+        card_data.index_state.update(running=True, done=3, total=40)
+        self.assertEqual(card_data.index_progress(), {'running': True, 'done': 3, 'total': 40})
+
+
 class Routes(State):
     def setUp(self):
         super().setUp()

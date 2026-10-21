@@ -73,6 +73,7 @@ game sits behind one interface (`games/`), so another could be added.
   collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
+- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a checkbox in Settings > Card reading turns it off. Never starts the first build. Tested with stand-ins only, **never tried on a live server**.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
