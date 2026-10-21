@@ -59,6 +59,10 @@ game sits behind one interface (`games/`), so another could be added.
   OCR does not read the marker, a small network reads it from the set line (`foil_net.onnx`,
   since 2026-10-20) before the vision AI is asked; measured on 13 recent sets only, never tried
   on a Pi or in the Android app.
+- **Tokens and emblems** are in the card data (since 2026-10-20) and are matched by the `T 0001` their
+  collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
+  pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
+  update, and the picture index's button for their pictures).
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.

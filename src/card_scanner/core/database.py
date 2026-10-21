@@ -424,7 +424,10 @@ class CardDatabase:
         inserted = 0
         for card in cards_data:
             try:
-                if card.get('layout') in ['token', 'emblem', 'art_series']:
+                # Art cards stay out (their own cards, no collector line to read). Tokens and emblems are in since 2026-10-20: they are
+                # collected, and print "T 0001" over the code of the set they came with (card_ocr.prints_token_letter) - the scanner
+                # could not find a single one before (a collection scanned in one session had four, none matched)
+                if card.get('layout') == 'art_series':
                     continue
                 
                 prices = card.get('prices', {})

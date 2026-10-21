@@ -1578,8 +1578,18 @@ considered finished until that is settled. With the picture alone on, 12 of the 
 
 One SQLite file, `data/cards_database.db`.
 
-**`cards`** - Scryfall's "default cards" bulk data (gzipped JSON lines), tokens/emblems/art
-cards excluded. Columns are defined once in `database.CARD_COLUMNS`:
+**`cards`** - Scryfall's "default cards" bulk data (gzipped JSON lines), art cards excluded; **tokens
+and emblems are kept since 2026-10-20** (before, they were skipped, and the four tokens of a 62-card session
+- a Cadet, a Treasure, a Dwarf - could not be matched at all). A token prints `T 0001` over `FRA • EN`: the
+letter `T` where a card has its rarity (no card has that rarity), the code of the set it came with, and Scryfall
+files it as the set `tfra`, number 1. `card_ocr.prints_token_letter` / `token_set_code` turn that read into the
+set `TFRA` (`parse_magic`) / `tfra` (`parse_strip`), so the exact lookup and the picture's candidates find the
+token and not the first card of the parent set. **Only the newer form is handled** (the letter and a four-digit
+number); older tokens print neither and are found by name and number if at all. **Never tried on a real
+download yet:** a card-data update (Settings > Storage) loads the tokens, and the picture index's button then
+adds their pictures - until then a token is matched by its collector line alone (OCR) and the picture
+cannot confirm it. The standalone Android app's parser (`ParserParityTest`) was not changed. Columns are defined
+once in `database.CARD_COLUMNS`:
 
 **The download is streamed** (since 2026-10-16; `CardDatabase._stream_cards`, `tests/test_card_data_stream.py`):
 `download_scryfall_data` hands back a generator that decompresses and parses the gzipped JSON lines as they arrive,

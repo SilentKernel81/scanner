@@ -384,6 +384,7 @@ in `src/ocr/`. The top folder has two Python files, the launchers `app.py` (serv
   the table (`_migrate_add_location` is the pattern: backup, keep ids, check counts).
 - **Moves to the collection are crash-safe** (`take_from`, `pending_moves` / `arrived_moves`,
   `finish_interrupted_moves`): two files, two commits - keep the note-first order.
+- **Tokens are in the card data, and their set is `t` + the printed code** (since 2026-10-20): a token prints `T 0001` over `FRA • EN`, Scryfall files it as `tfra` 1. `card_ocr.prints_token_letter` / `token_set_code` do that for both parsers (`parse_magic` -> `TFRA`, `parse_strip` -> `tfra`, so `decide_printing` compares the strip with a candidate of that set and stays unchanged); `database._fill_import` skips only `art_series`. The letter `T` is the one rarity letter no card has - never widen it to another letter. The Android app's own parser (standalone mode) does not do this yet. `tests/test_printing_check.py` (`TheTokenLetter`) and `tests/test_database.py` (`CardDataImport`) pin it.
 - **OCR parser**: keep `parse_magic` strict - a loose collector-number pattern once confirmed
   the wrong printing. Re-run a batch of captures through `CardOcr.read_card` +
   `Game.confirmed_read` (on a copy of the database) and compare with the AI before loosening it.
