@@ -218,31 +218,37 @@ def scheduled_card_data_updates(now=None):
     return started
 
 
+def schedule_tick(check_due, downloads_due):
+    """
+    One turn of the loop below. check_due: time for the update check (the notice); downloads_due: past the first minutes
+    after start. Each of the three is asked on its own: one failing (logged) never keeps the others from their turn. The
+    card data comes before the index: a download it just started makes the index wait for it (index_due).
+    """
+    steps = [('update check', check_card_data_updates)] if check_due else []
+    if downloads_due:
+        steps += [('automatic card data update', scheduled_card_data_updates), ('automatic picture index update', scheduled_index_update)]
+    for name, step in steps:
+        try:
+            step()
+        except Exception as e:
+            logger.error(f"The {name} failed: {e}", exc_info=True)
+
+
 def run_update_schedule():
     """
     The update check (the notice: 10 s after start, then once a day, as before), the automatic card data download and the
     picture index's retry (every SCHEDULE_TICK, from SCHEDULE_FIRST_DOWNLOAD after start) on one thread. Nothing that fails
-    in a tick ends the loop, and one of them failing does not keep the other from its turn.
+    in a tick ends the loop (schedule_tick).
     """
     def loop():
         started = time.monotonic()
         last_check = None
         time.sleep(10)
         while True:
-            try:
-                if last_check is None or time.monotonic() - last_check >= UPDATE_CHECK_EVERY:
-                    last_check = time.monotonic()
-                    check_card_data_updates()
-                if time.monotonic() - started >= SCHEDULE_FIRST_DOWNLOAD:
-                    scheduled_card_data_updates()
-            except Exception as e:
-                logger.error(f"The automatic card data update failed: {e}", exc_info=True)
-            try:
-                # After the card data: a download it just started makes the index wait for it (index_due)
-                if time.monotonic() - started >= SCHEDULE_FIRST_DOWNLOAD:
-                    scheduled_index_update()
-            except Exception as e:
-                logger.error(f"The automatic picture index update failed: {e}", exc_info=True)
+            check_due = last_check is None or time.monotonic() - last_check >= UPDATE_CHECK_EVERY
+            if check_due:
+                last_check = time.monotonic()
+            schedule_tick(check_due, time.monotonic() - started >= SCHEDULE_FIRST_DOWNLOAD)
             time.sleep(SCHEDULE_TICK)
     threading.Thread(target=loop, daemon=True, name='update-schedule').start()
 
