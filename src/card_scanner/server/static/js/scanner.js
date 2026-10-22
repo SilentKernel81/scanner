@@ -347,7 +347,7 @@ socket.on('inventory_updated', function(data) {
         return;
     }
     if (data.undone) {
-        // This station's last card taken back (Settings -> Stations, or the station itself)
+        // This station's last card taken back (Settings -> Cameras, or the station itself)
         addLog(timeNow(), 'warning', `Removed ${data.undone} from the inventory (undo)`);
         if (isOpen('inventory-modal')) loadInventory();
         return;
@@ -976,7 +976,7 @@ socket.on('ai_provider_set', function(data) {
 });
 
 // ============================================================================
-// Prompt editor (Settings -> Card reading -> Edit prompts opens it: /scan/<id>#prompts)
+// Prompt editor (Settings -> Card recognition -> Edit prompts opens it: /scan/<id>#prompts)
 // ============================================================================
 
 let promptData = null;      // {provider, model, prompts: {kind: {label, instructions, source, ...}}}

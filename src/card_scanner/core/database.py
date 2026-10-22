@@ -983,62 +983,6 @@ class CardDatabase:
             'cards_with_prices': cards_with_prices
         }
 
-    def rebuild_database_schema(self, progress_callback=None):
-        """
-        Rebuild the cards table with the canonical column order and fresh indexes.
-
-        Columns are copied by name, so this works for any older layout (e.g. databases
-        where flavor_name or the treatment columns were appended by migration).
-        The inventory table is not touched.
-        """
-        if progress_callback:
-            progress_callback("Starting database schema rebuild...")
-
-        logger.info("Beginning database schema rebuild")
-
-        with self._lock:
-            try:
-                cursor = self.conn.cursor()
-                existing_columns = {row['name'] for row in cursor.execute("PRAGMA table_info(cards)").fetchall()}
-                shared_columns = ', '.join(c for c in CARD_COLUMN_NAMES if c in existing_columns)
-
-                if progress_callback:
-                    progress_callback("Copying card data into optimized table...")
-
-                cursor.execute("DROP TABLE IF EXISTS cards_rebuild")
-                self._create_cards_table(cursor, table='cards_rebuild')
-                cursor.execute(f"INSERT INTO cards_rebuild ({shared_columns}) SELECT {shared_columns} FROM cards")
-                imported = cursor.rowcount
-
-                cursor.execute("DROP TABLE cards")
-                cursor.execute("ALTER TABLE cards_rebuild RENAME TO cards")
-
-                if progress_callback:
-                    progress_callback("Rebuilding indexes...")
-                self._create_card_indexes(cursor)
-
-                self.conn.commit()
-
-                if progress_callback:
-                    progress_callback("Database rebuild complete!")
-                logger.info(f"Database schema rebuild completed: {imported} cards")
-
-                return {
-                    'success': True,
-                    'cards_imported': imported,
-                    'schema_type': 'current'
-                }
-
-            except Exception as e:
-                logger.exception(f"Database rebuild failed: {e}")
-                self.conn.rollback()
-                if progress_callback:
-                    progress_callback(f"Rebuild failed: {str(e)}")
-                return {
-                    'success': False,
-                    'error': str(e)
-                }
-
     def close(self):
         """Close database connection"""
         if self.conn:

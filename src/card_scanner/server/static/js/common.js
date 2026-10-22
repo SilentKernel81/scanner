@@ -590,7 +590,7 @@ function watchCardData() {
                     ? `The card data could not be downloaded: ${database.error}`
                     : database.updating
                         ? 'The card data is being downloaded for the first time (a few minutes). The pages work meanwhile, but no card can be found or identified yet.'
-                        : 'There is no card data yet. It is downloaded from Settings -> Card database.';
+                        : 'There is no card data yet. It is downloaded from Settings -> Card data.';
                 banner.classList.toggle('is-error', Boolean(database.error));
                 banner.hidden = false;
             } else {
@@ -609,7 +609,7 @@ function watchCardData() {
 document.addEventListener('DOMContentLoaded', watchCardData);
 
 // The picture index on the Scanner pages (the banner is only there: _topbar.html): cards are read by their picture first, so a missing or stale index changes what is read -
-// said at the top, with a link to where it is updated (Settings > Card reading > Picture). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
+// said at the top, with a link to where it is updated (Settings > Card data). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
 function showIndexNotice(reading) {
     const banner = document.getElementById('index-banner');
     if (!banner) return;
@@ -628,7 +628,7 @@ function showIndexNotice(reading) {
         }
     }
     banner.hidden = !text;
-    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card reading)</a>` : '';
+    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#carddata">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card data)</a>` : '';
     // While a build runs, look again every few seconds so the count moves (and the banner goes when it ends); otherwise the slow timer below is enough
     clearTimeout(indexNoticeTimer);
     if (build && build.running) indexNoticeTimer = setTimeout(loadIndexNotice, 3000);
@@ -646,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadIndexNotice, 5 * 60 * 1000);
 });
 
-// Settings -> Program: restart, quit (only there when started as a desktop program), and who
+// Settings -> Server: restart, quit (only there when started as a desktop program), and who
 // may open the pages
 
 async function restartProgram() {

@@ -8,7 +8,7 @@
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=8">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -16,26 +16,37 @@
     {% set page = 'settings' %}
     {% include '_topbar.html' %}
 
-    {# One page for every setting, in five categories (the list on the left; #cameras, #sounds,
-       #reading, #data, #server in the address). Each setting is saved the moment it is changed.
-       static/js/settings.js. What belongs to one camera is under Cameras, with that camera chosen
-       at the top: the rest is the server's, the same for every camera #}
+    {# One page for every setting, in sections (the list on the left; #overview, #cameras, #reading, #carddata,
+       #backups, #storage, #server in the address - the old #sounds and #data still lead to Cameras and Backups: settings.js,
+       categoryFromAddress). Each setting is saved the moment it is changed. static/js/settings.js; the plan:
+       docs/plans/SETTINGS_REDESIGN_PLAN.md. Under Cameras, "This camera" is the camera chosen at the top, "All cameras"
+       the server's own; every other section is the server's, the same for every camera #}
     <main class="container settings-page">
         <h1 class="settings-title">Settings</h1>
         <div class="settings-layout">
-            <nav class="settings-nav" id="settings-nav" aria-label="Settings categories">
+            <nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
+                <button type="button" data-category="overview"><svg class="icon"><use href="#i-grid"/></svg> Overview</button>
                 <button type="button" data-category="cameras"><svg class="icon"><use href="#i-camera"/></svg> Cameras</button>
-                <button type="button" data-category="sounds"><svg class="icon"><use href="#i-play"/></svg> Sounds</button>
-                <button type="button" data-category="reading"><svg class="icon"><use href="#i-card"/></svg> Card reading</button>
-                <button type="button" data-category="data"><svg class="icon"><use href="#i-list"/></svg> Collection and data</button>
+                <button type="button" data-category="reading"><svg class="icon"><use href="#i-card"/></svg> Card recognition</button>
+                <button type="button" data-category="carddata"><svg class="icon"><use href="#i-layers"/></svg> Card data</button>
+                <button type="button" data-category="backups"><svg class="icon"><use href="#i-download"/></svg> Backups</button>
+                <button type="button" data-category="storage"><svg class="icon"><use href="#i-list"/></svg> Storage</button>
                 <button type="button" data-category="server"><svg class="icon"><use href="#i-settings"/></svg> Server</button>
             </nav>
 
             <div class="settings-content">
-                <!-- ================= Cameras ================= -->
+                <!-- ================= Overview: one line per section, how things stand (settings.js: renderOverview) ================= -->
+                <section class="settings-category" id="cat-overview" hidden>
+                    <h2>Overview</h2>
+                    <p class="hint">How things stand. Choose a line to change it.</p>
+                    <div class="overview-list" id="overview-list"></div>
+                    <p class="hint lock-legend"><svg class="icon"><use href="#i-lock"/></svg> A padlock marks what asks for the settings password (Server).</p>
+                </section>
+
+                <!-- ================= Cameras: the chosen one, then what every camera shares ================= -->
                 <section class="settings-category" id="cat-cameras" hidden>
                     <h2>Cameras</h2>
-                    <p class="hint">What belongs to one camera. Choose the camera; each change is saved at once.</p>
+                    <h3 class="settings-group">This camera</h3>
                     <div class="settings-card">
                         <div class="input-group">
                             <label for="camera-select">Camera</label>
@@ -46,7 +57,7 @@
                     <div id="camera-empty" class="hint" hidden>No camera station has connected yet. A station connects with <code>station.py --server <span id="server-origin"></span></code> and appears here.</div>
                     <div id="camera-settings" hidden>
                         <div class="settings-card">
-                            <h3>This camera</h3>
+                            <h3>Name and place</h3>
                             <div class="input-group">
                                 <label for="camera-name">Name</label>
                                 <input type="text" id="camera-name" class="text-input" maxlength="60" autocomplete="off">
@@ -55,7 +66,7 @@
                                 <label for="camera-location">Scan into location</label>
                                 <input type="text" id="camera-location" class="text-input" list="location-options" maxlength="60" placeholder="None" autocomplete="off">
                                 <datalist id="location-options"></datalist>
-                                <div class="hint">Cards this camera adds get this location (a binder, a box). Change it when you start another pile.</div>
+                                <div class="hint">Where its cards go (a binder, a box). Change it when you start another pile.</div>
                             </div>
                             <div class="settings-actions">
                                 <a class="btn btn-small" id="camera-page" href="#">Open its page</a>
@@ -70,14 +81,14 @@
                             <label class="switch-row">
                                 <span class="switch-text">
                                     <span class="switch-title">Add cards automatically</span>
-                                    <span class="switch-desc">Auto-scanned cards go straight to the scanned cards (an uncertain match waits for review). Off: confirm each card.</span>
+                                    <span class="switch-desc">Off: you confirm each card. An uncertain match always waits for review.</span>
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-auto-add">
                             </label>
                             <label class="switch-row">
                                 <span class="switch-text">
                                     <span class="switch-title">Stop at a card back</span>
-                                    <span class="switch-desc">A card dropped face down stops auto-capture: put one at the end of a stack. The back is not added. Not for sleeved cards.</span>
+                                    <span class="switch-desc">Drop one card face down to end a stack. Not for sleeved cards.</span>
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-stop-at-back">
                             </label>
@@ -89,7 +100,7 @@
                                     <option value="270">90° counter-clockwise</option>
                                     <option value="180">180°</option>
                                 </select>
-                                <div class="hint">A camera mounted sideways puts the card's long side along the image's long side: more detail per card and room for a taller pile.</div>
+                                <div class="hint">For a camera mounted sideways (more detail per card, room for a taller pile).</div>
                             </div>
                             <div class="hint" id="fixed-area-state"></div>
                         </div>
@@ -100,14 +111,14 @@
                             <label class="switch-row">
                                 <span class="switch-text">
                                     <span class="switch-title">Camera autofocus</span>
-                                    <span class="switch-desc">Off: the sharpest focus is found once and locked - no hunting when cards are dropped quickly.</span>
+                                    <span class="switch-desc">Off: the focus is found once and locked - steadier when cards drop quickly.</span>
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-autofocus">
                             </label>
                             <div class="input-group">
                                 <label for="refocus-every">Check the focus every (captures)</label>
                                 <input type="number" id="refocus-every" class="text-input narrow" min="0" max="100" step="1" inputmode="numeric">
-                                <div class="hint">With the focus locked: after this many captures it tries a focus one step away and keeps the sharper one. Each check holds the next card back about a second. 0 = never.</div>
+                                <div class="hint">With the focus locked. Each check holds the next card about a second; 0 = never.</div>
                             </div>
                             <div class="input-group">
                                 <label for="refocus-on-drop">Refocus when the cards get blurry</label>
@@ -117,28 +128,39 @@
                                     <option value="0.35">When they are a third as sharp (recommended)</option>
                                     <option value="0.2">When they are a fifth as sharp</option>
                                 </select>
-                                <div class="hint">With the focus locked: when the last 3 cards captured are much less sharp than the ones before them, the camera finds the sharpest focus again (about 8 s). It does nothing with the camera's own continuous autofocus, and happens at most once a minute.</div>
+                                <div class="hint">With the focus locked: refocus (about 8 s) when the last 3 cards are much blurrier than before. At most once a minute.</div>
                             </div>
                         </div>
 
                         <details class="settings-advanced">
-                            <summary>Advanced (this camera)</summary>
+                            <summary>Troubleshooting</summary>
                             <label class="switch-row">
                                 <span class="switch-text">
                                     <span class="switch-title">Debug trace</span>
-                                    <span class="switch-desc">Log filtered detections, save frames of slow or doubtful captures on the camera (data/debug_frames) and send each capture's whole camera frame and outline to the server (data/frames) as training data. It makes the camera busier; leave it off in everyday use.</span>
+                                    <span class="switch-desc">Extra logs and pictures, for finding faults and training the detector. Makes the camera busier: leave it off day to day.</span>
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-debug-trace">
                             </label>
                         </details>
                     </div>
-                </section>
 
-                <!-- ================= Sounds ================= -->
-                <section class="settings-category" id="cat-sounds" hidden>
-                    <h2>Sounds</h2>
-                    <p class="hint">For every camera, played by the scanner pages.</p>
+                    <h3 class="settings-group">All cameras</h3>
                     <div class="settings-card">
+                        <h3>Capture size</h3>
+                        <div class="input-group">
+                            <label for="capture-copy-size">Picture kept with each card</label>
+                            <select id="capture-copy-size" class="select narrow">
+                                <option value="off">Off - thumbnails only</option>
+                                <option value="small">Small - 600 px tall, about 55 KB each</option>
+                                <option value="medium">Medium - 900 px tall, about 100 KB each</option>
+                                <option value="large">Large - 1200 px tall, about 145 KB each</option>
+                            </select>
+                            <div class="hint" id="capture-copy-hint">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>Sounds</h3>
+                        <p class="hint">Played by the scanner pages, for every camera.</p>
                         <label class="switch-row">
                             <span class="switch-text"><span class="switch-title">Sound effects</span></span>
                             <input type="checkbox" class="switch" id="toggle-audio">
@@ -166,68 +188,55 @@
                     </div>
                 </section>
 
-                <!-- ================= Card reading ================= -->
+                <!-- ================= Card recognition: the three steps, in their order ================= -->
                 <section class="settings-category" id="cat-reading" hidden>
-                    <h2>Card reading</h2>
-                    <p class="hint">How a captured card is read, in this order: its picture; then OCR, when the picture is in doubt; then the vision AI, for what is still open - and otherwise the
-                        card goes to the review queue. Each step can be switched off.</p>
+                    <h2>Card recognition</h2>
+                    <p class="hint">Each card is read in up to three steps, in this order. What none of them settles goes to the review queue.</p>
 
-                    <!-- 1. The picture: the reading by fingerprint, what it may add on its own, and the index it needs -->
-                    <div class="settings-card" id="reading-evidence-card">
-                        <h3>Picture</h3>
-                        <p class="hint">A fingerprint of the card is matched against every printing of the card data; a clear match settles the card. When OCR is on, the collector line is read from
-                            the card's strip too, to tell apart printings with the same art. Without the picture index below, cards are read by OCR and then the AI, as before.</p>
+                    <!-- 1. The picture: the reading by fingerprint, and what it may add on its own (its index is under Card data) -->
+                    <div class="settings-card reading-step" id="reading-evidence-card">
+                        <h3><span class="step-number">1</span> Picture</h3>
                         <label class="switch-row">
                             <span class="switch-text">
-                                <span class="switch-title">Read the card by its picture</span>
+                                <span class="switch-title" data-guarded>Read the card by its picture</span>
                                 <span class="switch-desc" id="reading-evidence-desc">On: the picture, then OCR in doubt, then the vision AI</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-reading-evidence">
                         </label>
-                        <label class="switch-row">
-                            <span class="switch-text">
-                                <span class="switch-title">Add a card only the picture decided</span>
-                                <span class="switch-desc">On: a clear match nothing else ties with is added by the picture alone - a printing newer than the picture index whose collector line is not read (OCR off, or an unreadable line) can then be added as another printing. Off: such a card needs the collector line or OCR to agree, else it goes on to the AI or review</span>
-                            </span>
-                            <input type="checkbox" class="switch" id="toggle-picture-alone">
-                        </label>
                         <p class="hint" id="reading-status"></p>
-                        <div class="input-group">
-                            <label>Picture index</label>
-                            <div class="storage-usage" id="index-status">Loading...</div>
-                            <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
-                            <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
-                            <div class="hint" id="index-hint">A fingerprint of every printing's picture. An update downloads only the new pictures from Scryfall; the first build downloads the whole game, about 12 GB, and takes hours - it can be stopped and goes on where it stopped.</div>
-                        </div>
-                        <!-- a direct child of the card, like every other switch: inside .input-group it took that group's input styles (a full-width bar) -->
-                        <label class="switch-row">
-                            <span class="switch-text">
-                                <span class="switch-title">Update the index after a card data update</span>
-                                <span class="switch-desc">Fetches the new printings' pictures by itself; never the first build</span>
-                            </span>
-                            <input type="checkbox" class="switch" id="toggle-extend-index">
-                        </label>
+                        <details class="settings-more">
+                            <summary>Details</summary>
+                            <p class="hint">The card's picture is compared with every printing's picture (the picture index, under Card data); a clear match settles it. With OCR on, the
+                                collector line at the bottom of the card is read too, to tell apart printings with the same art.</p>
+                            <label class="switch-row">
+                                <span class="switch-text">
+                                    <span class="switch-title" data-guarded>Add a card only the picture decided</span>
+                                    <span class="switch-desc">On: a clear match is added without the collector line. Off: such a card also needs OCR or the collector line to agree, else it goes on to the next step.</span>
+                                </span>
+                                <input type="checkbox" class="switch" id="toggle-picture-alone">
+                            </label>
+                        </details>
                     </div>
 
                     <!-- 2. OCR: read on this computer, for what the picture does not settle (and the collector line for the picture) -->
-                    <div class="settings-card">
-                        <h3>OCR</h3>
+                    <div class="settings-card reading-step">
+                        <h3><span class="step-number">2</span> OCR</h3>
                         <label class="switch-row">
                             <span class="switch-text">
                                 <span class="switch-title">Read with OCR</span>
-                                <span class="switch-desc" id="ocr-desc">light-ocr reads the card on this computer when the picture is in doubt, and the collector line for the picture</span>
+                                <span class="switch-desc" id="ocr-desc">Reads the card's text on this computer, when the picture is unsure</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-ocr">
                         </label>
                     </div>
 
                     <!-- 3. The vision AI: the last step - switched on or off, and configured -->
-                    <div class="settings-card">
-                        <h3>Vision AI</h3>
+                    <div class="settings-card reading-step">
+                        <h3><span class="step-number">3</span> Vision AI</h3>
                         <label class="switch-row">
                             <span class="switch-text">
                                 <span class="switch-title">Ask the vision AI</span>
-                                <span class="switch-desc" id="ai-desc">On: the last step - asked for what the picture and OCR could not decide, and for the foil marker where nothing else read it</span>
+                                <span class="switch-desc" id="ai-desc">The last step: asked about what the picture and OCR could not decide</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-ai">
                         </label>
@@ -244,7 +253,7 @@
                             <label for="ai-credential" id="ai-credential-label">API key</label>
                             <div class="model-row">
                                 <input type="password" id="ai-credential" class="text-input" autocomplete="off" spellcheck="false">
-                                <button type="button" class="btn btn-small" id="save-credential">Save</button>
+                                <button type="button" class="btn btn-small" id="save-credential" data-guarded>Save</button>
                             </div>
                             <div class="hint" id="ai-credential-hint"></div>
                         </div>
@@ -258,18 +267,74 @@
                         <div class="input-group">
                             <span class="field-label">Prompts</span>
                             <a class="btn btn-block" id="edit-prompts" href="#">Edit prompts</a>
-                            <div class="hint" id="prompt-summary">What the AI is asked to read on each card - adjustable per model. The editor is on a scanner page.</div>
+                            <div class="hint" id="prompt-summary">What the AI is asked about each card. The editor is on a scanner page.</div>
                         </div>
                     </div>
                 </section>
 
-                <!-- ================= Collection and data ================= -->
-                <section class="settings-category" id="cat-data" hidden>
-                    <h2>Collection and data</h2>
+                <!-- ================= Card data: the card database and the picture index, and their automatic updates ================= -->
+                <section class="settings-category" id="cat-carddata" hidden>
+                    <h2>Card data</h2>
+                    <p class="hint">What cards are recognised against: every printing with its prices, and a fingerprint of each printing's picture.</p>
 
                     <div class="settings-card">
-                        <h3>Backups</h3>
-                        <p class="hint">The collection, the scanned cards and the decks as they are now. Make one yourself before a big load (adding scanned cards, importing a file) - restoring puts all three back.</p>
+                        <h3>Card database</h3>
+                        <div class="storage-usage" id="database-state">Loading...</div>
+                        <button type="button" id="update-database" class="btn btn-block">Update card database</button>
+                        <div class="hint" id="database-source-hint">Downloads the latest card data and prices. Scanning keeps working meanwhile.</div>
+                        <div class="hint" id="database-progress"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Picture index</h3>
+                        <div class="input-group">
+                            <div class="storage-usage" id="index-status">Loading...</div>
+                            <button type="button" id="update-index" class="btn btn-block" data-guarded>Update the picture index</button>
+                            <button type="button" id="stop-index" class="btn btn-block" hidden data-guarded>Stop (what is done is kept)</button>
+                            <div class="hint" id="index-hint">Downloads only the pictures it lacks. The first build takes hours (about 12 GB); it can be stopped and goes on later.</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Automatic updates</h3>
+                        <p class="hint">While the program runs; a computer that was off catches up when it starts.</p>
+                        <div class="schedule-row">
+                            <label for="database-every" data-guarded>Card database</label>
+                            <select id="database-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="24">Every day</option>
+                                <option value="72">Every 3 days</option>
+                                <option value="168">Every week</option>
+                                <option value="720">Every month</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="database-auto"></div>
+                        <label class="switch-row">
+                            <span class="switch-text">
+                                <span class="switch-title" data-guarded>The picture index follows</span>
+                                <span class="switch-desc">After each card data update, fetch the new printings' pictures</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="toggle-extend-index">
+                        </label>
+                        <div class="schedule-row">
+                            <label for="index-every" data-guarded>Picture index: fetch what is missing</label>
+                            <select id="index-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="6">Every 6 hours</option>
+                                <option value="24">Every day</option>
+                                <option value="168">Every week</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="index-auto"></div>
+                    </div>
+                </section>
+
+                <!-- ================= Backups ================= -->
+                <section class="settings-category" id="cat-backups" hidden>
+                    <h2>Backups</h2>
+                    <p class="hint">The collection, the scanned cards and the decks. Restoring puts all three back as they were.</p>
+                    <div class="settings-card">
+                        <h3>Automatic backups</h3>
                         <div class="backup-schedule">
                             <label for="backup-every">Automatic backup</label>
                             <select id="backup-every" class="select">
@@ -282,53 +347,42 @@
                             <label for="backup-keep">keep the last</label>
                             <input type="number" id="backup-keep" class="text-input" min="1" max="60" value="7">
                         </div>
-                        <div class="hint">Made while the program runs, and only when something changed since the last backup. Older automatic ones are cleared when a new one is made; the ones you make stay until you delete them. Backups are kept on the server's own disk: download one (the arrow beside it) to have a copy elsewhere.</div>
+                        <div class="hint">Only when something changed. Older automatic ones are removed; the ones you make stay.</div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>Your backups</h3>
+                        <p class="hint">Make one before a big change (adding scanned cards, importing a file). They are kept on the server's disk: download one (the arrow) to keep a copy elsewhere.</p>
                         <div class="backup-create">
                             <input type="text" id="backup-note" class="text-input" maxlength="80" placeholder="Note (optional)" autocomplete="off">
                             <button type="button" class="btn btn-primary" id="backup-create">Back up now</button>
                         </div>
                         <div class="settings-actions">
-                            <button type="button" class="btn btn-small" id="backup-upload">Upload a backup file</button>
+                            <button type="button" class="btn btn-small" id="backup-upload" data-guarded>Upload a backup file</button>
                             <input type="file" id="backup-upload-input" accept=".zip,application/zip" style="display: none;">
                         </div>
                         <div id="backup-list" class="backup-list"></div>
                     </div>
+                </section>
 
+                <!-- ================= Storage ================= -->
+                <section class="settings-category" id="cat-storage" hidden>
+                    <h2>Storage</h2>
                     <div class="settings-card">
-                        <h3>Card data</h3>
-                        <div class="hint" id="database-state">Loading...</div>
-                        <button type="button" id="update-database" class="btn btn-block">Update card database</button>
-                        <div class="hint" id="database-source-hint">Downloads the latest card data and prices (a few minutes). Scanning keeps working while it downloads.</div>
-                        <div class="hint" id="database-progress"></div>
-                    </div>
-
-                    <div class="settings-card">
-                        <h3>Storage</h3>
+                        <h3>Capture files</h3>
                         <div class="input-group">
-                            <label>Capture files in use</label>
                             <div class="storage-usage" id="capture-usage">Loading...</div>
                         </div>
                         <div class="input-group">
-                            <label for="capture-copy-size">Capture size (all cameras)</label>
-                            <select id="capture-copy-size" class="select narrow">
-                                <option value="off">Off - thumbnails only</option>
-                                <option value="small">Small - 600 px tall, about 55 KB each</option>
-                                <option value="medium">Medium - 900 px tall, about 100 KB each</option>
-                                <option value="large">Large - 1200 px tall, about 145 KB each</option>
-                            </select>
-                            <div class="hint" id="capture-copy-hint">Loading...</div>
-                        </div>
-                        <div class="input-group">
-                            <label for="cleanup-days">Keep the pictures received from the cameras for (days)</label>
+                            <label for="cleanup-days" data-guarded>Keep pictures received from the cameras (days)</label>
                             <input type="number" id="cleanup-days" class="text-input narrow" min="1" max="3650" step="1">
-                            <div class="hint">Older ones are deleted when the server starts and once a day. The thumbnails and large copies kept with the collection's cards are not touched.</div>
-                            <button type="button" id="cleanup-now" class="btn btn-block">Clean up now</button>
+                            <div class="hint">Older ones are deleted daily. The pictures kept with your cards stay.</div>
+                            <button type="button" id="cleanup-now" class="btn btn-block" data-guarded>Clean up now</button>
                             <div class="hint" id="cleanup-result"></div>
                         </div>
                         <div class="input-group">
                             <label>Large copies</label>
-                            <button type="button" id="compress-copies" class="btn btn-block">Compress large copies</button>
-                            <div class="hint" id="compress-hint">Makes the copies already kept as small as the capture size above (only ever smaller). Backups keep the old files until they are deleted.</div>
+                            <button type="button" id="compress-copies" class="btn btn-block" data-guarded>Compress large copies</button>
+                            <div class="hint" id="compress-hint">Shrinks the pictures already kept to the capture size (Cameras, All cameras).</div>
                         </div>
                         <label class="switch-row">
                             <span class="switch-text">
@@ -338,15 +392,6 @@
                             <input type="checkbox" class="switch" id="keep-frames">
                         </label>
                     </div>
-
-                    <details class="settings-advanced">
-                        <summary>Advanced</summary>
-                        <div class="settings-card flat">
-                            <button type="button" id="rebuild-database" class="btn btn-block">Rebuild database schema</button>
-                            <div class="hint">Reorders the card table and rebuilds its indexes (about 30 seconds). Your cards are not touched.</div>
-                            <div class="hint" id="rebuild-progress"></div>
-                        </div>
-                    </details>
                 </section>
 
                 <!-- ================= Server ================= -->
@@ -354,11 +399,11 @@
                     <h2>Server</h2>
                     <div class="settings-card">
                         <h3>Restart</h3>
-                        <p class="hint">Stops and starts Card Scanner again, wherever it runs (a few seconds). Your cards are saved; the cameras reconnect by themselves; this page reloads. Use it for the settings that say "applies after a restart".</p>
-                        <button type="button" class="btn btn-block" id="restart-program">Restart Card Scanner</button>
+                        <p class="hint">A few seconds. Your cards are saved and the cameras reconnect. Needed by settings that say "applies after a restart".</p>
+                        <button type="button" class="btn btn-block" id="restart-program" data-guarded>Restart Card Scanner</button>
                         {% if app_mode %}
-                        <button type="button" class="btn btn-block" id="quit-program">Quit Card Scanner</button>
-                        <div class="hint">Stops the program on the computer it runs on (from that computer only); your cards are saved.</div>
+                        <button type="button" class="btn btn-block" id="quit-program" data-guarded>Quit Card Scanner</button>
+                        <div class="hint">Stops the program on this computer; your cards are saved.</div>
                         {% endif %}
                     </div>
 
@@ -366,8 +411,8 @@
                         <h3>Network</h3>
                         <label class="switch-row">
                             <span class="switch-text">
-                                <span class="switch-title">Reachable from other devices</span>
-                                <span class="switch-desc" id="network-access-desc" data-saved="{{ 'true' if network_access else 'false' }}" data-running="{{ 'true' if network_access_running else 'false' }}">Phones and other computers on your network can open these pages (there is no login); applies after a restart</span>
+                                <span class="switch-title" data-guarded>Reachable from other devices</span>
+                                <span class="switch-desc" id="network-access-desc" data-saved="{{ 'true' if network_access else 'false' }}" data-running="{{ 'true' if network_access_running else 'false' }}">Phones and other computers on your network can open these pages. Applies after a restart</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-network-access" {% if network_access %}checked{% endif %}>
                         </label>
@@ -375,7 +420,7 @@
 
                     <div class="settings-card" id="lock-card">
                         <h3>Settings password</h3>
-                        <p class="hint">Optional. With a password set, the AI keys and endpoint, restart, network access, debug mode and the backups (restore, upload, download, delete) ask for it first. Scanning, the collection and the decks stay open. The page is plain HTTP, so the password crosses the network unencrypted: it keeps out mistakes and the curious, not someone listening on the network. Forgotten: delete <code>data/settings_login.json</code> and restart.</p>
+                        <p class="hint">Optional. What is marked with a padlock then asks for it; scanning, the collection and the decks stay open.</p>
                         <div class="hint" id="lock-status"></div>
                         <div class="lock-row" id="lock-set-row">
                             <input type="password" id="lock-new" class="text-input" placeholder="New password (8 characters or more)" autocomplete="new-password">
@@ -386,14 +431,19 @@
                             <button type="button" class="btn" id="lock-lock" hidden>Lock this browser</button>
                             <button type="button" class="btn btn-danger" id="lock-remove" hidden>Remove the password</button>
                         </div>
+                        <details class="settings-more">
+                            <summary>Details</summary>
+                            <p class="hint">The pages are plain HTTP, so the password crosses the network unencrypted: it keeps out mistakes and the curious, not someone listening on the network.
+                                Forgotten: delete <code>data/settings_login.json</code> and restart.</p>
+                        </details>
                     </div>
 
                     <details class="settings-advanced">
-                        <summary>Advanced</summary>
+                        <summary>Troubleshooting</summary>
                         <label class="switch-row">
                             <span class="switch-text">
-                                <span class="switch-title">Debug mode</span>
-                                <span class="switch-desc" id="debug-mode-desc">A request log (data/logs/requests.log) and, when the server listens on this computer only, the web server's interactive debugger (an error page with a Python console). A server that other devices can reach never starts the debugger - anyone on the network could use it. Applies after a restart.</span>
+                                <span class="switch-title" data-guarded>Debug mode</span>
+                                <span class="switch-desc" id="debug-mode-desc">A log of every request and, on a server only this computer can reach, an interactive debugger. Applies after a restart.</span>
                             </span>
                             <input type="checkbox" class="switch" id="toggle-debug-mode">
                         </label>
@@ -406,7 +456,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=26"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=22"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=28"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=26"></script>
 </body>
 </html>

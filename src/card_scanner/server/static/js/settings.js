@@ -1,5 +1,5 @@
-// The settings page (templates/settings.html): every setting of the program in five categories,
-// each saved the moment it changes. Loaded after audio.js and common.js; it has its own `$`,
+// The settings page (templates/settings.html): every setting of the program in sections (the plan:
+// docs/plans/SETTINGS_REDESIGN_PLAN.md), each saved the moment it changes. Loaded after audio.js and common.js; it has its own `$`,
 // `api` and connection (scanner.js, collection.js and library.js are for other pages and declare
 // the same names).
 //
@@ -49,14 +49,19 @@ function recall(key, fallback) {
     try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
 }
 
-const CATEGORIES = ['cameras', 'sounds', 'reading', 'data', 'server'];
+const CATEGORIES = ['overview', 'cameras', 'reading', 'carddata', 'backups', 'storage', 'server'];
+
+// The sections the page had before the redesign of 2026-10-22, and where their contents went: other pages link to the old addresses
+// (the collection page sends #data, an older bookmark #sounds) and a browser may remember one as its last section
+const OLD_CATEGORIES = {sounds: 'cameras', data: 'backups'};
 
 // ============================================================================
 // Categories
 // ============================================================================
 
 function showCategory(name, remembered = true) {
-    if (!CATEGORIES.includes(name)) name = 'cameras';
+    name = OLD_CATEGORIES[name] || name;
+    if (!CATEGORIES.includes(name)) name = 'overview';
     CATEGORIES.forEach(category => {
         $('cat-' + category).hidden = category !== name;
     });
@@ -71,9 +76,55 @@ function showCategory(name, remembered = true) {
 // The old addresses: the scanner page's drawer (#settings) was cameras, sound and the AI; the
 // collection page's was backups and storage
 function categoryFromAddress() {
-    const name = location.hash.replace('#', '');
+    const asked = location.hash.replace('#', '');
+    const name = OLD_CATEGORIES[asked] || asked;
     if (CATEGORIES.includes(name)) return name;
-    return recall('settingsCategory', 'cameras');
+    const remembered = recall('settingsCategory', 'overview');
+    return OLD_CATEGORIES[remembered] || remembered;
+}
+
+// ============================================================================
+// The overview: one line per section, how things stand. Nothing is asked for it: each loader below hands its part over
+// (setOverview) when its own answer comes - the stations, the card data, the index, the backups... - and the list is drawn again.
+// A line is a button to its section; a line marked `warn` is something to look at.
+// ============================================================================
+
+const OVERVIEW_ORDER = [
+    ['cameras', 'Cameras', 'cameras'], ['reading', 'Card recognition', 'reading'], ['carddata', 'Card data', 'carddata'],
+    ['index', 'Picture index', 'carddata'], ['backups', 'Backups', 'backups'], ['storage', 'Storage', 'storage'], ['server', 'Server', 'server'],
+];
+const overview = {};     // line -> {text, warn}
+
+function setOverview(line, text, warn = false) {
+    overview[line] = {text, warn};
+    renderOverview();
+}
+
+function renderOverview() {
+    $('overview-list').innerHTML = OVERVIEW_ORDER.filter(([line]) => overview[line]).map(([line, label, section]) =>
+        `<button type="button" class="overview-row${overview[line].warn ? ' is-warn' : ''}" data-goto="${section}">`
+        + `<span class="overview-label">${escapeHtml(label)}</span><span class="overview-text">${escapeHtml(overview[line].text)}</span>`
+        + `<span class="overview-go" aria-hidden="true">&rsaquo;</span></button>`).join('')
+        || '<div class="hint">Loading...</div>';
+}
+
+function shortTime(iso) {
+    return new Date(iso).toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+
+// Card recognition's line is made of three answers that come separately (the OCR, the AI, the reading mode)
+const readingParts = {};
+
+function overviewReading(part, value) {
+    readingParts[part] = value;
+    const {ocr, ai, reading} = readingParts;
+    if (!reading) return;
+    const steps = [];
+    if (reading.mode === 'evidence') steps.push('picture');
+    if (ocr) steps.push('OCR');
+    if (ai) steps.push('vision AI');
+    const text = steps.length ? 'Reads by ' + steps.join(', then ') : 'Every step is off: each card goes to review';
+    setOverview('reading', text, !steps.length);
 }
 
 // ============================================================================
@@ -104,7 +155,7 @@ function connect() {
     socket.on('refocus_on_drop_updated', data => showRefocusOnDrop(data.ratio));
     socket.on('fixed_area_updated', () => loadCameraSettings());
 
-    // Card reading
+    // Card recognition
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
     socket.on('ai_toggled', data => applyAiState(data.enabled, data.available));
     socket.on('reading_mode_changed', applyReadingState);
@@ -122,28 +173,17 @@ function connect() {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `Updated: ${data.total_cards.toLocaleString()} cards loaded.`;
-        notify('Card data updated - the picture index can be updated now (Card reading > Picture)', 'success');
+        notify('Card data updated', 'success');
         loadDatabaseState();
         loadIndex();
+        loadUpdateSchedule();
     });
     socket.on('database_update_error', data => {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `The update failed: ${data.message}`;
         notify(`Card data update failed: ${data.message}`, 'error');
-    });
-    socket.on('database_rebuild_progress', data => { $('rebuild-progress').textContent = data.message; });
-    socket.on('database_rebuild_complete', data => {
-        $('rebuild-database').disabled = false;
-        $('rebuild-database').textContent = 'Rebuild database schema';
-        $('rebuild-progress').textContent = `Rebuilt: ${data.cards_imported.toLocaleString()} cards migrated (${data.schema_type}).`;
-        notify('Database rebuilt', 'success');
-    });
-    socket.on('database_rebuild_error', data => {
-        $('rebuild-database').disabled = false;
-        $('rebuild-database').textContent = 'Rebuild database schema';
-        $('rebuild-progress').textContent = `The rebuild failed: ${data.message}`;
-        notify(`Database rebuild failed: ${data.message}`, 'error');
+        loadUpdateSchedule();
     });
 }
 
@@ -167,6 +207,8 @@ async function loadStations(keep = true) {
     if (!data) return;
     stations = data.stations;
     $('server-origin').textContent = window.location.origin;
+    const connected = stations.filter(station => station.connected).length;
+    setOverview('cameras', stations.length ? `${connected} of ${plural(stations.length, 'camera')} connected` : 'No camera has connected yet', !connected);
     const select = $('camera-select');
     select.innerHTML = stations.map(station =>
         `<option value="${escapeHtml(station.id)}">${escapeHtml(station.name)}${station.connected ? '' : ' (not connected)'}</option>`).join('');
@@ -381,7 +423,7 @@ function bindSounds() {
 }
 
 // ============================================================================
-// Card reading: OCR, the vision AI
+// Card recognition: the picture, OCR, the vision AI
 // ============================================================================
 
 const OCR_DESC = $('ocr-desc').textContent;
@@ -390,45 +432,48 @@ const AI_DESC = $('ai-desc').textContent;
 
 // The vision AI switch: off sends what OCR and the picture cannot decide to the review queue; without a provider set up there is nothing to switch
 function applyAiState(enabled, available) {
+    overviewReading('ai', Boolean(enabled) && Boolean(available));
     const toggle = $('toggle-ai');
     toggle.checked = Boolean(enabled) && Boolean(available);
     toggle.disabled = !available;
     $('ai-desc').textContent = !available ? 'No vision AI is set up (a provider and its key)'
-        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service - what OCR and the picture cannot decide goes to the review queue';
+        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service; what is left goes to review';
 }
 
 function applyOcrState(enabled, installed) {
+    overviewReading('ocr', Boolean(enabled) && Boolean(installed));
     const toggle = $('toggle-ocr');
     toggle.checked = Boolean(enabled) && Boolean(installed);
     toggle.disabled = !installed;
     $('ocr-desc').textContent = installed ? OCR_DESC
-        : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
+        : 'Not installed on this server (it needs Node.js 22+ and "npm install" in src/ocr; scripts/deploy.sh does it)';
 }
 
 // The reading mode (core/identification.py: reading_mode): off is OCR then the AI as always; on reads a card OCR could not confirm by its picture first
 function applyReadingState(reading) {
     if (!reading) return;
+    overviewReading('reading', reading);
     const evidence = reading.mode === 'evidence';
     $('toggle-reading-evidence').checked = evidence;
     $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
     $('toggle-picture-alone').disabled = !evidence;
     $('toggle-extend-index').checked = Boolean(reading.extend_index);     // independent of the mode: it only keeps the index current
     $('reading-evidence-desc').textContent = evidence
-        ? 'On: the picture, then OCR in doubt, then the vision AI (the last step)'
-        : 'Off: OCR, then the vision AI, as before the picture matching existed';
+        ? 'Compared with every printing\'s picture; a clear match settles the card'
+        : 'Off: OCR first, then the vision AI';
     const missing = [];
     if (reading.index_printings === null || reading.index_printings === undefined) {
-        missing.push('there is no picture index (the button below)');
+        missing.push('there is no picture index (Card data)');
     }
     // OCR off is no strip: only the picture alone can decide then, so it is a gap only while that is off too
     if (!reading.ocr_enabled && !reading.accept_image_alone) missing.push('OCR is switched off and the picture alone is not allowed');
     const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
     // While the index lacks printings of the card data, the picture alone adds nothing (the server refuses it: a missing printing would be added as another one)
     const stale = evidence && reading.accept_image_alone && reading.index_missing
-        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (below), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
-    // (the index's size is not repeated here: the picture index's own status sits right below, in the same card)
-    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
-        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
+        ? `The picture index lacks ${plural(reading.index_missing, 'printing')}: until it is updated (Card data), cards the picture alone would settle go on to the next step. ` : '';
+    // (the index's size is not repeated here: it is under Card data, with the button that updates it)
+    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is off: the picture alone decides what it can. ' : '')
+        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')}.` : '');
 }
 
 let availableModels = {};
@@ -551,7 +596,7 @@ async function loadPromptSummary() {
         const custom = data.order.map(kind => data.prompts[kind]).filter(prompt => prompt.source !== 'built-in');
         $('prompt-summary').textContent = custom.length
             ? custom.map(prompt => `${prompt.label}: ${PROMPT_SOURCES[prompt.source]}`).join(' · ') + '. The editor is on a scanner page.'
-            : 'What the AI is asked to read on each card - adjustable per model. The editor is on a scanner page.';
+            : 'What the AI is asked about each card. The editor is on a scanner page.';
     } catch (error) { /* the summary is only a hint */ }
 }
 
@@ -567,7 +612,7 @@ function bindReading() {
         if (toggle.checked) {
             const ok = await confirmDialog({
                 title: 'Add cards the picture alone decided?',
-                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: extend the picture index after every card data update (Settings > Storage) and look at what is added.',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: keep the picture index current (Settings > Card data) and look at what is added.',
                 confirmText: 'Turn on', danger: true
             });
             if (!ok) { toggle.checked = false; return; }
@@ -605,7 +650,7 @@ function bindReading() {
 }
 
 // ============================================================================
-// Collection and data: backups, card data, storage
+// Backups, card data (with the picture index and the automatic updates), storage
 // ============================================================================
 
 async function loadBackups() {
@@ -615,6 +660,16 @@ async function loadBackups() {
     $('backup-every').value = String(data.schedule.every_hours);
     $('backup-keep').value = data.schedule.keep;
     $('backup-keep').disabled = !data.schedule.every_hours;
+    backupSchedule = data.schedule;
+    overviewBackups();
+}
+
+let backupSchedule = null, newestBackup = null;    // for the overview's line
+
+function overviewBackups() {
+    const every = backupSchedule && backupSchedule.every_hours;
+    const auto = !backupSchedule ? '' : every ? ` · automatic every ${every === 24 ? 'day' : every === 168 ? 'week' : every + ' hours'}` : ' · automatic backups off';
+    setOverview('backups', (newestBackup ? `Last ${shortTime(newestBackup.created)}` : 'No backup yet') + auto, !newestBackup || !every);
 }
 
 async function saveBackupSchedule(change) {
@@ -623,10 +678,14 @@ async function saveBackupSchedule(change) {
     $('backup-every').value = String(data.schedule.every_hours);
     $('backup-keep').value = data.schedule.keep;
     $('backup-keep').disabled = !data.schedule.every_hours;
+    backupSchedule = data.schedule;
+    overviewBackups();
     notify(data.schedule.every_hours ? 'Automatic backups saved' : 'Automatic backups switched off', 'success');
 }
 
 function renderBackups(backups) {
+    newestBackup = backups[0] || null;     // the list is newest first
+    overviewBackups();
     $('backup-list').innerHTML = backups.map(backup => `
         <div class="backup-row" data-backup="${escapeHtml(backup.id)}" data-created="${escapeHtml(backup.created.slice(0, 16))}">
             <div>
@@ -634,7 +693,7 @@ function renderBackups(backups) {
                 ${backup.note ? `<div class="idea-meta">${escapeHtml(backup.note)}</div>` : ''}
                 <div class="idea-meta">${plural(backup.cards, 'card')} in the collection · ${backup.scanned} scanned · ${plural(backup.decks, 'deck')}</div>
             </div>
-            <button type="button" class="btn btn-small" data-backup-action="restore">Restore</button>
+            <button type="button" class="btn btn-small" data-backup-action="restore" data-guarded>Restore</button>
             <a class="mini-btn" href="/api/backups/${encodeURIComponent(backup.id)}/download" download title="Download this backup as a zip file, to keep a copy elsewhere"><svg class="icon"><use href="#i-download"/></svg></a>
             <button type="button" class="mini-btn" data-backup-action="delete" title="Delete this backup"><svg class="icon"><use href="#i-trash"/></svg></button>
         </div>`).join('') || '<div class="hint">No backups yet.</div>';
@@ -694,16 +753,28 @@ async function loadDatabaseState() {
     else if (state.update) parts.push(state.update);
     if (state.error) parts.push(`last update failed: ${state.error}`);
     $('database-state').textContent = parts.join(' · ');
+    cardDataState = state;
+    overviewCardData();
     try {
         // What the update downloads depends on the game being scanned
         const games = await (await fetch('/api/games')).json();
         const game = games.games.find(item => item.id === games.active);
         if (game) {
             $('database-source-hint').textContent =
-                `Downloads the latest ${game.label} card data${game.id === 'mtg' ? ' and prices' : ''} from ${game.source}`
-                + (game.id === 'mtg' ? ' (a few minutes)' : ' (a few seconds)') + '. Scanning keeps working while it downloads.';
+                `Downloads the latest ${game.label} card data${game.id === 'mtg' ? ' and prices' : ''} from ${game.source}. Scanning keeps working meanwhile.`;
         }
     } catch (error) { /* the general text stays */ }
+}
+
+let cardDataState = null, cardDataSchedule = null;     // the overview's card data line is made of both
+
+function overviewCardData() {
+    if (!cardDataState) return;
+    const parts = [`${(cardDataState.total_cards || 0).toLocaleString()} cards`];
+    if (cardDataState.updating) parts.push('updating now');
+    else if (cardDataState.update) parts.push('newer data available');
+    if (cardDataSchedule) parts.push(cardDataSchedule.every_hours ? `next update ${whenText(cardDataSchedule.next)}` : 'automatic update off');
+    setOverview('carddata', parts.join(' · '), Boolean(cardDataState.error || (cardDataState.update && !cardDataState.updating)));
 }
 
 function formatBytes(bytes) {
@@ -719,6 +790,7 @@ function showCaptureUsage(usage) {
         ['large', 'Large copies kept with each capture', 'data/captures_full'],
         ['frames', 'Camera frames kept for training', 'data/frames'],
     ];
+    setOverview('storage', `${formatBytes(usage.total_bytes)} of capture files`);
     $('capture-usage').innerHTML = `<div class="storage-total">${formatBytes(usage.total_bytes)}</div>`
         + kinds.map(([key, label, where]) => `<div class="storage-row" title="${escapeHtml(where)}"><span>${escapeHtml(label)}</span>`
             + `<span>${usage[key].count.toLocaleString()} files, ${formatBytes(usage[key].bytes)}</span></div>`).join('');
@@ -734,6 +806,9 @@ function showIndex(state) {
     $('update-index').disabled = !!state.running;
     $('stop-index').hidden = !state.running;
     $('stop-index').disabled = !!state.stopping;
+    setOverview('index', state.running ? `Building: ${state.done.toLocaleString()} of ${state.total ? state.total.toLocaleString() : '?'} new pictures`
+        : !state.indexed ? 'Not built yet' : state.missing ? `Lacks ${plural(state.missing, 'printing')} of the card data` : `Complete: ${state.indexed.toLocaleString()} printings`,
+        !state.running && (!state.indexed || Boolean(state.missing)));
     if (state.running) {
         status.textContent = `Building: ${state.done.toLocaleString()} of ${state.total ? state.total.toLocaleString() : '?'} new pictures done (${covers} covered before).`
             + (state.stopping ? ' Stopping...' : '');
@@ -743,11 +818,12 @@ function showIndex(state) {
     const wasWatching = Boolean(indexWatch);
     if (indexWatch) { clearInterval(indexWatch); indexWatch = null; }
     $('update-index').textContent = state.indexed ? 'Update the picture index' : 'Build the picture index';
-    status.textContent = state.indexed ? `Covers ${covers}` + (state.missing ? ` - ${state.missing.toLocaleString()} to add (press the button)` : ' - up to date')
+    status.textContent = state.indexed ? `Covers ${covers}` + (state.missing ? ` - ${state.missing.toLocaleString()} to add` : ' - up to date')
                                        : `Not built yet (0 of ${state.printings.toLocaleString()} printings)`;
     if (state.error) status.textContent += ` - the last build did not finish: ${state.error}`;     // stays after a reload: it is not only a notification
     if (state.built) status.title = `Built ${state.built}`;
     if (wasWatching) {
+        loadUpdateSchedule();       // an automatic build that just ended changes the "last / next" line
         // It has just ended: say how it went, once
         if (state.error) notify(`Picture index: ${state.error}`, 'error');
         else if (state.result) {
@@ -761,6 +837,54 @@ function showIndex(state) {
 async function loadIndex() {
     const state = await api('/api/image_index');
     if (state) showIndex(state);
+}
+
+// The automatic updates (server/card_data.py: update_schedule_state): the card data's download and the picture index's retry - each a
+// select and a line saying how the last automatic run ended and when the next is due. The times come with the server's offset, and are
+// shown in the browser's own time zone.
+
+function whenText(iso) {
+    const moment = new Date(iso);
+    if (moment <= new Date()) return 'within 10 minutes';
+    return moment.toLocaleString(undefined, {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+
+function lastRunText(last) {
+    // ok: true / false, or null while it runs (or when a server stopped in the middle of it)
+    if (!last || !last.at) return 'Not run yet.';
+    const at = new Date(last.at).toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    if (last.ok === true) return `Last ${at}: ${last.message}.`;
+    if (last.ok === false) return `Last ${at} did not finish: ${last.message}.`;
+    return `Last began ${at} (still running, or the program stopped during it).`;
+}
+
+function showUpdateSchedule(state) {
+    const card = state.card_data, index = state.image_index;
+    cardDataSchedule = card;
+    overviewCardData();
+    $('database-every').value = String(card.every_hours);
+    $('database-auto').textContent = card.every_hours
+        ? `${lastRunText(card.last)} Next: ${whenText(card.next)}.`
+        : 'Off: only with the button above (a notice says when newer data is there).';
+    $('index-every').value = String(index.every_hours);
+    $('index-auto').textContent = index.every_hours
+        ? `${lastRunText(index.last)} Next look: ${whenText(index.next)}, if any are missing. Never the first build.`
+        : 'Off: what a build left out (a rate limit, a stop) waits for the button or the next card data update.';
+}
+
+async function loadUpdateSchedule() {
+    const state = await api('/api/updates/schedule');
+    if (state) showUpdateSchedule(state);
+}
+
+async function saveUpdateSchedule(change) {
+    // Guarded on the server: with a settings password set, common.js asks for it and sends the request again
+    const state = await api('/api/updates/schedule', {method: 'POST', body: change});
+    if (!state) return loadUpdateSchedule();       // refused (or the password dialog cancelled): the selects go back to what is saved
+    showUpdateSchedule(state);
+    const [what, hours] = Object.entries(change)[0];
+    const label = what === 'card_data' ? 'Automatic card data update' : 'Picture index retry';
+    notify(hours ? `${label} saved` : `${label} switched off`, 'success');
 }
 
 let compressWatch = null;   // the timer that asks how far the compression is, while it runs
@@ -790,13 +914,11 @@ function showCaptureCopy(info) {
     if (info.usage) showCaptureUsage(info.usage); else $('capture-usage').textContent = 'Could not be measured (see the log).';
     $('capture-copy-size').value = info.size;
     $('keep-frames').checked = !!info.keep_frames;
-    $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `
-        + (info.keep_frames ? 'They stay after their scanned cards are cleared or added to the collection (until the 3 GB limit).'
-                            : 'The frame of a scanned card is removed when that card is cleared or added to the collection. Label the frames you want for training first, or turn this on.');
-    $('capture-copy-hint').textContent = (info.size === 'off'
-        ? 'Only the thumbnail of each captured card is kept. '
-        : 'The size of the picture of each captured card kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
-        + `${info.count} kept so far, ${info.megabytes} MB (data/captures_full). It applies to captures made from now on, from every camera.`;
+    $('keep-frames-hint').textContent = `${plural(info.frames, 'frame')} kept, ${info.frames_megabytes} MB - training data from cameras with Debug trace on. `
+        + (info.keep_frames ? 'They stay when their cards are cleared or added (up to 3 GB).' : 'Off: a frame goes when its card is cleared or added.');
+    $('capture-copy-hint').textContent = (info.size === 'off' ? 'Only a thumbnail is kept. '
+        : 'Kept beside the thumbnail, to read a card again later or train the detector. ')
+        + `${info.count} kept, ${info.megabytes} MB. Applies to new captures.`;
 }
 
 async function loadCaptureCopy() {
@@ -821,6 +943,8 @@ function bindData() {
     });
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value)}));
+    $('database-every').addEventListener('change', event => saveUpdateSchedule({card_data: parseInt(event.target.value)}));
+    $('index-every').addEventListener('change', event => saveUpdateSchedule({image_index: parseInt(event.target.value)}));
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');
         if (button) backupAction(button.closest('[data-backup]'), button.dataset.backupAction);
@@ -832,19 +956,6 @@ function bindData() {
         $('database-progress').textContent = 'Starting the card data update...';
         socket.emit('update_database');
     });
-    $('rebuild-database').addEventListener('click', async () => {
-        const ok = await confirmDialog({
-            title: 'Rebuild database schema?',
-            message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your cards are not touched.',
-            confirmText: 'Rebuild'
-        });
-        if (!ok) return;
-        $('rebuild-database').disabled = true;
-        $('rebuild-database').textContent = 'Rebuilding...';
-        $('rebuild-progress').textContent = 'Starting the rebuild...';
-        socket.emit('rebuild_database');
-    });
-
     $('cleanup-days').addEventListener('change', event => {
         const days = parseInt(event.target.value);
         if (!(days >= 1 && days <= 3650)) { notify('Days: a whole number from 1 to 3650', 'error'); return loadCaptureCopy(); }
@@ -888,11 +999,11 @@ const DEBUG_MODE_DESC = $('debug-mode-desc').textContent;
 function applyDebugMode(enabled, running, debuggerRunning) {
     $('toggle-debug-mode').checked = Boolean(enabled);
     let text = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
-        : `Now ${running ? 'on' : 'off'}: restart Card Scanner to turn it ${enabled ? 'on' : 'off'}. ` + DEBUG_MODE_DESC;
+        : `Now ${running ? 'on' : 'off'}: restart to turn it ${enabled ? 'on' : 'off'}. ` + DEBUG_MODE_DESC;
     // The debugger is half of the mode, and only where nobody else can reach the server
     if (running) {
-        text += debuggerRunning ? ' The interactive debugger is on (the server listens on this computer only).'
-            : ' The interactive debugger is off: this server can be reached from the network, so only the request log runs.';
+        text += debuggerRunning ? ' The debugger is on (only this computer can reach the server).'
+            : ' The debugger stays off: other devices can reach this server.';
     }
     $('debug-mode-desc').textContent = text;
 }
@@ -921,6 +1032,11 @@ async function loadLock() {
     $('lock-unlock').hidden = !(status.has_password && !status.unlocked);
     $('lock-lock').hidden = !(status.has_password && status.unlocked);
     $('lock-remove').hidden = !(status.has_password && !status.fixed);
+    // The padlocks (settings.css: [data-guarded] - everything the server asks the password for, the backups' Restore too) only
+    // mean something while a password is set: without one nothing asks
+    document.body.classList.toggle('has-settings-password', Boolean(status.has_password));
+    const network = $('toggle-network-access').checked ? 'reachable from other devices' : 'this computer only';
+    setOverview('server', `${status.has_password ? 'Settings password set' : 'No settings password'} · ${network}`);
 }
 
 function bindLock() {
@@ -976,6 +1092,11 @@ function bindServer() {
 document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('#settings-nav button').forEach(button =>
         button.addEventListener('click', () => showCategory(button.dataset.category)));
+    $('overview-list').addEventListener('click', event => {
+        const row = event.target.closest('[data-goto]');
+        if (row) showCategory(row.dataset.goto);
+    });
+    renderOverview();
     window.addEventListener('hashchange', () => showCategory(categoryFromAddress(), false));
     showCategory(categoryFromAddress(), false);
 
@@ -994,4 +1115,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadDatabaseState();
     loadCaptureCopy();
     loadIndex();
+    loadUpdateSchedule();
 });

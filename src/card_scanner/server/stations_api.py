@@ -31,6 +31,7 @@ from card_scanner.server.captures import (
     stop_at_card_back, submit_capture,
 )
 from card_scanner.server.inventory_api import clear_camera
+from card_scanner.server.card_data import data_updates_running, index_progress
 
 
 STATION_CAPTURE_MAX_BYTES = 30 * 1024 * 1024  # a card image and its foil image
@@ -50,6 +51,10 @@ def station_token_ok():
 # plus a small table of what the decision about a printing needs (set, number, finishes), built from the card data. Read-only, behind the station token
 # like the rest of a station's routes, and only the CURRENT generation: a phone that asks for a file of an older one is told to ask again, so it can never
 # hold the hashes of one build and the ids of another.
+# The listing also says when the index is about to change - a build running (`building`: the button, the automatic update, the extension after a card data
+# download) or a card data download (`card_data_updating`: the printings table follows it, and an extension of the index usually comes after). An update
+# changes both a few minutes apart (2026-10-22: the card data at 09:41:28, the new generation about 09:47), so a phone that downloads in between gets a
+# generation about to be replaced, or a 409 twice; the app waits instead (its IndexDownload). The files are still listed: an older app ignores the two fields.
 
 index_table_lock = threading.Lock()
 index_table_cache = {}      # {(generation, card data download time): (bytes, sha256)} - one entry at a time
@@ -87,7 +92,7 @@ def image_index_download():
         return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
     found = index_for_download()
     if found is None:
-        return jsonify({'success': False, 'message': 'This server has no picture index (Settings > Card reading > Picture)'}), 404
+        return jsonify({'success': False, 'message': 'This server has no picture index (Settings > Card data)'}), 404
     manifest, folder = found
     table, table_sha = index_printings_table(manifest)
     generation = manifest['generation']
@@ -97,9 +102,12 @@ def image_index_download():
         if kind == 'printings':
             url += f'&version={sha}'      # the table follows the card data, not the generation: its own checksum pins the download (a resumed one too)
         return {'kind': kind, 'bytes': size, 'sha256': sha, 'url': url}
+    build = index_progress()        # cheap: no database, no index read
     return jsonify({
         'success': True, 'descriptor': manifest['descriptor'], 'generation': generation, 'count': manifest['count'], 'hash_bytes': manifest['hash_bytes'],
         'built': manifest.get('built'),
+        'building': {'running': build['running'], 'done': build['done'], 'total': build['total']},
+        'card_data_updating': games.active_id() in data_updates_running,
         'files': [entry('hashes', (folder / manifest['hashes']).stat().st_size, manifest['hashes_sha256']),
                   entry('ids', (folder / manifest['ids']).stat().st_size, manifest['ids_sha256']),
                   entry('printings', len(table), table_sha)]})

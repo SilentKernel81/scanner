@@ -106,6 +106,7 @@ class Config:
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')
     DATABASE_UPDATE_AFTER_DAYS = config.get('database', 'update_after_days', default=7)
+    DATABASE_AUTO_UPDATE_HOURS = config.get('database', 'auto_update_every_hours', default=0)  # 0: off
 
     # API URLs
     SCRYFALL_BULK_URL = config.get('api', 'scryfall_bulk', default="https://api.scryfall.com/bulk-data/default-cards")
@@ -185,6 +186,7 @@ class Config:
     READING_ACCEPT_IMAGE_ALONE = bool(config.get('reading', 'accept_image_alone', default=True))
     # Extend the picture index by itself after a card data download (only when an index exists already; the Settings page's choice wins)
     READING_EXTEND_INDEX = bool(config.get('reading', 'extend_index_after_update', default=True))
+    READING_INDEX_RETRY_HOURS = config.get('reading', 'index_retry_every_hours', default=0)  # 0: off
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

@@ -195,7 +195,7 @@ def save_credential(provider, value):
     # Create with owner-only permissions before writing the secret
     fd = os.open(KEYS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as f:
-        f.write('# Saved from the web interface (Settings -> Vision AI); overrides .env\n')
+        f.write('# Saved from the web interface (Settings -> Card recognition -> Vision AI); overrides .env\n')
         f.write(''.join(entry + '\n' for entry in entries))
     os.chmod(KEYS_FILE, 0o600)
 

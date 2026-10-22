@@ -627,6 +627,20 @@
    "trade_receive"
   ],
   [
+   "/api/updates/schedule",
+   [
+    "GET"
+   ],
+   "update_schedule"
+  ],
+  [
+   "/api/updates/schedule",
+   [
+    "POST"
+   ],
+   "set_update_schedule"
+  ],
+  [
    "/capture_images/<path:name>",
    [
     "GET"
@@ -710,7 +724,6 @@
   "connect",
   "disconnect",
   "dismiss_card",
-  "rebuild_database",
   "reset_focus",
   "reset_prompt",
   "review_close",
