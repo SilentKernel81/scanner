@@ -14,6 +14,18 @@ server's OCR read its star; and without OCR there is no `strong` decision and no
   OCR, then the AI.
 - **The gate stays parity on TEXTS** (not boxes): the confetti Bolt's star must come out of the Kotlin reader as the character the server's reader gives.
 - The strip-only read is timed on its own: it decides whether the full-card OCR is needed for most cards.
+**Where it stands (2026-10-21, evening): steps 0-4 and 6 DONE, on the owner's Pixel 10; step 5 (speed) and 7 (docs) partly.** Step 2: `reading/CardText.kt`
+(the parsers - Python's \s / \d / \b spelled out: Android's ICU regex refuses (?U)), `reading/TextMath.kt` (the arithmetic, Clipper's round offset
+written out), 82 JVM tests and the parser cases on the phone. Step 3: `reading/TextReader.kt` - the same lines and texts as `ppocr_reference.py` on 10
+parity pictures, boxes within 0.0 px (`TextReaderParityTest`; the networks' reshaped outputs released - a leak of ~3.8 MB a read found by Codex). Steps 4
+and 6, wired in the server's evidence order (not the cascade below): `PictureReader.read` reads the strip upright (`parse_strip`, the OCR's star / dot first,
+the network at the OCR's box only where it read none - and only on a printing that prints the marker), rule A2 with the strip (`strong`, the row's
+"picture + collector line"), and for a decision by the picture alone the FULL-CARD confirmation (`ocrFacts` = `printing_check.ocr_facts`, then
+`Decide.confirmByOcr`), the card read upright. On the 41 Pixel captures the server's decision for every one: 38 added (25 by their line), the three Secret
+Lair Lightning Greaves refused as on the server, the full-card facts equal for all 16 asked. Live in standalone mode (the owner, 2026-10-21): the confetti
+foil Bolt now foil from the star the OCR read. Setting: Read the collector line (OCR), on by default. Time: ~0.3 s a card its line confirms, ~1 s one the
+picture decides alone (the full read) - step 5's open question (recognise only the lines the parsers need).
+
 **Step 0 done (2026-10-21, on the Pixel 10)**: both networks load and run - on **OpenCV 5.0**, to which the app moved (4.14 refused the recognizer:
 its input width is dynamic; onnxruntime ran it meanwhile and gives the same answers to 2.3e-5; with 5.0 it is not needed - 23 MB less native library).
 OpenCV 5 moved the geometry functions to `org.opencv.geometry.Geometry`. **Step 1 done**: `scripts/experiments/ocr_port/` (README: the numbers;
