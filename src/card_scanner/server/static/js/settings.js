@@ -1035,8 +1035,21 @@ async function loadLock() {
     // The padlocks (settings.css: [data-guarded] - everything the server asks the password for, the backups' Restore too) only
     // mean something while a password is set: without one nothing asks
     document.body.classList.toggle('has-settings-password', Boolean(status.has_password));
-    const network = $('toggle-network-access').checked ? 'reachable from other devices' : 'this computer only';
-    setOverview('server', `${status.has_password ? 'Settings password set' : 'No settings password'} · ${network}`);
+    hasSettingsPassword = Boolean(status.has_password);
+    overviewServer();
+}
+
+let hasSettingsPassword = null;     // from loadLock: the Server line is drawn again when the network switch changes, without asking for it again
+
+// The overview's Server line: the password, and who can reach the server NOW - common.js's setNetworkAccess keeps what is saved and what runs on the
+// switch's description (data-saved / data-running): the switch takes effect after a restart, and the line says so until then
+function overviewServer() {
+    if (hasSettingsPassword === null) return;
+    const desc = $('network-access-desc');
+    const saved = desc.dataset.saved === 'true', running = desc.dataset.running === 'true';
+    let network = running ? 'reachable from other devices' : 'this computer only';
+    if (saved !== running) network += saved ? ' (other devices too after a restart)' : ' (this computer only after a restart)';
+    setOverview('server', `${hasSettingsPassword ? 'Settings password set' : 'No settings password'} · ${network}`, saved !== running);
 }
 
 function bindLock() {
@@ -1081,7 +1094,8 @@ function bindServer() {
     loadLock();
     $('restart-program').addEventListener('click', restartProgram);
     if ($('quit-program')) $('quit-program').addEventListener('click', quitProgram);
-    $('toggle-network-access').addEventListener('change', event => setNetworkAccess(event.target.checked));
+    // Saved (or refused, and the switch goes back) - then the overview's line says what is now saved and what runs
+    $('toggle-network-access').addEventListener('change', async event => { await setNetworkAccess(event.target.checked); overviewServer(); });
     $('toggle-debug-mode').addEventListener('change', event => socket.emit('toggle_debug_mode', {enabled: event.target.checked}));
 }
 
