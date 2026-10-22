@@ -1,6 +1,6 @@
 # ============================================================================
 # FILE: server/card_data.py
-# Card data: updating and rebuilding the card database from the web interface.
+# Card data: updating the card database from the web interface (and on a schedule), and the picture index.
 # ============================================================================
 from datetime import datetime, timedelta
 from flask import jsonify, request
@@ -263,57 +263,6 @@ def handle_update_database():
         return
     if not start_card_data_update(games.active()):
         emit('error', {'message': 'An update of this card data is already running'})
-
-
-@socketio.on('rebuild_database')
-def handle_rebuild_database():
-    """Handle database schema rebuild request"""
-
-    logger.info("Database rebuild request received")
-
-    if not database:
-        logger.error("Database rebuild requested but database not initialized")
-        emit('error', {'message': 'Database not initialized'})
-        return
-
-    def progress_callback(message):
-        """Send progress updates to the client"""
-        socketio.emit('database_rebuild_progress', {'message': message})
-        logger.info(f"Database rebuild: {message}")
-
-    def rebuild_task():
-        """Run database rebuild in background thread"""
-        try:
-            logger.info("Starting database rebuild in background thread")
-
-            # Rebuild the database schema
-            result = database.rebuild_database_schema(progress_callback)
-
-            if result['success']:
-                # Send completion event
-                socketio.emit('database_rebuild_complete', {
-                    'cards_imported': result['cards_imported'],
-                    'schema_type': result['schema_type']
-                })
-
-                logger.info(f"Database rebuild complete: {result['cards_imported']} cards, schema type: {result['schema_type']}")
-            else:
-                socketio.emit('database_rebuild_error', {
-                    'message': result.get('error', 'Unknown error')
-                })
-                logger.error(f"Database rebuild failed: {result.get('error')}")
-
-        except Exception as e:
-            logger.exception(f"Database rebuild failed: {e}")
-            socketio.emit('database_rebuild_error', {
-                'message': str(e)
-            })
-
-    # Run rebuild in background thread
-    rebuild_thread = threading.Thread(target=rebuild_task, daemon=True)
-    rebuild_thread.start()
-
-    logger.info("Database rebuild thread started")
 
 
 # ============================================================================

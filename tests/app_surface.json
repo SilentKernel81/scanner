@@ -724,7 +724,6 @@
   "connect",
   "disconnect",
   "dismiss_card",
-  "rebuild_database",
   "reset_focus",
   "reset_prompt",
   "review_close",

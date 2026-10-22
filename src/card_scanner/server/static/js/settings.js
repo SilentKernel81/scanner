@@ -134,19 +134,6 @@ function connect() {
         notify(`Card data update failed: ${data.message}`, 'error');
         loadUpdateSchedule();
     });
-    socket.on('database_rebuild_progress', data => { $('rebuild-progress').textContent = data.message; });
-    socket.on('database_rebuild_complete', data => {
-        $('rebuild-database').disabled = false;
-        $('rebuild-database').textContent = 'Rebuild database schema';
-        $('rebuild-progress').textContent = `Rebuilt: ${data.cards_imported.toLocaleString()} cards migrated (${data.schema_type}).`;
-        notify('Database rebuilt', 'success');
-    });
-    socket.on('database_rebuild_error', data => {
-        $('rebuild-database').disabled = false;
-        $('rebuild-database').textContent = 'Rebuild database schema';
-        $('rebuild-progress').textContent = `The rebuild failed: ${data.message}`;
-        notify(`Database rebuild failed: ${data.message}`, 'error');
-    });
 }
 
 // ============================================================================
@@ -884,19 +871,6 @@ function bindData() {
         $('database-progress').textContent = 'Starting the card data update...';
         socket.emit('update_database');
     });
-    $('rebuild-database').addEventListener('click', async () => {
-        const ok = await confirmDialog({
-            title: 'Rebuild database schema?',
-            message: 'Reorders the card table and rebuilds its indexes (about 30 seconds). Your cards are not touched.',
-            confirmText: 'Rebuild'
-        });
-        if (!ok) return;
-        $('rebuild-database').disabled = true;
-        $('rebuild-database').textContent = 'Rebuilding...';
-        $('rebuild-progress').textContent = 'Starting the rebuild...';
-        socket.emit('rebuild_database');
-    });
-
     $('cleanup-days').addEventListener('change', event => {
         const days = parseInt(event.target.value);
         if (!(days >= 1 && days <= 3650)) { notify('Days: a whole number from 1 to 3650', 'error'); return loadCaptureCopy(); }
