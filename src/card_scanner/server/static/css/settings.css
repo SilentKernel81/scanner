@@ -142,7 +142,8 @@
     margin-top: 10px;
 }
 
-.backup-schedule {
+.backup-schedule,
+.schedule-row {             /* a label and a select on one line: the automatic backup, card data update and index retry */
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -151,7 +152,8 @@
     font-size: 13px;
 }
 
-.backup-schedule select {
+.backup-schedule select,
+.schedule-row select {
     width: auto;
 }
 

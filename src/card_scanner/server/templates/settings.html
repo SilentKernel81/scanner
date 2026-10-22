@@ -8,7 +8,7 @@
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=5">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -207,6 +207,17 @@
                             </span>
                             <input type="checkbox" class="switch" id="toggle-extend-index">
                         </label>
+                        <!-- The automatic retry (server/card_data.py: scheduled_index_update): a build Scryfall refused, one stopped or failed - never a first build -->
+                        <div class="schedule-row">
+                            <label for="index-every">Go back to what is missing</label>
+                            <select id="index-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="6">Every 6 hours</option>
+                                <option value="24">Every day</option>
+                                <option value="168">Every week</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="index-auto">On its own, while the program runs: the pictures a build left out (Scryfall's rate limit, a stop, an error). Never the first build.</div>
                     </div>
 
                     <!-- 2. OCR: read on this computer, for what the picture does not settle (and the collector line for the picture) -->
@@ -298,6 +309,18 @@
                         <h3>Card data</h3>
                         <div class="hint" id="database-state">Loading...</div>
                         <button type="button" id="update-database" class="btn btn-block">Update card database</button>
+                        <!-- The automatic download (server/card_data.py: scheduled_card_data_updates) - off unless chosen here -->
+                        <div class="schedule-row">
+                            <label for="database-every">Automatic update</label>
+                            <select id="database-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="24">Every day</option>
+                                <option value="72">Every 3 days</option>
+                                <option value="168">Every week</option>
+                                <option value="720">Every month</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="database-auto">Downloads the card data again on its own, while the program runs (a computer that was off catches up when it starts).</div>
                         <div class="hint" id="database-source-hint">Downloads the latest card data and prices (a few minutes). Scanning keeps working while it downloads.</div>
                         <div class="hint" id="database-progress"></div>
                     </div>
@@ -407,6 +430,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=26"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=22"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=23"></script>
 </body>
 </html>

@@ -125,12 +125,14 @@ function connect() {
         notify('Card data updated - the picture index can be updated now (Card reading > Picture)', 'success');
         loadDatabaseState();
         loadIndex();
+        loadUpdateSchedule();
     });
     socket.on('database_update_error', data => {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `The update failed: ${data.message}`;
         notify(`Card data update failed: ${data.message}`, 'error');
+        loadUpdateSchedule();
     });
     socket.on('database_rebuild_progress', data => { $('rebuild-progress').textContent = data.message; });
     socket.on('database_rebuild_complete', data => {
@@ -748,6 +750,7 @@ function showIndex(state) {
     if (state.error) status.textContent += ` - the last build did not finish: ${state.error}`;     // stays after a reload: it is not only a notification
     if (state.built) status.title = `Built ${state.built}`;
     if (wasWatching) {
+        loadUpdateSchedule();       // an automatic build that just ended changes the "last / next" line
         // It has just ended: say how it went, once
         if (state.error) notify(`Picture index: ${state.error}`, 'error');
         else if (state.result) {
@@ -761,6 +764,53 @@ function showIndex(state) {
 async function loadIndex() {
     const state = await api('/api/image_index');
     if (state) showIndex(state);
+}
+
+// The automatic updates (server/card_data.py: update_schedule_state): the card data's download and the picture index's retry - each a
+// select and a line saying how the last automatic run ended and when the next is due. The times come with the server's offset, and are
+// shown in the browser's own time zone.
+
+function whenText(iso) {
+    const moment = new Date(iso);
+    if (moment <= new Date()) return 'soon (it is looked at every 10 minutes)';
+    return moment.toLocaleString(undefined, {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+
+function lastRunText(last) {
+    // ok: true / false, or null while it runs (or when a server stopped in the middle of it)
+    if (!last || !last.at) return 'No automatic run yet.';
+    const at = new Date(last.at).toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    if (last.ok === true) return `Last automatic run ${at}: ${last.message}.`;
+    if (last.ok === false) return `Last automatic run ${at} did not finish: ${last.message}.`;
+    return `Last automatic run began ${at} (still running, or the program stopped during it).`;
+}
+
+function showUpdateSchedule(state) {
+    const card = state.card_data, index = state.image_index;
+    $('database-every').value = String(card.every_hours);
+    $('database-auto').textContent = card.every_hours
+        ? `${lastRunText(card.last)} Next: ${whenText(card.next)}. Only while the program runs - a computer that was off catches up when it starts.`
+        : 'Off: the card data is downloaded only when you press the button (a notice says when newer data is there).';
+    $('index-every').value = String(index.every_hours);
+    $('index-auto').textContent = index.every_hours
+        ? `${lastRunText(index.last)} Next look: ${whenText(index.next)} - only when pictures are missing. `
+          + `Never the first build, nor one with less than ${Math.round(index.min_coverage * 100)}% of the printings.`
+        : 'Off: the pictures a build left out (Scryfall\'s rate limit, a stop, an error) are fetched when you press the button, or after the next card data update.';
+}
+
+async function loadUpdateSchedule() {
+    const state = await api('/api/updates/schedule');
+    if (state) showUpdateSchedule(state);
+}
+
+async function saveUpdateSchedule(change) {
+    // Guarded on the server: with a settings password set, common.js asks for it and sends the request again
+    const state = await api('/api/updates/schedule', {method: 'POST', body: change});
+    if (!state) return loadUpdateSchedule();       // refused (or the password dialog cancelled): the selects go back to what is saved
+    showUpdateSchedule(state);
+    const [what, hours] = Object.entries(change)[0];
+    const label = what === 'card_data' ? 'Automatic card data update' : 'Picture index retry';
+    notify(hours ? `${label} saved` : `${label} switched off`, 'success');
 }
 
 let compressWatch = null;   // the timer that asks how far the compression is, while it runs
@@ -821,6 +871,8 @@ function bindData() {
     });
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value)}));
+    $('database-every').addEventListener('change', event => saveUpdateSchedule({card_data: parseInt(event.target.value)}));
+    $('index-every').addEventListener('change', event => saveUpdateSchedule({image_index: parseInt(event.target.value)}));
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');
         if (button) backupAction(button.closest('[data-backup]'), button.dataset.backupAction);
@@ -994,4 +1046,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadDatabaseState();
     loadCaptureCopy();
     loadIndex();
+    loadUpdateSchedule();
 });

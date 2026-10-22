@@ -3,7 +3,7 @@
 # Card data: updating and rebuilding the card database from the web interface.
 # ============================================================================
 from datetime import datetime, timedelta
-from flask import jsonify
+from flask import jsonify, request
 from flask_socketio import emit
 import threading
 import time
@@ -387,6 +387,7 @@ def start_index_update(on_done=None):
     def task():
         error = result = None
         busy = False    # image_index.BuildRunning: another process is building - not this build's failure
+        refused = False  # Scryfall kept refusing: told to the schedule in its own words (the result's shape is the page's, and pinned)
         try:
             logger.info("Picture index: extending it from Scryfall's pictures")
             built = image_index.build(database.printing_images(), printing_check.index_folder, fetch=True, log=logger.info,
@@ -395,6 +396,7 @@ def start_index_update(on_done=None):
             reason = getattr(built, 'reason', 'done')          # image_index.BuildResult: 'done', 'cancelled' or 'refused'
             result = {'printings': kept, 'new': new, 'skipped': skipped, 'stopped': reason == 'cancelled'}
             if reason == 'refused':
+                refused = True
                 # Scryfall kept answering 403 / 429: what was done is kept (build wrote it), but this is not "updated" - it is to be tried again later
                 error = (f"Scryfall kept refusing requests (a rate limit), so the build stopped after adding {new} new "
                          f"picture{'' if new == 1 else 's'}. What was done is kept - press the button again later and it goes on from there")
@@ -411,6 +413,10 @@ def start_index_update(on_done=None):
             # After the state is written: whoever is told sees the build as ended. Never allowed to raise into the thread
             if busy:
                 ok, message = None, error
+            elif refused:
+                # Worded for the schedule: the error above tells the person to press the button, which the schedule does not need
+                ok, message = False, (f"Scryfall kept refusing requests (a rate limit) after {result['new']} new "
+                                      f"picture{'' if result['new'] == 1 else 's'} - what was done is kept, and the next run goes on from there")
             elif error:
                 ok, message = False, error
             elif result and result['stopped']:
@@ -543,3 +549,102 @@ def image_index_stop():
     if running:
         index_cancel.set()
     return jsonify({'success': True, **index_status()})
+
+
+# ============================================================================
+# The two schedules on the Settings page (docs/plans/UPDATE_SCHEDULE_PLAN.md, phase 3): what they are, how the last automatic
+# run ended and when the next is due; and the change, which needs the settings password - turning on downloads the server
+# makes on its own is the same kind of decision as the picture index's button (image_index_update), which is guarded too.
+# ============================================================================
+
+def _shown(moment):
+    """A time for the page: the server's local time with its offset, so a browser in another time zone (a server in Docker
+    runs in UTC) shows it in its own. None stays None"""
+    return moment.astimezone().isoformat(timespec='seconds') if moment else None
+
+
+def _shown_attempt(attempt):
+    """A remembered attempt with its time made ready for the page"""
+    if not attempt:
+        return None
+    return {**attempt, 'at': _shown(_parse_time(attempt.get('at')))}
+
+
+def card_data_next_due(game, every_hours):
+    """
+    When the schedule will next download a game's card data (card_data_due's two rules turned into a time), or None when it
+    is off. A time already past means at the next look (SCHEDULE_TICK) - the page says "soon".
+    """
+    if not every_hours:
+        return None
+    downloaded = _parse_time((database.get_data_info(game.id) or {}).get('downloaded_at')) if database else None
+    attempt = _parse_time((last_auto_attempt(game.id) or {}).get('at'))
+    times = [moment for moment in (downloaded and downloaded + timedelta(hours=every_hours),
+                                   attempt and attempt + AUTO_RETRY_AFTER) if moment]
+    return max(times) if times else datetime.now()
+
+
+def index_next_due(every_hours):
+    """When the schedule may next go back to the picture index (whether there is anything missing is the page's own count), or None when off"""
+    if not every_hours:
+        return None
+    attempt = _parse_time((last_index_attempt() or {}).get('at'))
+    return attempt + timedelta(hours=every_hours) if attempt else datetime.now()
+
+
+def update_schedule_state():
+    """What the Settings page shows of the two schedules: the choice, the choices, the last automatic run and the next (the active game's card data)"""
+    game = games.active()
+    card_hours, index_hours = card_data_schedule(), index_schedule()
+    return {
+        'card_data': {'every_hours': card_hours, 'choices': list(CARD_DATA_SCHEDULE_HOURS), 'game': game.label,
+                      'last': _shown_attempt(last_auto_attempt(game.id)), 'next': _shown(card_data_next_due(game, card_hours))},
+        'image_index': {'every_hours': index_hours, 'choices': list(INDEX_SCHEDULE_HOURS),
+                        'min_coverage': INDEX_AUTO_MIN_COVERAGE,
+                        'last': _shown_attempt(last_index_attempt()), 'next': _shown(index_next_due(index_hours))},
+    }
+
+
+SCHEDULE_FIELDS = {'card_data': ('card_data_every_hours', CARD_DATA_SCHEDULE_HOURS),
+                   'image_index': ('image_index_every_hours', INDEX_SCHEDULE_HOURS)}
+
+
+def parse_update_schedule(data):
+    """
+    The settings in a request to change the schedules ({'card_data', 'image_index'}: hours, each optional) as {setting key:
+    value} - or ValueError before anything is saved (as backups.parse_schedule): a request refused for one value changes
+    nothing. A boolean is refused although Python counts True as 1, and so is a number that is not one of the choices.
+    """
+    if not isinstance(data, dict):
+        raise ValueError
+    changes = {}
+    for field, value in data.items():
+        if field not in SCHEDULE_FIELDS:
+            raise ValueError
+        key, choices = SCHEDULE_FIELDS[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value not in choices:
+            raise ValueError
+        changes[key] = value
+    if not changes:
+        raise ValueError
+    return changes
+
+
+@app.route('/api/updates/schedule')
+def update_schedule():
+    """The automatic updates of the card data and the picture index: their choice, last run and next"""
+    return jsonify({'success': True, **update_schedule_state()})
+
+
+@app.route('/api/updates/schedule', methods=['POST'])
+@guarded
+def set_update_schedule():
+    """Change how often the card data is downloaded and the picture index goes back to what is missing (JSON: 'card_data', 'image_index': hours, 0 off)"""
+    try:
+        changes = parse_update_schedule(request.get_json(silent=True))    # all of it checked before any of it is saved
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Unknown update interval'}), 400
+    for key, value in changes.items():
+        app_settings.set(key, value)
+    logger.info(f"Automatic updates: card data every {card_data_schedule()} h, picture index every {index_schedule()} h (0: off)")
+    return jsonify({'success': True, **update_schedule_state()})
