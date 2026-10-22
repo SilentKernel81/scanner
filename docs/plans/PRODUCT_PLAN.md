@@ -1,6 +1,6 @@
 # Turning the scanner into a product: plan
 
-Date: 2026-10-22. Written against the three checkouts as they are today: this server (`main`,
+Date: 2026-10-22 (§2's Scryfall and Wizards rows and §3a researched the same day, from the sources listed at the end). Written against the three checkouts as they are today: this server (`main`,
 36632a0), the standalone mirror (identical apart from an untracked `docs/plans/WINDOWS_STANDALONE_PLAN.md`)
 and the Android app (189ea15). **Nothing here is implemented, nothing here was measured**: every
 number below is quoted from a file of the project and says which; where a figure, a price or a legal
@@ -65,8 +65,8 @@ with what to find out and whom to ask.
 |---|---|---|
 | **May the owner sell what is under PolyForm Noncommercial?** | `LICENSE` (since 2026-10-19; MIT before, and copies of those versions stay MIT - README *License*). Its *No Other Rights* section says the terms do not "prevent the licensor from granting licenses to anyone else" | whether the owner, as the sole licensor, can offer their own copy under other terms (a lawyer); what the MIT history means for code published before 2026-10-19; whether a contributor other than the owner and the AI ever committed (the history says no, to confirm) |
 | **Is code written entirely by an AI protected by copyright at all?** | README: "written by an AI coding assistant ... directed by the project's author"; the Android app also by Codex | what a license can enforce if the answer is "not, or only in part", in the owner's jurisdiction and in the markets the product would be sold in; whether the author's direction, selection and the documentation change that. A lawyer's question; it decides how much the license is worth, not whether to proceed |
-| **Scryfall's data and pictures** | the server downloads the bulk card data (README *Acknowledgments*; `database.py` sends a `User-Agent`/`Accept` as Scryfall asks); the index is built from every printing's picture (~12 GB downloaded once, hashed, thrown away - PROGRAM_DOCUMENTATION); the phone calls `api.scryfall.com` directly and downloads ~80 MB of card data (Android README; `scryfall/Scryfall.kt`); the User-Agent calls itself "a personal collection scanner" (`core/image_index.py`) | Scryfall's API terms as published today: attribution, rate limits, whether their data may be used in a paid product, whether it may be paywalled or redistributed (a hosted index is derived from their pictures; a hosted card-data snapshot *is* their data); whether a product with thousands of phones each calling the API needs permission or a different design. **Ask Scryfall**, and read the terms, before hosting anything |
-| **Wizards of the Coast** | README ends with "an unofficial fan project, not affiliated with or endorsed by Wizards of the Coast. Magic: The Gathering is a trademark" | the Fan Content Policy as it stands: whether it allows a *paid* product at all, what it says about the name and the store listing, the use of card pictures (Scryfall's scans) in the app and its screenshots; whether "MTG" may appear in an app's name. The display name is already `Card Scanner` (`strings.xml`), but the repository, the APK file name (`mtg-scanner-<version>.apk`), the README titles, `~/.mtg-scanner` and the systemd unit names still say MTG |
+| **Scryfall's data and pictures** | the server downloads the bulk card data (README *Acknowledgments*; `database.py` sends a `User-Agent`/`Accept` as Scryfall asks); the index is built from every printing's picture (~12 GB downloaded once, hashed, thrown away - PROGRAM_DOCUMENTATION); the phone calls `api.scryfall.com` directly and downloads ~80 MB of card data (Android README; `scryfall/Scryfall.kt`); the User-Agent calls itself "a personal collection scanner" (`core/image_index.py`) | **Read 2026-10-22** (their API page, rate limits, bulk data, images, Terms of Service): the data and images are free "for the primary purpose of creating additional Magic software ... as part of the Wizards of the Coast Fan Content Policy"; "You may not 'paywall' access to Scryfall data" (no payments, subscriptions or surveys for it); "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value"; the User-Agent "must be accurate ... the name of your application, such as MTGExampleApp/1.0"; 10 requests/s, 2/s for search and named lookups, a 429 locks out for 30 s and ignoring it "may result in a temporary or permanent ban of your application"; "If you need to ... resolve a large number of card images, you must use the bulk data files" and `*.scryfall.io` has no rate limit (what the index build does already); images may not be cropped of the artist / copyright line, distorted, colour-shifted or watermarked; bulk prices are "dangerously stale after 24 hours ... not ... to power a storefront"; the Terms of Service: "Scryfall is not for advertising, trades, or sales" and no "undue burden ... through the use of automated means" - written for the site, but "Scryfall" is defined to include the API. **Still to ask Scryfall**: a paid tier (how does the no-paywall rule apply when the data stays free but the app does not?); whether a hosted card-data snapshot is "republishing" and a hosted index (fingerprints, no images) is "additional value"; one shared app name on thousands of phones under a per-application ban. **To check in the code**: the phone's User-Agent; every place a card picture is shown (the review screen's candidate tiles, deck covers) for a cropped artist line |
+| **Wizards of the Coast** | README ends with "an unofficial fan project, not affiliated with or endorsed by Wizards of the Coast. Magic: The Gathering is a trademark" | **Read 2026-10-22** (Fan Content Policy, last updated 2017-11-15): "Free means FREE" - no payments, subscriptions, downloads or registration to access fan content; sponsorships, ad revenue and donations are allowed "so long as it doesn't interfere with the Community's access"; no Wizards logos or trademarks without prior written permission (the page's list of them is a set of logo images, so whether "MTG" may be in a name is not answered there); the notice "[Title] is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC." is asked for (README has a shorter one); Wizards may stop any use "at any time—for any reason or no reason". So **a paid app or a subscription is outside the policy** and needs Wizards' written approval (through support.wizards.com); a free app with donations or ads is inside it. **Still to ask Wizards**: "MTG" in a name or store listing; whether hardware sold with free software is fan content. The display name is already `Card Scanner` (`strings.xml`), but the repository, the APK file name (`mtg-scanner-<version>.apk`), the README titles, `~/.mtg-scanner` and the systemd unit names still say MTG |
 | **The vision AI providers** | the user's own key, sent from the server or the phone | nothing the owner redistributes; if a hosted AI were ever offered (§3, costs), each provider's terms for resale |
 | **Shipped third-party code** | Socket.IO client (MIT), Roboto (OFL), the PP-OCRv6 networks the phone ships (Apache-2.0, Android README), light-ocr itself (its license is not named in the files - *to confirm*), OpenCV, Flask, numpy ... (README *Acknowledgments*) | a license inventory with each file's notice for the store listing and the About page; nothing GPL (to confirm with a tool over `requirements*.txt`, `src/ocr/package-lock.json` and the Gradle dependencies) |
 | **Privacy law** | the server keeps pictures of cards and nothing about people; the phone keeps everything on the phone; no telemetry (the manifest asks CAMERA and INTERNET only) | what a store requires anyway (§3, releases); what a tester programme that collects reading logs must tell people and ask of them (§4, phase 3) |
@@ -74,6 +74,40 @@ with what to find out and whom to ask.
 Order: the two license questions and Scryfall's answer first - a "no" to either changes the product,
 not a phase. Wizards' policy decides the name and the listing. Everything in §4 is written as if
 the answers allow it.
+
+## 3a. What others make (researched 2026-10-22)
+
+From the apps' store pages, their own guides and third-party comparisons; Google Play's and Printables' pages could
+not be read by the tools used, and where sources disagree it says so. Prices in US dollars as listed.
+
+| | Price | What it does | Notes |
+|---|---|---|---|
+| ManaBox (iOS, Android) | free with ads; PRO $2.49/month or $22.99/year | one card at a time, Quick Scan picks the first matching printing; decks, trades | card search works offline (offline *scanning* not confirmed); its guide: glare on sleeves stops border detection |
+| Delver Lens (Android) | free with limits; ~$3/month per one listing (sources differ on what is free) | fast, cards and tokens | no source confirms offline scanning or a batch mode |
+| TCGplayer app | free | Magic, Pokémon, Yu-Gi-Oh; sleeved cards; Trade-In | its FAQ: "one at a time"; does not tell black from white borders |
+| Dragon Shield app | free | aimed at sleeved cards; TCGplayer prices | only a third-party source |
+| Lotus Scan, Scrytics, Sparkheim | various | | Sparkheim *claims* its whole catalogue is on the phone; the Scrytics comparison is by Scrytics' own developer |
+| X1PRO (TCG Verifier) | from $199 | a feeder only - your camera and app | |
+| Card Slinger 3.0 (3D-printed) | print it, or finished units from its maker | a **passive funnel** guiding tossed cards to a phone running ManaBox | patent pending (Nov 2024); a remixer reports the original may not be modified or sold - check its license before printing |
+| Arduino feeder by Fraens (3D-printed) | parts | a motor feeds cards one by one; a microphone **listens for ManaBox's success sound** to feed the next | license not stated in the article |
+| CardMill (Kickstarter) | $575 / $750 | scans and sorts one method at a time; exports to TCGplayer, Moxfield, Deckbox, Archidekt | in production |
+| Magic Sorter (Italy) | ~€2,500, over $3,000 delivered | scan and sort, **on a Raspberry Pi**, ~250 cards an hour | trouble with foils and full arts reported |
+| TCGplayer Roca Sifter | $799 + $300/year (one source), lease-to-own (another) | sorts for stores | needs a TCGplayer seller account and internet |
+| SortSwift | $8,999 (9 bins) / $24,999 (29 bins) | store sorters | |
+| PhyzBatch-9000 (TCG Machines) | leased to stores | cameras on both sides of a glass plate | |
+
+What it means for §1's choice:
+- **Free phone scanners are common**, so (a) does not compete on price; it competes on reading without a cloud AI,
+  and on the collection beside it.
+- **The station sits in an empty middle**: phone apps go one card at a time, feeders (from $199) still need a
+  recognition app, sorters start around $2,500. A self-hosted station reading by picture at about 1.7 s a card
+  (README) is cheaper than a sorter.
+- **The feeders lean on a phone app** - the Arduino rig listens for ManaBox's sound to know a card was read. The
+  station already *knows* when the next card may come (`station_client.py`: `Station._auto_captured`, where it sends
+  `captured` - the capture beep): it can tell a dropper to release the next card itself (§4, phase 5). The owner has a 3D printer to try one - of the project's
+  own design, not a copy of either printed design above.
+- **Every paid competitor's terms with Scryfall and Wizards are not public**; how ManaBox and Delver Lens charge
+  subscriptions within §2's rules is a question to ask, not to infer.
 
 ## 3. Gaps, by area
 
@@ -187,6 +221,25 @@ gets it by merge).
 - One-click server: a prepared image for the box's computer, HTTPS, a login (§3, security) - the server
   changes are generic and land in `scanner-server`; the standalone merges them.
 - Windows for (b) by the standalone's plan, in the mirror only, as new files (its §2 rule).
+- **A card dropper the station drives from the Pi's GPIO pins** (the owner's idea, 2026-10-22; 3D-printed, of the
+  project's own design - §3a). The station tells it to release the next card at the moment it already says so to a
+  person: `station_client.py`, `Station._auto_captured`, where it sends `captured` - "the capture beep - the signal to
+  drop the next card: once the image is taken and a focus probe started by this capture ... is done" (it waits up to
+  2.5 s for the probe). Only then: never while a refocus sweep runs (about 8 s), never while a card waits for
+  confirmation (auto-add off), never after a card back stopped auto-capture, never while the camera is lost. One
+  pulse per card, so a missed capture cannot let the stack run on. Needs: the GPIO device in the station's container
+  (the Pi-camera image runs privileged already; the USB-webcam one would need `/dev/gpiochip*` passed in), a
+  setting to switch it on per station (`CAMERA_SETTINGS`), and the auto-capture thresholds measured again - they
+  come from hand drops (CLAUDE.md), and a mechanism drops differently.
+  **Card damage comes first** - the owner's concern, and the reason to measure before building further:
+  - a *roller* that pulls a card from a stack rubs the face of the next one (scuffs, marks on foils) and can bend it;
+    a *gravity* magazine with a thin gate or pusher that only touches the bottom card's edge is gentler, but the gap
+    must stay under one card's thickness (about 0.3 mm unsleeved, more sleeved - to measure with calipers) or two
+    come out at once;
+  - the drop onto the pile: a short fall, a soft landing, corners not striking first;
+  - try it on commons and on sleeved cards first (a sleeve takes the wear), look at faces, edges and corners after
+    many passes, and keep valuable and foil cards out until that is measured.
+  Never tried: all of it.
 - The ESP32-with-a-scale station stays a plan until phase 5 has a box to put it under.
 
 ## 5. Left out on purpose
@@ -212,9 +265,22 @@ gets it by merge).
    with a built-in update check? (iOS is nowhere in the files: a Kotlin port's second port.)
 6. **Who tests**: 10-20 people the owner knows, or a public call? What they are told about the reading
    records, and what they get for it.
-7. **Price and support**: free app plus a paid box, a paid app, or a one-time price per program? No
-   number in the files supports any of these; competitor apps and their prices are *to research*
-   (what to find out: which scan piles automatically, which work offline, what they charge, how they
-   name Magic in their listings).
+7. **Price and support**: free app plus a paid box, a paid app, or a one-time price per program? §3a
+   has what others charge (free to $2.49/month for phone apps, $199 to $24,999 for feeders and sorters);
+   §2 has what Scryfall's and Wizards' terms say about charging at all - read both before choosing.
 8. **Time**: the owner's own, with this assistant - the only development resource the project has ever
    had, and the one every phase above assumes.
+
+## Sources (read 2026-10-22)
+
+Scryfall: [API documentation](https://scryfall.com/docs/api), [rate limits](https://scryfall.com/docs/api/rate-limits),
+[bulk data](https://scryfall.com/docs/api/bulk-data), [images](https://scryfall.com/docs/api/images),
+[Terms of Service](https://scryfall.com/docs/terms). Wizards: [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy).
+Apps: [ManaBox on the App Store](https://apps.apple.com/us/app/-/id1460407674), [ManaBox scanner guide](https://manabox.app/guides/scanner/getting-started/),
+[ManaBox paywall (Adapty)](https://adapty.io/paywall-library/manabox/), [Delver Lens (AppFollow)](https://appfollow.io/android/mtg-card-scanner-delver-lens/delverlab.delverlens?country=us),
+[TCGplayer App FAQ](https://help.tcgplayer.com/hc/en-us/articles/115009506407-TCGplayer-App-FAQ), [Ricoh/PFU on scanning cards](https://www.pfu-us.ricoh.com/blog/scan-pokemon-cards),
+[Scrytics' comparison](https://scrytics.com/blog/best-mtg-card-scanner-app-2026), [Sparkheim](https://mwm.ai/apps/sparkheim-mtg/6792481720).
+Machines: [Eldwyn: sorting machines 2026](https://eldwyn.app/blog/mtg-card-sorting-machine-2026/), [TCG Verifier: sorters compared](https://www.tcgverifier.com/blog/automatic-tcg-card-sorters-compared),
+[CardSellerTools](https://cardsellertools.com/machines), [SortSwift](https://sortswift.com/features/super-sorter),
+[Arduino blog: a 3D-printable scanning rig](https://blog.arduino.cc/2025/03/27/quickly-digitize-your-magic-deck-with-this-3d-printable-scanning-rig/),
+[Card Slinger 3.0](https://www.printables.com/model/1034404-card-slinger-30-for-mtg-manabox-app-for-sleeved-an), [Card Slinger on Thangs](https://thangs.com/m/1239254).
