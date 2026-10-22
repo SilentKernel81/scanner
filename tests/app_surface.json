@@ -729,12 +729,14 @@
   "set_refocus_every",
   "set_refocus_on_drop",
   "test_prompt",
+  "toggle_ai",
   "toggle_auto_capture",
   "toggle_debug_mode",
   "toggle_debug_trace",
   "toggle_detection",
   "toggle_fast_scan",
   "toggle_ocr",
+  "toggle_stop_at_card_back",
   "undo_last_add",
   "update_database"
  ]

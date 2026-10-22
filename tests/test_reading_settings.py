@@ -21,6 +21,7 @@ from card_scanner.server.state import app, socketio  # noqa: E402
 from card_scanner.station.station_login import Login  # noqa: E402
 
 settings_events = sys.modules['card_scanner.server.settings_events']
+card_data = sys.modules['card_scanner.server.card_data']
 
 
 class FakeSettings:
@@ -59,6 +60,9 @@ class TheEvent(unittest.TestCase):
             patcher = mock.patch.object(settings_events, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(card_data, 'app_settings', self.settings)       # reading_status reads the extend-the-index choice through card_data
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch.object(lock, 'login', self.login)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -70,16 +74,20 @@ class TheEvent(unittest.TestCase):
         self.client.emit('set_reading_mode', payload)
         return {e['name']: e['args'][0] for e in self.client.get_received()}
 
-    def test_the_default_is_evidence_and_the_picture_alone_is_off(self):
+    def test_the_default_is_evidence_and_the_picture_alone_is_on(self):
+        # (on since 2026-10-20: the picture comes first and a clear one settles a card - the person can still turn it off, and what they chose is what is kept)
         status = settings_events.reading_status()
-        self.assertEqual((status['mode'], status['accept_image_alone']), ('evidence', False))
+        self.assertEqual((status['mode'], status['accept_image_alone']), ('evidence', True))
+        self.settings.saved['reading_accept_image_alone'] = False
+        self.assertFalse(settings_events.reading_status()['accept_image_alone'])           # a stored choice wins over the default
 
     def test_evidence_is_remembered_and_the_next_card_takes_it(self):
         got = self.emit({'mode': 'evidence'})
         self.assertEqual(self.settings.saved, {'reading_mode': 'evidence'})
-        self.assertEqual(got['reading_mode_changed'], {'mode': 'evidence', 'accept_image_alone': False, 'index_printings': 112765, 'ocr_enabled': True})
+        self.assertEqual(got['reading_mode_changed'], {'mode': 'evidence', 'accept_image_alone': True, 'extend_index': True,
+                                                'index_build': {'running': False, 'done': 0, 'total': 0}, 'index_printings': 112765, 'index_missing': None, 'ocr_enabled': True})
         self.assertEqual(self.ident.reading_mode, 'evidence')                       # no restart: Identification reads the setting
-        self.assertFalse(self.ident.accept_image_alone)
+        self.assertTrue(self.ident.accept_image_alone)                              # the default (the picture comes first)
         self.emit({'mode': 'cascade'})
         self.assertEqual(self.ident.reading_mode, 'cascade')
         self.assertEqual(self.settings.saved['reading_mode'], 'cascade')           # turning it OFF is remembered too: the default would turn it on again
@@ -92,8 +100,16 @@ class TheEvent(unittest.TestCase):
             self.settings.saved['reading_accept_image_alone'] = value
             self.assertFalse(self.ident.accept_image_alone, repr(value))           # a hand-edited file cannot turn it on by accident
 
+    def test_extending_the_index_is_its_own_switch_remembered_and_on_by_default(self):
+        self.assertTrue(settings_events.reading_status()['extend_index'])          # config.yaml's reading.extend_index_after_update
+        got = self.emit({'extend_index': False})
+        self.assertEqual(self.settings.saved, {'reading_extend_index': False})     # nothing else changes with it
+        self.assertFalse(got['reading_mode_changed']['extend_index'])
+        self.emit({'extend_index': True})
+        self.assertTrue(settings_events.reading_status()['extend_index'])
+
     def test_what_it_does_not_know_is_refused_and_nothing_is_saved(self):
-        for payload in ({'mode': 'both'}, {'mode': 3}, {'accept_image_alone': 'yes'}, {'accept_image_alone': 1}):
+        for payload in ({'mode': 'both'}, {'mode': 3}, {'accept_image_alone': 'yes'}, {'accept_image_alone': 1}, {'extend_index': 'yes'}, {'extend_index': 0}):
             got = self.emit(payload)
             self.assertIn('error', got, payload)
             self.assertNotIn('reading_mode_changed', got)
@@ -114,7 +130,43 @@ class TheEvent(unittest.TestCase):
 
     def test_the_page_gets_the_status_with_the_other_scan_settings(self):
         data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
-        self.assertEqual(set(data['reading']), {'mode', 'accept_image_alone', 'index_printings', 'ocr_enabled'})
+        self.assertEqual(set(data['reading']), {'mode', 'accept_image_alone', 'extend_index', 'index_build', 'index_printings', 'index_missing', 'ocr_enabled'})
+
+    # ----- the vision AI's switch (toggle_ai): like the OCR's, open, remembered, and what Identification reads on the next card
+    def toggle_ai(self, enabled):
+        self.client.emit('toggle_ai', {'enabled': enabled})
+        return {e['name']: e['args'][0] for e in self.client.get_received()}
+
+    def test_the_ai_is_on_by_default_and_the_page_is_told(self):
+        self.ident.card_identifier = object()
+        data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
+        self.assertEqual((data['ai_enabled'], data['ai_available']), (True, True))
+
+    def test_without_a_provider_there_is_no_ai_to_switch(self):
+        data = app.test_client().get('/api/scan_settings', base_url='http://localhost').get_json()
+        self.assertEqual((data['ai_enabled'], data['ai_available']), (True, False))      # the page disables the switch and says so
+
+    def test_switching_the_ai_off_is_remembered_answered_and_logged(self):
+        self.ident.card_identifier = object()
+        got = self.toggle_ai(False)
+        self.assertEqual(got['ai_toggled'], {'enabled': False, 'available': True})
+        self.assertEqual(self.settings.saved['ai_enabled'], False)
+        self.assertFalse(self.ident.ai_enabled)                                               # what the next card reads: no restart
+        self.assertIn('off', self.log.call_args[0][0])
+        self.assertEqual(self.toggle_ai(True)['ai_toggled']['enabled'], True)
+        self.assertTrue(self.ident.ai_enabled)
+        self.assertEqual(self.settings.saved['ai_enabled'], True)
+
+    def test_the_ai_switch_does_not_need_the_settings_password_like_the_ocr_switch(self):
+        # it adds nothing, it only stops asking: what is added is still decided by the same rules
+        self.login.set_password('correct horse')
+        stranger = socketio.test_client(app, flask_test_client=app.test_client())
+        stranger.get_received()
+        stranger.emit('toggle_ai', {'enabled': False})
+        got = {e['name']: e['args'][0] for e in stranger.get_received()}
+        stranger.disconnect()
+        self.assertNotIn('error', got)
+        self.assertEqual(got['ai_toggled']['enabled'], False)
 
     def test_with_a_settings_password_a_stranger_is_locked_out(self):
         self.login.set_password('correct horse')

@@ -22,6 +22,7 @@ class Settings:
         'auto_capture_enabled': False,  # Controlled via UI button, not config
         'auto_add': True,  # Auto scanning adds confirmed cards to the inventory without review
         'ocr_first': True,  # light-ocr reads each card; the vision AI only when that isn't a confirmed match
+        'ai_enabled': True,  # The vision AI is asked at all (off: what OCR and the picture cannot decide goes to the review queue; the provider and its key are kept)
         'debug_trace': False,  # Log filtered detections, save frames of slow or doubtful captures
         'capture_copy_size': 'large',  # The large copy kept with each capture: off / small / medium / large
         'keep_frames': False,  # Keep a scanned card's camera frame (training data) after it is cleared or added to the collection

@@ -59,8 +59,9 @@ section by section, and says what was never tried.
   to add just that camera's cards to the collection, or clear them and scan its pile again.
 - **Automatic or manual capture** - start auto scanning and just drop cards into the box (about
   1.7 s per card), or capture on demand.
-- **OCR first, AI second** - most cards are read on the server in a fraction of a second
-  without an AI request; the vision AI handles the rest. Providers: Google Gemini, OpenAI,
+- **Picture first, OCR in doubt, AI last** - the picture of a card is matched against every printing
+  (about 0.02 s), and a clear match settles the card; in doubt OCR reads it, and the vision AI handles only
+  what is still open (both can be switched off in Settings; with both off the picture decides alone). Providers: Google Gemini, OpenAI,
   Anthropic Claude, or a self-hosted model via Ollama (or another OpenAI-compatible server).
 - **Exact printing identification** from the set code and collector number, with name
   matching that tolerates misreads, accents ("Fili" → "Fíli"), flavor names ("Bucklebury

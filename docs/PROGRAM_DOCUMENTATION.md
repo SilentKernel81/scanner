@@ -102,7 +102,7 @@ a station imports nothing of `core/` or `server/`, and `core/` nothing of `serve
 | `app.py`, `server/` | server | `app.py` only starts it; `server/` is the Flask + Socket.IO app, a module per area (listed in `server/__init__.py`): pages, routes, events; one desk per station (`Desk`, `desk()`); station captures (`station_capture`, `submit_capture`); what happens to a read card (`route_identified`) |
 | `identification.py` | server | Reading a card, for every camera: light-ocr, the vision AI, the queue in front of each (`Identification`) |
 | `card_ocr.py`, `ocr/server.mjs` | server | light-ocr reader: the Node.js process that runs the OCR models (kept running, one request per line), and the parsers that pick name, number, set code and foil marker from the text lines |
-| `reading/evidence.py`, `reading/decide.py` | server | The decision about a printing as a pure function of plain data (`decide_printing`, rule A2): what `printing_check.py`'s lookup used to do inline, now with test files another program can pass too (see *Printing check*) |
+| `reading/evidence.py`, `reading/decide.py` | server | The decision about a printing as a pure function of plain data (`decide_printing`, rule A2; `decide_finish`; the guards around it, `accept_printing` and `confirm_by_ocr`, since 2026-10-21): what `printing_check.py`'s lookup used to do inline, now with test files another program can pass too (see *Printing check*) |
 | `image_index.py`, `printing_check.py` | server | The printing check, shadow mode (see *Printing check*): a 96-byte fingerprint of every printing's picture (`hash_card`, `ImageIndex`, the builder `build`) and the check that a capture looks like the printing the server resolved (`PrintingCheck`) |
 | `foil_marker.py`, `foil_net.onnx` | server | The foil marker (★ / •) read from the set line by a small network where OCR left it unread (`FoilMarker`, `load`); the network is the file beside the module, run with OpenCV's dnn (310 KB) |
 | `card_identifier.py` | server | Vision AI providers (`_ask_*`), response parsing, foil marker check, model warm-up |
@@ -1094,7 +1094,9 @@ With **Add cards automatically** (default; internally `fast_scan_mode`, saved pe
 `auto_add`): the capture is uploaded, put on record and queued (`submit_capture`), read in the background (`Identification.submit`: OCR, then the AI
 workers - see [The two queues](#the-two-queues)), and a confirmed printing
 is added immediately by the server (`add_automatically`: one Near Mint copy in
-`Game.suggested_finish` - the same rule as the page's `suggestedFinish`), never through the
+`Game.suggested_finish` - the same rule as the page's `suggestedFinish`) - when its finish is known (`Game.finish_known`, since 2026-10-21: a printing
+made in one finish only, or a ★ / • read; a printing made in both with the marker unread is queued for review, reason "finish not read (printed in foil and
+non-foil)", instead of being added as regular - a confetti foil the Pixel's network could not read had gone in as regular), never through the
 current card, so it can't replace a card being reviewed. It used to be the page that sent the
 add; a tab still running an older script then sent every add without its card and all confirmed
 cards ended in the review queue - and with no page open (phone asleep) nothing was added. The
@@ -1125,6 +1127,35 @@ With the switch off, each capture is uploaded with `mode: review`, read at once
 (`Identification.identify`) and shown on the station's page, where it waits for **Add** / **Skip**;
 the station holds its next capture until then (`card_under_review`), and a card dropped
 meanwhile is captured right after.
+
+### A card back stops auto-capture
+
+A face-down Magic card is a stop sign (since 2026-10-21; `docs/plans/CARD_BACK_STOP_PLAN.md`): put one at the end of a stack and the camera stops by itself
+instead of capturing whatever is dropped next. **How it is recognised** (`core/card_back.py`): the picture index's own fingerprint (`image_index.hash_card`) of
+the flat card - `foil_image` when the station sends it - as given and turned 180 degrees, against the fingerprint of Scryfall's picture of the standard back,
+pinned in the code as hex (`CARD_BACK_FINGERPRINT`, made with `image_index.DESCRIPTOR` - a test pins that; recomputed by
+`scripts/experiments/image_match/card_back_fingerprint.py`); a back from `CARD_BACK_MIN_SIMILARITY` on. **That threshold, 0.35, is provisional**: the 16,881
+saved captures of card fronts on the development machine reach at most 0.219 (99.9% below 0.177), Scryfall's back degraded on purpose stays above 0.92 when
+blurred, darkened, tinted or compressed and near 0.71 with a glare spot or a 3% perspective error, but falls to 0.35 cropped by 5% and 0.42 with everything
+together - **no real camera capture of a back has been measured yet** (`scripts/experiments/image_match/card_back_measure.py --backs ... --fronts ...`).
+
+**Where it acts**: `stations_api.station_capture`, after the upload is saved and its repeat check, BEFORE it branches into mode `review` (read at once) or
+`submit_capture` - so both are covered (`captures.stop_at_card_back`). Only for a sender that understands the answer: a computer station (`camera=1`; it reads
+only the capture's number from the answer, and its auto-capture follows the server's) or one that says so (`accepts=card_back`: the Android app since it knows
+the status - an older one maps an unknown status to an error, so its captures are read as before). With the camera's setting on (**Settings > Cameras >
+Scanning: Stop at a card back**, per station as `stop_at_card_back` in `data/stations.json`, on unless switched off; event `toggle_stop_at_card_back`), a back
+is answered `{'status': 'card_back', 'similarity'}` and remembered under the upload's key (`remember_outcome`) and on record (`pending.settle_unrecorded`, in
+`settled_captures` by its `capture_id`: a Codex review found that a station sending it again after a restart stopped the camera a second time) - a repeat gets the same answer and stops nothing
+twice, across a restart too; it is not put on record in `pending`, not read, not added, not reviewed; the station's `auto_capture_enabled` and `card_under_review` go to False (the
+latter releases a `review` capture's hold); the camera's pages get `auto_capture_toggled` and `card_back_seen` (a log line, a notice, the queue alert's beeps - and the
+Start / Stop button now follows `auto_capture_toggled`, which it did not before: a game switch stopped the cameras with the button still saying Stop); `scanned_cards.log`
+gets `(card back)` with the reader `card-back`, the reading log a record with `card_back` (the similarity) and `result.outcome: card_back`. The picture stays in
+`scanned_cards/` (the clean-up removes it with the others) - it is what the threshold will be measured on. The phone's sync route refuses a back (409: nothing
+was added). A failing check is "not a back": the capture is read as before.
+
+Not covered: a capture waiting in `pending` when the server stopped is read as before when it resumes (`resume_pending` does not check: every capture on
+record there passed the check at its upload, or came before the check existed); a sleeved card shows the SLEEVE's back; other products' own backs and a
+double-faced card's back are read as cards (they land in review). The standalone phone app reads cards itself and does not check.
 
 ## Identification (vision AI)
 
@@ -1293,7 +1324,9 @@ shown as a picker when there's more than one.
 ## Foil and finish
 
 Modern cards print a star instead of a dot between set code and language on foil copies
-(`HOB★EN` vs `HOB•EN`). For captures found by outline detection - where the corner is known to
+(`HOB★EN` vs `HOB•EN`). **An unread finish is not regular** (since 2026-10-21): a confirmed printing made in foil and non-foil whose marker nothing read goes
+to review with its printing (`Game.finish_known`, see "Adding automatically vs. reviewing"); and in the picture + collector line path the strip's symbol and
+the network decide only for a printing that prints the marker at all (`prints_a_marker`; the reading by picture's rule (3) below). For captures found by outline detection - where the corner is known to
 be in the image - `read_foil_symbol()` sends the bottom-left corner (lowest 14% × left 45% of
 the flat card, enlarged 3×) and asks which symbol it is (`vision_ai.detect_foil`).
 
@@ -1324,6 +1357,27 @@ or when no set line was found - then the AI's foil check follows as before. The 
 and a star or dot that the second OCR request (on the strip) reads itself stands: the network is not asked then (it was never
 wrong on a symbol OCR read, 99.9%; on its own it was wrong on two of five confetti-foil cards). An earlier version let the network
 overrule such a symbol - found by a review on 2026-10-20, fixed the same day (`symbol_read`, with tests for both contradictions).
+
+**The foil marker with the OCR switched off** (2026-10-20): nothing finds the set line then, so the network is asked about it at its fixed place on the flat card (`foil_marker.FIXED_BOX`, `fixed_crop`, `FoilMarker.read_fixed`;
+used by `Identification._read_foil_locally` and, for the finish of a card the picture alone decided, `printing_check.read_strip_evidence` with no reader), where before the AI's foil check - 25 s on a cold model - was the only
+answer. The box is the median of the set line's box over 1,487 cards (`scripts/experiments/image_match/foil_fixed_crop.py`): its centre varies by +/-0.73% of the card's height and the line is 2.4% high. **Measured with the same
+network and the same threshold on held-out cards where the marker is needed (the shipped code, `check_foil_marker.py`, 600 cards):** at the OCR's own box 97.8% answered and 99.8% right; at the fixed box of a card ASSUMED upright 95.5% answered and 99.3% right,
+4 ms a read (43 ms with the OCR request); on the 15 Deadpool phone captures (confetti foils) **10 answered, 9 right** (15 of 15 with the OCR, which reads the symbol itself).
+**Which way up the card is must be established first** (a Codex review, 2026-10-20: the fixed place is only the set line on an upright card, and a card put in upside down fed the network art and title pixels - 5 of 30 turned
+evaluation pictures got a confident wrong finish, one a foil called regular at 0.00002): `PrintingCheck.upright` turns the card the way the picture search says (it already compares both orientations) and answers None - so
+the finish is 'unknown' and the AI's check follows - when the better orientation matches no printing at 0.30 or is not ahead of the other by 0.20 (`ORIENTATION_MIN_SIMILARITY`, `ORIENTATION_MIN_MARGIN`; on 1,628 pictures the
+better orientation matches at a median of 0.68 and leads by a median of 0.44; 6.2% are unsure) and with no printing check or no index. **The shipped path** (`check_foil_marker.py`, the same 600 cards): 91.7% answered, **99.5% right**
+(3 wrong of 550), 22 ms a read - and the same 91.7% / 99.5% for the cards turned 180 degrees, which is the point: an upside-down card is turned back before it is cut. The price of the check is 3.8 points more cards left to the AI. **It must also be a card that prints a marker** (a Codex review, 2026-10-20: knowing which way up a card is does not say it has a star or dot; the network has only the outputs foil / non-foil and answers about
+whatever sits in the box): `prints_a_marker` (released from 2023-06-23 - the earliest set in the evaluation data where the OCR reads a marker, The Lord of the Rings, on 83% of its cards; nothing older is in the data - and in the
+`2015` frame, since a retro frame in a new set prints the old collector line) judged by `PrintingCheck.marker_expected` over EVERY printing of the index the picture cannot tell apart from its best match (less than `AGREE_BELOW` under it - taken from the distances to the whole index, not from the five rows of `top`: with five or more same-art reprints tied, an older one just outside them was never looked at, found by a second Codex review; more than `MARKER_MAX_TIED` = 200 tied is too ambiguous and answers 'no' without a database read each).
+**Measured on real pictures** (Scryfall's own scans of 80 other old-frame printings and 80 modern ones, and the owner's captures): the network with no guard answered confidently on **53 of 80 old-frame cards** (none prints a
+marker) and the shipped path on **0 of 80**; modern cards 79 of 80 and 79 of 80; the owner's 600 held-out cards unchanged at 91.7% answered, 99.5% right; and again with every tied row considered, on a fresh sample of 100 each: **old frames 63 of 100 unguarded, 0 of 100 shipped**; modern 98 of 100 both ways. A first form of the rule, ALL five nearest printings, was
+measured and rejected: it let only 15% of modern cards through, because a modern card often shares art with an older reprint. The rule is conservative: a card that does print a marker but is older than that date goes to the AI's
+check. **On the AI path the network's answer is provisional** (a third Codex finding): it is taken before the AI says which card this is, and the check ran on the nearest *indexed* printings - a card the index lacks can borrow a
+modern lookalike's marker layout. So once the AI has named the card, the answer stands only if that printing resolves and prints a marker (`Identification._resolved_prints_a_marker`); otherwise it is discarded and the AI's own foil
+check runs (one extra AI request, only in that case). The picture-alone path needs no such step: the printing it decides is the best match, which is always among the printings `marker_expected` checks. **The same test guards the picture-alone path** (`orientation_established`, used by `upright` and by `live_read` when it has no reader; a Codex review found the second use missing): a picture can pass the printing's 0.5 similarity and 0.05 lead and still be nearly as near to the other orientation, so without it the network would read the wrong crop and its answer become the finish - now it is not asked, and the finish falls back to the printing's own finishes or the AI's check. A taller / wider box was clearly worse (82% answered,
+96% right; 4 of 10 on the Deadpool captures): do not widen it. With OCR on nothing changed: the OCR's symbol, then the network at the OCR's box. **Not measured:** other cameras, a card the warp cut loosely, cards of older frames;
+and with no OCR symbol to stand first, a confetti foil can be called the wrong finish without the AI's check seeing it.
 
 What was measured (`docs/plans/IMAGE_MATCH_EXPERIMENT.md`, section 5; 10,501 set lines of 13 recent sets from the owner's
 collection; tested on cards the network was not trained on - the split is by card): where OCR had left the marker unread, right
@@ -1380,13 +1434,13 @@ checkpoints every 5,000 printings and can be stopped and run again.
 **The index for a phone** (since 2026-10-20; the first step of a standalone phone that reads cards by their picture - the Android side is not written): a phone cannot build the index (118,000 pictures, hours, 12 GB),
 so it takes this server's - `GET /api/image_index/download` (the generation and each file's address, size and SHA-256; 404 without an index) and `GET /api/image_index/download/<hashes|ids|printings>?generation=<g>`
 (`server/stations_api.py`: `index_for_download`, `index_printings_table`; resumable with `Range`, the ETag is the SHA-256). `hashes` and `ids` are the files of the current generation as they are on disk; `printings` is a
-gzipped tab-separated table (`id, set, number, oracle_id, finishes, name`, `image_index.printings_table`, from `database.printing_facts`) for the printings of the index the card data has, joined by id - the part of
+gzipped tab-separated table (`id, set, number, oracle_id, finishes, name`, and since 2026-10-21 `released_at, frame` - added LAST, the Android app reads the columns by name: what `printing_check.prints_a_marker` needs for the phone's fixed-place foil reading; `image_index.printings_table`, from `database.printing_facts`) for the printings of the index the card data has, joined by id - the part of
 the decision's evidence (`decide.py`: set, number, oracle id, finishes) a phone needs of each candidate without asking Scryfall. **Only the current generation** is served: another one is a 409 that names the current
 one, so a phone never holds the hashes of one build and the ids of another. **The table is pinned by its own checksum too** (a Codex review, 2026-10-20): it follows the card data, which changes without a new generation, so its address in the listing carries `&version=<sha256>` and a request with another one - a card data update since the listing, also a resumed `Range` request - is a 409 naming the current version, never other bytes with a 200. Behind the station token (open without one, like the other station routes), read-only; the table is built once per generation and card data
 download (0.7 s, in memory). **Measured on the development machine's index (112,765 printings): 22 MB in all - hashes 10.8, ids 4.2, table 6.6 MB gzipped (the oracle ids do not compress).** Tried with a Flask test client
 and a synthetic index (`tests/test_index_download.py`); **not tried from a phone**, and nothing in the app reads it yet.
 
-**The same run is a button** (since 2026-10-20): Settings > Storage > *Picture index* shows how many printings of the card database the index covers
+**The same run is a button** (since 2026-10-20): Settings > Card reading > *Picture* (in Storage until 2026-10-20) shows how many printings of the card database the index covers
 ("Covers 112,765 of 112,818 printings - 53 to add") and downloads the missing ones in the background (`server/card_data.py`: `index_status`,
 `start_index_update`; `GET /api/image_index`, `POST /api/image_index/update` and `/stop`, the last two behind the settings password). The page asks for the
 progress every two seconds while it runs (so it shows after a reload), a Stop button keeps what is done (`build`'s `cancel`; the next press goes on
@@ -1517,22 +1571,58 @@ only checked against the right printing), a quiet server's timing, and the false
 **Why it is the default.** The vision AI was in this project from the start because the OCR then did not read well enough. light-ocr does now, and the picture of a card can be matched against every
 printing, so the AI is the **last** step - kept as the fallback until it can be removed. What waits for the exit criteria (see *Printing check*) is *removing* it, not its place in the order.
 
-`reading.mode` in `config.yaml` (`evidence`, the default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode` and
-`reading_accept_image_alone`; the next card takes it - no restart and no image rebuild). The page says what the mode needs (the picture index with its number of printings - Settings > Storage - and OCR switched on;
+`reading.mode` in `config.yaml` (`evidence`, the default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode`,
+`reading_accept_image_alone` and `reading_extend_index` (the checkbox beside the index button, carried by the same event); the next card takes it - no restart and no image rebuild). The page says what the mode needs (the picture index with its number of printings - Settings > Storage - and OCR switched on;
 **without them every card is read as in `cascade`**, so a new installation behaves as before until its index is built); asking for the picture alone to add cards asks for confirmation. **`cascade` is exactly the reading as it was before the picture matching existed**: OCR, then the vision AI; nothing in this section runs in it (the foil-marker tests, which predate the mode,
 pass unedited, and `cascade` never calls the code of this section - a test pins that). A `reading_mode` that is not understood is `cascade`, not `evidence`.
 
-**`evidence`** changes only the card the full-card OCR did *not* confirm - the card that would have gone to the vision AI. A card OCR confirms is read as before.
-For such a card, in `Identification._read_with_ocr` (so also in `identify()`, which the synchronous station route uses):
+**The order - the picture first (decided and built on 2026-10-20, the same day the mode became the default; it first changed only a card the full-card OCR did not confirm; that is history, the order below is the present one).** In `Identification._read_with_ocr`
+(so also in `identify()`, which the synchronous station route uses), in this order, each step only for what the one before did not settle:
+1. **the picture** (steps 1-4 below), with the collector line read from its strip when OCR is on - a card it settles is settled, and the full-card OCR is never read for it;
+2. **in doubt, the full-card OCR** (when OCR is on): a confirmed read stands, with the one question below (does the picture look like another printing of the same card, or - for a name only partly read - like any other card?);
+3. **the vision AI** (when it is on), whose answer is checked against the picture; else the card goes to review under the name OCR read.
+
+OCR and AI both off: the picture alone, then review. OCR off, AI on: the picture, then the AI. OCR on, AI off: the picture, then OCR, then review. `reading.accept_image_alone` is **on by default** now (a clear picture settles a card: see below
+for what that risks) - **but only while the picture index covers the whole card data** (a Codex review of 2026-10-20: with it on by default, a printing the index lacks - after a card data update, before the index is
+extended - would be added as its best match, another printing, when no strip says otherwise). `PrintingCheck.missing_printings` counts every printing of the card data the index lacks - with a picture address or without, since one with none can never be indexed (a second Codex finding; there were none in the card data on 2026-10-20, 0 of 116,329) - once per index
+generation and card data download (0.20 s on 112,765 printings, then remembered); `Identification._read_by_picture` passes the picture alone on only at 0, and the Card reading page says how many are missing and that
+the picture alone adds nothing until the index is updated. **The index is extended by itself after a successful card data download** (`reading.extend_index_after_update`, on by default; `Config.READING_EXTEND_INDEX`, the person's `reading_extend_index` wins; `server/card_data.py`: `extend_index_after_update` calls `start_index_update` at the end of `start_card_data_update`'s task): only when an index exists already (never a first build - hours and ~12 GB - which stays the button's), not while a build runs, and a failure to start it never turns the finished update into a failed one. The Scanner pages' banner then says "Extending the picture index: N of M" (`reading_status()['index_build']`, polled every 3 s while it runs). Never tried against a live server. **A card newer than the card data itself** (in neither the data nor the index - a third Codex finding: a complete index of a stale card data
+still let its best match, another printing, be added) is caught by two more rules, each where the other cannot see: (1) the strip names a printing (number AND set) the card data does not have at all -> no add by the picture alone
+(`PrintingCheck._names_unknown`; measured with `scripts/experiments/image_match/unknown_strip.py`: 13 of 47 picture-alone decisions had such a strip, all 13 right - OCR misreads of special printings like `spm 2099` - so they go on to the
+full-card OCR, a cost in time, not in errors); (2) with OCR on, EVERY decision by the picture alone - whatever the strip read (a fourth Codex finding: a strip naming another existing printing was a contradiction the picture overruled unconfirmed) - needs the full-card
+OCR to CONFIRM the chosen printing (`printing_check.ocr_agrees`, from `Identification._ocr_names`): the same name (`database.names_match`), and - when it read a whole collector line that is not the chosen printing's - that line must not name
+ANOTHER PRINTING OF THE SAME CARD (same oracle id: a fifth Codex finding, the name alone let printing A stand where the OCR had read printing B) nor a printing the card data lacks. A line that names a DIFFERENT card is no evidence about this card's
+printing and the name decides: a Secret Lair prints another card's line by design (Deadpool's Bolt reads `GN2 042`, Lightning Strike), and OCR misreads numbers (`SPM 0069` for Shocker #89 is Swarm). (A first form that rejected every differing
+line refused 28 of 49 correct picture decisions, all 15 Deadpool captures among them; the same-card test must not use names_match, which takes Lightning Strike for Lightning Bolt.) Not confirmed: the card is in doubt and the OCR path reads it.
+**Its cost, measured** (`scripts/experiments/image_match/confirm_cost.py`, the shipped function: 1,628 evaluation pictures and the 15 Deadpool captures, real OCR): of 49 picture-alone decisions **29 confirmed** (25 right and the 4 label errors
+where the picture is right) **and 20 refused, the picture right in all 20** - OCR could not read the name (a sticker or a styled title: `Worn`, `Swiftfo`, `THRILLOF`, `WASHINGTONDC`) or read a line naming no printing (`LTR 2023`); the same-card
+contradiction never occurred in the data. No error was prevented; those 20 go on to the OCR path, the AI or review. The person's design reads such doubt as a job for OCR. **Since 2026-10-21 a clear lead stands in for the name** (`decide.LEAD_WAIVES_NAME` = 0.10, `confirm_by_ocr(ocr, lead)`): the live case was the Deadpool Sol Ring, which prints "Worn Powerstone" - six live scans refused, leads 0.12-0.19. Measured with `scripts/experiments/image_match/lead_waiver.py` (every printing of a card removed from the index, the case the name check is for: the best match then led by a median of 0.005 and never more than 0.052 - 0 of 428 would be added as another card at 0.08; with the index complete, 257 of 386 right picture-alone decisions lead by 0.10 or more) and `confirm_cost.py --with-lead` (real OCR): **39 confirmed right, 6 refused (all right), the same 4 label errors - 0 more wrong.** A whole collector line naming exactly the chosen printing (`line_names: chosen`) stands in for the name as well. What the lead does not cover is the printing: `lead_waiver.py --missing printing` gave 107 wrong printings at 0.10, all of the same card - so the lines are still checked: the full-card OCR's (`same_card`, `unknown`, `lookup_failed` refuse) and, since a second Codex review the same day, the strip's (`strip_names: same_card` refuses whatever the name and the lead - `accept_printing` lets a strip naming another indexed printing through, and the name check was what caught it). And a name that is ANOTHER card's which a whole line - the OCR's or the strip's - names too refuses whatever the lead (`name_of_other_line`, a Codex review: two readings agreeing on a different card are a contradiction, not a misread); a Secret Lair's printed name comes with a part of a line at most (`Worn`, `SCD`, no number), so this cost nothing measured. None of the three has met a live case yet. **Three more rules of the same evening** (Codex reviews of the Android port, whose flaws were the server's too):
+(1) **A collector number with a letter suffix names its own printing** (`printing_check.printing_named_by_line`, used by `PrintingCheck._strip_printing` and
+`Identification._ocr_names`): looked up AS WRITTEN only - leading zeros off, then as read - never by its digits (`database.collector_number_variants` took
+`233a` for `233`, and ZEN has both Plains: a line saying 233a "confirmed" the 233 the picture chose); no such printing in the card data is `unknown` (fail
+closed: a misread suffix costs a review, never a wrong printing). Checked on the real card data: `zen 233a` -> `10a087d3`, was the 233's `e9646663`.
+(2) **The confirmation reads the card the way up the picture search found it**: `live_read` returns `rotated`, `_ocr_names` reads the card turned 180 degrees
+when it is set - the strip was always read so, the full card was read as given, and `parse_magic` finds the title at the top only (an upside-down card's
+decision was refused for that alone). (3) **The strip's star / dot and the foil network give the finish only on a printing that prints the marker**
+(`prints_a_marker`: The Lord of the Rings on, modern frame - the rule the fixed-place network already followed): an older line's separator is not known to
+encode the finish; the 200 station captures with a known finish all print the marker (symbol right 76, wrong 1), so nothing was measured on older cards -
+failing closed costs them the AI's foil check or a review. Left open: with OCR OFF there is nothing to agree with - the person's "picture only" configuration takes that risk knowingly; and a reprint of the SAME card in a set newer than the card data, with an unreadable
+strip, passes the name check (the same name) and would be added as an older printing of that card. **The Scanner pages say when the index is stale or missing** (a banner under the header of the cameras' overview and of each camera's
+page, `common.js: showIndexNotice / loadIndexNotice`, from `/api/scan_settings`'s `reading.index_missing`; asked on opening, every five minutes and after a card data update). **Measured on the rehearsal server** (`scripts/experiments/image_match/rehearse_matrix.py`: a copy of the real data in a second container, the same 39 pictures - 15 Deadpool phone captures, 12 ordinary, 12 hard
+evaluation pictures - in the four configurations, each answer scored against the known one): **0 added wrong in any of them.** OCR on + AI on: 39 added, picture 18 + picture and strip 19 + AI 2 (the old order asked the AI for 20 of the same
+39), median 0.12 s; OCR on + AI off: 37 added, 2 to review; OCR off + AI on: 39 added, picture 29 + AI 10, median 0.08 s; OCR off + AI off: 29 added, 10 to review, median 0.06 s. The reader labels: `picture` (nothing but the picture
+decided), `picture+strip` (the collector line named the printing the picture agrees with), `light-ocr`, or the AI's model. **Not yet run on a live scan in the OCR-on configuration.**
+
+What follows describes steps 1-4 of the picture's own reading, unchanged:
 1. `PrintingCheck.live_read` fingerprints the capture (both orientations), takes the five nearest printings of the image index, reads the strip of the flat card with the
    **live** OCR reader (one more small request; here the read is the live path, unlike the shadow lookup's isolated reader) and applies `decide_printing` (rule A2).
-2. `strong` (the strip names a printing the picture agrees with) or, only when `reading.accept_image_alone: true` (**off by default**, see below), `image` (the picture alone leads
+2. `strong` (the strip names a printing the picture agrees with) or, only when `reading.accept_image_alone: true` (**on by default since 2026-10-20**, see below), `image` (the picture alone leads
    clearly; otherwise those cards go to the AI): the card is returned with its **printing id**, `reader: picture+strip`, and a `foil` field from `decide_finish` (printing's finishes, then the symbol, then the
    network; an unknown finish still gets the AI's foil check where that was possible, and otherwise stays `unknown`, which `Game.suggested_finish` files as regular, as before).
 3. `review`, no index, a printing the card data lacks, or any failure: the card goes to the vision AI as in `cascade`. **With OCR switched off there is no strip** (`live_read` is handed no reader and reads none): only the picture alone can decide, and only with `reading.accept_image_alone` on - the way to try the picture on its own; with it off every card goes to the AI at once. No strip also means the guard against a printing newer than the index (`_names_unindexed`) has nothing to compare, so the similarity floor and the lead are all that stand - the 4% of the simulation. **Measured with no strip at all** (`scripts/experiments/image_match/calibrate_picture_only.py`, 1,628 evaluation pictures, picture alone allowed): it decided 1,085 (66.6%) and left 543 to the AI;
 4 of the 1,085 differ from the stored label, and in all 4 the picture is right and the label is wrong (looked at by eye 2026-10-20: `Shocker, Unshakable` SPM 89 - the strip's "69" was a misread -, `Super Strength` MSH 189,
 `Living Brain` SPM 167, and the Deadpool `Lightning Bolt` IFIYW-2, whose art has no rainbow), so 0 wrong - **on printings that are in the index**. A printing newer than the index is the hazard this mode cannot see:
-extend the index (Settings > Storage) after every card-data update before trusting it. **The AI's answer is then checked
+extend the index (Settings > Card reading > Picture) after every card-data update before trusting it. **The AI's answer is then checked
    against the picture** (`PrintingCheck.verdict_of`): if the picture clearly looks like another printing (`disagree`), its number and set are dropped and the card goes to
    the review queue under the name the AI gave; any other verdict, or a failed check, leaves the answer alone.
 
@@ -1552,11 +1642,14 @@ the strip names and the picture confirms): the best match must be at least `IMAG
 database has but the index lacks (if the card database cannot say, the picture alone is not enough). Measured with `scripts/experiments/image_match/calibrate_uncovered.py` on 428 real
 pictures, each also with its own printing removed from the index (every add is then wrong): the lead alone still added **36%** of those; the strip rule brought it to 5.4% at no cost to
 covered cards; adding the floor, **4.0%**, at 1.1 points of covered cards (which go to the AI). A higher floor costs more than it helps - a covered camera picture is only 0.66 similar to
-Scryfall's scan (median), and the same-art reprints of an uncovered printing stay in the index and score high - so the floor is a backstop, not the protection. **Residual risk, and why the picture alone is OFF by default** (second Codex review, same day): with the two guards, a printing newer than the index whose strip is unreadable can still be added by
-the picture alone (4% in that simulation), and a stale index makes that likelier. So `reading.accept_image_alone` defaults to **false** (config, `Config`, and the `live_read` signature): such cards
-go to the AI as before, and only the decisions the strip confirms are made without it. With that default the same simulation added **0 of 428** pictures whose printing was not indexed, while
-359 of 428 covered ones (83.9%) were still decided by picture and strip, none wrong. Turning the picture alone on is a separate decision (it was 24 more of the 128 AI-read cards); rebuild the
-index after every card data update either way (`not_indexed` in the report says when).
+Scryfall's scan (median), and the same-art reprints of an uncovered printing stay in the index and score high - so the floor is a backstop, not the protection. **Residual risk of the picture alone, and the history of its default** (second Codex review, same day). With the two guards above, a printing newer than the index whose strip is unreadable can still be added by
+the picture alone (4% in that simulation), and a stale index makes that likelier. For part of 2026-10-20 `reading.accept_image_alone` was therefore **false** by default: such cards went to the AI, and only the decisions the strip
+confirms were made without it. With that setting the same simulation added **0 of 428** pictures whose printing was not indexed, while 359 of 428 covered ones (83.9%) were still decided by picture and strip, none wrong;
+allowing the picture alone was 24 more of the 128 AI-read cards. That was changed the same day, when the picture became the first step: the setting is **true** now (`config.yaml`, `Config.READING_ACCEPT_IMAGE_ALONE`; the Settings
+page's choice wins), and what makes it acceptable are the guards, which are all in the code: the picture alone adds nothing while the index lacks any printing of the card data (`PrintingCheck.missing_printings() == 0`, checked in
+`Identification._read_by_picture`), it needs `IMAGE_MIN_SIMILARITY`, it is refused when the strip names a printing the card database has and the index lacks (`_names_unindexed`) or one the card data lacks (`_names_unknown`),
+and with OCR on the full-card OCR must confirm the printing (`printing_check.ocr_agrees`). `PrintingCheck.live_read`'s own parameter `accept_image_alone` still defaults to `False` (a caller that says nothing gets the strip-confirmed
+decisions only); `Identification` always passes the setting. Rebuild the index after every card data update either way (`not_indexed` in the report says when).
 
 **The decided printing travels by its id.** `route_identified` / `search_and_emit_card` take `printing_id` and use `Game.card_by_printing` (tag `picture`, in
 `CONFIRMED_MATCHES`) instead of looking the card up again by name and number. Measured with `scripts/experiments/image_match/verify_roundtrip.py`: on a seeded sample of 3,000
@@ -1566,16 +1659,65 @@ route (hand the server the database's name, number and set) would have added ano
 **Not recorded in the shadow log.** `PrintingCheck.observe` ignores a card whose reader is `picture+strip` (comparing the picture with the printing it chose would only
 compare the choice with itself). **The exit criteria's evidence is therefore collected in `cascade` mode only**: with the mode on, the shadow log covers just the cards the AI
 still handles and says nothing about the cards the mode adds itself. What the mode adds is in the scanned-cards log (`ai_model` = `picture+strip`) and the app log
-(`Picture and strip: ...`); the collection itself is the test (cards added with the wrong printing).
+(`Picture and strip: ...`) - and, since 2026-10-21, in the reading log below.
 
-*Measured* (`verify_live_read.py --no-image-alone`, the shipped default, with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
+**The reading log** (`data/logs/reading.jsonl`, `core/reading/record.py`; since 2026-10-21, step 2 of `docs/plans/READING_REVIEW_2026-10-21_PLAN.md`): one JSON line per capture,
+in **either** mode, of what each step of the reading saw and did - so that the thresholds and guards above, set on 20 known-wrong labels and simulations, can be judged on live scans.
+It is not the shadow log and does not replace it. A record has `time`, `station`, `capture` (the file name), `capture_key` (the capture's uid, for a queued capture), `mode`, `ocr_on`,
+`ai_on`, `accept_image_alone`, `game`, `index_covers` / `index_missing` (asked only when the picture alone is allowed), `seconds` per step (`picture`, `ocr`, `ai`, `total`);
+`picture` (`rotated`, `lead`, the five `candidates`: id, set, number, similarity), `strip` (`number`, `set`, `symbol`, `net`), `decision` (rule A2's `path`, `printing_id`, `similarity`,
+`lead`; `accepted: true` when the card was taken), `refused` - `null` or **the name of the guard** that stopped the picture's decision (`record.GUARDS`: `image_alone_off`,
+`index_incomplete`, `card_not_in_data`, `below_image_floor`, `below_strong_floor`, `strip_names_unindexed`, `strip_names_unknown`, `ocr_did_not_confirm` with `refused_ocr_name` /
+`refused_ocr_line` - both null when the OCR read nothing, which is also what a reader in its cool-down gives); `ocr` (the full-card read: `name`, `collector_number`, `set_code`, `foil`,
+`confirmed`, `contradicted` + `why`; for the read that confirms - or not - a decision by the picture alone, also `confirms_picture` and the facts `decide.confirm_by_ocr` took, `name_matches`, `line_names`, `name_of_other_line`, `strip_names` - written whether it confirmed or not since 2026-10-21, before that only on a refusal - and `name_waived`: confirmed without the name, by the lead or the line); `ai` (`asked`: `identify` / `foil`, `answer`, `verdict` of the picture against it: `agree` / `weak` / `disagree` / `not_indexed` / `not_found`);
+`result` (`reader`, `printing_id`, name / number / set, `foil`, and `outcome` + `reason` from the router: `added` / `review` / `shown`). A second kind of line, `review: true`, is
+written when a review item is settled by picking a printing (`scan_events.add_selected_card`): `picked`, the `candidates` the review screen showed (kept on the desk by
+`handle_review_open`), and the picked one's `rank` among them - 0: the picture's best match was right and a guard (or the AI) sent it to review; null: the picture had it wrong or showed
+nothing. It joins the capture's record by `capture_key` (a review item keeps its picture under a name of its own).
+How it travels: the thread reading a capture holds its record as the *current* one (`record.using`; the OCR worker, then the AI worker, with the record on the `Job`), every step adds
+to whatever record is current (`record.note`, `record.refuse` - `PrintingCheck.live_read` names its guards so, `Identification` the others), and the record is then *handed over* to
+the code that routes the card in the same thread (the results thread's `on_done`, or the station's route after `identify`): `captures.announce_and_route` completes it with the
+outcome (`record.complete`), and one nobody completes is written without an outcome. Nothing of it is in the outcome a phone parses (`ServerOutcome.parse`). It never raises: a
+failed write is a debug line in `ai.log`. Renamed to `.1` beyond 10 MB, in no backup. The summary: `scripts/reading_report.py` (`core/reading/report.py`): captures by configuration,
+by reader and outcome, the refusals by guard, the review picks by rank and joined to the guard that sent the card there (the cost of each guard in live numbers), seconds per step
+(median, 95th percentile), and the captures to look at by eye (picture-alone adds under 0.6 similarity, strong decisions whose strip and full-card OCR read different numbers, AI
+answers the picture only weakly agrees with); the `ocr_did_not_confirm` refusals are split by why (nothing read, the name not the card's, what the line names - step 6 of the plan). *Tested with stand-ins and the synthetic index (`tests/test_reading_log.py`). First live run 2026-10-21 (OCR on, AI on, picture alone on; the owner's scans): 133 captures in 25 minutes, 121 by picture + strip, 4 by the picture alone, 8 to review; 6 picture-alone decisions refused by `ocr_did_not_confirm`; 2 review picks, both the picture's first candidate, both of a card the OCR guard had refused (the Deadpool Sol Ring, which prints another card's name - `Worn Powerstone` - and line, so no read of its text can confirm it).*
+
+**The guards as a pure function** (since 2026-10-21; step 5 of the same plan). What `PrintingCheck.live_read` and `Identification._read_by_picture` checked inline is now two pure
+functions in `core/reading/decide.py`, beside rule A2, with exactly the same rules in the same order: `accept_printing(decision, facts)` - review is no decision; the picture alone
+needs the setting (`image_alone_off`) and an index that covers the card data (`index_incomplete`); the printing must be in the card data (`card_not_in_data`); each path its floor
+(`below_image_floor` 0.5, `below_strong_floor` 0.30); the picture alone, a strip naming a printing the index lacks or that cannot be looked up (`strip_names_unindexed`) or one the
+card data lacks (`strip_names_unknown`) - and, for the picture alone with OCR on, `needs_ocr`: then `confirm_by_ocr(ocr)` decides (`ocr_did_not_confirm`). The facts are gathered
+outside (`PrintingCheck._strip_names`: one lookup of the strip's line; `printing_check.ocr_facts`: the name, the full-card OCR's line and the strip's - `ocr_agrees`, which
+`confirm_cost.py` calls, is the two halves together). On the server the index's coverage is folded into the setting by `_read_by_picture` before `live_read` (as before), so
+`live_read` passes it as covered and the log's `index_incomplete` is named by `_read_by_picture`. The case file is `tests/data/reading_guard_cases.json` (44 cases, hand-written: one
+per guard, one per way through, and the order between them); the Android app's `Decide.kt` (`acceptPrinting`, `confirmByOcr`) passes a copy of it. The guards' names are defined
+there once (`decide.GUARDS`; `record.py` imports them). `missing_printings` takes the game from the server (`PrintingCheck(..., game_id=games.active_id)`) instead of naming one.
+*Checked:* `verify_live_read.py` and `compare_lookup_versions.py` unchanged (95/128, 286/300, 0 wrong; 444 of 444); the `Identification` path on 529 real captures, the tree of step 4
+against this one, identical record by record, with 6 `ocr_did_not_confirm`, 10 `strip_names_unknown`, 3 + 3 below a floor and 17 picture-alone adds among them. `strip_names_unindexed`,
+`card_not_in_data`, `index_incomplete` and `image_alone_off` did not occur in those captures (the development index covers its card data): the case file and the unit tests cover them.
+
+**One body of evidence per capture** (`core/reading/capture.py`, since 2026-10-21; step 4 of the same plan). The steps of the reading ask about the same flat card more than once:
+the picture search (`PrintingCheck._search`: two fingerprints, two passes over the whole index, 18 ms median) by `live_read`, then `contradicts` / `disagrees` for an OCR-confirmed
+card, `upright` for the foil network with OCR off, and `verdict_of` for the AI's answer; the strip by `live_read` and again by `foil_marker.read` for an OCR-confirmed card whose
+marker the full-card OCR missed; the full-card OCR by `_ocr_names` (the picture alone's confirmation) and again by `_read_with_ocr`. Each is now worked out once: the thread
+reading a capture holds a `CaptureEvidence` as its current one (`capture.using`; on the `Job` between the OCR and the AI worker, let go of in `_finish`), and `_search`, the strip
+(`capture.remember` in `live_read`, `recall` in `Identification._read_foil_locally`) and `Identification._read_card` ask it first. A value is kept for one picture only - the
+very array it was made of - and a step with no current capture (the shadow worker, the review screen's candidates, scripts) computes as before. The strip's marker is taken as
+`foil_marker.read` would answer from the same read (`_foil_of_strip`: the symbol, else the network at `SURE`), but of the card turned **upright**: an upside-down OCR-confirmed card
+got `unknown` (and the AI's check) before. The two guards on the strip's printing share one lookup (`PrintingCheck._strip_printing`). *Not done:* the AI's answer is still looked up
+twice (`_resolved_prints_a_marker`: `confirmed_card`; `_checked_against_picture`: `identify`) - the two lookups are not the same rule, and folding them would change what is checked.
+*Checked:* the reading tests pass unedited; `verify_live_read.py` gives the same counts before and after; the full `Identification` path on real captures gives the same answer
+capture by capture before and after (`tests/test_reading_capture.py` pins "once per capture").
+
+*Measured* (`verify_live_read.py --no-image-alone` - the strip-confirmed decisions only, the shipped default for part of 2026-10-20 - with the real index, OCR reader and foil network, against the frozen truth): the 128 AI-read pictures - 75 decided
 (58.6%, all strong), **0 wrong**, 53 left for the AI; a seeded sample of 300 OCR-confirmed pictures - 284 decided (94.7%), **0 wrong**, 16 left. With `accept_image_alone: true` and the two
-guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%). About 60 ms per card
+guards (`verify_live_read.py`): 104 of 128 (81.2%) and 287 of 300 (95.7%), 0 wrong (without the guards: 107, 83.6%) when first measured; re-run on 2026-10-21 with the code of that day (all the guards since added): **95 of 128 (74.2%: 74 strong, 21 by the picture alone) and 286 of 300 (95.3%), 0 wrong** - the cause of the difference was not looked into. About 60 ms per card
 (median; 75-81 ms at the 95th percentile) on the development machine, in the OCR worker. On the server, rehearsed on a copy of the real data with the real 9B model (0.18-0.41 s per card read this way, GPU peak 11.2 of 16.4 GB with two OCR readers up); *not yet run on live scans: the first live evidence is what the collection and `scanned_cards.log` (`ai_model` = `picture+strip`) show*.
 
 **An OCR-confirmed card is asked one thing** (`Identification._contradicted_by_picture`, `PrintingCheck.contradicts`; 2026-10-20): whether the picture clearly looks like *another printing of
 the same card* than the one the OCR read (the Secret Lair case: the card prints the set and number of the card it is made from). If so, the OCR read is no longer a confirmed read: its
-number and set are dropped, and it goes to the picture (when the picture alone is on), to the AI (whose answer is checked as above) or, without either, to review under its name. It fails open
+number and set are dropped, and it goes on to the AI (whose answer is checked as above) or, without it, to review under its name (the picture was asked first and has already declined). It fails open
 to the OCR: no index, no verdict or a failure leaves the read standing. The look-up is one (`Game.confirmed_card`, `confirmed_read` unchanged) and the search costs 18 ms (median) on the
 development machine, on the single OCR worker, for every OCR-confirmed card in this mode. **Two rules, one question each.** (1) `contradicts`: the picture clearly looks like *another printing of the same card* - always believed. Measured on the stored labels of 10,568 OCR-confirmed
 pictures, 82 disagree: 6 `same_card` (all the Deadpool Secret Lair cards, genuine) and 76 `other_card`, a mix of foil glare / showcase backgrounds / printings newer than the index on correct reads and a few
@@ -1586,7 +1728,7 @@ title leaves the printed set + number to confirm the card, and a Secret Lair pri
 cannot tell. The rule is the conjunction, because each half alone is a poor reason. **Measured on the 6,374 OCR-confirmed pictures:** 18 reads are a fragment; for 15 of them the picture agrees (no effect) and
 for 3 it disagrees - exactly the three `Lightning Strike` confirmations; the other 40 disagreements (glare, showcase, new printings) are untouched. Run through the real OCR, lookup, index and gate on the 15
 Deadpool captures: the gate fires on all three Lightning captures (1038, 1043, 1048) and on nothing else; the other 12 are not OCR-confirmed and go on to the picture / AI as before. What it does to such a card:
-it is no longer confirmed (number and set dropped) and goes to the picture (when the picture alone is on: all 15 are the right printing, 1,085 of 1,628 evaluation pictures decided with 0 wrong - see the OCR-off paragraph),
+it is no longer confirmed (number and set dropped) and goes on to the AI or review (as the picture is the first step, it has already declined; measured on the picture alone, all 15 are the right printing, 1,085 of 1,628 evaluation pictures decided with 0 wrong - see the OCR-off paragraph),
 to the AI (checked as above) or to review. **Not covered:** a card whose name was read *whole* but wrongly, or a Secret Lair of another card entirely read in full, with a picture that disagrees - those are
 indistinguishable from glare by these signals; the picture alone (`accept_image_alone`) is the route for them.
 
@@ -1604,7 +1746,7 @@ files it as the set `tfra`, number 1. `card_ocr.prints_token_letter` / `token_se
 set `TFRA` (`parse_magic`) / `tfra` (`parse_strip`), so the exact lookup and the picture's candidates find the
 token and not the first card of the parent set. **Only the newer form is handled** (the letter and a four-digit
 number); older tokens print neither and are found by name and number if at all. **Never tried on a real
-download yet:** a card-data update (Settings > Storage) loads the tokens, and the picture index's button then
+download yet:** a card-data update (Settings > Collection and data > Card data) loads the tokens, and the picture index's button then
 adds their pictures - until then a token is matched by its collector line alone (OCR) and the picture
 cannot confirm it. The standalone Android app's parser (`ParserParityTest`) was not changed. Columns are defined
 once in `database.CARD_COLUMNS`:
@@ -2650,7 +2792,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 | Page → server | Server → page |
 |---|---|
 | `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data), `rebuild_database` | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `database_rebuild_*`, `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name; `candidates`: the printings the picture looks like, `[]` without an index), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -2778,7 +2920,7 @@ inside the container still listens on all of its addresses.
 | `data/review/` | Captures waiting in the review queue (deleted when resolved) |
 | `data/captures/` | Thumbnails of the captures behind inventory entries (deleted with their entry) |
 | `data/backups/` | Backups (`<date_time>/`, see Backups); copies of the inventory table made before a migration rebuilds it (`inventory_before_*.db`) |
-| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `requests.log` (debug mode) |
+| `data/logs/` | `app.log` (also every station's scanner lines), `ai.log`, `database.log`, `scanned_cards.log` (one CSV line per identified card; the model column says `light-ocr` when OCR read it), `ocr.log` (errors of the OCR reader process), `printing_check.jsonl` (the shadow check), `reading.jsonl` (the reading log: one record per capture of what each step saw and did, and the review's picks - see "Reading mode: evidence"), `requests.log` (debug mode) |
 | `scanned_cards/` | Captured images as uploaded (deleted after `cleanup.days`) |
 
 **Camera station** - nothing it must keep:
@@ -2837,6 +2979,10 @@ confirming removes the copies with their photos and leaves a record, a confirm t
 changes nothing, and backups (a restore brings a trade back with its entries, over an open
 trade, from before trades). The routes and the page were tried in headless Chromium against
 the server's code on a temporary copy of test data (2026-10-10), not against the server.
+
+`tests/test_card_back.py` covers the card-back check on synthetic pictures (the pinned fingerprint swapped for one of a synthetic "back"), and that the pinned
+one was made with today's fingerprint; `tests/test_card_back_stop.py` the upload route with a back - modes `auto` and `review`, a repeat, the setting off, a
+front, an older phone app, a failing check, the sync route's 409 - through Flask's test client on temporary data, with a reading that fails the test if asked.
 
 `tests/test_arena_collection.py` covers the digital collection and the decks' two kinds, on
 temporary files and made-up exports: reading the exporter's two files and refusing others,

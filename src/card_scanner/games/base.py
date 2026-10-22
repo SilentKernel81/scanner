@@ -126,6 +126,13 @@ class Game:
         """
         return self.default_finish
 
+    def finish_known(self, card, foil='unknown'):
+        """
+        Whether the finish of a copy of `card` is known - from the card itself or the marker read (foil) - so that it may be added automatically. A game
+        without finishes to tell apart always knows it
+        """
+        return True
+
     def with_prices(self, card):
         """The card with current prices (fetches_prices games: may make a network request)"""
         return card

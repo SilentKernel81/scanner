@@ -754,17 +754,18 @@ class CardDatabase:
 
     def printing_facts(self):
         """
-        {Scryfall id: (name, set code, collector number, oracle id, finishes as 'nonfoil,foil')} of every printing: the little table that goes beside the image
-        index to a phone (core/image_index.py: printings_table) - what the decision about a printing (core/reading/decide.py) needs of each candidate.
+        {Scryfall id: (name, set code, collector number, oracle id, finishes as 'nonfoil,foil', released_at, frame)} of every printing: the little table that goes
+        beside the image index to a phone (core/image_index.py: printings_table) - what the decision about a printing (core/reading/decide.py) needs of each candidate,
+        and (since 2026-10-21) what printing_check.prints_a_marker needs: whether a printing prints the foil marker at all, for the phone's fixed-place foil reading.
         """
         facts = {}
         with self._lock:
-            for row in self.conn.execute('SELECT id, name, set_code, collector_number, oracle_id, finishes FROM cards'):
+            for row in self.conn.execute('SELECT id, name, set_code, collector_number, oracle_id, finishes, released_at, frame FROM cards'):
                 try:
                     finishes = ','.join(json.loads(row['finishes'] or '[]'))
                 except (ValueError, TypeError):
                     finishes = ''
-                facts[row['id']] = (row['name'], row['set_code'], row['collector_number'], row['oracle_id'], finishes)
+                facts[row['id']] = (row['name'], row['set_code'], row['collector_number'], row['oracle_id'], finishes, row['released_at'], row['frame'])
         return facts
 
     def get_card_by_id(self, card_id):

@@ -26,6 +26,12 @@ game sits behind one interface (`games/`), so another could be added.
   station beeps. It checks movement, drift and sharpness, ignores a card that has not changed,
   and notices when a new card lands on the pile (about 1.7 s per card). Manual capture and a
   fixed-area mode for a box with a known spot are there too.
+- **A card back stops the camera** (since 2026-10-21): put a card face down at the end of a stack and the
+  camera's auto-capture switches itself off, with a notice and a sound; the back is not added. Per camera,
+  on by default (Settings > Cameras > Scanning). Computer and Pi stations, and the Android app in client mode
+  from its next version. **Never tried with a real camera yet**: the threshold is a first guess from
+  pictures of card fronts (none came near) and an edited copy of Scryfall's picture of the back. Not for
+  sleeved cards (the sleeve's back is not the card's).
 - **Cuts out and flattens the card** (perspective correction), with crop, rotation and shape
   choices (4:5, 16:9, free) drawn on the station's setup page.
 - **Focus on a USB webcam:** finds the sharpest position by sweeping, locks it, follows drift
@@ -48,9 +54,21 @@ game sits behind one interface (`games/`), so another could be added.
 
 ## 2. Reading and matching (the server)
 
-- **OCR first:** a local text reader gets the name, collector number and set code in about
-  0.1 s on a GPU (0.7 s on a CPU).
-- **A vision AI second,** only when OCR cannot confirm (full-art and borderless cards, a soft
+- **The picture first** (since 2026-10-20): a fingerprint of the card is matched against every printing of
+  the card data (the picture index; about 0.02 s) and a clear match settles the card, with the collector
+  line read from its strip when OCR is on. On a rehearsal of 39 pictures in all four combinations of OCR and
+  the vision AI, nothing was added wrong and the AI was asked for 2 cards (20 in the old order); not yet run on a live
+  scan with OCR on. Without the index it is OCR first, as before; while the index lacks any printing of the card data (after a card
+  data update, until its button is pressed), a picture alone adds nothing - the Scanner pages and the Picture settings say so, with a link.
+  With OCR on, a card the picture alone decides must also be confirmed - its collector line must not name a printing the card data lacks,
+  and OCR must read the same name and no other printing of the same card - so a card newer than the card data is not added as its best
+  match. The price: cards whose title OCR cannot read (a Secret Lair's sticker, a styled title) went on to OCR, the AI or review - 20
+  of 49 such decisions in the data, all of them right. Since 2026-10-21 a picture far ahead of the second-nearest printing needs no name
+  (6 of 49 refused then, all right, none more wrong - measured on saved pictures with the real OCR); a collector line naming another
+  printing of the same card, or another card whose name OCR read, still refuses it. Not yet seen on a live scan.
+- **OCR in doubt:** a local text reader gets the name, collector number and set code in about
+  0.1 s on a GPU (0.7 s on a CPU) for what the picture does not settle.
+- **A vision AI last,** only when neither the picture nor OCR can confirm (full-art and borderless cards, a soft
   collector line): Google Gemini, OpenAI, Anthropic Claude, or a self-hosted model through
   Ollama. The prompts can be edited per model and tested; API keys are stored masked and the
   browser can only replace or remove them.
@@ -63,6 +81,7 @@ game sits behind one interface (`games/`), so another could be added.
   collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
+- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a checkbox in Settings > Card reading turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
@@ -70,18 +89,33 @@ game sits behind one interface (`games/`), so another could be added.
   was there because OCR once read poorly): for a card the full-card OCR cannot confirm, the
   fingerprint of the picture and the strip's collector number and set decide first, the AI is asked
   only when they do not, and its answer is checked against the picture. On the experiment's
-  pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (81% if the
-  picture alone may also add, which is off by default), none wrong. Needs the picture index
+  pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (74% if the
+  picture alone may also add - re-measured 2026-10-21 with all the guards; it is on by default since 2026-10-20), none wrong. Needs the picture index
   (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
   turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
   copy of the real data).
+- **The reading log** (since 2026-10-21): `data/logs/reading.jsonl` records, for every capture and in either reading mode, what the picture, the strip, the OCR and the AI said,
+  which guard (by name) refused the picture's decision, and what became of the card; a card settled in review notes which of the picture's candidates the person picked.
+  `scripts/reading_report.py` sums it up. First live run 2026-10-21: 133 captures, every record written, the review's picks joined to their captures.
+- **A switch for the vision AI** (Settings > Card reading, since 2026-10-20), like the one for OCR: off, nothing is sent to an AI service - the picture (and OCR when it is on) decides what it can and the rest goes to
+  the review queue under the name OCR read; the provider and its key are kept, and a card already waiting for the AI comes back as read. Remembered (`ai_enabled`); the page disables it, and says so, when no provider is set up.
+  Tried with tests only, never from the page in a browser.
+- **Foil or regular without the OCR** (since 2026-10-20): with OCR switched off the foil network reads the set line at its fixed place on the flat card instead of asking the vision AI (4 ms against up to 25 s on
+  a cold model): on 600 held-out cards 91.7% answered and 99.5% of those right (97.8% / 99.8% with the OCR), also for cards put in upside down (the picture search turns them back first; when it is not sure, the AI's check answers); on 15 confetti-foil phone captures 10 answered, 9 right; only for cards released from 2023-06-23 in the modern frame (older cards print no marker: of 80 old-frame cards the unguarded network answered 53, this answers none and leaves them to the AI). Other cameras and loosely cropped cards never tried.
 - **A Secret Lair that hides its title is not misread** (since 2026-10-20): when the OCR read only a fragment of the card's name (`Lightning` of `Lightning Strike`, a sticker over the rest) and the
   picture looks like another card, the read is not confirmed - it goes to the picture or the AI. On the evaluation set it fires on 3 of 6,374 OCR-confirmed cards, all three genuine misreads (Deadpool's `Lightning Bolt`
   read as `Lightning Strike`); a glare or showcase disagreement with a name read whole is left alone. Not yet seen on a live scan.
 - **The picture index can be downloaded by a phone** (since 2026-10-20): the server serves the 22 MB index and a table of set, number and finishes to a station (`/api/image_index/download`), the first
-  step of letting the Android app read cards by their picture without a server. Tried with synthetic data only; **not tried from a phone**, and the app does not use it yet.
+  step of letting the Android app read cards by their picture without a server. Downloaded by the owner's Pixel 10 on 2026-10-21 (the app's `IndexDownloadTest`:
+  116,331 printings, 21 MB in 3.5 s, a file cut in half resumed).
+- **The Android app reads by the picture in standalone mode** (since 2026-10-21; the app's own repository): the index above, the same decisions as the server's
+  code with OCR off on the owner's 41 Pixel captures (28 added by the picture alone, 24 ms a card on the phone), then the vision AI - or, with the app's new
+  AI switch off, review. On by default. **Not yet tried on cards with the phone** (only its parity tests); no OCR on the phone, so no collector line. The
+  ★ / • foil marker IS read (since 2026-10-21): the foil network at the fixed place, as the server with OCR off - only for a card the search turned upright and
+  whose printings all print a marker (from The Lord of the Rings on, modern frame); on the 28 Pixel captures the picture adds, 17 finishes from it, the same
+  as the server's code. Needs a server whose index table carries the release date and frame (this version); an older server's table: no marker reading.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
-  printing's picture (Settings > Storage > Picture index, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
+  printing's picture (Settings > Card reading > Picture, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
   printing's set and number, and cards the AI misread. For now it only writes down where it
   disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it
@@ -92,7 +126,8 @@ game sits behind one interface (`games/`), so another could be added.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
   the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read.
-  Scanning goes on meanwhile.
+  Scanning goes on meanwhile. Since 2026-10-21 a confirmed printing made in foil AND non-foil whose ★ / • nothing read (OCR, the foil network, the AI) is not
+  added as regular either: it waits for review with its printing filled in, "finish not read" (the same rule in the Android app's standalone mode).
 - **Send back to review:** a button on any entry of the collection or the scanned cards sends
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.

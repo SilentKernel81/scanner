@@ -18,23 +18,37 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / 'src'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import cv2
 import numpy as np
+from card_scanner.config import Config
 from card_scanner.core import card_ocr, foil_marker
+from card_scanner.core.database import CardDatabase
+from card_scanner.core.printing_check import PrintingCheck
 from common import HOME, OUT, printings, read
 
 P = printings()
 sample_size = int(sys.argv[1]) if len(sys.argv) > 1 else 400
 marker = foil_marker.load(True)
+checker = PrintingCheck(CardDatabase(), Config.DATA_DIR / 'image_index', Path('/nonexistent/x.jsonl'), 'off', 'off')
 ocr = card_ocr.CardOcr()
 ocr.warm_up()
 
 
-def run(pictures, title):
+def run(pictures, title, fixed=False, turn=False):
     answered = right = 0
     seconds = []
     for path, finish in pictures:
         t0 = time.time()
-        foil, probability = marker.read(read(path), ocr)
+        # fixed: the OCR switched off - the set line is cut at its fixed place (foil_marker.FIXED_BOX), no OCR is asked
+        picture = read(path)
+        if turn:
+            picture = cv2.rotate(picture, cv2.ROTATE_180)          # a card put in upside down
+        if turn or fixed == 'oriented':
+            # the shipped path with OCR off: the picture search says which way up the card is (None: cannot say -> unknown, the AI's check follows)
+            picture = checker.upright(picture, needs_marker=True)
+            foil, probability = marker.read_fixed(picture) if picture is not None else ('unknown', None)
+        else:
+            foil, probability = marker.read_fixed(picture) if fixed else marker.read(picture, ocr)
         seconds.append(time.time() - t0)
         if foil != 'unknown':
             answered += 1
@@ -47,6 +61,7 @@ def run(pictures, title):
 # the rescan: #1037-1041 regular, 1042-1051 foil / confetti foil
 rescan = {int(f.name.split('_')[1]): f for f in (HOME / 'truth' / 'rescan_cards').iterdir() if f.name.startswith('phone-0240eb84_')}
 run([(rescan[n], 'regular' if n < 1042 else 'foil') for n in range(1037, 1052)], 'Deadpool rescan')
+run([(rescan[n], 'regular' if n < 1042 else 'foil') for n in range(1037, 1052)], 'Deadpool rescan, OCR off (fixed place, orientation from the picture search)', fixed='oriented')
 
 # held-out cards (the test side of foil_train.py's split by card), where the printing exists in both finishes
 items = [i for i in json.loads((OUT / 'eval.json').read_text())
@@ -56,4 +71,6 @@ items = [i for i in json.loads((OUT / 'eval.json').read_text())
 rng = np.random.default_rng(11)
 chosen = [items[i] for i in rng.choice(len(items), min(sample_size, len(items)), replace=False)]
 run([(i['path'], i['finish']) for i in chosen], 'held-out cards')
+run([(i['path'], i['finish']) for i in chosen], 'held-out cards, OCR off (fixed place, orientation from the picture search)', fixed='oriented')
+run([(i['path'], i['finish']) for i in chosen], 'the same cards put in UPSIDE DOWN, OCR off (what a Codex review probed)', turn=True)
 ocr.stop()

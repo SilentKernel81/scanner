@@ -203,15 +203,7 @@ function autoScanHint() {
 }
 
 function toggleAutoScanning() {
-    autoScanningEnabled = !autoScanningEnabled;
-
-    const btn = $('toggle-auto-scanning-btn');
-    const hint = $('auto-scan-hint');
-    btn.classList.toggle('is-active', autoScanningEnabled);
-    hint.classList.toggle('is-active', autoScanningEnabled);
-    btn.innerHTML = `<svg class="icon"><use href="#i-play"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
-    hint.textContent = autoScanningEnabled ? autoScanHint() : 'Click to start automatic card scanning';
-
+    showAutoScanning(!autoScanningEnabled);
     socket.emit('toggle_auto_capture', {enabled: autoScanningEnabled});
     if (autoScanningEnabled) {
         addLog(timeNow(), 'success', `Auto scanning started${fastScanMode ? ' - adding cards automatically' : ' - confirm each card'}`);
@@ -219,6 +211,30 @@ function toggleAutoScanning() {
         addLog(timeNow(), 'info', 'Auto scanning stopped - captures in progress will complete');
     }
 }
+
+// The button and its hint as the state is - set here or by the server (a card back, a game switch, the station itself: auto_capture_toggled)
+function showAutoScanning(enabled) {
+    autoScanningEnabled = Boolean(enabled);
+    const btn = $('toggle-auto-scanning-btn');
+    const hint = $('auto-scan-hint');
+    btn.classList.toggle('is-active', autoScanningEnabled);
+    hint.classList.toggle('is-active', autoScanningEnabled);
+    btn.innerHTML = `<svg class="icon"><use href="#i-play"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
+    hint.textContent = autoScanningEnabled ? autoScanHint() : 'Click to start automatic card scanning';
+}
+
+// The server switched this camera's auto-capture on or off (it also answers the page's own toggle with it: then nothing changes)
+socket.on('auto_capture_toggled', function(data) {
+    if (Boolean(data.enabled) !== autoScanningEnabled) showAutoScanning(data.enabled);
+});
+
+// A face-down card was captured: the server stopped this camera's auto-capture (captures.stop_at_card_back) and added nothing.
+// The queue alert's triple beep is the audible signal; the button follows through auto_capture_toggled
+socket.on('card_back_seen', function(data) {
+    audioManager.playQueueAlert();
+    addLog(timeNow(), 'warning', `🂠 Card back seen (capture #${data.number}) - auto scanning stopped. Start it again for the next stack.`);
+    notify('Card back seen - auto scanning stopped', 'warning');
+});
 
 socket.on('processing_queue_update', function(data) {
     const queueCount = data.queue_count || 0;
@@ -942,6 +958,7 @@ socket.on('database_update_complete', function(data) {
     audioManager.playQueueAlert();  // triple beep: a long operation finished
     addLog(timeNow(), 'success', `Database updated! ${data.total_cards.toLocaleString()} cards loaded.`);
     loadStats();
+    loadIndexNotice();          // new printings: the picture index now lacks them until it is updated (common.js)
 });
 
 socket.on('database_update_error', function(data) {

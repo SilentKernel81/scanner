@@ -11,7 +11,8 @@ import threading
 
 from card_scanner.config import Config
 from card_scanner import games
-from card_scanner.core import frames
+from card_scanner.core import card_back, frames
+from card_scanner.core.reading import record as reading_record
 
 from card_scanner.server.state import (
     app_settings, capture_outcomes, capture_outcomes_lock, identification, maintenance_barrier,
@@ -205,7 +206,10 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
     # (Game.confirmed_matches, e.g. set + number); anything less certain goes to the review
     # queue and scanning goes on
     confirmed = game.is_confirmed(db_card_info)
-    auto_add = was_fast_scan_mode and confirmed
+    # ... and whose finish is known: a printing made in foil and non-foil with the ★ / • unread waits for review, its printing filled in (Game.finish_known;
+    # the owner's choice of 2026-10-21 - before, it was added as regular)
+    finish_known = bool(db_card_info) and game.finish_known(db_card_info, foil)
+    auto_add = was_fast_scan_mode and confirmed and finish_known
 
     # Log scanned card
     log_scanned_card(
@@ -219,7 +223,9 @@ def search_and_emit_card(card_name, collector_number, processing_time=None, was_
 
     if not auto_add and (was_fast_scan_mode or desk().current_review_id is not None):
         why = queue_for_review(game, image_path, card_name, collector_number, set_code, foil, db_card_info,
-                               why=None if was_fast_scan_mode else 'captured during a review', station=station)
+                               why=('captured during a review' if not was_fast_scan_mode
+                                    else 'finish not read (printed in foil and non-foil)' if confirmed and not finish_known else None),
+                               station=station)
         return {'status': 'review', 'reason': why}
     if auto_add:
         # Added here, not through the current card: an open review keeps its card
@@ -272,6 +278,11 @@ def announce_and_route(image_path, card_info, card_number, game_id, processing_t
     outcome['read'] = {'name': info.get('name', ''), 'number': info.get('collector_number', ''),
                        'set': info.get('set_code', ''), 'foil': info.get('foil', 'unknown'),
                        'reader': info.get('reader') or get_ai_model_info()} if info else None
+    # The reading log (data/logs/reading.jsonl): the record of this card's reading - handed over by Identification in this thread - gets what became of
+    # the card and is written. The capture's uid (capture_key) is what joins it to the review's pick later: a review item keeps a copy of the picture
+    # under a name of its own. Never raises; nothing of it goes into the outcome (a phone parses that: ServerOutcome.parse)
+    reading_record.complete(card_info, outcome, capture=Path(image_path).name if image_path else None, station=desk().id,
+                            capture_key=capture_key())
     return outcome
 
 
@@ -344,6 +355,57 @@ def submit_capture(image_path, image, foil_image, number, game_id, station=None,
             on_outcome(outcome)
 
     identification.submit(image, foil_image, game_id, identified, scope=lambda: in_desk(owner))
+
+
+# The per-camera setting (Settings > Cameras > Scanning: "Stop auto-capture at a card back"), kept like auto_add in the station's settings; on unless switched off
+CARD_BACK_SETTING = 'stop_at_card_back'
+
+
+def stops_at_card_back():
+    """Whether the current desk's camera stops at a card back (its own setting, else the app's, else on)"""
+    settings = scanner.settings if scanner else app_settings
+    return bool(settings.get(CARD_BACK_SETTING, True)) if settings else True
+
+
+def stop_at_card_back(image_path, image, foil_image, number, station=None):
+    """
+    A face-down card is a stop sign (docs/plans/CARD_BACK_STOP_PLAN.md): when the current desk's camera stops at a card back (stops_at_card_back) and this capture is one
+    (core/card_back.is_card_back, of the flat card - foil_image when the station sent it), the camera's auto-capture is switched off, its page told (the event
+    card_back_seen: a line, a notice, the queue alert's sound) and the capture is settled as {'status': 'card_back', 'similarity': ...} - not read, not added, not reviewed.
+    Returns that outcome, or None for every other capture (the caller goes on as before). Called by stations_api.station_capture BEFORE it branches into its
+    'review' mode or submit_capture, inside the station's desk, and only for an upload that understands the answer (see there). Never raises: a failure is "not a back".
+    The picture is kept in scanned_cards/ (the clean-up deletes it with the others): what real backs look like to a camera is still to be measured.
+    """
+    try:
+        if not stops_at_card_back():
+            return None
+        similarity = card_back.card_back_similarity(foil_image if foil_image is not None else image)
+    except Exception as e:
+        logger.warning(f"Card back check failed for {Path(image_path).name} ({e}) - read as a card")
+        return None
+    if similarity < card_back.CARD_BACK_MIN_SIMILARITY:
+        return None
+    outcome = {'status': 'card_back', 'similarity': round(similarity, 3)}
+    try:
+        # What the game switch does for every camera (settings_events.handle_switch_game), for this one: auto_capture_enabled is one of RemoteScanner.SENT, so the
+        # station follows; card_under_review False releases a 'review' capture's hold, or the station would wait for an Add / Skip that never comes
+        if scanner:
+            scanner.auto_capture_enabled = False
+            scanner.card_under_review = False
+        emit_desk('auto_capture_toggled', {'enabled': False})
+        emit_desk('card_back_seen', {'number': number, 'similarity': outcome['similarity']})
+        log_to_client(f"{station_prefix(station)}Card back seen (capture #{number}): auto-capture stopped", level="warning")
+        logger.info(f"Capture {Path(image_path).name} is a card back (similarity {similarity:.3f}): auto-capture stopped")
+        log_scanned_card('(card back)', '', 'card-back', False, False)
+        # the reading log: counted with the other captures (result.outcome card_back), in the configuration they are read in (Identification._new_record)
+        record = identification._new_record() if identification else None
+        if record is not None:
+            record.note(None, card_back=outcome['similarity'])
+            record.finish(None, outcome, capture=Path(image_path).name, station=desk().id)
+            record.write()
+    except Exception as e:
+        logger.warning(f"Card back {Path(image_path).name}: telling the page / the logs failed ({e})")   # the camera is stopped, or the page says the rest
+    return outcome
 
 
 def remember_outcome(key, outcome):

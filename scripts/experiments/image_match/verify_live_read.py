@@ -26,7 +26,7 @@ from common import OUT, TRUTH, read
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--easy', type=int, default=300)
-ap.add_argument('--no-image-alone', action='store_true', help='as shipped (the default): only the decisions the strip confirms')
+ap.add_argument('--no-image-alone', action='store_true', help='measure without the picture alone: only the decisions the strip confirms (the script by default allows the picture alone, like the shipped setting)')
 ap.add_argument('--out', default=str(REPO / 'data' / 'logs' / 'live_read.json'))
 arguments = ap.parse_args()
 

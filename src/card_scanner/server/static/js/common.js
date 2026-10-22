@@ -608,6 +608,44 @@ function watchCardData() {
 }
 document.addEventListener('DOMContentLoaded', watchCardData);
 
+// The picture index on the Scanner pages (the banner is only there: _topbar.html): cards are read by their picture first, so a missing or stale index changes what is read -
+// said at the top, with a link to where it is updated (Settings > Card reading > Picture). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
+function showIndexNotice(reading) {
+    const banner = document.getElementById('index-banner');
+    if (!banner) return;
+    let text = '';
+    const build = reading && reading.index_build;
+    if (build && build.running) {
+        // A build is running (the Settings button, or the one started after a card data update): say how far it is, whatever the mode
+        text = `Extending the picture index: ${build.done.toLocaleString()} of ${build.total ? build.total.toLocaleString() : '?'} new pictures.`;
+    } else if (reading && reading.mode === 'evidence') {
+        if (reading.index_printings === null || reading.index_printings === undefined) {
+            text = 'There is no picture index: cards are read by OCR and the vision AI only.';
+        } else if (reading.index_missing) {
+            const n = reading.index_missing;
+            text = `The picture index is out of date: it lacks ${n.toLocaleString()} printing${n === 1 ? '' : 's'} of the card data. ` +
+                'Until it is updated, a card the picture alone would decide is read by OCR or the vision AI instead.';
+        }
+    }
+    banner.hidden = !text;
+    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card reading)</a>` : '';
+    // While a build runs, look again every few seconds so the count moves (and the banner goes when it ends); otherwise the slow timer below is enough
+    clearTimeout(indexNoticeTimer);
+    if (build && build.running) indexNoticeTimer = setTimeout(loadIndexNotice, 3000);
+}
+let indexNoticeTimer = null;
+
+// Asked when the page opens, now and then (an index built from the Settings page sends no event), and after a card data update (scanner.js), which is what makes it stale
+function loadIndexNotice() {
+    if (!document.getElementById('index-banner')) return;
+    fetch('/api/scan_settings', {cache: 'no-store'}).then(response => response.json()).then(data => showIndexNotice(data.reading)).catch(() => {});
+}
+document.addEventListener('DOMContentLoaded', () => {
+    if (!document.getElementById('index-banner')) return;
+    loadIndexNotice();
+    setInterval(loadIndexNotice, 5 * 60 * 1000);
+});
+
 // Settings -> Program: restart, quit (only there when started as a desktop program), and who
 // may open the pages
 

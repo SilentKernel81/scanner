@@ -652,7 +652,8 @@ class CardDataImport(TemporaryData):
             cards.populate_database([self.card(n) for n in range(40)] + [token])
             facts = cards.printing_facts()
             self.assertEqual(len(facts), 41)
-            self.assertEqual(facts['tok'], ('Cadet', 'tfra', '1', 'oracle-cadet', 'nonfoil,foil'))
+            self.assertEqual(facts['tok'][:5], ('Cadet', 'tfra', '1', 'oracle-cadet', 'nonfoil,foil'))
+            self.assertEqual(len(facts['tok']), 7)                        # and released_at, frame (the phone's fixed-place foil reading)
             self.assertEqual(facts['id-3'][:3], ('Card 3', 'tst', '3'))
         finally:
             cards.conn.close()

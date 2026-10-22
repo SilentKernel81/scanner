@@ -9,7 +9,7 @@ from flask_socketio import emit, join_room
 from card_scanner import games
 from card_scanner.core.review import REVIEW_DIR
 
-from card_scanner.server.state import app, database, inventory, maintenance_barrier, printing_check, review, scan_inventory, socketio, stations
+from card_scanner.server.state import app, database, identification, inventory, maintenance_barrier, printing_check, review, scan_inventory, socketio, stations
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import GENERAL_ROOM, desk, desk_for, emit_desk, log_to_client, page_stations, scanner
 from card_scanner.server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
@@ -206,6 +206,12 @@ def add_selected_card(data):
         start_price_update(game, card, added_rows)
         desk().current_card_info = None
         if desk().current_review_id is not None:
+            # The reading log (data/logs/reading.jsonl): which printing the person picked, and where it stood among the picture's candidates shown for
+            # this item - a free label for the cards the picture's guards sent here. Never raises
+            if identification and identification.reading_log is not None and reviewed:
+                identification.reading_log.review_pick(reviewed.get('file'), card.get('id'), desk().review_candidates,
+                                                       station=reviewed.get('station'), capture_key=reviewed.get('capture_key'))
+            desk().review_candidates = []
             # Reviewed: resolve the item and open the next one
             review.remove(desk().current_review_id)
             desk().current_review_id = None
@@ -249,6 +255,7 @@ def handle_review_open(data=None):
     except Exception as e:
         logger.debug(f"Review item {item['id']}: no candidates ({e})")
         candidates = []
+    desk().review_candidates = [c['id'] for c in candidates]     # what the person is shown: the reading log notes which one is picked
     emit('review_item', {
         'id': item['id'],
         'total': total,

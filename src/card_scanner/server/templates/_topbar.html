@@ -88,3 +88,7 @@
 </header>
 {# Written by common.js (watchCardData) while the active game has no card data: the first download #}
 <div id="data-banner" class="data-banner" role="status" hidden></div>
+{% if page in ('scanner', 'stations') %}
+{# Written by common.js (loadIndexNotice) on the Scanner pages while the picture index is missing or lacks printings of the card data: cards are read by their picture first #}
+<div id="index-banner" class="data-banner" role="status" hidden></div>
+{% endif %}

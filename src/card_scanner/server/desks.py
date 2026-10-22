@@ -41,6 +41,9 @@ class Desk:
         self.pending_capture = None
         self.processing = 0                 # captures being identified (shown on its page)
         self.last_capture = None            # file name (in scanned_cards/) of the picture a camera-less station sent last
+        # The printings the review screen showed for the open item (printing_check.candidates' ids, nearest first): the reading log notes which of them the
+        # person picked (scan_events.add_selected_card) - the label that judges the picture's guards
+        self.review_candidates = []
 
     @property
     def room(self):

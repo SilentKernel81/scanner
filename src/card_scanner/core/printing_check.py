@@ -1,7 +1,7 @@
 # printing_check.py
 # Does the picture look like the printing the server resolved? A second opinion that does not go
-# through the OCR or the AI - and, in SHADOW MODE (the only mode there is for now), one that only
-# writes down where it disagrees and changes nothing.
+# through the OCR or the AI - and, in SHADOW MODE (`observe`, which is log-only and changes nothing: it
+# writes down where it disagrees), one that only watches. `live_read` is the part that acts: it is the first step of reading.mode 'evidence', the default.
 #
 # What it is for (docs/plans/IMAGE_MATCH_EXPERIMENT.md): the collector line does not always name the
 # printing (a Secret Lair card prints the set and number of the card it is made from, so the server
@@ -38,6 +38,7 @@
 # one background thread behind a small queue: a capture never waits for it, and nothing it does can fail one.
 
 import json
+import re
 import logging
 import queue
 import threading
@@ -48,10 +49,11 @@ import cv2
 import numpy as np
 
 from card_scanner.core import card_ocr, foil_marker, image_index
-from card_scanner.core.database import search_key as database_search_key
+from card_scanner.core.database import names_match as database_names_match, search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
-from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, decide_finish, decide_printing, plain_number
+from card_scanner.core.reading import capture as reading_capture, record as reading_record
+from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, accept_printing, confirm_by_ocr, decide_finish, decide_printing, plain_number
 
 logger = logging.getLogger('ai')
 
@@ -103,10 +105,34 @@ IMAGE_MIN_SIMILARITY = 0.5
 # the printings they pick have a similarity of at least 0.245 (1st percentile 0.355, median 0.68); 0.30 refuses 5 of them (0.33%, they go to the AI) and everything near the 0.10 of
 # the probe. A backstop calibrated against the correct ones - no wrong 'strong' decision exists in the data to calibrate against.
 STRONG_MIN_SIMILARITY = 0.30
-EVIDENCE_READER = 'picture+strip'     # what a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log)
+# Which way up a card is, as the picture search says (it compares a picture in both orientations and the better one counts), is believed only when the better orientation is similar enough
+# to a printing AND clearly better than the other one. Measured on 1,628 evaluation pictures (scripts/experiments/image_match/orientation_margin.py): the better orientation matches at a
+# median of 0.68 (5th percentile 0.43) and beats the other by a median of 0.44 (5th percentile 0.18, 1st 0.06); these two floors leave 6.2% of the pictures 'unknown'. What it is for: the foil
+# network cut at a fixed place of the card (foil_marker.FIXED_BOX) must not be fed an upside-down card (a Codex review of 2026-10-20: 5 of 30 turned pictures got a confident wrong finish) -
+# 'unknown' costs only the AI's check, a wrong orientation costs a silent wrong finish, so the margin is the conservative one.
+ORIENTATION_MIN_SIMILARITY = 0.30
+ORIENTATION_MIN_MARGIN = 0.20
+# Which printings print the ★ / • marker the foil network reads (a Codex review of 2026-10-20: knowing which way up a card is does not say it has a marker, and the network has only the two outputs
+# foil / non-foil - on an older frame it would classify whatever sits in the box, with a confident answer). The evaluation set the network was trained and measured on holds only releases of 2023,
+# 2025 and 2026, all in the modern frame; the earliest set where the OCR reads a marker is The Lord of the Rings (2023-06-23, on 83% of its cards, nothing older is in the data to say
+# otherwise). So a printing counts as marker-bearing from that date on, in the '2015' frame only (a retro frame in a new set prints the old collector line). Conservative on purpose: a card that
+# prints a marker but is older, or whose frame is another, is left to the AI's check - never guessed.
+MARKER_FROM = '2023-06-23'
+MARKER_FRAME = '2015'
+# More printings than this that the picture cannot tell apart from its best match (a blank or featureless picture ties thousands) is too ambiguous to say the card prints a marker, and each one is a
+# database read: past it the answer is 'no' without looking. Same-art reprints are a handful to a few dozen (basic lands the most).
+MARKER_MAX_TIED = 200
+# What a card read by live_read is said to be read by (route_identified's `reader`, the scanned-cards log): the picture ALONE (its printing is the best match, clear of the next; nothing else decided it)
+# or the picture WITH the collector line (the strip named a printing the picture agrees with: 'strong'). Two names so the log says which: how much OCR contributes is the question the metrics are for.
+PICTURE_READER = 'picture'
+EVIDENCE_READER = 'picture+strip'
+PICTURE_READERS = (PICTURE_READER, EVIDENCE_READER)
 LOOKUP_MODES = ('ai_cases', 'all', 'off')
 QUEUE_SIZE = 200                  # captures waiting to be looked at: more are dropped (it is only a second opinion)
 LOG_LIMIT = 10 * 1024 * 1024      # the log is renamed to .1 beyond this (the old .1 goes)
+
+# What PrintingCheck._strip_printing answers besides a card or None (no such printing): the strip read no whole line; the card database could not say
+NO_LINE, LOOKUP_FAILED = object(), object()
 
 
 def read_strip(ocr, card_rgb):
@@ -118,12 +144,134 @@ def read_strip(ocr, card_rgb):
     return card_ocr.parse_strip(lines) if lines else ('', '')
 
 
+def ocr_agrees(read, card, printing_at, lead=None, strip=None):
+    """
+    Whether a full-card OCR read (card_ocr.parse_magic: name, collector_number, set_code) CONFIRMS the printing the picture alone chose (a card dict: name, flavor_name, set_code,
+    number). Its name must be the card's (database.names_match - a face, the flavor name, a misread forgiven). And when it read a whole collector line (a set AND a number) that is
+    not the chosen printing's, `printing_at(set, number)` (database.get_card_by_set_number) says what that line names:
+      - another printing of the SAME card - the OCR read printing B where the picture chose A (a fifth Codex review of 2026-10-20): not confirmed;
+      - nothing in the card data - perhaps a card newer than it: not confirmed;
+      - a DIFFERENT card - a Secret Lair prints another card's line by design (Deadpool's Lightning Bolt reads `GN2 042`, Lightning Strike), or the OCR misread the number
+        (`SPM 069` is Swarm, the card is Shocker #89): that line is no evidence about this card's printing, and the name decides. Rejecting these too refused 28 of 49 correct
+        picture decisions and prevented no error (confirm_cost.py).
+    A part of the line (only a set, only a number) names no printing and is not used. The server (Identification._ocr_names) and the measurement
+    (scripts/experiments/image_match/confirm_cost.py) both ask this one. Since step 5 of docs/plans/READING_REVIEW_2026-10-21_PLAN.md it is two halves: ocr_facts gathers (the
+    names_match, the lookup, the oracle-id comparison) and the pure core/reading/decide.confirm_by_ocr decides - so the Android app passes the same case file.
+    """
+    # lead: the picture's lead over the second printing - from decide.LEAD_WAIVES_NAME on, the name is not needed (decide.confirm_by_ocr)
+    # strip: the strip's read ({'set', 'number'}), the second line a name naming another card is checked against (ocr_facts)
+    return confirm_by_ocr(ocr_facts(read, card, printing_at, strip), lead)['accepted']
+
+
+def printing_named_by_line(lookup, set_code, number):
+    """
+    The printing a whole collector line names, or None: lookup is database.get_card_by_set_number(set, number, exact=False). A number with a LETTER SUFFIX
+    ("233a", "0245p") is looked up AS WRITTEN only - leading zeros off ("0233a" -> "233a"), then as read - and when the card data has no such printing the
+    answer is None (unknown: a printing the card data lacks - the picture alone is then refused, strip_names_unknown / line_names unknown). Never by its
+    digits: two Codex reviews of 2026-10-21 - the digits alone (database.collector_number_variants) take "233a" for "233" (ZEN has both Plains), which
+    hid a line naming another printing; and falling back to the digits when the suffixed printing is MISSING from the card data (card data older than
+    the card) made the line "confirm" the base printing the picture chose. An OCR-misread suffix therefore costs a review, never a wrong printing (unknown
+    strips were 13 of 47 picture-alone decisions on the server, all right: time, not errors). A number of digits alone is looked up as always.
+    """
+    number = (number or '').strip()
+    if re.search(r'\d', number) and re.search(r'[^\d]', number):
+        plain = re.sub(r'^0+(?=\d)', '', number)
+        for written in dict.fromkeys((plain, number)):        # each once, in that order
+            found = lookup(set_code, written, exact=True)
+            if found:
+                return found
+        return None                                            # fail closed: the suffixed printing is not in the card data
+    return lookup(set_code, number)
+
+
+def _line_names(set_code, number, card, printing_at):
+    """
+    What a whole collector line (a set AND a number) names, next to the printing the picture chose: (None | 'chosen' | 'other_card' | 'same_card' | 'unknown' |
+    'lookup_failed', the printing it names or None) - see decide.confirm_by_ocr for the values. A part of a line (only a set, only a number) names nothing: (None, None).
+    """
+    number, set_code = (number or '').strip(), (set_code or '').strip().lower()
+    if not (number and set_code):
+        return None, None                                                  # no whole line
+    if set_code == (card.get('set_code') or '').lower() and plain_number(number).lower() == plain_number(card.get('number')).lower():
+        return 'chosen', None                                              # the very printing the picture chose
+    try:
+        named = printing_at(set_code, number)
+    except Exception as e:
+        logger.debug(f"Printing check: a collector line could not be looked up: {e}")
+        return 'lookup_failed', None                                       # cannot say what it names: not confirmed
+    if not named:
+        return 'unknown', None                                             # a printing the card data does not have
+    # The same card: the same oracle id - or, when either lacks one, the same name exactly (never names_match's forgiveness, which is for OCR misreads: it takes
+    # Lightning Strike for Lightning Bolt, and the Secret Lair's printed line would then count as another printing of the Bolt)
+    if named.get('oracle_id') and card.get('oracle_id'):
+        same_card = named['oracle_id'] == card['oracle_id']
+    else:
+        same_card = (database_search_key(named.get('name')) or '') == (database_search_key(card.get('name')) or '-')
+    return ('same_card' if same_card else 'other_card'), named
+
+
+def ocr_facts(read, card, printing_at, strip=None):
+    """
+    What a full-card OCR read says about the printing the picture alone chose, as decide.confirm_by_ocr takes it: {'name_matches', 'line_names', 'name_of_other_line',
+    'strip_names'} (see there). Every lookup is here. A read of nothing is {'name_matches': False, 'line_names': None, 'name_of_other_line': False} and what the strip's
+    line names (strip_names: the same values as line_names, None without a strip or a whole line in it). The line is looked up
+    WHATEVER the name says: since a clear lead can stand in for the name (decide.LEAD_WAIVES_NAME, 2026-10-21) the line is then the only check left on the printing - a
+    misread name must not hide a line naming another printing.
+    strip: the strip's own read ({'set', 'number'}, live_read's reading['strip']; None: not given) - the second collector line name_of_other_line is checked against.
+    name_of_other_line: the name the OCR read is not the chosen card's but IS the card a whole collector line names - the OCR's own line, or the strip's. Two readings
+    then point at the same OTHER card, which is a contradiction, not a misread (a Codex review of 2026-10-21: the lead waiver let a picture overrule exactly that). A
+    Secret Lair that prints another card's name shows it with a part of a line at most (the Deadpool Sol Ring: 'Worn', 'SCD' and no number), so this costs the
+    waiver nothing measured (confirm_cost.py --with-lead).
+    """
+    if not card:
+        return {'name_matches': False, 'line_names': None, 'name_of_other_line': False, 'strip_names': None}
+    # The strip's whole line, looked up whatever the OCR read - also when it read nothing: a strip naming another printing of the SAME card refuses the picture alone
+    # whatever its lead and whatever name was read (decide.confirm_by_ocr; a Codex review of 2026-10-21 - the lead says which card, never which printing)
+    strip_names, strip_named = _line_names(strip.get('set'), strip.get('number'), card, printing_at) if strip else (None, None)
+    if not read:
+        return {'name_matches': False, 'line_names': None, 'name_of_other_line': False, 'strip_names': strip_names}
+    name = read.get('name')
+    name_matches = bool(name) and database_names_match(name, {'name': card.get('name'), 'flavor_name': card.get('flavor_name')})
+    line_names, named = _line_names(read.get('set_code'), read.get('collector_number'), card, printing_at)
+    name_of_other_line = False
+    if name and not name_matches:
+        # the other cards a whole line names: the OCR's and the strip's
+        others = [o for names, o in ((line_names, named), (strip_names, strip_named)) if names == 'other_card']
+        name_of_other_line = any(database_names_match(name, {'name': o.get('name'), 'flavor_name': o.get('flavor_name')}) for o in others)
+    # another printing of this card: not confirmed; another card's line: no evidence about this card's printing, the name (or the lead) decides - unless the name
+    # read IS that other card's
+    return {'name_matches': name_matches, 'line_names': line_names, 'name_of_other_line': name_of_other_line, 'strip_names': strip_names}
+
+
+def prints_a_marker(card):
+    """Whether a printing (card dict: released_at, frame) is one the foil network was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False for anything missing or unreadable."""
+    return bool(card) and (card.get('released_at') or '') >= MARKER_FROM and card.get('frame') == MARKER_FRAME
+
+
+def orientation_established(search):
+    """
+    Whether a search (PrintingCheck._search) says which way up the card is with confidence: the better orientation looks like a printing (ORIENTATION_MIN_SIMILARITY) and is clearly ahead
+    of the other one (ORIENTATION_MIN_MARGIN). Nothing else says so: a decision about a PRINTING compares the nearest printings within the winning orientation, not the two orientations -
+    a picture can pass 0.5 similarity and a lead of 0.05 and still be as near to the other orientation (a Codex review of 2026-10-20). The one test for everything that reads a place that
+    is only where it should be on an upright card (PrintingCheck.upright, live_read's fixed foil crop).
+    """
+    as_given, turned = search['nearest']
+    best, other = (turned, as_given) if search['rotated'] else (as_given, turned)
+    similarity = float(image_index.similarity(best))
+    margin = similarity - float(image_index.similarity(other))
+    return similarity >= ORIENTATION_MIN_SIMILARITY and margin >= ORIENTATION_MIN_MARGIN
+
+
 def read_strip_evidence(ocr, card_rgb, net=None):
     """
     The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
     set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked only when the OCR read no symbol and there is a network (a
     foil_marker.FoilMarker; a separate instance from the live path's) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
     """
+    if ocr is None:
+        # OCR switched off: no number, no set, no symbol - but the foil network can still be asked about the set line at its fixed place (foil_marker.FIXED_BOX)
+        crop = foil_marker.fixed_crop(card_rgb) if net is not None else None
+        return {'number': '', 'set': '', 'symbol': 'unknown', 'net': net.probability(crop) if crop is not None else None}
     strip = foil_marker.strip_of(card_rgb)
     lines = ocr.read_lines(strip)
     if not lines:
@@ -230,8 +378,11 @@ class PrintingCheck:
     the lookup then goes by the picture alone.
     """
 
-    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None):
+    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None, game_id=None):
         self.database = database
+        # game_id(): the game whose card data the index is measured against (missing_printings) - the server passes games.active_id; a script that makes one without
+        # it gets Magic, the one game an index exists for
+        self.game_id = game_id or (lambda: 'mtg')
         self.index_folder = Path(index_folder)
         self.log_file = Path(log_file)
         self.mode = mode if mode in ('shadow', 'off') else 'shadow'
@@ -247,8 +398,36 @@ class PrintingCheck:
         self._lock = threading.Lock()       # starting the thread, loading the index
         self._said_no_index = False
         self._failures = 0
+        self._coverage_lock = threading.Lock()
+        self._coverage = (None, None)       # (the index's stamp and the card data's download time it was counted for, how many printings the index lacks)
 
     # ------------------------------------------------------------------ the index
+
+    def missing_printings(self):
+        """
+        How many printings of the card data the index LACKS - every one, with a picture address or without (a printing with no picture can never be indexed, so it can never be
+        the picture's match either: a card of it would be added as another printing; a second Codex review of 2026-10-20; there were none in the card data then): 0 when it covers the card data, None when that cannot be said (no index, or the card data could not
+        be read). A card the picture alone decides may be added only at 0 (a Codex review of 2026-10-20: a printing the index lacks cannot be the picture's best match, so with no
+        strip to say otherwise another printing would be added in its place - 4% of the simulated missing printings). Counted once per index generation and card data download
+        (a pass over every printing, a few tenths of a second), then remembered: the next card update or index build counts again.
+        """
+        index = self.index()
+        if index is None:
+            return None
+        try:
+            stamp = (self._index_stamp, (self.database.get_data_info(self.game_id()) or {}).get('downloaded_at'))
+        except Exception as e:
+            logger.debug(f"Printing check: the card data's date could not be read: {e}")
+            return None
+        with self._coverage_lock:
+            if self._coverage[0] != stamp:
+                try:
+                    missing = sum(1 for printing, _address in self.database.printing_images() if index.row(printing) is None)
+                except Exception as e:
+                    logger.debug(f"Printing check: the index's coverage could not be counted: {e}")
+                    return None                                             # not remembered: asked again on the next card
+                self._coverage = (stamp, missing)
+            return self._coverage[1]
 
     def index(self):
         """The image index, loaded when first needed and again when it was rebuilt; None when there is none (said once in the log)"""
@@ -274,7 +453,14 @@ class PrintingCheck:
         """
         The capture against every printing, in both orientations (the better one counts): the index, the distance to every row, whether the
         card was upside down, and the five nearest rows with their similarities (nearest first). None without an index.
+        Done ONCE per capture while the reading has a current capture (core/reading/capture.py): live_read, contradicts / disagrees, upright and
+        verdict_of all ask about the same flat card, and the second ask is the first's answer. Without one (the shadow worker, the review screen) it is
+        computed every time, as before.
         """
+        return reading_capture.get('search', rgb, lambda: self._search_now(rgb))
+
+    def _search_now(self, rgb):
+        """_search, computed (see there)"""
         index = self.index()
         if index is None or not len(index):
             return None
@@ -285,7 +471,40 @@ class PrintingCheck:
         k = min(5, len(distances))
         top = np.argpartition(distances, k - 1)[:k]
         top = top[np.argsort(distances[top], kind='stable')]
-        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top])}
+        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top]),
+                # the nearest row of each orientation (bits): how far the better orientation is ahead of the other (upright())
+                'nearest': (int(upright.min()), int(turned.min()))}
+
+    def marker_expected(self, search):
+        """
+        Whether the card the picture shows prints a foil marker, judged by EVERY printing of the index the picture cannot tell apart from its best match (less than AGREE_BELOW under it - the same ones
+        decide_printing counts as agreeing, the best match included): ALL of them must be marker-bearing (prints_a_marker). Taken from the distances to the whole index, not from the five nearest rows
+        of `top`: with five or more same-art reprints tied, an older one just outside those five would never be looked at (a Codex review of 2026-10-20). The printing itself is not known yet when the AI is
+        about to identify the card. Measured on real pictures (the guard's first form, all five nearest, let only 15% of modern cards through): this rule lets 100% of 60 modern Scryfall scans and 100%
+        of 374 of the owner's modern captures through and 0 of 60 old-frame scans, because a reprint in an older frame looks different enough to fall outside it. Fails closed: a printing the card
+        data does not have, a read that fails, or more than MARKER_MAX_TIED printings tied, is False.
+        """
+        similarities = image_index.similarity(search['distances'])
+        tied = np.flatnonzero(float(similarities.max()) - similarities < AGREE_BELOW)       # the best match is always among them
+        if len(tied) > MARKER_MAX_TIED:
+            return False
+        try:
+            return all(prints_a_marker(self.database.get_card_by_id(search['index'].ids[int(row)])) for row in tied)
+        except Exception as e:
+            logger.debug(f"Printing check: the marker layout could not be judged: {e}")
+            return False
+
+    def upright(self, rgb, needs_marker=False):
+        """
+        The card (RGB) the right way up, as the picture search says - or None when that cannot be established: no index, or the better orientation does not look enough like any printing
+        (ORIENTATION_MIN_SIMILARITY) or is not clearly better than the other (ORIENTATION_MIN_MARGIN). For what reads a place on the card that is only where it should be on an upright one
+        (foil_marker.read_fixed); None must then mean 'unknown', never a guess. A card that is upright comes back as it is (the same array).
+        needs_marker: also None unless the card prints a foil marker at all (marker_expected) - what the fixed foil crop needs, since the network answers foil / non-foil about whatever is in the box.
+        """
+        search = self._search(rgb)
+        if search is None or not orientation_established(search) or (needs_marker and not self.marker_expected(search)):
+            return None
+        return cv2.rotate(rgb, cv2.ROTATE_180) if search['rotated'] else rgb
 
     def check(self, rgb, printing_id, search=None):
         """
@@ -391,14 +610,14 @@ class PrintingCheck:
     def live_read(self, image, card_image, ocr, foil_net=None, accept_image_alone=False):
         """
         The reading of a capture by its picture and its strip - the live counterpart of lookup, used by Identification only in reading.mode
-        'evidence' (docs/plans/READING_REFACTOR_PLAN.md, phase 3), for a card the full-card OCR did not confirm, in place of asking the vision AI.
+        'evidence' (docs/plans/READING_REFACTOR_PLAN.md, phase 3), as the FIRST step of a capture's reading (before the full-card OCR and the vision AI).
         image: the capture (RGB); card_image: the flat card (the perspective-corrected one when there is one, else image). BOTH the fingerprint and
         the strip are made of the flat card: a fixed area's `image` is the area as drawn, not a card, and the index was built from whole-card pictures
         (the shadow log hashes the saved capture file, so its numbers for such a station carry that difference). ocr: the LIVE reader (here the read IS the live path - the shadow lookup's isolated reader exists to protect
         the live one from shadow work); foil_net: the foil network, asked only where the OCR read no symbol.
         Returns None when the picture cannot speak (no index, nothing found, or a candidate the card database does not have) and for a decision
         of 'review' - the caller then goes on as it always did; or {'path', 'card' (the database's card of the decided printing), 'strip',
-        'finish' (decide_finish's answer), 'similarity', 'lead'}. 'image' (the picture alone; OFF unless asked for: a Codex review of 2026-10-20 - a printing newer than the index with an unreadable strip can still be added by it) is returned only with accept_image_alone.
+        'finish' (decide_finish's answer), 'similarity', 'lead'}. 'image' (the picture alone) is returned only with accept_image_alone: this parameter defaults to False, but Identification passes the setting, which is ON by default (config.yaml; it was off for part of 2026-10-20 because a printing newer than the index with an unreadable strip can still be added by it - the guards in Identification._read_by_picture and PrintingCheck now cover that).
         Raises nothing the caller must handle except what the OCR reader raises.
         """
         card_image = image if card_image is None else card_image
@@ -406,36 +625,81 @@ class PrintingCheck:
         if search is None:
             return None
         upright = cv2.rotate(card_image, cv2.ROTATE_180) if search['rotated'] else card_image
-        # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader
-        strip = read_strip_evidence(ocr, upright, foil_net) if ocr is not None else {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+        # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader; the foil network is still asked, at a fixed place - but only
+        # when the search is sure which way up the card is (the fixed place is the set line on an UPRIGHT card): not sure, no network (net None), and the finish falls back as it always did
+        # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
+        net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
+        strip = read_strip_evidence(ocr, upright, net_at_a_fixed_place)
+        if ocr is not None:
+            # kept for the capture: the foil marker of a card the full-card OCR then confirms is this strip's symbol / network answer - the same reading
+            # foil_marker.read would do again, but of the card turned UPRIGHT (Identification._read_foil_locally)
+            reading_capture.remember('strip', card_image, strip)
         picture, cards = self._picture_evidence(search)
         decision = decide_printing(picture, {'number': strip['number'], 'set': strip['set']})
-        if decision['path'] == 'review' or (decision['path'] == 'image' and not accept_image_alone):
-            return None
-        card = cards.get(decision['printing_id'])
-        if not card:                                   # an indexed printing the card database no longer has: not a card to add
-            return None
-        if decision['similarity'] < (IMAGE_MIN_SIMILARITY if decision['path'] == 'image' else STRONG_MIN_SIMILARITY):
-            return None                                # a picture that looks little like the printing decides nothing, not even with a collector line that names it
-        if decision['path'] == 'image' and self._names_unindexed(search['index'], strip):
-            return None                                # the picture alone is not enough for a card the index may not have (see IMAGE_MIN_SIMILARITY)
+        # The reading log (core/reading/record.py: data/logs/reading.jsonl) - what the picture and the strip said and what rule A2 answered, and below, by
+        # its name, the guard that refused the decision. Written into the record of the capture being read, if there is one; it changes nothing here.
+        lead = None if decision['lead'] is None else round(float(decision['lead']), 4)
+        reading_record.note('picture', rotated=bool(search['rotated']), lead=lead,
+                            candidates=[{'id': c['id'], 'set': c['set'], 'number': c['number'], 'similarity': round(c['similarity'], 4)} for c in picture['candidates']])
+        reading_record.note('strip', number=strip['number'], set=strip['set'], symbol=strip['symbol'],
+                            net=None if strip['net'] is None else round(float(strip['net']), 4))
+        reading_record.note('decision', path=decision['path'], printing_id=decision['printing_id'], lead=lead,
+                            similarity=None if decision['similarity'] is None else round(decision['similarity'], 4))
+        # May the server add it on this evidence? The guards are a pure function (core/reading/decide.accept_printing, with its own case file) on facts gathered here:
+        # every lookup is done in this method, the function only compares. The index's coverage of the card data is folded into accept_image_alone by the caller
+        # (Identification._read_by_picture: the picture alone only while PrintingCheck.missing_printings is 0), so it is given as covered here. The floors are read
+        # at call time (this module's IMAGE_MIN_SIMILARITY / STRONG_MIN_SIMILARITY, which tests and the measurement scripts set).
+        card = cards.get(decision['printing_id']) if decision['printing_id'] is not None else None
+        alone = decision['path'] == 'image'
+        facts = {'accept_image_alone': bool(accept_image_alone), 'index_covers': True, 'in_data': bool(card), 'ocr_on': ocr is not None,
+                 # what the strip's whole line names: looked up only where a guard asks it (the picture alone, when allowed)
+                 'strip_names': self._strip_names(search['index'], strip, decision['printing_id']) if alone and accept_image_alone and card else None}
+        verdict = accept_printing(decision, facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
+        if verdict['refused']:
+            reading_record.refuse(verdict['refused'])
+        if not (verdict['accepted'] or verdict['needs_ocr']):
+            return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
+        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (prints_a_marker: from The Lord of
+        # the Rings on, modern frame - a Codex review of 2026-10-21: a separator on an older line is not known to encode the finish, and the network answered
+        # confidently on 53 of 80 old-frame cards); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review
+        marker = prints_a_marker(card)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
-                'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
-                'similarity': decision['similarity'], 'lead': decision['lead']}
+                'finish': decide_finish(card.get('finishes'), strip['symbol'] if marker else 'unknown', strip['net'] if marker else None),
+                'similarity': decision['similarity'], 'lead': decision['lead'],
+                # which way up the search found the card - the strip above was read turned so; the full-card confirmation reads it so too (_ocr_names)
+                'rotated': bool(search['rotated'])}
 
-    def _names_unindexed(self, index, strip):
+    def _strip_printing(self, strip):
         """
-        Whether the strip names a printing the card database has and the image index LACKS: then the picture cannot have seen that printing, and its best
-        match is another card's (or another printing's) - no add by the picture alone. Fails closed: if the card database cannot say, True.
+        The printing the strip's whole line (a number AND a set) names - a card dict, None when the card data has no such printing, NO_LINE without a whole line,
+        LOOKUP_FAILED when the card database cannot say (_strip_names turns it into what accept_printing takes).
         """
         if not (strip['number'] and strip['set']):
-            return False
+            return NO_LINE
         try:
-            named = self.database.get_card_by_set_number(strip['set'], strip['number'])
+            return printing_named_by_line(self.database.get_card_by_set_number, strip['set'], strip['number'])    # a letter suffix kept first ("233a")
         except Exception as e:
             logger.debug(f"Printing check: the strip's printing could not be looked up: {e}")
-            return True
-        return bool(named) and index.row(named['id']) is None
+            return LOOKUP_FAILED
+
+    def _strip_names(self, index, strip, chosen_id):
+        """
+        What the strip's whole line names, as accept_printing takes it (decide.STRIP_NAMES): None without a whole line (a number AND a set), 'lookup_failed' when the card
+        database cannot say, 'unknown' for a printing the card data does not have - the sign of a card newer than the card data, in neither the data nor the index (a third Codex
+        review of 2026-10-20; measured, scripts/experiments/image_match/unknown_strip.py: 13 of 47 picture-alone decisions had such a strip, all 13 right - OCR misreads of special
+        printings - so they go on to the full-card OCR instead), 'unindexed' for one the card data has and the index LACKS (the picture cannot have seen it: its best match is
+        another printing's), 'chosen' for the printing decided on, 'indexed_other' for another printing in the index. One lookup.
+        """
+        named = self._strip_printing(strip)
+        if named is NO_LINE:
+            return None
+        if named is LOOKUP_FAILED:
+            return 'lookup_failed'
+        if not named:
+            return 'unknown'
+        if index.row(named['id']) is None:
+            return 'unindexed'
+        return 'chosen' if named['id'] == chosen_id else 'indexed_other'
 
     def candidates(self, image_path):
         """
@@ -528,7 +792,7 @@ class PrintingCheck:
         foil: the marker the server read for the capture ('foil', 'non-foil', 'unknown'; None = not given), for the comparison of the finish.
         Returns at once and never raises: the capture goes on whatever happens here.
         """
-        if reader == EVIDENCE_READER:
+        if reader in PICTURE_READERS:
             return          # the picture and the strip chose this printing: comparing the picture with it would only compare it with itself
         resolved = card if card and card.get('id') else None
         lookup = self.wants_lookup(reader, resolved)

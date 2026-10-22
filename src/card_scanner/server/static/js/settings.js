@@ -29,6 +29,18 @@ async function api(path, options = {}) {
     }
 }
 
+// A setting that only acts while another one is in some state is greyed out and cannot be changed otherwise - the locked-focus checks while the camera's autofocus is on,
+// the sounds while sound effects are off. Its value is kept: it applies again as soon as the other setting allows it.
+function setDependents(ids, enabled) {
+    for (const id of ids) {
+        const control = $(id);
+        if (!control) continue;
+        control.disabled = !enabled;
+        const row = control.closest('.switch-row, .input-group, .volume-row');
+        if (row) row.classList.toggle('is-dependent-off', !enabled);
+    }
+}
+
 function remember(key, value) {
     try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ }
 }
@@ -82,6 +94,7 @@ function connect() {
 
     // Camera
     socket.on('fast_scan_toggled', () => {});
+    socket.on('stop_at_card_back_toggled', data => { $('toggle-stop-at-back').checked = Boolean(data.enabled); });
     socket.on('camera_rotation_updated', data => {
         $('camera-rotation').value = String(data.rotation);
         notify(`Camera image rotated ${data.rotation}°` + (data.fixed_area_off ? ' - fixed area off, draw it again' : ''), 'info');
@@ -93,6 +106,7 @@ function connect() {
 
     // Card reading
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
+    socket.on('ai_toggled', data => applyAiState(data.enabled, data.available));
     socket.on('reading_mode_changed', applyReadingState);
     socket.on('debug_mode_toggled', data => applyDebugMode(data.enabled, data.running, data.debugger));
     socket.on('ai_provider_set', data => {
@@ -108,7 +122,7 @@ function connect() {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `Updated: ${data.total_cards.toLocaleString()} cards loaded.`;
-        notify('Card data updated - the picture index can be updated now (Storage)', 'success');
+        notify('Card data updated - the picture index can be updated now (Card reading > Picture)', 'success');
         loadDatabaseState();
         loadIndex();
     });
@@ -202,7 +216,9 @@ async function loadCameraSettings() {
     const data = await api('/api/scan_settings' + query);
     if (!data || mine !== cameraRequest) return;
     $('toggle-auto-add').checked = Boolean(data.auto_add);
+    $('toggle-stop-at-back').checked = data.stop_at_card_back !== false;     // on unless switched off
     $('toggle-autofocus').checked = Boolean(data.autofocus);
+    applyFocusMode(Boolean(data.autofocus));
     $('refocus-every').value = String(data.refocus_every);
     showRefocusOnDrop(data.refocus_on_drop);
     $('camera-rotation').value = String(data.camera_rotation || 0);
@@ -215,8 +231,14 @@ async function loadCameraSettings() {
     // The server's own settings come with the same answer
     applySound(data.sound);
     applyOcrState(data.ocr_first, data.ocr_installed);
+    applyAiState(data.ai_enabled, data.ai_available);
     applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
+}
+
+// The two focus checks act on a LOCKED focus only (autofocus off): greyed out while the camera focuses by itself
+function applyFocusMode(autofocus) {
+    setDependents(['refocus-every', 'refocus-on-drop'], !autofocus);
 }
 
 function showRefocusOnDrop(ratio) {
@@ -274,11 +296,16 @@ function bindCameras() {
     });
     $('camera-forget').addEventListener('click', forgetCamera);
 
+    $('toggle-stop-at-back').addEventListener('change', event => {
+        socket.emit('toggle_stop_at_card_back', {enabled: event.target.checked});
+        notify(event.target.checked ? 'A card back stops auto-capture' : 'A card back no longer stops auto-capture', 'success');
+    });
     $('toggle-auto-add').addEventListener('change', event => {
         socket.emit('toggle_fast_scan', {enabled: event.target.checked});
         notify(`Cards are added ${event.target.checked ? 'automatically' : 'after you confirm them'}`, 'success');
     });
     $('toggle-autofocus').addEventListener('change', event => {
+        applyFocusMode(event.target.checked);
         socket.emit('set_autofocus', {enabled: event.target.checked});
         notify(`Autofocus ${event.target.checked ? 'on' : 'off'}`, 'success');
     });
@@ -305,10 +332,16 @@ function applySound(sound) {
     $('volume-value').textContent = sound.volume + '%';
     $('toggle-sound-capture').checked = sound.capture;
     $('toggle-sound-added').checked = sound.added;
+    applySoundsEnabled(sound.enabled);
     audioManager.setEnabled(sound.enabled);
     audioManager.setVolume(sound.volume / 100);
     audioManager.setMuted('capture', !sound.capture);
     audioManager.setMuted('added', !sound.added);
+}
+
+// The single sounds and the volume only matter with sound effects on
+function applySoundsEnabled(enabled) {
+    setDependents(['toggle-sound-capture', 'toggle-sound-added', 'audio-volume', 'audio-test'], enabled);
 }
 
 function saveSound(change) {
@@ -317,6 +350,7 @@ function saveSound(change) {
 
 function bindSounds() {
     $('toggle-audio').addEventListener('change', event => {
+        applySoundsEnabled(event.target.checked);
         audioManager.setEnabled(event.target.checked);
         saveSound({enabled: event.target.checked});
         if (event.target.checked) audioManager.playSuccess();
@@ -352,6 +386,17 @@ function bindSounds() {
 
 const OCR_DESC = $('ocr-desc').textContent;
 
+const AI_DESC = $('ai-desc').textContent;
+
+// The vision AI switch: off sends what OCR and the picture cannot decide to the review queue; without a provider set up there is nothing to switch
+function applyAiState(enabled, available) {
+    const toggle = $('toggle-ai');
+    toggle.checked = Boolean(enabled) && Boolean(available);
+    toggle.disabled = !available;
+    $('ai-desc').textContent = !available ? 'No vision AI is set up (a provider and its key)'
+        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service - what OCR and the picture cannot decide goes to the review queue';
+}
+
 function applyOcrState(enabled, installed) {
     const toggle = $('toggle-ocr');
     toggle.checked = Boolean(enabled) && Boolean(installed);
@@ -367,18 +412,22 @@ function applyReadingState(reading) {
     $('toggle-reading-evidence').checked = evidence;
     $('toggle-picture-alone').checked = evidence && Boolean(reading.accept_image_alone);
     $('toggle-picture-alone').disabled = !evidence;
+    $('toggle-extend-index').checked = Boolean(reading.extend_index);     // independent of the mode: it only keeps the index current
     $('reading-evidence-desc').textContent = evidence
-        ? 'On: OCR, then the picture and the collector line, then the vision AI (the last step)'
+        ? 'On: the picture, then OCR in doubt, then the vision AI (the last step)'
         : 'Off: OCR, then the vision AI, as before the picture matching existed';
     const missing = [];
     if (reading.index_printings === null || reading.index_printings === undefined) {
-        missing.push('there is no picture index (Storage > Picture index)');
+        missing.push('there is no picture index (the button below)');
     }
     // OCR off is no strip: only the picture alone can decide then, so it is a gap only while that is off too
     if (!reading.ocr_enabled && !reading.accept_image_alone) missing.push('OCR is switched off and the picture alone is not allowed');
     const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
-    $('reading-status').textContent = (reading.index_printings ? `Image index: ${reading.index_printings.toLocaleString()} printings. ` : '')
-        + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
+    // While the index lacks printings of the card data, the picture alone adds nothing (the server refuses it: a missing printing would be added as another one)
+    const stale = evidence && reading.accept_image_alone && reading.index_missing
+        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (below), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
+    // (the index's size is not repeated here: the picture index's own status sits right below, in the same card)
+    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
         + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
 }
 
@@ -508,6 +557,7 @@ async function loadPromptSummary() {
 
 function bindReading() {
     $('toggle-ocr').addEventListener('change', event => socket.emit('toggle_ocr', {enabled: event.target.checked}));
+    $('toggle-ai').addEventListener('change', event => socket.emit('toggle_ai', {enabled: event.target.checked}));
     // The mode is the program's design (the vision AI last): no question either way. The picture-alone switch decides what is added with no one asking: ON asks first,
     // and the page goes back if it is declined
     $('toggle-reading-evidence').addEventListener('change', event =>
@@ -517,13 +567,16 @@ function bindReading() {
         if (toggle.checked) {
             const ok = await confirmDialog({
                 title: 'Add cards the picture alone decided?',
-                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. Leave it off unless you rebuild the index after every card data update and look at what is added.',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: extend the picture index after every card data update (Settings > Storage) and look at what is added.',
                 confirmText: 'Turn on', danger: true
             });
             if (!ok) { toggle.checked = false; return; }
         }
         socket.emit('set_reading_mode', {accept_image_alone: toggle.checked});
     });
+    // (not a risk to what is added - it only fetches pictures - so no confirmation; the event itself is guarded and the page goes back if declined)
+    $('toggle-extend-index').addEventListener('change', event =>
+        socket.emit('set_reading_mode', {extend_index: event.target.checked}));
     $('ai-provider').addEventListener('change', event => {
         const provider = event.target.value;
         renderCredentialField(provider);

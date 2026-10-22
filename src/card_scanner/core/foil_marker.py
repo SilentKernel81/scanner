@@ -121,6 +121,36 @@ def set_line_crop(strip, box):
     return cv2.resize(cv2.cvtColor(part, cv2.COLOR_RGB2GRAY), (CROP_W, CROP_H), interpolation=cv2.INTER_AREA)
 
 
+# Where the set line is on a flat card when nothing can say so - the OCR is switched off: the MEDIAN of its box (y from, y to, x from, x to; fractions of the card's height /
+# width) over 1,487 cards of the evaluation set (scripts/experiments/image_match/foil_fixed_crop.py). The line's centre varies by +/-0.73% of the card's height (std) and the line is
+# 2.4% high, so 90% of the centres lie within half a line of this box. Measured on 1,453 held-out cards where the marker is needed, with the same network and the same SURE: cut at the
+# OCR's own box it answered 97.8% and was right 99.6%; cut here, 95.0% and 98.9%; on the 313 whose marker the OCR did not read, 95.8% and 99.0%; on the 15 Deadpool phone captures
+# (confetti foils) 10 answered, 9 right (at the OCR's box: 12, 11). A taller / wider box was clearly worse (82% answered, 96% right; 4 of 10 on the Deadpool captures): do not widen it.
+# NOT measured: other cameras than the evaluation set's and the phone's, cards of older frames (no marker printed), a card the warp cut loosely.
+FIXED_BOX = (0.9460, 0.9698, 0.0627, 0.3970)
+
+
+def fixed_crop(card_rgb):
+    """The network's input cut at FIXED_BOX of a flat card (RGB): through the same strip as training (enlarged when small) and the same margin - or None"""
+    if card_rgb is None or min(card_rgb.shape[:2]) < 2:
+        return None                                   # nothing to cut out of
+    strip = strip_of(card_rgb)
+    strip_height, strip_width = strip.shape[:2]
+    y0, y1, x0, x1 = FIXED_BOX
+    top, bottom = [(y - STRIP[0]) / (STRIP[1] - STRIP[0]) * strip_height for y in (y0, y1)]
+    left, right = [x / STRIP[3] * strip_width for x in (x0, x1)]
+    return set_line_crop(strip, [(left, top), (right, top), (right, bottom), (left, bottom)])
+
+
+def answer_for(probability):
+    """('foil' | 'non-foil' | 'unknown', probability): the probability that is believed one way or the other (SURE), else 'unknown'"""
+    if probability >= SURE:
+        return 'foil', probability
+    if probability <= 1 - SURE:
+        return 'non-foil', probability
+    return 'unknown', probability
+
+
 class FoilMarker:
     """The network, loaded once. One instance serves all threads (a lock: a dnn network is not safe to run from two at once)."""
 
@@ -162,12 +192,18 @@ class FoilMarker:
         crop = set_line_crop(strip, line['box'])
         if crop is None:
             return 'unknown', None
-        foil = self.probability(crop)
-        if foil >= SURE:
-            return 'foil', foil
-        if foil <= 1 - SURE:
-            return 'non-foil', foil
-        return 'unknown', foil
+        return answer_for(self.probability(crop))
+
+    def read_fixed(self, card_rgb):
+        """
+        The marker of a flat card with NO OCR: the network asked about the crop at FIXED_BOX, ('foil' | 'non-foil' | 'unknown', probability). There is no symbol the OCR read to
+        stand first, so on a confetti foil (a pattern the network confuses) it can be wrong where read() would have kept the OCR's symbol: it is for when the OCR is off, where the
+        alternative is the vision AI's check.
+        """
+        crop = fixed_crop(card_rgb)
+        if crop is None:
+            return 'unknown', None
+        return answer_for(self.probability(crop))
 
 
 def load(enabled=True):

@@ -182,7 +182,9 @@ class Config:
 
     # How a card is read (core/identification.py): 'evidence' (the default: OCR, then the picture and the collector line, and the vision AI LAST) or 'cascade' (OCR, then the vision AI, as before the picture matching existed)
     READING_MODE = str(config.get('reading', 'mode', default='evidence')).strip().lower()
-    READING_ACCEPT_IMAGE_ALONE = bool(config.get('reading', 'accept_image_alone', default=False))
+    READING_ACCEPT_IMAGE_ALONE = bool(config.get('reading', 'accept_image_alone', default=True))
+    # Extend the picture index by itself after a card data download (only when an index exists already; the Settings page's choice wins)
+    READING_EXTEND_INDEX = bool(config.get('reading', 'extend_index_after_update', default=True))
 
     # Local AI settings
     LOCAL_AI_ENDPOINT = os.getenv('LOCAL_AI_ENDPOINT') or config.get('vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

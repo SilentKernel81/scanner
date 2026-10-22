@@ -18,8 +18,8 @@ from card_scanner.server.state import app, app_settings, identification, invento
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
-from card_scanner.server.captures import scan_location, set_pending_capture
-from card_scanner.server.card_data import start_card_data_update
+from card_scanner.server.captures import CARD_BACK_SETTING, scan_location, set_pending_capture, stops_at_card_back
+from card_scanner.server.card_data import extend_index_wanted, index_progress, start_card_data_update
 
 
 @app.route('/api/ai_provider')
@@ -146,9 +146,19 @@ def reading_status():
         index = printing_check.index() if printing_check else None
     except Exception:
         index = None
+    try:
+        missing = printing_check.missing_printings() if printing_check and index is not None else None
+    except Exception:
+        missing = None
+    missing = missing if isinstance(missing, int) else None        # a plain number for the page, or nothing
     return {'mode': identification.reading_mode if identification else 'cascade',
             'accept_image_alone': bool(identification.accept_image_alone) if identification else False,
+            # extend the index by itself after a card data download (only when it exists), and a build's progress for the banner
+            'extend_index': extend_index_wanted(),
+            'index_build': index_progress(),
             'index_printings': len(index) if index is not None else None,
+            # printings of the card data the index lacks: while not 0, the picture alone adds nothing (None: not known)
+            'index_missing': missing,
             'ocr_enabled': bool(identification.ocr_enabled) if identification else False}
 
 
@@ -157,8 +167,11 @@ def get_scan_settings():
     """Scanning preferences the page needs on load"""
     return jsonify({
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
+        'stop_at_card_back': stops_at_card_back(),     # this camera's: a face-down card stops its auto-capture (captures.stop_at_card_back)
         'ocr_first': bool(identification.ocr_enabled) if identification else True,
         'ocr_installed': CardOcr.installed(),
+        'ai_enabled': bool(identification.ai_enabled) if identification else True,
+        'ai_available': bool(identification and identification.card_identifier),
         'reading': reading_status(),
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
         'debug_mode': saved_debug_mode(),
@@ -365,6 +378,18 @@ def handle_toggle_fast_scan(data):
     log_to_client(f"Add cards automatically: {'on' if enabled else 'off - review each card'}", level="info")
 
 
+@socketio.on('toggle_stop_at_card_back')
+def handle_toggle_stop_at_card_back(data):
+    """Whether a card back captured by this camera stops its auto-capture (docs/plans/CARD_BACK_STOP_PLAN.md; remembered per camera, like auto_add)"""
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    enabled = bool(data.get('enabled', True))
+    scanner.settings.set(CARD_BACK_SETTING, enabled)
+    emit_desk('stop_at_card_back_toggled', {'enabled': enabled})      # every page of this camera (the Settings page shows its switch)
+    log_to_client(f"A card back {'stops' if enabled else 'no longer stops'} auto-capture", level="info")
+
+
 @socketio.on('toggle_ocr')
 def handle_toggle_ocr(data):
     """Read cards with light-ocr first, the vision AI only when needed (remembered)"""
@@ -375,24 +400,35 @@ def handle_toggle_ocr(data):
     emit('ocr_toggled', {'enabled': identification.ocr_enabled, 'installed': CardOcr.installed()})
 
 
+@socketio.on('toggle_ai')
+def handle_toggle_ai(data):
+    """Ask the vision AI at all, or send what OCR and the picture cannot decide to the review queue (remembered; open like the OCR switch: it adds nothing, it only stops asking)"""
+    identification.set_ai_enabled(bool((data or {}).get('enabled', False)))
+    emit('ai_toggled', {'enabled': identification.ai_enabled, 'available': bool(identification.card_identifier)})
+    log_to_client(f"Vision AI: {'on' if identification.ai_enabled else 'off - what OCR and the picture cannot decide goes to the review queue'}", level="info")
+
+
 @socketio.on('set_reading_mode')
 @guarded_event
 def handle_set_reading_mode(data=None):
     """
     How cards are read (remembered; the next card takes it, no restart): data['mode'] 'cascade' (OCR, then the vision AI) or 'evidence' (the picture and the
-    strip before the AI - docs/PROGRAM_DOCUMENTATION.md, "Reading mode: evidence"), and data['accept_image_alone'] (a card only the picture decided may be added).
-    Guarded like the other settings that decide what is added. Either may be sent alone.
+    strip before the AI - docs/PROGRAM_DOCUMENTATION.md, "Reading mode: evidence"), data['accept_image_alone'] (a card only the picture decided may be added)
+    and data['extend_index'] (extend the picture index after a card data download). Guarded like the other settings that decide what is added. Any may be sent alone.
     """
     data = data or {}
     mode = data.get('mode')
     alone = data.get('accept_image_alone')
-    if (mode is not None and mode not in ('cascade', 'evidence')) or (alone is not None and not isinstance(alone, bool)):
+    extend = data.get('extend_index')
+    if (mode is not None and mode not in ('cascade', 'evidence')) or any(value is not None and not isinstance(value, bool) for value in (alone, extend)):
         emit('error', {'message': 'Not a reading mode'})
         return
     if mode is not None:
         app_settings.set('reading_mode', mode)
     if alone is not None:
         app_settings.set('reading_accept_image_alone', alone)
+    if extend is not None:
+        app_settings.set('reading_extend_index', extend)
     status = reading_status()
     emit('reading_mode_changed', status)
     log_to_client(f"Card reading: {status['mode']}" + (' (the picture alone may add a card)' if status['mode'] == 'evidence' and status['accept_image_alone'] else ''),
