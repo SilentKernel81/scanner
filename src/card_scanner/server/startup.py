@@ -39,7 +39,7 @@ from card_scanner.server.state import (
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
 from card_scanner.server.captures import resume_pending
-from card_scanner.server.card_data import run_update_checks, start_card_data_update
+from card_scanner.server.card_data import run_update_schedule, start_card_data_update
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
@@ -272,7 +272,7 @@ def main():
 
     # Start background cleanup
     run_cleanup_background()
-    run_update_checks()
+    run_update_schedule()
     run_backup_schedule()
 
     game = games.active()

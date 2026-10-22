@@ -106,6 +106,7 @@ class Config:
     # Database
     DATABASE_FILE = DATA_DIR / config.get('database', 'file', default='cards_database.db')
     DATABASE_UPDATE_AFTER_DAYS = config.get('database', 'update_after_days', default=7)
+    DATABASE_AUTO_UPDATE_HOURS = config.get('database', 'auto_update_every_hours', default=0)  # 0: off
 
     # API URLs
     SCRYFALL_BULK_URL = config.get('api', 'scryfall_bulk', default="https://api.scryfall.com/bulk-data/default-cards")

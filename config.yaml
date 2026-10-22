@@ -113,6 +113,10 @@ database:
   # shows a notice. Scryfall republishes its data every day (prices), so Magic only counts
   # as outdated once the local copy is this many days older than Scryfall's
   update_after_days: 7
+  # Download the card data again on its own, every this many hours (0: never - only the notice
+  # above, and the button). One of 0, 24, 72, 168, 720. Settings > Card data changes it, and
+  # that choice, remembered in data/settings.json as "card_data_every_hours", wins
+  auto_update_every_hours: 0
 
 # light-ocr (offline text recognition) reads each card before the vision AI, which is then
 # asked only when OCR's read isn't a confirmed match. Needs Node.js 22+ and `npm install` in

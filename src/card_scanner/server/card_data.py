@@ -2,6 +2,7 @@
 # FILE: server/card_data.py
 # Card data: updating and rebuilding the card database from the web interface.
 # ============================================================================
+from datetime import datetime, timedelta
 from flask import jsonify
 from flask_socketio import emit
 import threading
@@ -27,16 +28,25 @@ data_update_errors = {}
 FIRST_DOWNLOAD_RETRIES = (60, 300, 900, 1800)
 
 
-def start_card_data_update(game, retry=False):
+def start_card_data_update(game, retry=False, on_done=None):
     """
     Download a game's card data in the background (progress/complete/error events). retry: the
     first download, with no data to fall back on - a failure is tried again after a pause,
     for as long as the program runs (an update of data that is there is asked for again by the
-    person, not repeated).
+    person, or by the schedule, not repeated). on_done(ok, message): called once when the
+    download has ended, either way (the schedule remembers how its own attempt ended).
     """
     if game.id in data_updates_running:
         return False
     data_updates_running.add(game.id)
+
+    def finished(ok, message):
+        # The caller's callback must never turn the end of a download into a crash of its thread
+        if on_done:
+            try:
+                on_done(ok, message)
+            except Exception as e:
+                logger.exception(f"Card data update: the end of the download could not be noted: {e}")
 
     def progress_callback(message):
         socketio.emit('database_update_progress', {'message': message})
@@ -54,6 +64,7 @@ def start_card_data_update(game, retry=False):
                     data_update_errors.pop(game.id, None)
                     socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
                     logger.info(f"{game.label} card data updated: {total} cards")
+                    finished(True, f"{total:,} cards")
                     extend_index_after_update()
                     return
                 except Exception as e:
@@ -61,6 +72,7 @@ def start_card_data_update(game, retry=False):
                     socketio.emit('database_update_error', {'game': game.id, 'message': str(e)})
                     if not retry or game.card_count():
                         data_update_errors.pop(game.id, None)
+                        finished(False, str(e))
                         return
                     pause = FIRST_DOWNLOAD_RETRIES[min(failures, len(FIRST_DOWNLOAD_RETRIES) - 1)]
                     failures += 1
@@ -92,14 +104,125 @@ def check_card_data_updates():
             data_update_notices.pop(game.id, None)
 
 
-def run_update_checks():
-    """Check for newer card data shortly after startup, then once a day"""
+# ============================================================================
+# The automatic update of the card data (docs/plans/UPDATE_SCHEDULE_PLAN.md, phase 1). Built like the automatic backup
+# (backups_api.run_backup_schedule): no clock time, a loop that asks every few minutes whether a download is DUE - the
+# last one is the chosen number of hours old or older. A laptop or a Pi that was off when it was due catches up once it
+# runs again, which an "at 3 a.m." would not. Off by default: until now updates were never started without the person.
+# ============================================================================
+
+CARD_DATA_SCHEDULE_HOURS = (0, 24, 72, 168, 720)  # 0: off; a day, three days, a week, a month
+SCHEDULE_TICK = 600               # seconds between two "is anything due?" questions
+SCHEDULE_FIRST_DOWNLOAD = 300     # no automatic download in the first minutes: a Pi's or a laptop's network may not be up yet
+UPDATE_CHECK_EVERY = 24 * 3600    # the update check (the notice on the page) stays once a day
+AUTO_RETRY_AFTER = timedelta(hours=1)  # an automatic download that failed is not tried again before this (Scryfall down)
+AUTO_LAST_KEY = 'card_data_auto_last'  # data/settings.json: {game id: {'at', 'ok', 'message'}} of the last automatic attempt
+
+
+def card_data_schedule():
+    """Every how many hours the card data is downloaded on its own (0: off) - the person's choice, else config.yaml's"""
+    value = app_settings.get('card_data_every_hours', Config.DATABASE_AUTO_UPDATE_HOURS) if app_settings else Config.DATABASE_AUTO_UPDATE_HOURS
+    # A hand-edited data/settings.json or config.yaml with another number (or a true / "24") is off, never a guess:
+    # downloading on its own is something the person must have chosen
+    if isinstance(value, bool) or value not in CARD_DATA_SCHEDULE_HOURS:
+        return 0
+    return value
+
+
+def last_auto_attempt(game_id):
+    """{'at' (ISO time), 'ok' (None while it runs), 'message'} of the last automatic download of a game, or None"""
+    attempts = app_settings.get(AUTO_LAST_KEY) if app_settings else None
+    attempt = attempts.get(game_id) if isinstance(attempts, dict) else None
+    return attempt if isinstance(attempt, dict) else None
+
+
+def note_auto_attempt(game_id, at, ok=None, message=''):
+    """Remember an automatic download in data/settings.json - kept across a restart, so the back-off and 'when next' are too"""
+    attempts = app_settings.get(AUTO_LAST_KEY)
+    attempts = dict(attempts) if isinstance(attempts, dict) else {}  # a copy: the settings object saves what it is given
+    attempts[game_id] = {'at': at.isoformat(timespec='seconds'), 'ok': ok, 'message': message}
+    app_settings.set(AUTO_LAST_KEY, attempts)
+
+
+def _parse_time(text):
+    """A time written by isoformat (card_data_info, the attempts above), or None for anything else"""
+    try:
+        return datetime.fromisoformat(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def card_data_due(game, now, every_hours):
+    """
+    Whether the schedule should download this game's card data now: the schedule is on, the data in use was downloaded
+    every_hours ago or longer (by anyone - a press of the button counts too), and no automatic attempt was made in the last
+    hour (a download that keeps failing would otherwise be tried at every tick). The times are local and naive, as
+    card_data_info's downloaded_at is written (database.set_data_info: datetime.now()).
+    """
+    if not every_hours:
+        return False
+    info = database.get_data_info(game.id) or {}
+    downloaded = _parse_time(info.get('downloaded_at'))
+    # Data from before card_data_info existed has no date: it is old enough
+    if downloaded is not None and now - downloaded < timedelta(hours=every_hours):
+        return False
+    attempt = _parse_time((last_auto_attempt(game.id) or {}).get('at'))
+    if attempt is not None and now - attempt < AUTO_RETRY_AFTER:
+        return False
+    return True
+
+
+def scheduled_card_data_updates(now=None):
+    """
+    Start the automatic download of every game whose card data is due (card_data_due); the ids of the games started.
+    Only games that have data: the first download is startup's, with its own retries (FIRST_DOWNLOAD_RETRIES). A download
+    running already (the button, the first download) is left alone - start_card_data_update refuses a second.
+    """
+    every_hours = card_data_schedule()
+    if not every_hours or not database or not app_settings:
+        return []
+    now = now or datetime.now()
+    started = []
+    for game in games.all_games():
+        try:
+            if not game.card_count() or game.id in data_updates_running or not card_data_due(game, now, every_hours):
+                continue
+
+            # How it ended goes beside the time it began: the same game's entry, written again
+            def done(ok, message, game_id=game.id, at=now):
+                note_auto_attempt(game_id, at, ok, message)
+
+            # The attempt is noted BEFORE the download starts: a server stopped in the middle still counts it for the back-off
+            note_auto_attempt(game.id, now)
+            if start_card_data_update(game, on_done=done):
+                logger.info(f"{game.label} card data: automatic update (every {every_hours} h)")
+                started.append(game.id)
+        except Exception as e:
+            # One game's trouble (its database, its settings) must not keep the others from their update
+            logger.exception(f"{game.label} card data: the automatic update could not start: {e}")
+    return started
+
+
+def run_update_schedule():
+    """
+    The update check (the notice: 10 s after start, then once a day, as before) and the automatic download (every
+    SCHEDULE_TICK, from SCHEDULE_FIRST_DOWNLOAD after start) on one thread. Nothing that fails in a tick ends the loop.
+    """
     def loop():
+        started = time.monotonic()
+        last_check = None
         time.sleep(10)
         while True:
-            check_card_data_updates()
-            time.sleep(24 * 3600)
-    threading.Thread(target=loop, daemon=True, name='update-check').start()
+            try:
+                if last_check is None or time.monotonic() - last_check >= UPDATE_CHECK_EVERY:
+                    last_check = time.monotonic()
+                    check_card_data_updates()
+                if time.monotonic() - started >= SCHEDULE_FIRST_DOWNLOAD:
+                    scheduled_card_data_updates()
+            except Exception as e:
+                logger.error(f"The automatic card data update failed: {e}", exc_info=True)
+            time.sleep(SCHEDULE_TICK)
+    threading.Thread(target=loop, daemon=True, name='update-schedule').start()
 
 
 @socketio.on('update_database')
