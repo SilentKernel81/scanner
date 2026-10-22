@@ -394,3 +394,33 @@ body.has-settings-password .lock-legend {
     height: 1em;
     vertical-align: -0.12em;
 }
+
+/* ---- Card recognition's three steps, numbered in the order a card goes through them ---- */
+.step-number {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+
+/* ---- "Details": what a control does in full, folded under its card (the card itself says it in one line) ---- */
+.settings-more {
+    margin-top: 10px;
+}
+
+.settings-more > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--accent);
+}
+
+.settings-more[open] > summary {
+    margin-bottom: 6px;
+}

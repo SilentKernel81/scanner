@@ -437,7 +437,7 @@ function applyAiState(enabled, available) {
     toggle.checked = Boolean(enabled) && Boolean(available);
     toggle.disabled = !available;
     $('ai-desc').textContent = !available ? 'No vision AI is set up (a provider and its key)'
-        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service - what OCR and the picture cannot decide goes to the review queue';
+        : enabled ? AI_DESC : 'Off: nothing is sent to an AI service; what is left goes to review';
 }
 
 function applyOcrState(enabled, installed) {
@@ -446,7 +446,7 @@ function applyOcrState(enabled, installed) {
     toggle.checked = Boolean(enabled) && Boolean(installed);
     toggle.disabled = !installed;
     $('ocr-desc').textContent = installed ? OCR_DESC
-        : 'Not installed: needs Node.js 22+ and "npm install" in the ocr folder (scripts/deploy.sh does it)';
+        : 'Not installed on this server (it needs Node.js 22+ and "npm install" in src/ocr; scripts/deploy.sh does it)';
 }
 
 // The reading mode (core/identification.py: reading_mode): off is OCR then the AI as always; on reads a card OCR could not confirm by its picture first
@@ -459,8 +459,8 @@ function applyReadingState(reading) {
     $('toggle-picture-alone').disabled = !evidence;
     $('toggle-extend-index').checked = Boolean(reading.extend_index);     // independent of the mode: it only keeps the index current
     $('reading-evidence-desc').textContent = evidence
-        ? 'On: the picture, then OCR in doubt, then the vision AI (the last step)'
-        : 'Off: OCR, then the vision AI, as before the picture matching existed';
+        ? 'Compared with every printing\'s picture; a clear match settles the card'
+        : 'Off: OCR first, then the vision AI';
     const missing = [];
     if (reading.index_printings === null || reading.index_printings === undefined) {
         missing.push('there is no picture index (Card data)');
@@ -470,10 +470,10 @@ function applyReadingState(reading) {
     const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
     // While the index lacks printings of the card data, the picture alone adds nothing (the server refuses it: a missing printing would be added as another one)
     const stale = evidence && reading.accept_image_alone && reading.index_missing
-        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (Card data), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
+        ? `The picture index lacks ${plural(reading.index_missing, 'printing')}: until it is updated (Card data), cards the picture alone would settle go on to the next step. ` : '';
     // (the index's size is not repeated here: it is under Card data, with the button that updates it)
-    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
-        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
+    $('reading-status').textContent = stale + (pictureOnly ? 'OCR is off: the picture alone decides what it can. ' : '')
+        + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')}.` : '');
 }
 
 let availableModels = {};
@@ -596,7 +596,7 @@ async function loadPromptSummary() {
         const custom = data.order.map(kind => data.prompts[kind]).filter(prompt => prompt.source !== 'built-in');
         $('prompt-summary').textContent = custom.length
             ? custom.map(prompt => `${prompt.label}: ${PROMPT_SOURCES[prompt.source]}`).join(' · ') + '. The editor is on a scanner page.'
-            : 'What the AI is asked to read on each card - adjustable per model. The editor is on a scanner page.';
+            : 'What the AI is asked about each card. The editor is on a scanner page.';
     } catch (error) { /* the summary is only a hint */ }
 }
 
@@ -761,8 +761,7 @@ async function loadDatabaseState() {
         const game = games.games.find(item => item.id === games.active);
         if (game) {
             $('database-source-hint').textContent =
-                `Downloads the latest ${game.label} card data${game.id === 'mtg' ? ' and prices' : ''} from ${game.source}`
-                + (game.id === 'mtg' ? ' (a few minutes)' : ' (a few seconds)') + '. Scanning keeps working while it downloads.';
+                `Downloads the latest ${game.label} card data${game.id === 'mtg' ? ' and prices' : ''} from ${game.source}. Scanning keeps working meanwhile.`;
         }
     } catch (error) { /* the general text stays */ }
 }
@@ -819,7 +818,7 @@ function showIndex(state) {
     const wasWatching = Boolean(indexWatch);
     if (indexWatch) { clearInterval(indexWatch); indexWatch = null; }
     $('update-index').textContent = state.indexed ? 'Update the picture index' : 'Build the picture index';
-    status.textContent = state.indexed ? `Covers ${covers}` + (state.missing ? ` - ${state.missing.toLocaleString()} to add (press the button)` : ' - up to date')
+    status.textContent = state.indexed ? `Covers ${covers}` + (state.missing ? ` - ${state.missing.toLocaleString()} to add` : ' - up to date')
                                        : `Not built yet (0 of ${state.printings.toLocaleString()} printings)`;
     if (state.error) status.textContent += ` - the last build did not finish: ${state.error}`;     // stays after a reload: it is not only a notification
     if (state.built) status.title = `Built ${state.built}`;
@@ -846,17 +845,17 @@ async function loadIndex() {
 
 function whenText(iso) {
     const moment = new Date(iso);
-    if (moment <= new Date()) return 'soon (it is looked at every 10 minutes)';
+    if (moment <= new Date()) return 'within 10 minutes';
     return moment.toLocaleString(undefined, {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
 }
 
 function lastRunText(last) {
     // ok: true / false, or null while it runs (or when a server stopped in the middle of it)
-    if (!last || !last.at) return 'No automatic run yet.';
+    if (!last || !last.at) return 'Not run yet.';
     const at = new Date(last.at).toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
-    if (last.ok === true) return `Last automatic run ${at}: ${last.message}.`;
-    if (last.ok === false) return `Last automatic run ${at} did not finish: ${last.message}.`;
-    return `Last automatic run began ${at} (still running, or the program stopped during it).`;
+    if (last.ok === true) return `Last ${at}: ${last.message}.`;
+    if (last.ok === false) return `Last ${at} did not finish: ${last.message}.`;
+    return `Last began ${at} (still running, or the program stopped during it).`;
 }
 
 function showUpdateSchedule(state) {
@@ -865,13 +864,12 @@ function showUpdateSchedule(state) {
     overviewCardData();
     $('database-every').value = String(card.every_hours);
     $('database-auto').textContent = card.every_hours
-        ? `${lastRunText(card.last)} Next: ${whenText(card.next)}. Only while the program runs - a computer that was off catches up when it starts.`
-        : 'Off: the card data is downloaded only when you press the button (a notice says when newer data is there).';
+        ? `${lastRunText(card.last)} Next: ${whenText(card.next)}.`
+        : 'Off: only with the button above (a notice says when newer data is there).';
     $('index-every').value = String(index.every_hours);
     $('index-auto').textContent = index.every_hours
-        ? `${lastRunText(index.last)} Next look: ${whenText(index.next)} - only when pictures are missing. `
-          + `Never the first build, nor one with less than ${Math.round(index.min_coverage * 100)}% of the printings.`
-        : 'Off: the pictures a build left out (Scryfall\'s rate limit, a stop, an error) are fetched when you press the button, or after the next card data update.';
+        ? `${lastRunText(index.last)} Next look: ${whenText(index.next)}, if any are missing. Never the first build.`
+        : 'Off: what a build left out (a rate limit, a stop) waits for the button or the next card data update.';
 }
 
 async function loadUpdateSchedule() {
@@ -916,13 +914,11 @@ function showCaptureCopy(info) {
     if (info.usage) showCaptureUsage(info.usage); else $('capture-usage').textContent = 'Could not be measured (see the log).';
     $('capture-copy-size').value = info.size;
     $('keep-frames').checked = !!info.keep_frames;
-    $('keep-frames-hint').textContent = `${info.frames} camera frame${info.frames === 1 ? '' : 's'} kept, ${info.frames_megabytes} MB (data/frames). `
-        + (info.keep_frames ? 'They stay after their scanned cards are cleared or added to the collection (until the 3 GB limit).'
-                            : 'The frame of a scanned card is removed when that card is cleared or added to the collection. Label the frames you want for training first, or turn this on.');
-    $('capture-copy-hint').textContent = (info.size === 'off'
-        ? 'Only the thumbnail of each captured card is kept. '
-        : 'The size of the picture of each captured card kept beside its thumbnail, for reading it again later or for training a detector; the pages never show it. ')
-        + `${info.count} kept so far, ${info.megabytes} MB (data/captures_full). It applies to captures made from now on, from every camera.`;
+    $('keep-frames-hint').textContent = `${plural(info.frames, 'frame')} kept, ${info.frames_megabytes} MB - training data from cameras with Debug trace on. `
+        + (info.keep_frames ? 'They stay when their cards are cleared or added (up to 3 GB).' : 'Off: a frame goes when its card is cleared or added.');
+    $('capture-copy-hint').textContent = (info.size === 'off' ? 'Only a thumbnail is kept. '
+        : 'Kept beside the thumbnail, to read a card again later or train the detector. ')
+        + `${info.count} kept, ${info.megabytes} MB. Applies to new captures.`;
 }
 
 async function loadCaptureCopy() {
@@ -1003,11 +999,11 @@ const DEBUG_MODE_DESC = $('debug-mode-desc').textContent;
 function applyDebugMode(enabled, running, debuggerRunning) {
     $('toggle-debug-mode').checked = Boolean(enabled);
     let text = Boolean(enabled) === Boolean(running) ? DEBUG_MODE_DESC
-        : `Now ${running ? 'on' : 'off'}: restart Card Scanner to turn it ${enabled ? 'on' : 'off'}. ` + DEBUG_MODE_DESC;
+        : `Now ${running ? 'on' : 'off'}: restart to turn it ${enabled ? 'on' : 'off'}. ` + DEBUG_MODE_DESC;
     // The debugger is half of the mode, and only where nobody else can reach the server
     if (running) {
-        text += debuggerRunning ? ' The interactive debugger is on (the server listens on this computer only).'
-            : ' The interactive debugger is off: this server can be reached from the network, so only the request log runs.';
+        text += debuggerRunning ? ' The debugger is on (only this computer can reach the server).'
+            : ' The debugger stays off: other devices can reach this server.';
     }
     $('debug-mode-desc').textContent = text;
 }
