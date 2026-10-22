@@ -459,6 +459,15 @@ class LiveRead(unittest.TestCase):
         net = mock.Mock()
         net.probability.return_value = 0.97
         self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(3, '')), net)['finish'], {'finish': 'foil', 'source': 'network'})
+        # a printing that does NOT print the marker (released before The Lord of the Rings): neither the star read nor the network says its finish - unknown,
+        # the AI's foil check or review follows (a Codex review of 2026-10-21: an older line's separator is not known to encode the finish)
+        older = self.make(Cards(old=('p3',)))
+        self.assertEqual(older.live_read(picture, None, FakeReader(strip_lines(3, '★')))['finish'], {'finish': 'unknown', 'source': 'none'})
+        self.assertEqual(older.live_read(picture, None, FakeReader(strip_lines(3, '•')))['finish'], {'finish': 'unknown', 'source': 'none'})
+        self.assertEqual(older.live_read(picture, None, FakeReader(strip_lines(3, '')), net)['finish'], {'finish': 'unknown', 'source': 'none'})
+        # ... its own finishes still decide when it exists in one only
+        self.assertEqual(self.make(Cards({'p3': ['foil']}, old=('p3',))).live_read(picture, None, FakeReader(strip_lines(3, '•')))['finish'],
+                         {'finish': 'foil', 'source': 'printing'})
 
     def test_a_card_read_by_picture_and_strip_is_not_looked_at_by_the_shadow_check(self):
         # the picture chose it: comparing the picture with it would only compare the choice with itself (circular evidence for the exit criteria)

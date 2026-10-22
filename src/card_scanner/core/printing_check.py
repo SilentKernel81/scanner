@@ -659,8 +659,12 @@ class PrintingCheck:
             reading_record.refuse(verdict['refused'])
         if not (verdict['accepted'] or verdict['needs_ocr']):
             return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
+        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (prints_a_marker: from The Lord of
+        # the Rings on, modern frame - a Codex review of 2026-10-21: a separator on an older line is not known to encode the finish, and the network answered
+        # confidently on 53 of 80 old-frame cards); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review
+        marker = prints_a_marker(card)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
-                'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
+                'finish': decide_finish(card.get('finishes'), strip['symbol'] if marker else 'unknown', strip['net'] if marker else None),
                 'similarity': decision['similarity'], 'lead': decision['lead'],
                 # which way up the search found the card - the strip above was read turned so; the full-card confirmation reads it so too (_ocr_names)
                 'rotated': bool(search['rotated'])}
