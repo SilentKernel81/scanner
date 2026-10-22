@@ -136,7 +136,7 @@ game sits behind one interface (`games/`), so another could be added.
   week or month, and go back to the pictures the picture index still lacks (a build Scryfall refused, one stopped) every
   6 hours, day or week - while the program runs; a computer that was off catches up when it starts. Never the index's
   first build. Each card says how the last automatic run ended and when the next is due. Tested with stand-ins and on
-  copied data, one live run (2026-10-22: the download 10 minutes after start, the index extended after it); never tried: a month-long run, a Pi whose network comes up late.
+  copied data, live runs on 2026-10-22 (the download 10 minutes after start, the index extended after it; the retry fetching 3,592 missing pictures on its own); never tried: a month-long run, a Pi whose network comes up late.
 - **Sounds:** a beep per capture and a sound when a card is added; the volume and each sound
   can be changed.
 
