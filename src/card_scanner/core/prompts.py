@@ -1,5 +1,5 @@
 """
-Vision AI prompts, editable from the web interface (Settings -> Vision AI -> Prompts).
+Vision AI prompts, editable from the web interface (Settings -> Card recognition -> Vision AI -> Prompts).
 
 Each prompt has two parts:
 - instructions: what the card looks like and where to read each field - editable;

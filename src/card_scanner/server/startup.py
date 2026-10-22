@@ -293,7 +293,7 @@ def main():
     else:
         logger.warning("Vision AI disabled - no API key configured")
         print("⚠ Vision AI disabled")
-        print("  To enable: enter an API key in Settings -> Vision AI (or pick a local model)")
+        print("  To enable: enter an API key in Settings -> Card recognition -> Vision AI (or pick a local model)")
 
     print("✓ Cameras: at the stations - each connects by itself (station_client.py, the Android app)")
     print(services.daily_backup_status)

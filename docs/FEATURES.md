@@ -81,7 +81,7 @@ game sits behind one interface (`games/`), so another could be added.
   collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
-- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a checkbox in Settings > Card reading turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
+- **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a switch in Settings > Card data turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
@@ -91,13 +91,13 @@ game sits behind one interface (`games/`), so another could be added.
   only when they do not, and its answer is checked against the picture. On the experiment's
   pictures: 59% of the AI-read cards decided by themselves with the strip's confirmation (74% if the
   picture alone may also add - re-measured 2026-10-21 with all the guards; it is on by default since 2026-10-20), none wrong. Needs the picture index
-  (Settings > Storage; without it cards are read as before); a switch in Settings > Card reading
+  (Settings > Card data; without it cards are read as before); a switch in Settings > Card recognition
   turns it off, and it takes effect on the next card. **Not yet run on live scans** (rehearsed on a
   copy of the real data).
 - **The reading log** (since 2026-10-21): `data/logs/reading.jsonl` records, for every capture and in either reading mode, what the picture, the strip, the OCR and the AI said,
   which guard (by name) refused the picture's decision, and what became of the card; a card settled in review notes which of the picture's candidates the person picked.
   `scripts/reading_report.py` sums it up. First live run 2026-10-21: 133 captures, every record written, the review's picks joined to their captures.
-- **A switch for the vision AI** (Settings > Card reading, since 2026-10-20), like the one for OCR: off, nothing is sent to an AI service - the picture (and OCR when it is on) decides what it can and the rest goes to
+- **A switch for the vision AI** (Settings > Card recognition, since 2026-10-20), like the one for OCR: off, nothing is sent to an AI service - the picture (and OCR when it is on) decides what it can and the rest goes to
   the review queue under the name OCR read; the provider and its key are kept, and a card already waiting for the AI comes back as read. Remembered (`ai_enabled`); the page disables it, and says so, when no provider is set up.
   Tried with tests only, never from the page in a browser.
 - **Foil or regular without the OCR** (since 2026-10-20): with OCR switched off the foil network reads the set line at its fixed place on the flat card instead of asking the vision AI (4 ms against up to 25 s on
@@ -115,7 +115,7 @@ game sits behind one interface (`games/`), so another could be added.
   whose printings all print a marker (from The Lord of the Rings on, modern frame); on the 28 Pixel captures the picture adds, 17 finishes from it, the same
   as the server's code. Needs a server whose index table carries the release date and frame (this version); an older server's table: no marker reading.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
-  printing's picture (Settings > Card reading > Picture, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
+  printing's picture (Settings > Card data, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether
   a capture looks like the printing it just added - the Secret Lair cards that print another
   printing's set and number, and cards the AI misread. For now it only writes down where it
   disagrees (`python scripts/printing_check_report.py`) and changes nothing; without the index it
@@ -132,7 +132,7 @@ game sits behind one interface (`games/`), so another could be added.
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.
 - **Card data updates** (download and safe replacement) and a check for new data.
-- **Automatic updates** (since 2026-10-22, off by default): Settings can download the card data again every day, 3 days,
+- **Automatic updates** (since 2026-10-22, off by default): Settings > Card data can download the card data again every day, 3 days,
   week or month, and go back to the pictures the picture index still lacks (a build Scryfall refused, one stopped) every
   6 hours, day or week - while the program runs; a computer that was off catches up when it starts. Never the index's
   first build. Each card says how the last automatic run ended and when the next is due. Tested with stand-ins and on
@@ -253,11 +253,16 @@ This one was sent back from the collection.*
 - **Images and installs:** Docker images for the server (with an NVIDIA GPU option), for a
   camera station, and for a Raspberry Pi camera; scripts and systemd units for a machine that
   is both; a desktop program (AppImage) that starts the server and a station together.
-- **Settings page** (cameras, sounds, card reading, collection and data, server): choose a
-  camera and its scan location, refocus rules, the vision AI and prompts, backups, card data,
-  storage, restart / quit, network access, debug mode.
+- **Settings page** (redesigned 2026-10-22: overview, cameras, card recognition, card data, backups,
+  storage, server): an overview of how things stand first, one line per section; then each camera
+  and its scan location, refocus rules, capture size and sounds, the three reading steps in their
+  order (picture, OCR, vision AI and prompts), the card data and the picture index with their
+  automatic updates, backups, storage, restart / quit, network access, debug mode - one plain line
+  per control, the details folded. Tried in a headless browser on copied data; not yet with a
+  camera connected.
 - **An optional settings password** guards the AI keys, restart / quit, network access, debug
-  mode and restoring or deleting backups.
+  mode, how cards are read, the picture index and automatic updates, storage clean-ups and restoring or
+  deleting backups; a padlock marks each of those while a password is set.
 - **Requests from other web pages are refused;** the pages load everything from the server
   (nothing from a CDN) so a network without internet still works.
 - **An MCP server** lets an AI assistant read your decks and collection, check a deck, find what

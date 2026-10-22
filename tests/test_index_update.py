@@ -1,5 +1,5 @@
 """
-The picture index's button (Settings > Storage): server/card_data.py - index_status, start_index_update, the three /api/image_index routes - and what it needs of
+The picture index's button (Settings > Card data): server/card_data.py - index_status, start_index_update, the three /api/image_index routes - and what it needs of
 core/image_index.build (a progress callback and a cancel switch). Synthetic pictures and stand-ins; nothing is downloaded and no real data is touched.
 
     venv/bin/python -m unittest discover tests -p test_index_update.py

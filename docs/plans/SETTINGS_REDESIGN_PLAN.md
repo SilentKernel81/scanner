@@ -42,6 +42,8 @@ swapped in only when the download is whole). The code reads columns by name, so 
 
 ## Steps (one commit each)
 
+**Status:** all five done on 2026-10-22 (b450a1c, 8dab2af, fe29197, 3922c63, and the docs). Not deployed.
+
 1. Remove the rebuild.
 2. The restructure: markup moved, new categories and their mapping, the strings that named the old places.
 3. The overview and the lock badges.

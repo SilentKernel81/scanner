@@ -155,7 +155,7 @@ function connect() {
     socket.on('refocus_on_drop_updated', data => showRefocusOnDrop(data.ratio));
     socket.on('fixed_area_updated', () => loadCameraSettings());
 
-    // Card reading
+    // Card recognition
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
     socket.on('ai_toggled', data => applyAiState(data.enabled, data.available));
     socket.on('reading_mode_changed', applyReadingState);
@@ -423,7 +423,7 @@ function bindSounds() {
 }
 
 // ============================================================================
-// Card reading: OCR, the vision AI
+// Card recognition: the picture, OCR, the vision AI
 // ============================================================================
 
 const OCR_DESC = $('ocr-desc').textContent;

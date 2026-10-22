@@ -142,7 +142,7 @@ See [docs/INSTALL.md](docs/INSTALL.md#as-a-desktop-program-appimage).
 
 ## Choosing a vision AI provider
 
-On a camera's page, **Settings → Card reading**: pick a provider and a key field appears (keys you
+On a camera's page, **Settings → Card recognition**: pick a provider and a key field appears (keys you
 saved before are shown masked, e.g. `AIza…3f9Q`, never in full). They are stored on the server
 in `data/api_keys.env` (readable only by you) and used immediately. The choice is one for all
 cameras.
@@ -167,7 +167,7 @@ you start auto scanning and kept loaded for 30 minutes.
 than 6 GB of GPU memory; on smaller GPUs `qwen3.5:4b` works, but it is slower on weak GPUs and
 more often mistakes regular cards for foil - see docs/PROGRAM_DOCUMENTATION.md for the comparison.
 
-**Prompts**: **Settings → Card reading → Edit prompts** shows what the AI is asked (card
+**Prompts**: **Settings → Card recognition → Edit prompts** shows what the AI is asked (card
 identification and the foil marker check) and lets you change it - for all models or just the
 one in use. **Test on last capture** runs the edited text on the last card read before you
 save it. **Restore default** goes back to the built-in prompt. Only the instructions are
@@ -341,7 +341,7 @@ a phone too; the deck pages are made for a screen with a pointer.
 - **Statistics** - cards and value by color, type, rarity, finish, set, location and tag, and
   your most valuable cards.
 - **Backups** - one is made automatically the first time the server starts each day (the last
-  7 are kept). The **Settings** link in the right corner of the header (Collection and data): **Back up now** keeps your collection, the
+  7 are kept). The **Settings** link in the right corner of the header (Backups): **Back up now** keeps your collection, the
   scanned cards and your decks as they are - do it before a big load. **Restore** puts all
   three back as they were; what you had at that moment is backed up first, so a restore can be
   taken back.
@@ -402,9 +402,9 @@ image).
 
 | Task | How |
 |---|---|
-| Update card data and prices | Click the Database counter when it shows a dot, or **Settings → Collection and data → Update card database**. Scanning keeps working during an update |
+| Update card data and prices | Click the Database counter when it shows a dot, or **Settings → Card data → Update card database**. Scanning keeps working during an update |
 | Update the programs | `git pull`, then `docker compose up -d --build` again - on the server and on each station |
-| Back up your cards | **Settings → Collection and data → Back up now**; automatic backups are set there too (every hour to every week, or off; default every day, the last 7 kept), and each backup can be downloaded as a zip file and uploaded again |
+| Back up your cards | **Settings → Backups → Back up now**; automatic backups are set there too (every hour to every week, or off; default every day, the last 7 kept), and each backup can be downloaded as a zip file and uploaded again |
 | Back up everything | Copy the server's `data/` folder while the container is stopped |
 | See what a station is doing | Its page's Activity log; `docker compose -f deploy/docker-compose.client.yml logs -f` on the station |
 | Server logs | `data/logs/`: `app.log` (web app, every station's scanner lines), `ai.log` (OCR and AI reads), `database.log`, `scanned_cards.log` (one CSV line per identified card), `ocr.log` |

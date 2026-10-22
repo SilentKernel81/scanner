@@ -50,7 +50,7 @@ Files: `deploy/Dockerfile` (target `server`), `deploy/docker-compose.yml`, `depl
 ### Vision AI
 
 Open any camera's page (or, before a camera exists, enter the keys in `.env`) and choose the
-provider in **Settings → Card reading**. It is one choice for all cameras, remembered on the
+provider in **Settings → Card recognition**. It is one choice for all cameras, remembered on the
 server.
 
 - **Cloud**: pick the provider and paste the API key into the field that appears - it is saved
@@ -320,7 +320,7 @@ their project `scanner-server`: if your folder has another name, run `docker com
 with the *old* files before pulling (containers of the old name would be in the way), and a
 station set up on its setup page has its settings in a volume of the old name
 (`<folder>_station-data`) - copy it to `scanner-server_station-data`, or set the station up
-again on its page. Card data is updated from the web interface (**Settings → Collection and data → Update
+again on its page. Card data is updated from the web interface (**Settings → Card data → Update
 card database**, or the Database counter when it shows a dot).
 
 ## Backups

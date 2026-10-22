@@ -590,7 +590,7 @@ function watchCardData() {
                     ? `The card data could not be downloaded: ${database.error}`
                     : database.updating
                         ? 'The card data is being downloaded for the first time (a few minutes). The pages work meanwhile, but no card can be found or identified yet.'
-                        : 'There is no card data yet. It is downloaded from Settings -> Card database.';
+                        : 'There is no card data yet. It is downloaded from Settings -> Card data.';
                 banner.classList.toggle('is-error', Boolean(database.error));
                 banner.hidden = false;
             } else {
@@ -646,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadIndexNotice, 5 * 60 * 1000);
 });
 
-// Settings -> Program: restart, quit (only there when started as a desktop program), and who
+// Settings -> Server: restart, quit (only there when started as a desktop program), and who
 // may open the pages
 
 async function restartProgram() {

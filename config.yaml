@@ -77,7 +77,7 @@ vision_ai:
 
   # Local AI Settings (self-hosted models)
   local:
-    # Ollama on this machine. Elsewhere: Settings -> Vision AI, or LOCAL_AI_ENDPOINT
+    # Ollama on this machine. Elsewhere: Settings -> Card recognition -> Vision AI, or LOCAL_AI_ENDPOINT
     # (the Docker image sets it to host.docker.internal)
     endpoint: http://localhost:11434/v1/chat/completions
     model: qwen3.5:9b  # default until a model is chosen in Settings
@@ -134,7 +134,7 @@ ocr:
 # resolved? A Secret Lair card prints the set and number of the card it is made from, and the AI
 # sometimes names a card the picture is not. shadow: written down in data/logs/printing_check.jsonl
 # (python scripts/printing_check_report.py sums it up), nothing is changed; off. It needs an image
-# index of Scryfall's pictures: Settings > Card reading > Picture, or python scripts/build_image_index.py (about 15 MB; the first build downloads about 12 GB
+# index of Scryfall's pictures: Settings > Card data, or python scripts/build_image_index.py (about 15 MB; the first build downloads about 12 GB
 # and takes hours, later ones only the new printings); without one it does nothing
 printing_check:
   mode: shadow
@@ -148,25 +148,25 @@ printing_check:
 # How a card is read (core/identification.py; docs/plans/READING_REFACTOR_PLAN.md, phase 3).
 # The vision AI came first because OCR did not read well enough; light-ocr does now, and the picture of a card can be matched against every printing,
 # so the AI is the LAST step, kept until it can be removed:
-#   evidence (the default): the PICTURE first (a fingerprint matched against every printing - needs the image index: Settings > Card reading > Picture -
+#   evidence (the default): the PICTURE first (a fingerprint matched against every printing - needs the image index: Settings > Card data -
 #            with the collector line read from its strip when OCR is on); a card it settles is settled. In doubt, light-ocr reads the whole card (when OCR is on);
 #            only what is still open is asked of the vision AI (when it is on), and the AI's answer is checked against the picture; else it goes to review.
 #            OCR and AI both off: the picture alone, then review. Without an index it is the cascade.
 #   cascade: OCR, then the vision AI for what OCR cannot confirm - the reading as it was before the picture matching existed
-# The person's choice wins over this default and needs no rebuild and no restart: Settings > Card reading (guarded by the settings password when there is one),
+# The person's choice wins over this default and needs no rebuild and no restart: Settings > Card recognition (guarded by the settings password when there is one),
 # remembered in data/settings.json as "reading_mode", "reading_accept_image_alone" and "reading_extend_index"
 reading:
   mode: evidence
   # Add a card when only the picture decided it (the strip did not name a printing the picture agrees with, or there is no strip: OCR off). ON by default since
   # 2026-10-20: the picture comes first and a clear one settles the card. Guarded (the best match must be 0.5 similar and 0.05 clear of the next, and the strip, when
   # read, must not name a printing the image index lacks) and none wrong on 1,628 evaluation pictures. It adds nothing while the index lacks any printing of the card
-  # data (after a card data update, until the index is extended: Settings > Card reading > Picture) - a printing the index lacks would otherwise be added as its
+  # data (after a card data update, until the index is extended: Settings > Card data) - a printing the index lacks would otherwise be added as its
   # best match, another printing (4% of the simulated missing printings with no readable strip). Left open: a card newer than the card data itself. OFF: such a
   # card needs the collector line or OCR to agree, else it goes on to the AI or review.
   accept_image_alone: true
   # After a card data download that succeeded, extend the picture index by the new printings' pictures (fetched from Scryfall; one live run, 2 new printings: about 10 s - a large update was never timed), so the picture alone
   # is not held back for long (see accept_image_alone). Only when an index exists already - the first build (hours, ~12 GB) is only ever started by the button in
-  # Settings > Card reading > Picture. Remembered per person in data/settings.json as "reading_extend_index".
+  # Settings > Card data. Remembered per person in data/settings.json as "reading_extend_index".
   extend_index_after_update: true
   # Go back to the printings still missing from the picture index (a build Scryfall refused half-way, one stopped or
   # failed) on its own, at most once every this many hours (0: never). One of 0, 6, 24, 168. Never a first build, nor an

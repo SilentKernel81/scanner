@@ -267,7 +267,7 @@ every station's `.env`.
 | The card is not outlined | The whole card must be in view, on a background that contrasts with its border. For sleeved or borderless cards use **Fixed area** on the camera's page |
 | Status stays on **Focusing** | Click **Refocus** with a card in the box |
 | Many cards go to **Review** | Usually focus: the small print is too soft to read. **Refocus**. Full-art and borderless cards need a vision AI |
-| **Vision AI disabled** | No key for the chosen provider: enter one in Settings → Vision AI |
+| **Vision AI disabled** | No key for the chosen provider: enter one in Settings → Card recognition → Vision AI |
 | `permission denied ... docker.sock` | You are not in the `docker` group yet: log out and in after `usermod`, or use `sudo` |
 | The browser can't open the page | Check the address and that the server is running (`docker compose ps`); a firewall on the server must allow port 5000 |
 | Port 5000 is taken on the server | Put `SCANNER_PORT=5050` in a `.env` beside the server's compose file, restart it, and use that port in the browser and in the stations' `SCANNER_SERVER` |

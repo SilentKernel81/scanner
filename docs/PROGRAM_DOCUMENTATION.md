@@ -878,7 +878,7 @@ pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the bee
 the scanner's log - the station's output, its page's Activity, and `data/logs/app.log` on the
 server - says why, once a second (`_trace_waiting`): *no card outline found* (every 5 s), or
 *card not ready (n/N)* with the frame's movement, drift, sharpness change and sharpness against
-their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Cameras → Advanced → Debug trace** on (remembered per station: `debug_trace`), the scanner also
+their limits (1%, 1%, 20%, `min_sharpness`). With **Settings → Cameras → Troubleshooting → Debug trace** on (remembered per station: `debug_trace`), the scanner also
 keeps the last 3 s of frames (640 px wide - what the outline detector works on) and saves them,
 plus the next second, to `data/debug_frames/<time>_<reason>/` (on the station's machine) when a card waits over 2 s or a
 new card is detected, or the card is "gone", less than 2 s after a capture (a likely duplicate:
@@ -911,7 +911,7 @@ the server notes its `uid` in the frame's `.json` (`frames.attach`, called from 
 when the scanned cards are cleared (a camera's, or all: `clear_camera`, `clear_inventory`) or added to the
 collection (`scan_to_collection`) the frames of the captures that left the scanned list are deleted
 (`inventory_api.release_frames`, `Inventory.capture_keys`, `frames.forget`) - unless **Keep camera frames
-after clearing or adding** is on (collection page, Settings → Storage; `keep_frames` in
+after clearing or adding** is on (Settings → Storage; `keep_frames` in
 `data/settings.json`, through `/api/capture_copy`), which is for the days frames are labelled. A frame
 without a `uid` (taken before this, or never settled) stays until the 3 GB cap. Tests:
 `tests/test_frames_release.py`. Only captures have a frame: a card that was *missed* leaves none (the
@@ -1256,7 +1256,7 @@ answers are capped (`num_predict`), so a model that starts reasoning aloud can't
 
 ### Prompts
 
-Prompts live in `prompts.py` and are editable in Settings → Card reading → **Edit prompts**. Each
+Prompts live in `prompts.py` and are editable in Settings → Card recognition → **Edit prompts**. Each
 prompt (card identification, foil marker) has two parts:
 
 - **instructions** - what the card looks like and where each value is; this is what the editor
@@ -1440,7 +1440,7 @@ one, so a phone never holds the hashes of one build and the ids of another. **Th
 download (0.7 s, in memory). **Measured on the development machine's index (112,765 printings): 22 MB in all - hashes 10.8, ids 4.2, table 6.6 MB gzipped (the oracle ids do not compress).** Tried with a Flask test client
 and a synthetic index (`tests/test_index_download.py`); **not tried from a phone**, and nothing in the app reads it yet.
 
-**The same run is a button** (since 2026-10-20): Settings > Card reading > *Picture* (in Storage until 2026-10-20) shows how many printings of the card database the index covers
+**The same run is a button** (since 2026-10-20): Settings > *Card data* (in Storage until 2026-10-20, then under Card reading > Picture until 2026-10-22) shows how many printings of the card database the index covers
 ("Covers 112,765 of 112,818 printings - 53 to add") and downloads the missing ones in the background (`server/card_data.py`: `index_status`,
 `start_index_update`; `GET /api/image_index`, `POST /api/image_index/update` and `/stop`, the last two behind the settings password). The page asks for the
 progress every two seconds while it runs (so it shows after a reload), a Stop button keeps what is done (`build`'s `cancel`; the next press goes on
@@ -1571,8 +1571,8 @@ only checked against the right printing), a quiet server's timing, and the false
 **Why it is the default.** The vision AI was in this project from the start because the OCR then did not read well enough. light-ocr does now, and the picture of a card can be matched against every
 printing, so the AI is the **last** step - kept as the fallback until it can be removed. What waits for the exit criteria (see *Printing check*) is *removing* it, not its place in the order.
 
-`reading.mode` in `config.yaml` (`evidence`, the default), overridden by the person's choice in Settings > Card reading (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode`,
-`reading_accept_image_alone` and `reading_extend_index` (the checkbox beside the index button, carried by the same event); the next card takes it - no restart and no image rebuild). The page says what the mode needs (the picture index with its number of printings - Settings > Storage - and OCR switched on;
+`reading.mode` in `config.yaml` (`evidence`, the default), overridden by the person's choice in Settings > Card recognition (the event `set_reading_mode`, guarded; remembered in `data/settings.json` as `reading_mode`,
+`reading_accept_image_alone` and `reading_extend_index` (the checkbox beside the index button, carried by the same event); the next card takes it - no restart and no image rebuild). The page says what the mode needs (the picture index with its number of printings - Settings > Card data - and OCR switched on;
 **without them every card is read as in `cascade`**, so a new installation behaves as before until its index is built); asking for the picture alone to add cards asks for confirmation. **`cascade` is exactly the reading as it was before the picture matching existed**: OCR, then the vision AI; nothing in this section runs in it (the foil-marker tests, which predate the mode,
 pass unedited, and `cascade` never calls the code of this section - a test pins that). A `reading_mode` that is not understood is `cascade`, not `evidence`.
 
@@ -1585,7 +1585,7 @@ pass unedited, and `cascade` never calls the code of this section - a test pins 
 OCR and AI both off: the picture alone, then review. OCR off, AI on: the picture, then the AI. OCR on, AI off: the picture, then OCR, then review. `reading.accept_image_alone` is **on by default** now (a clear picture settles a card: see below
 for what that risks) - **but only while the picture index covers the whole card data** (a Codex review of 2026-10-20: with it on by default, a printing the index lacks - after a card data update, before the index is
 extended - would be added as its best match, another printing, when no strip says otherwise). `PrintingCheck.missing_printings` counts every printing of the card data the index lacks - with a picture address or without, since one with none can never be indexed (a second Codex finding; there were none in the card data on 2026-10-20, 0 of 116,329) - once per index
-generation and card data download (0.20 s on 112,765 printings, then remembered); `Identification._read_by_picture` passes the picture alone on only at 0, and the Card reading page says how many are missing and that
+generation and card data download (0.20 s on 112,765 printings, then remembered); `Identification._read_by_picture` passes the picture alone on only at 0, and the Card recognition section says how many are missing and that
 the picture alone adds nothing until the index is updated. **The index is extended by itself after a successful card data download** (`reading.extend_index_after_update`, on by default; `Config.READING_EXTEND_INDEX`, the person's `reading_extend_index` wins; `server/card_data.py`: `extend_index_after_update` calls `start_index_update` at the end of `start_card_data_update`'s task): only when an index exists already (never a first build - hours and ~12 GB - which stays the button's), not while a build runs, and a failure to start it never turns the finished update into a failed one. The Scanner pages' banner then says "Extending the picture index: N of M" (`reading_status()['index_build']`, polled every 3 s while it runs). Never tried against a live server. **A card newer than the card data itself** (in neither the data nor the index - a third Codex finding: a complete index of a stale card data
 still let its best match, another printing, be added) is caught by two more rules, each where the other cannot see: (1) the strip names a printing (number AND set) the card data does not have at all -> no add by the picture alone
 (`PrintingCheck._names_unknown`; measured with `scripts/experiments/image_match/unknown_strip.py`: 13 of 47 picture-alone decisions had such a strip, all 13 right - OCR misreads of special printings like `spm 2099` - so they go on to the
@@ -1622,7 +1622,7 @@ What follows describes steps 1-4 of the picture's own reading, unchanged:
 3. `review`, no index, a printing the card data lacks, or any failure: the card goes to the vision AI as in `cascade`. **With OCR switched off there is no strip** (`live_read` is handed no reader and reads none): only the picture alone can decide, and only with `reading.accept_image_alone` on - the way to try the picture on its own; with it off every card goes to the AI at once. No strip also means the guard against a printing newer than the index (`_names_unindexed`) has nothing to compare, so the similarity floor and the lead are all that stand - the 4% of the simulation. **Measured with no strip at all** (`scripts/experiments/image_match/calibrate_picture_only.py`, 1,628 evaluation pictures, picture alone allowed): it decided 1,085 (66.6%) and left 543 to the AI;
 4 of the 1,085 differ from the stored label, and in all 4 the picture is right and the label is wrong (looked at by eye 2026-10-20: `Shocker, Unshakable` SPM 89 - the strip's "69" was a misread -, `Super Strength` MSH 189,
 `Living Brain` SPM 167, and the Deadpool `Lightning Bolt` IFIYW-2, whose art has no rainbow), so 0 wrong - **on printings that are in the index**. A printing newer than the index is the hazard this mode cannot see:
-extend the index (Settings > Card reading > Picture) after every card-data update before trusting it. **The AI's answer is then checked
+extend the index (Settings > Card data) after every card-data update before trusting it. **The AI's answer is then checked
    against the picture** (`PrintingCheck.verdict_of`): if the picture clearly looks like another printing (`disagree`), its number and set are dropped and the card goes to
    the review queue under the name the AI gave; any other verdict, or a failed check, leaves the answer alone.
 
@@ -1746,7 +1746,7 @@ files it as the set `tfra`, number 1. `card_ocr.prints_token_letter` / `token_se
 set `TFRA` (`parse_magic`) / `tfra` (`parse_strip`), so the exact lookup and the picture's candidates find the
 token and not the first card of the parent set. **Only the newer form is handled** (the letter and a four-digit
 number); older tokens print neither and are found by name and number if at all. **Never tried on a real
-download yet:** a card-data update (Settings > Collection and data > Card data) loads the tokens, and the picture index's button then
+download yet:** a card-data update (Settings > Card data) loads the tokens, and the picture index's button then
 adds their pictures - until then a token is matched by its collector line alone (OCR) and the picture
 cannot confirm it. The standalone Android app's parser (`ParserParityTest`) was not changed. Columns are defined
 once in `database.CARD_COLUMNS`:
@@ -1957,8 +1957,8 @@ the others from their turn.
   2026-10-22: the first version used up the interval - up to a week - on a build that never ran).
 - **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720) and `image_index_every_hours` (0, 6, 24, 168) in
   `data/settings.json`, else `config.yaml`'s `database.auto_update_every_hours` / `reading.index_retry_every_hours` (both
-  0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Collection and data > Card data
-  and Settings > Card reading > Picture: a select each, and a line with the last automatic run and the next
+  0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Card data
+  and Settings > Card data: a select each, and a line with the last automatic run and the next
   (`GET /api/updates/schedule`, open; `POST`, guarded - `parse_update_schedule` checks every value before any is saved).
   The times are sent with the server's own offset (`astimezone`: a server in Docker runs in UTC) and shown in the
   browser's zone.
@@ -2339,7 +2339,7 @@ collection.
 
 ### Backups
 
-They are on the settings page, **Collection and data** (see [The settings page](#the-settings-page)).
+They are on the settings page, **Backups** (see [The settings page](#the-settings-page)).
 **Back up now** (`POST /api/backups`, `backups.create`) writes `data/backups/<date_time>/`:
 `backup.db` with plain copies of `inventory`, `inventory_captures`, `inventory_sources`, `trades` and `trade_cards` of the collection
 (`collection_*`) and of the scanned cards (`scanned_*`), `decks`, `deck_cards` and an `info`
@@ -2799,19 +2799,31 @@ it only sees its own camera - see [A page per camera](#a-page-per-camera). The p
 `/settings` (`server/pages.py: settings_page`, `templates/settings.html`, `static/js/settings.js`,
 `static/css/settings.css`; since 2026-10-15 - before it each scanner page and the collection page
 had a drawer of its own with a different part of the settings). Settings is the last link of the header's lower row, in its right corner (it was a gear button in the top row until 2026-10-16; on a narrow window it stays in the first row, the page's own tabs go below), a link to it
-on every page. Five categories, a list on the left and one at a time on the right (`#cameras`,
-`#sounds`, `#reading`, `#data`, `#server` in the address; `/scan/<id>#settings` and
-`/collection#settings` go to it):
+on every page. Seven sections since the redesign of 2026-10-22 (`docs/plans/SETTINGS_REDESIGN_PLAN.md`; five
+before it), a list on the left and one at a time on the right (`#overview`, `#cameras`, `#reading`, `#carddata`,
+`#backups`, `#storage`, `#server` in the address; the old `#sounds` and `#data` - and a browser that remembered one -
+go to Cameras and Backups: `OLD_CATEGORIES`; `/scan/<id>#settings` and `/collection#settings` go to it):
 
-| Category | Holds |
+| Section | Holds |
 |---|---|
-| **Cameras** | one camera chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings), Camera rotation, the fixed area's state (it is drawn on the camera's page); under Advanced: Debug trace |
-| **Sounds** | Sound effects, Capture beep, Card added, Volume - for every camera |
-| **Card reading** | Read with OCR first, the vision AI (provider, key, model), Prompts (the summary, and a link to the editor) |
-| **Collection and data** | Backups (schedule, make, upload, list: restore / download / delete), Card data (update), Storage (capture size, keep camera frames) |
-| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Advanced: Debug mode |
+| **Overview** (the default) | One line per section - cameras connected, how cards are read, the card data and its next update, the picture index, the last backup, capture files, the password and network - each a button to its section, the ones to look at marked. No route of its own: each loader hands its part over (`setOverview`) |
+| **Cameras** | *This camera*, chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Stop at a card back, Camera rotation, the fixed area's state (it is drawn on the camera's page), Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings); under Troubleshooting: Debug trace. *All cameras*: Capture size, Sounds (Sound effects, Capture beep, Card added, Volume) |
+| **Card recognition** | The three steps, numbered in their order: 1 Picture (read by the picture; in its Details: Add a card only the picture decided), 2 OCR, 3 Vision AI (provider, key, model, Prompts - the summary, and a link to the editor) |
+| **Card data** | The card database (state, update), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
+| **Backups** | Automatic backups (schedule, how many kept); Your backups (make, upload, list: restore / download / delete) |
+| **Storage** | Capture files in use, how long received pictures are kept, Clean up now, Compress large copies, Keep camera frames |
+| **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Troubleshooting: Debug mode |
 
-**Debug mode** (Server → Advanced) is two things: the request log (`data/logs/requests.log`) and Werkzeug's
+**The padlock.** Every control the server asks the settings password for carries `data-guarded` in the page (a
+backup's Restore gets it in `renderBackups`); `settings.css` draws a padlock after it (`::after`, a mask of the
+sprite's `i-lock` - not an icon inside the element, since the script rewrites some of those buttons' text) only while
+a password is set (`loadLock` puts `has-settings-password` on the body). A new guarded route or event needs the
+attribute on its control.
+
+**Removed on 2026-10-22: "Rebuild database schema"** (Collection and data > Advanced): see *Card data* - every update
+already does what it did.
+
+**Debug mode** (Server → Troubleshooting) is two things: the request log (`data/logs/requests.log`) and Werkzeug's
 interactive debugger. Since 2026-10-16 the debugger only runs when the server listens on this computer
 alone (`program.debugger_allowed`; `services.debugger_running`; the page says which is on) or when the
 server is started with `SCANNER_LAN_DEBUGGER=1` - the switch can be reached from the network, and an
@@ -2828,7 +2840,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 
 | Page → server | Server → page |
 |---|---|
-| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Stations: that station's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
+| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Cameras: that camera's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data) | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
