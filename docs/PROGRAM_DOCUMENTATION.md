@@ -144,7 +144,7 @@ Server:
 | OCR worker (`Identification._ocr_worker`) | Reads queued captures with light-ocr, one at a time; passes on what it can't settle |
 | AI workers (`Identification._ai_worker`, `vision_ai.workers`, default 3) | Ask the vision AI about the cards OCR passed on, several at once |
 | Identified worker (`Identification._done_worker`) | Hands each read card back - lookup, add or review queue (`route_identified`) - one at a time |
-| Background tasks | Card database update / rebuild, startup image cleanup, model warm-up, card data update check (10 s after startup, then daily), "What can I build?" searches |
+| Background tasks | Card database update / rebuild, startup image cleanup, model warm-up, the update schedule (`run_update_schedule`: the card data update check 10 s after startup, then daily; the automatic card data download and picture index retry every 10 minutes from 5 minutes after start - off unless chosen), "What can I build?" searches |
 
 Station (`station_client.py`):
 
@@ -1448,7 +1448,7 @@ from there; it is heard within a quarter of a second even while the workers wait
 2026-10-20 found the first version ignored it for minutes) - except that a request already on its way is waited for, 60 s at most), a second start is refused (409) and a build started from the command line holds the same lock (said in the page). It is a button, not
 automatic: after a card database update the page says the index can be updated, and the person presses it. The running server follows the new
 generation by itself. Not done: re-fetching a picture Scryfall replaced (a placeholder that later got its real scan) - every printing's picture
-address has a version stamp, but all 112,765 carry one (many were re-stamped in July with no change in the art), so the stamp cannot tell; Scryfall's
+address has a version stamp (the automatic retry of what is missing: see *Automatic updates* under Card data), but all 112,765 carry one (many were re-stamped in July with no change in the art), so the stamp cannot tell; Scryfall's
 `image_status` would, and the card database does not keep it yet. **Publishing is one step** (found by a review on 2026-10-20: the
 first version replaced three files one after the other): each build writes its own pair of files, nothing pointing at them yet, then
 replaces `manifest.json` with one rename - it names the current pair and holds the SHA-256 of both. A build that is interrupted anywhere
@@ -1928,7 +1928,44 @@ Scryfall republishes every day for prices, the data only counts as outdated once
 downloaded before this check existed). A result
 is kept in `data_update_notices`, sent as `database_update_available`, and returned by
 `/api/stats`; the page puts a dot on the Database counter (click → confirm → update) and shows
-one notification per page load. Updates are never started without the user.
+one notification per page load. Updates are not started without the user unless the automatic update below is on (it is off by default).
+
+**Automatic updates** (since 2026-10-22; `server/card_data.py`, `tests/test_update_schedule.py`, plan:
+`docs/plans/UPDATE_SCHEDULE_PLAN.md`). Built like the automatic backup, not like cron: no clock time, but a thread
+(`run_update_schedule`) that asks every 10 minutes (`SCHEDULE_TICK`) whether something is DUE - so a laptop, an
+AppImage or a Pi that was off when it was due catches up once it runs again. Nothing is downloaded in the first
+5 minutes after start (`SCHEDULE_FIRST_DOWNLOAD`: a network that is not up yet); as the ticks are 10 minutes
+apart, the first automatic download comes about 10 minutes after start. Each tick (`schedule_tick`) asks the update check
+(when a day has passed), the card data and the picture index in that order, each in its own `try`: one failing never keeps
+the others from their turn.
+- **The card data** (`scheduled_card_data_updates`, `card_data_due`): every game with data (the first download stays
+  startup's, with its own retries) whose `card_data_info.downloaded_at` is the chosen number of hours old or older - a
+  press of the button counts too - is downloaded again (`start_card_data_update`: the same safe swap, scanning goes on).
+  The interval is the interval: the 7-day rule of the notice above is not asked (daily means fresh prices daily). An
+  automatic attempt is noted in `data/settings.json` (`card_data_auto_last`: `at`, `ok`, `message`) BEFORE the download
+  starts, so a server stopped in the middle still counts it; how it ended is written by `on_done`. A failed one is not
+  tried again for an hour (`AUTO_RETRY_AFTER`), also across a restart. A download the button started between the
+  question and the start is not the schedule's: the last real attempt is put back.
+- **The picture index** (`scheduled_index_update`, `index_due`) already follows the card data (`extend_index_after_update`),
+  so its schedule is a RETRY of what is still missing - a build Scryfall refused half-way, one stopped, one that failed -
+  at most once per the chosen hours: only when an index exists (never a first build), it covers at least 90% of the
+  printings (`INDEX_AUTO_MIN_COVERAGE`: a first build stopped early stays the button's - hours and ~12 GB), nothing is
+  building and no card data download runs (its success extends the index itself), and `index_status()` counts something
+  missing. A printing Scryfall serves no picture for stays "missing" and is asked for again at each run - the interval
+  is what bounds that. A build that never began (another process holds the index: `BuildRunning`; or the button was
+  first) puts back the last real attempt (`image_index_auto_last`), so the next tick asks again (a Codex review of
+  2026-10-22: the first version used up the interval - up to a week - on a build that never ran).
+- **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720) and `image_index_every_hours` (0, 6, 24, 168) in
+  `data/settings.json`, else `config.yaml`'s `database.auto_update_every_hours` / `reading.index_retry_every_hours` (both
+  0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Collection and data > Card data
+  and Settings > Card reading > Picture: a select each, and a line with the last automatic run and the next
+  (`GET /api/updates/schedule`, open; `POST`, guarded - `parse_update_schedule` checks every value before any is saved).
+  The times are sent with the server's own offset (`astimezone`: a server in Docker runs in UTC) and shown in the
+  browser's zone.
+
+Tested: `tests/test_update_schedule.py` (stand-ins: nothing is downloaded); the routes and the two cards in a server on
+copied data and headless Chromium. An automatic download on a running server was not yet watched at this commit. Never tried: a month-long run, a Pi whose network comes late,
+the phone downloading the index while an automatic build publishes a new generation (as with the button).
 
 ## Focus
 
@@ -2883,7 +2920,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO
