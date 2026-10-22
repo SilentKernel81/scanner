@@ -144,6 +144,17 @@ def note_auto_attempt(game_id, at, ok=None, message=''):
     app_settings.set(AUTO_LAST_KEY, attempts)
 
 
+def restore_auto_attempt(game_id, previous):
+    """Put back a game's last automatic attempt as it was (previous: last_auto_attempt's answer, None when there was none)"""
+    attempts = app_settings.get(AUTO_LAST_KEY)
+    attempts = dict(attempts) if isinstance(attempts, dict) else {}
+    if previous is None:
+        attempts.pop(game_id, None)
+    else:
+        attempts[game_id] = previous
+    app_settings.set(AUTO_LAST_KEY, attempts)
+
+
 def _parse_time(text):
     """A time written by isoformat (card_data_info, the attempts above), or None for anything else"""
     try:
@@ -193,10 +204,14 @@ def scheduled_card_data_updates(now=None):
                 note_auto_attempt(game_id, at, ok, message)
 
             # The attempt is noted BEFORE the download starts: a server stopped in the middle still counts it for the back-off
+            previous = last_auto_attempt(game.id)
             note_auto_attempt(game.id, now)
             if start_card_data_update(game, on_done=done):
                 logger.info(f"{game.label} card data: automatic update (every {every_hours} h)")
                 started.append(game.id)
+            else:
+                # A download began between the question and now (the button): not the schedule's attempt - the last real one is put back
+                restore_auto_attempt(game.id, previous)
         except Exception as e:
             # One game's trouble (its database, its settings) must not keep the others from their update
             logger.exception(f"{game.label} card data: the automatic update could not start: {e}")
@@ -205,8 +220,9 @@ def scheduled_card_data_updates(now=None):
 
 def run_update_schedule():
     """
-    The update check (the notice: 10 s after start, then once a day, as before) and the automatic download (every
-    SCHEDULE_TICK, from SCHEDULE_FIRST_DOWNLOAD after start) on one thread. Nothing that fails in a tick ends the loop.
+    The update check (the notice: 10 s after start, then once a day, as before), the automatic card data download and the
+    picture index's retry (every SCHEDULE_TICK, from SCHEDULE_FIRST_DOWNLOAD after start) on one thread. Nothing that fails
+    in a tick ends the loop, and one of them failing does not keep the other from its turn.
     """
     def loop():
         started = time.monotonic()
@@ -221,6 +237,12 @@ def run_update_schedule():
                     scheduled_card_data_updates()
             except Exception as e:
                 logger.error(f"The automatic card data update failed: {e}", exc_info=True)
+            try:
+                # After the card data: a download it just started makes the index wait for it (index_due)
+                if time.monotonic() - started >= SCHEDULE_FIRST_DOWNLOAD:
+                    scheduled_index_update()
+            except Exception as e:
+                logger.error(f"The automatic picture index update failed: {e}", exc_info=True)
             time.sleep(SCHEDULE_TICK)
     threading.Thread(target=loop, daemon=True, name='update-schedule').start()
 
@@ -346,8 +368,12 @@ def index_status():
             'result': state['result']}
 
 
-def start_index_update():
-    """Extend the picture index in the background; False when a build is running already"""
+def start_index_update(on_done=None):
+    """
+    Extend the picture index in the background; False when a build is running already. on_done(ok, message): called once
+    when the build has ended - ok is True when it finished, False when it failed, was refused by Scryfall or was stopped,
+    None when it never began because a build started elsewhere (the command line) holds the index (the schedule's skip).
+    """
     with index_lock:
         if index_state['running']:
             return False
@@ -360,6 +386,7 @@ def start_index_update():
 
     def task():
         error = result = None
+        busy = False    # image_index.BuildRunning: another process is building - not this build's failure
         try:
             logger.info("Picture index: extending it from Scryfall's pictures")
             built = image_index.build(database.printing_images(), printing_check.index_folder, fetch=True, log=logger.info,
@@ -372,6 +399,7 @@ def start_index_update():
                 error = (f"Scryfall kept refusing requests (a rate limit), so the build stopped after adding {new} new "
                          f"picture{'' if new == 1 else 's'}. What was done is kept - press the button again later and it goes on from there")
         except image_index.BuildRunning as e:
+            busy = True
             error = f"{e} - wait for it to finish (a build started from the command line, perhaps)"
         except Exception as e:
             logger.exception(f"Picture index: the build failed: {e}")
@@ -379,8 +407,111 @@ def start_index_update():
         finally:
             with index_lock:
                 index_state.update(running=False, stopping=False, error=error, result=result)
+        if on_done:
+            # After the state is written: whoever is told sees the build as ended. Never allowed to raise into the thread
+            if busy:
+                ok, message = None, error
+            elif error:
+                ok, message = False, error
+            elif result and result['stopped']:
+                ok, message = False, f"stopped after {result['new']} new picture{'' if result['new'] == 1 else 's'}"
+            else:
+                ok, message = True, f"{result['new']} new picture{'' if result['new'] == 1 else 's'}"
+            try:
+                on_done(ok, message)
+            except Exception as e:
+                logger.exception(f"Picture index: the end of the build could not be noted: {e}")
 
     threading.Thread(target=task, daemon=True, name='index-build').start()
+    return True
+
+
+# ----------------------------------------------------------------------------
+# The picture index's automatic retry (docs/plans/UPDATE_SCHEDULE_PLAN.md, phase 2). The index already follows the card data
+# (extend_index_after_update, after every download that succeeded), so its own schedule is not a second timer beside that one:
+# it goes back to what is still MISSING - a build Scryfall refused half-way (its rate limit), one stopped, one that failed -
+# at most once per the chosen number of hours. It never makes a first build, nor finishes one that was stopped early: that
+# is hours and ~12 GB, and stays the button's.
+# ----------------------------------------------------------------------------
+
+INDEX_SCHEDULE_HOURS = (0, 6, 24, 168)     # 0: off; every 6 hours, a day, a week
+INDEX_AUTO_MIN_COVERAGE = 0.9              # below this share of the printings indexed, the index is a first build not finished: not the schedule's
+INDEX_AUTO_LAST_KEY = 'image_index_auto_last'  # data/settings.json: {'at', 'ok', 'message'} of the last automatic build
+
+
+def index_schedule():
+    """Every how many hours the picture index goes back to what is missing (0: off) - the person's choice, else config.yaml's"""
+    value = app_settings.get('image_index_every_hours', Config.READING_INDEX_RETRY_HOURS) if app_settings else Config.READING_INDEX_RETRY_HOURS
+    # As card_data_schedule: anything but one of the listed numbers is off - a download nobody chose is never guessed
+    if isinstance(value, bool) or value not in INDEX_SCHEDULE_HOURS:
+        return 0
+    return value
+
+
+def last_index_attempt():
+    """{'at', 'ok' (None while it runs, or when another build held the index), 'message'} of the last automatic build, or None"""
+    attempt = app_settings.get(INDEX_AUTO_LAST_KEY) if app_settings else None
+    return attempt if isinstance(attempt, dict) else None
+
+
+def note_index_attempt(at, ok=None, message=''):
+    """Remember an automatic build in data/settings.json (kept across a restart, like the card data's)"""
+    app_settings.set(INDEX_AUTO_LAST_KEY, {'at': at.isoformat(timespec='seconds'), 'ok': ok, 'message': message})
+
+
+def index_due(now, every_hours):
+    """
+    Whether the schedule should extend the picture index now. The cheap questions first, the count of what is missing (every
+    printing of the card data against the index) last:
+    - the schedule is on, the printing check and an index are there (no index: never a first build), no build is running;
+    - no card data download is running - when it succeeds it extends the index itself (extend_index_after_update);
+    - the last automatic build began every_hours ago or longer;
+    - something is missing, and the index covers at least INDEX_AUTO_MIN_COVERAGE of the printings.
+    """
+    if not every_hours or not database or not printing_check or printing_check.index() is None:
+        return False
+    if data_updates_running:
+        return False
+    with index_lock:
+        if index_state['running']:
+            return False
+    attempt = _parse_time((last_index_attempt() or {}).get('at'))
+    if attempt is not None and now - attempt < timedelta(hours=every_hours):
+        return False
+    status = index_status()
+    if not status['missing'] or not status['printings']:
+        return False
+    return status['indexed'] / status['printings'] >= INDEX_AUTO_MIN_COVERAGE
+
+
+def scheduled_index_update(now=None):
+    """Start the automatic build when it is due (index_due); True when one was started"""
+    every_hours = index_schedule()
+    if not every_hours or not app_settings:
+        return False
+    now = now or datetime.now()
+    if not index_due(now, every_hours):
+        return False
+
+    previous = last_index_attempt()
+
+    def done(ok, message):
+        if ok is None:
+            # Never began: another process (a build from the command line) held the index. That is not an attempt of the
+            # schedule's, so the last real one is put back - else the interval (a week, perhaps) would start from a build that
+            # never ran, and the printings that build leaves missing would wait for it. The next tick asks again
+            app_settings.set(INDEX_AUTO_LAST_KEY, previous)
+            logger.info(f"Picture index: the automatic update did not begin - {message}")
+            return
+        note_index_attempt(now, ok, message)
+
+    # Noted before it starts, as the card data's: a server stopped mid-build still counts the attempt
+    note_index_attempt(now)
+    if not start_index_update(on_done=done):
+        # A build began between the question and now (the button): that is the extension itself, and not the schedule's
+        app_settings.set(INDEX_AUTO_LAST_KEY, previous)
+        return False
+    logger.info(f"Picture index: automatic update of what is missing (every {every_hours} h)")
     return True
 
 
