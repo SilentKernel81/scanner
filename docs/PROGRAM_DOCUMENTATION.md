@@ -1964,7 +1964,7 @@ the others from their turn.
   browser's zone.
 
 Tested: `tests/test_update_schedule.py` (stand-ins: nothing is downloaded); the routes and the two cards in a server on
-copied data and headless Chromium. An automatic download on a running server was not yet watched at this commit. Never tried: a month-long run, a Pi whose network comes late,
+copied data and headless Chromium. **First live run, 2026-10-22** (a server on a copy of the card data from 2026-10-05 and the index of 2026-10-20, schedule "every day", index retry off): started 09:31:10, update check at 09:31:20, the automatic download at 09:41:20 (the first tick after 5 minutes), 116,357 cards in by 09:41:28; the index extended itself after it (`extend_index_after_update`, 3,592 new pictures, all 116,357 covered by about 09:47); the page's line then said last run ok, "116,357 cards", next 2026-10-23 09:41. No error in the log. One run: the index RETRY itself was not exercised live (its schedule was off; nothing was missing after the extension). Never tried: a month-long run, a Pi whose network comes late,
 the phone downloading the index while an automatic build publishes a new generation (as with the button).
 
 ## Focus
