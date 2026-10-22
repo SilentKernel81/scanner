@@ -26,6 +26,8 @@ import queue
 import threading
 import time
 
+import cv2
+
 from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
@@ -338,7 +340,7 @@ class Identification:
             # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);
             # and a strip naming ANOTHER existing printing is a contradiction the picture alone must not overrule unconfirmed (a fourth). Not agreeing: the card is in doubt,
             # and the OCR path below reads it as any other.
-            if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip')):
+            if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip'), reading.get('rotated', False)):
                 self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
                 return None
         reading_record.note('decision', accepted=True)
@@ -353,14 +355,17 @@ class Identification:
         self.log(self._said_by_ocr(info), level="success")
         return info, None
 
-    def _ocr_names(self, image, card, lead=None, strip=None):
+    def _ocr_names(self, image, card, lead=None, strip=None, rotated=False):
         """
         Whether the full-card OCR confirms the printing the picture alone chose (printing_check.ocr_agrees): the same name, and nothing of the collector line it read naming
         another printing - not a set code or a number that are not the card's. False when it reads nothing, contradicts it, or fails.
         """
         try:
+            # the card the way up the picture search found it - as the strip was read (live_read): parse_magic looks for the title at the top and the
+            # collector line at the bottom, so a card dropped upside down was read for nothing and its decision refused (a Codex review of 2026-10-21)
+            upright = cv2.rotate(image, cv2.ROTATE_180) if rotated else image
             with reading_record.timed('ocr'):
-                read = self._read_card(image)
+                read = self._read_card(upright)
             # what the OCR's collector line names (ocr_agrees looks it up): a letter suffix kept first ("233a" is not "233": printing_named_by_line)
             lookup = self.evidence.database.get_card_by_set_number
             printing_at = lambda set_code, number: printing_named_by_line(lookup, set_code, number)

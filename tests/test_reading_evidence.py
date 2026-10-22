@@ -818,6 +818,20 @@ class InIdentification(unittest.TestCase):
             self.ocr_read.update(collector_number='0242', set_code='HOB')                                           # ... the one the picture chose: added
             self.assertEqual(self.ident._read_by_picture(self.image, self.image)[0]['printing_id'], 'p3')
 
+    def test_an_upside_down_cards_confirmation_reads_it_upright(self):
+        # (a Codex review of 2026-10-21: the strip was read the way up the search found the card, the full card as given - parse_magic found no title at the
+        # top of an upside-down card, and its decision was refused for that alone) - _ocr_names reads the card turned as live_read says
+        image = np.arange(100 * 70 * 3, dtype=np.uint8).reshape(100, 70, 3)              # every pixel different: which way up is visible
+        seen = []
+        self.ident.card_ocr.read_card.side_effect = lambda picture, game: seen.append(picture.copy()) or dict(self.ocr_read)
+        with mock.patch.object(identification.Identification, 'accept_image_alone', new_callable=mock.PropertyMock, return_value=True):
+            self.ident.evidence.reading = {**READING, 'path': 'image', 'strip': {'number': '', 'set': ''}, 'lead': 0.0625, 'rotated': True}
+            self.ident._read_by_picture(image, image)
+            np.testing.assert_array_equal(seen[-1], cv2.rotate(image, cv2.ROTATE_180))
+            self.ident.evidence.reading['rotated'] = False                               # upright: as given
+            self.ident._read_by_picture(image, image)
+            np.testing.assert_array_equal(seen[-1], image)
+
     def test_a_collector_number_with_a_letter_suffix_names_its_own_printing(self):
         # (a Codex review of 2026-10-21: the lookup kept only the digits, so a line saying ZEN 233a was taken for the chosen ZEN 233 - both Plains are in the
         # index - and the same-card check never saw the contradiction) - printing_check.printing_named_by_line keeps the suffix first

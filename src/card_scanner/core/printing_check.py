@@ -661,7 +661,9 @@ class PrintingCheck:
             return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'], strip['net']),
-                'similarity': decision['similarity'], 'lead': decision['lead']}
+                'similarity': decision['similarity'], 'lead': decision['lead'],
+                # which way up the search found the card - the strip above was read turned so; the full-card confirmation reads it so too (_ocr_names)
+                'rotated': bool(search['rotated'])}
 
     def _strip_printing(self, strip):
         """
