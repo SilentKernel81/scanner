@@ -1438,7 +1438,21 @@ gzipped tab-separated table (`id, set, number, oracle_id, finishes, name`, and s
 the decision's evidence (`decide.py`: set, number, oracle id, finishes) a phone needs of each candidate without asking Scryfall. **Only the current generation** is served: another one is a 409 that names the current
 one, so a phone never holds the hashes of one build and the ids of another. **The table is pinned by its own checksum too** (a Codex review, 2026-10-20): it follows the card data, which changes without a new generation, so its address in the listing carries `&version=<sha256>` and a request with another one - a card data update since the listing, also a resumed `Range` request - is a 409 naming the current version, never other bytes with a 200. Behind the station token (open without one, like the other station routes), read-only; the table is built once per generation and card data
 download (0.7 s, in memory). **Measured on the development machine's index (112,765 printings): 22 MB in all - hashes 10.8, ids 4.2, table 6.6 MB gzipped (the oracle ids do not compress).** Tried with a Flask test client
-and a synthetic index (`tests/test_index_download.py`); **not tried from a phone**, and nothing in the app reads it yet.
+and a synthetic index (`tests/test_index_download.py`); downloaded by the owner's phone (the app's `reading/IndexDownload.kt`) - never while the server's index was changing.
+
+**What happens when the index changes during a download** (reviewed 2026-10-22, both sides' code). A phone can never hold a mix: each file is asked for
+with its generation (and the table with its version), so a request made after a change is a 409 and the app starts again from the listing (once); every
+file is checked against its SHA-256; the new index is put in place by one rename, only once it loads, else the index the phone had stays. The previous
+generation's files are kept on the server (`image_index.write`: `keep = {generation, previous}`), so a file already being sent is not cut off. A card data
+update that only refreshes prices changes nothing a phone downloads: the table's version is the checksum of its content (set, number, finishes...), which
+holds no prices. **The window:** an update changes the two a few minutes apart (the card data, then the extended index: 09:41:28 and about 09:47 in the
+first live run of the automatic update), so a download in between got a generation about to be replaced, or failed after a second 409 ("kept changing").
+**Since 2026-10-22 the listing says when the index is changing** - `building` (`running`, `done`, `total`: `card_data.index_progress`) and
+`card_data_updating` (the active game's download running) - and the app downloads nothing then: "The server is updating its picture index (1,200 of 3,592
+new pictures) - try again in a few minutes", its index staying (`IndexDownload.ServerBusy`). An older app ignores the two fields; an older server lists
+neither and is downloaded from as before. Tests: `tests/test_index_download.py` (the two fields), the app's `IndexDownloadPublishTest` (a change
+mid-download: asked again, the new one published; two changes: given up, the index that worked stays; a busy server: nothing fetched but the listing).
+Not tried on a phone against a server mid-update.
 
 **The same run is a button** (since 2026-10-20): Settings > *Card data* (in Storage until 2026-10-20, then under Card reading > Picture until 2026-10-22) shows how many printings of the card database the index covers
 ("Covers 112,765 of 112,818 printings - 53 to add") and downloads the missing ones in the background (`server/card_data.py`: `index_status`,
@@ -1964,8 +1978,8 @@ the others from their turn.
   browser's zone.
 
 Tested: `tests/test_update_schedule.py` (stand-ins: nothing is downloaded); the routes and the two cards in a server on
-copied data and headless Chromium. **First live run, 2026-10-22** (a server on a copy of the card data from 2026-10-05 and the index of 2026-10-20, schedule "every day", index retry off): started 09:31:10, update check at 09:31:20, the automatic download at 09:41:20 (the first tick after 5 minutes), 116,357 cards in by 09:41:28; the index extended itself after it (`extend_index_after_update`, 3,592 new pictures, all 116,357 covered by about 09:47); the page's line then said last run ok, "116,357 cards", next 2026-10-23 09:41. No error in the log. One run: the index RETRY itself was not exercised live (its schedule was off; nothing was missing after the extension). Never tried: a month-long run, a Pi whose network comes late,
-the phone downloading the index while an automatic build publishes a new generation (as with the button).
+copied data and headless Chromium. **First live run, 2026-10-22** (a server on a copy of the card data from 2026-10-05 and the index of 2026-10-20, schedule "every day", index retry off): started 09:31:10, update check at 09:31:20, the automatic download at 09:41:20 (the first tick after 5 minutes), 116,357 cards in by 09:41:28; the index extended itself after it (`extend_index_after_update`, 3,592 new pictures, all 116,357 covered by about 09:47); the page's line then said last run ok, "116,357 cards", next 2026-10-23 09:41. No error in the log. One run: the index RETRY itself was not exercised live (its schedule was off; nothing was missing after the extension). Never tried: a month-long run, a Pi whose network comes late.
+A phone downloading the index meanwhile: see *What happens when the index changes during a download* (the listing says when it is changing).
 
 ## Focus
 

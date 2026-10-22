@@ -98,7 +98,9 @@ On the page:
 - **The phone's index download** (`image_index_download`: current generation only, resumable): a scheduled
   rebuild publishes a new generation under a download in progress. That already happens with the button;
   what the phone then does (refused → starts the new generation?) is to be read in `index_for_download` and
-  the app's downloader before phase 3, and written in the docs.
+  the app's downloader before phase 3, and written in the docs. **Done 2026-10-22** (after phase 5): read on both sides; the listing now says
+  when the index is changing (`building`, `card_data_updating`) and the app waits then - PROGRAM_DOCUMENTATION, *What happens when the index
+  changes during a download*.
 - **The standalone mirror** gets this by merging `server/main`: generic server code, nothing behind
   `app_mode`, no edit in `../scanner`. The Android app is unaffected beyond the point above.
 

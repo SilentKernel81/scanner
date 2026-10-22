@@ -90,6 +90,20 @@ class TheListing(Download):
             self.assertEqual(len(served.data), entry['bytes'], kind)                       # what it says is what is sent
             self.assertEqual(hashlib.sha256(served.data).hexdigest(), entry['sha256'], kind)
 
+    def test_it_says_nothing_is_about_to_change_when_nothing_runs(self):
+        body = self.listing().get_json()
+        self.assertEqual(body['building'], {'running': False, 'done': 0, 'total': 0})
+        self.assertIs(body['card_data_updating'], False)
+
+    def test_it_says_when_a_build_or_a_card_data_download_is_running(self):
+        # The phone waits then instead of downloading a generation that is about to be replaced (IndexDownload.kt); the files are still listed for an older app
+        with mock.patch.object(stations_api, 'index_progress', lambda: {'running': True, 'done': 1200, 'total': 3592}), \
+                mock.patch.object(stations_api, 'data_updates_running', {'mtg'}):
+            body = self.listing().get_json()
+        self.assertEqual(body['building'], {'running': True, 'done': 1200, 'total': 3592})
+        self.assertIs(body['card_data_updating'], True)
+        self.assertEqual({f['kind'] for f in body['files']}, {'hashes', 'ids', 'printings'})
+
     def test_without_an_index_there_is_nothing_to_download(self):
         self.index = None
         self.assertEqual(self.listing().status_code, 404)
