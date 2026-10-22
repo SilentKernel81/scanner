@@ -293,3 +293,104 @@
 .is-dependent-off button {
     cursor: not-allowed;
 }
+
+/* ---- The overview (settings.js: renderOverview): one line per section, each a button to it ---- */
+.overview-list {
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+}
+
+.overview-row {
+    display: grid;
+    grid-template-columns: 150px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 16px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.overview-row:first-child {
+    border-top: 0;
+}
+
+.overview-row:hover,
+.overview-row:focus-visible {
+    background: var(--accent-soft);
+}
+
+.overview-label {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.overview-text {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.overview-go {
+    font-size: 18px;
+    color: var(--text-subtle);
+}
+
+/* Something to look at: no camera connected, data out of date, no backup... */
+.overview-row.is-warn {
+    box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.overview-row.is-warn .overview-text {
+    color: var(--warning);
+}
+
+@media (max-width: 600px) {
+    .overview-row {
+        grid-template-columns: 1fr auto;
+    }
+    .overview-text {
+        grid-column: 1;
+    }
+    .overview-go {
+        grid-row: 1 / span 2;
+        grid-column: 2;
+    }
+}
+
+/* ---- The padlocks on what asks for the settings password: every [data-guarded] (the server's @guarded routes and events), only while
+   a password is set (settings.js: loadLock sets the body's class). Drawn here, not inserted into the element: the script rewrites the
+   text of some of them ("Update the picture index", "Uploading...") and would wipe an icon inside. The drawing is the sprite's i-lock ---- */
+body.has-settings-password [data-guarded]::after {
+    content: "";
+    display: inline-block;
+    width: 0.95em;
+    height: 0.95em;
+    margin-left: 5px;
+    vertical-align: -0.12em;
+    background-color: currentColor;
+    opacity: 0.7;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.lock-legend {
+    display: none;
+}
+
+body.has-settings-password .lock-legend {
+    display: block;
+}
+
+.lock-legend .icon {
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.12em;
+}
