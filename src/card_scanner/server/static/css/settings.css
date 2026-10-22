@@ -73,6 +73,20 @@
     font-size: 18px;
 }
 
+/* A part of a section whose settings have another scope: Cameras' "This camera" (the one chosen) and "All cameras" */
+.settings-category > h3.settings-group {
+    margin: 22px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.settings-category > h2 + h3.settings-group {
+    margin-top: 10px;
+}
+
 .settings-card {
     margin-top: 14px;
     padding: 16px;

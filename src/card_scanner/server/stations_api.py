@@ -87,7 +87,7 @@ def image_index_download():
         return jsonify({'success': False, 'message': 'Wrong or missing station token'}), 401
     found = index_for_download()
     if found is None:
-        return jsonify({'success': False, 'message': 'This server has no picture index (Settings > Card reading > Picture)'}), 404
+        return jsonify({'success': False, 'message': 'This server has no picture index (Settings > Card data)'}), 404
     manifest, folder = found
     table, table_sha = index_printings_table(manifest)
     generation = manifest['generation']

@@ -1,6 +1,7 @@
 """
 The settings page (templates/settings.html, static/js/settings.js): the script only asks for
-elements the page has, the five categories each have a button and a section, and the old
+elements the page has, each section (category) has a button and a section and the old addresses
+(#sounds, #data: before the redesign of 2026-10-22) lead to one that exists, and the old
 drawers (scanner and collection pages) are gone with the elements their scripts used.
 
     venv/bin/python -m unittest discover tests -p test_settings_page.py
@@ -25,13 +26,26 @@ class SettingsPage(unittest.TestCase):
         missing = sorted(ids - in_page)
         self.assertEqual(missing, [], f"settings.js asks for elements settings.html does not have: {missing}")
 
+    def categories(self):
+        return re.findall(r"'([a-z]+)'", re.search(r"const CATEGORIES = \[([^\]]*)\]", SCRIPT).group(1))
+
     def test_each_category_has_a_button_and_a_section(self):
-        categories = re.search(r"const CATEGORIES = \[([^\]]*)\]", SCRIPT).group(1)
-        names = re.findall(r"'([a-z]+)'", categories)
-        self.assertEqual(len(names), 5)
+        names = self.categories()
+        self.assertTrue(names)
         for name in names:
             self.assertIn(f'data-category="{name}"', PAGE)
             self.assertIn(f'id="cat-{name}"', PAGE)
+        # ... and no button for a section the script does not know (it would show nothing)
+        self.assertEqual(sorted(re.findall(r'data-category="([a-z]+)"', PAGE)), sorted(names))
+
+    def test_the_old_addresses_lead_to_a_section_that_exists(self):
+        # Other pages and bookmarks still send #sounds and #data (collection.js: /settings#data)
+        old = dict(re.findall(r"(\w+): '(\w+)'", re.search(r"const OLD_CATEGORIES = \{([^}]*)\}", SCRIPT).group(1)))
+        self.assertEqual(set(old), {'sounds', 'data'})
+        for target in old.values():
+            self.assertIn(target, self.categories())
+        for name in old:
+            self.assertNotIn(name, self.categories())       # an old name is never a section again: the mapping would hide it
 
     def test_the_pages_have_no_drawer_left(self):
         for template in ('scanner.html', 'collection.html'):

@@ -8,7 +8,7 @@
     {% include '_favicon.html' %}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}?v=6">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -16,26 +16,28 @@
     {% set page = 'settings' %}
     {% include '_topbar.html' %}
 
-    {# One page for every setting, in five categories (the list on the left; #cameras, #sounds,
-       #reading, #data, #server in the address). Each setting is saved the moment it is changed.
-       static/js/settings.js. What belongs to one camera is under Cameras, with that camera chosen
-       at the top: the rest is the server's, the same for every camera #}
+    {# One page for every setting, in sections (the list on the left; #cameras, #reading, #carddata, #backups,
+       #storage, #server in the address - the old #sounds and #data still lead to Cameras and Backups: settings.js,
+       categoryFromAddress). Each setting is saved the moment it is changed. static/js/settings.js; the plan:
+       docs/plans/SETTINGS_REDESIGN_PLAN.md. Under Cameras, "This camera" is the camera chosen at the top, "All cameras"
+       the server's own; every other section is the server's, the same for every camera #}
     <main class="container settings-page">
         <h1 class="settings-title">Settings</h1>
         <div class="settings-layout">
-            <nav class="settings-nav" id="settings-nav" aria-label="Settings categories">
+            <nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
                 <button type="button" data-category="cameras"><svg class="icon"><use href="#i-camera"/></svg> Cameras</button>
-                <button type="button" data-category="sounds"><svg class="icon"><use href="#i-play"/></svg> Sounds</button>
-                <button type="button" data-category="reading"><svg class="icon"><use href="#i-card"/></svg> Card reading</button>
-                <button type="button" data-category="data"><svg class="icon"><use href="#i-list"/></svg> Collection and data</button>
+                <button type="button" data-category="reading"><svg class="icon"><use href="#i-card"/></svg> Card recognition</button>
+                <button type="button" data-category="carddata"><svg class="icon"><use href="#i-layers"/></svg> Card data</button>
+                <button type="button" data-category="backups"><svg class="icon"><use href="#i-download"/></svg> Backups</button>
+                <button type="button" data-category="storage"><svg class="icon"><use href="#i-list"/></svg> Storage</button>
                 <button type="button" data-category="server"><svg class="icon"><use href="#i-settings"/></svg> Server</button>
             </nav>
 
             <div class="settings-content">
-                <!-- ================= Cameras ================= -->
+                <!-- ================= Cameras: the chosen one, then what every camera shares ================= -->
                 <section class="settings-category" id="cat-cameras" hidden>
                     <h2>Cameras</h2>
-                    <p class="hint">What belongs to one camera. Choose the camera; each change is saved at once.</p>
+                    <h3 class="settings-group">This camera</h3>
                     <div class="settings-card">
                         <div class="input-group">
                             <label for="camera-select">Camera</label>
@@ -132,13 +134,24 @@
                             </label>
                         </details>
                     </div>
-                </section>
 
-                <!-- ================= Sounds ================= -->
-                <section class="settings-category" id="cat-sounds" hidden>
-                    <h2>Sounds</h2>
-                    <p class="hint">For every camera, played by the scanner pages.</p>
+                    <h3 class="settings-group">All cameras</h3>
                     <div class="settings-card">
+                        <h3>Capture size</h3>
+                        <div class="input-group">
+                            <label for="capture-copy-size">Capture size (all cameras)</label>
+                            <select id="capture-copy-size" class="select narrow">
+                                <option value="off">Off - thumbnails only</option>
+                                <option value="small">Small - 600 px tall, about 55 KB each</option>
+                                <option value="medium">Medium - 900 px tall, about 100 KB each</option>
+                                <option value="large">Large - 1200 px tall, about 145 KB each</option>
+                            </select>
+                            <div class="hint" id="capture-copy-hint">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>Sounds</h3>
+                        <p class="hint">Played by the scanner pages.</p>
                         <label class="switch-row">
                             <span class="switch-text"><span class="switch-title">Sound effects</span></span>
                             <input type="checkbox" class="switch" id="toggle-audio">
@@ -166,17 +179,17 @@
                     </div>
                 </section>
 
-                <!-- ================= Card reading ================= -->
+                <!-- ================= Card recognition: the three steps, in their order ================= -->
                 <section class="settings-category" id="cat-reading" hidden>
-                    <h2>Card reading</h2>
+                    <h2>Card recognition</h2>
                     <p class="hint">How a captured card is read, in this order: its picture; then OCR, when the picture is in doubt; then the vision AI, for what is still open - and otherwise the
                         card goes to the review queue. Each step can be switched off.</p>
 
-                    <!-- 1. The picture: the reading by fingerprint, what it may add on its own, and the index it needs -->
-                    <div class="settings-card" id="reading-evidence-card">
+                    <!-- 1. The picture: the reading by fingerprint, and what it may add on its own (its index is under Card data) -->
+                    <div class="settings-card reading-step" id="reading-evidence-card">
                         <h3>Picture</h3>
                         <p class="hint">A fingerprint of the card is matched against every printing of the card data; a clear match settles the card. When OCR is on, the collector line is read from
-                            the card's strip too, to tell apart printings with the same art. Without the picture index below, cards are read by OCR and then the AI, as before.</p>
+                            the card's strip too, to tell apart printings with the same art. Without the picture index (Card data), cards are read by OCR and then the AI, as before.</p>
                         <label class="switch-row">
                             <span class="switch-text">
                                 <span class="switch-title">Read the card by its picture</span>
@@ -192,32 +205,6 @@
                             <input type="checkbox" class="switch" id="toggle-picture-alone">
                         </label>
                         <p class="hint" id="reading-status"></p>
-                        <div class="input-group">
-                            <label>Picture index</label>
-                            <div class="storage-usage" id="index-status">Loading...</div>
-                            <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
-                            <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
-                            <div class="hint" id="index-hint">A fingerprint of every printing's picture. An update downloads only the new pictures from Scryfall; the first build downloads the whole game, about 12 GB, and takes hours - it can be stopped and goes on where it stopped.</div>
-                        </div>
-                        <!-- a direct child of the card, like every other switch: inside .input-group it took that group's input styles (a full-width bar) -->
-                        <label class="switch-row">
-                            <span class="switch-text">
-                                <span class="switch-title">Update the index after a card data update</span>
-                                <span class="switch-desc">Fetches the new printings' pictures by itself; never the first build</span>
-                            </span>
-                            <input type="checkbox" class="switch" id="toggle-extend-index">
-                        </label>
-                        <!-- The automatic retry (server/card_data.py: scheduled_index_update): a build Scryfall refused, one stopped or failed - never a first build -->
-                        <div class="schedule-row">
-                            <label for="index-every">Go back to what is missing</label>
-                            <select id="index-every" class="select">
-                                <option value="0">Off</option>
-                                <option value="6">Every 6 hours</option>
-                                <option value="24">Every day</option>
-                                <option value="168">Every week</option>
-                            </select>
-                        </div>
-                        <div class="hint" id="index-auto">On its own, while the program runs: the pictures a build left out (Scryfall's rate limit, a stop, an error). Never the first build.</div>
                     </div>
 
                     <!-- 2. OCR: read on this computer, for what the picture does not settle (and the collector line for the picture) -->
@@ -274,10 +261,65 @@
                     </div>
                 </section>
 
-                <!-- ================= Collection and data ================= -->
-                <section class="settings-category" id="cat-data" hidden>
-                    <h2>Collection and data</h2>
+                <!-- ================= Card data: the card database and the picture index, and their automatic updates ================= -->
+                <section class="settings-category" id="cat-carddata" hidden>
+                    <h2>Card data</h2>
+                    <p class="hint">What cards are recognised against: the card database (every printing, with prices) and the picture index (a fingerprint of every printing's picture). The index follows the card data.</p>
 
+                    <div class="settings-card">
+                        <h3>Card database</h3>
+                        <div class="storage-usage" id="database-state">Loading...</div>
+                        <button type="button" id="update-database" class="btn btn-block">Update card database</button>
+                        <div class="hint" id="database-source-hint">Downloads the latest card data and prices (a few minutes). Scanning keeps working while it downloads.</div>
+                        <div class="hint" id="database-progress"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Picture index</h3>
+                        <div class="input-group">
+                            <div class="storage-usage" id="index-status">Loading...</div>
+                            <button type="button" id="update-index" class="btn btn-block">Update the picture index</button>
+                            <button type="button" id="stop-index" class="btn btn-block" hidden>Stop (what is done is kept)</button>
+                            <div class="hint" id="index-hint">A fingerprint of every printing's picture. An update downloads only the new pictures from Scryfall; the first build downloads the whole game, about 12 GB, and takes hours - it can be stopped and goes on where it stopped.</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Automatic updates</h3>
+                        <div class="schedule-row">
+                            <label for="database-every">Automatic update</label>
+                            <select id="database-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="24">Every day</option>
+                                <option value="72">Every 3 days</option>
+                                <option value="168">Every week</option>
+                                <option value="720">Every month</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="database-auto">Downloads the card data again on its own, while the program runs (a computer that was off catches up when it starts).</div>
+                        <label class="switch-row">
+                            <span class="switch-text">
+                                <span class="switch-title">Update the index after a card data update</span>
+                                <span class="switch-desc">Fetches the new printings' pictures by itself; never the first build</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="toggle-extend-index">
+                        </label>
+                        <div class="schedule-row">
+                            <label for="index-every">Go back to what is missing</label>
+                            <select id="index-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="6">Every 6 hours</option>
+                                <option value="24">Every day</option>
+                                <option value="168">Every week</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="index-auto">On its own, while the program runs: the pictures a build left out (Scryfall's rate limit, a stop, an error). Never the first build.</div>
+                    </div>
+                </section>
+
+                <!-- ================= Backups ================= -->
+                <section class="settings-category" id="cat-backups" hidden>
+                    <h2>Backups</h2>
                     <div class="settings-card">
                         <h3>Backups</h3>
                         <p class="hint">The collection, the scanned cards and the decks as they are now. Make one yourself before a big load (adding scanned cards, importing a file) - restoring puts all three back.</p>
@@ -304,42 +346,16 @@
                         </div>
                         <div id="backup-list" class="backup-list"></div>
                     </div>
+                </section>
 
-                    <div class="settings-card">
-                        <h3>Card data</h3>
-                        <div class="hint" id="database-state">Loading...</div>
-                        <button type="button" id="update-database" class="btn btn-block">Update card database</button>
-                        <!-- The automatic download (server/card_data.py: scheduled_card_data_updates) - off unless chosen here -->
-                        <div class="schedule-row">
-                            <label for="database-every">Automatic update</label>
-                            <select id="database-every" class="select">
-                                <option value="0">Off</option>
-                                <option value="24">Every day</option>
-                                <option value="72">Every 3 days</option>
-                                <option value="168">Every week</option>
-                                <option value="720">Every month</option>
-                            </select>
-                        </div>
-                        <div class="hint" id="database-auto">Downloads the card data again on its own, while the program runs (a computer that was off catches up when it starts).</div>
-                        <div class="hint" id="database-source-hint">Downloads the latest card data and prices (a few minutes). Scanning keeps working while it downloads.</div>
-                        <div class="hint" id="database-progress"></div>
-                    </div>
-
+                <!-- ================= Storage ================= -->
+                <section class="settings-category" id="cat-storage" hidden>
+                    <h2>Storage</h2>
                     <div class="settings-card">
                         <h3>Storage</h3>
                         <div class="input-group">
                             <label>Capture files in use</label>
                             <div class="storage-usage" id="capture-usage">Loading...</div>
-                        </div>
-                        <div class="input-group">
-                            <label for="capture-copy-size">Capture size (all cameras)</label>
-                            <select id="capture-copy-size" class="select narrow">
-                                <option value="off">Off - thumbnails only</option>
-                                <option value="small">Small - 600 px tall, about 55 KB each</option>
-                                <option value="medium">Medium - 900 px tall, about 100 KB each</option>
-                                <option value="large">Large - 1200 px tall, about 145 KB each</option>
-                            </select>
-                            <div class="hint" id="capture-copy-hint">Loading...</div>
                         </div>
                         <div class="input-group">
                             <label for="cleanup-days">Keep the pictures received from the cameras for (days)</label>
@@ -361,7 +377,6 @@
                             <input type="checkbox" class="switch" id="keep-frames">
                         </label>
                     </div>
-
                 </section>
 
                 <!-- ================= Server ================= -->
@@ -421,7 +436,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=26"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=23"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=27"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=24"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-// The settings page (templates/settings.html): every setting of the program in five categories,
-// each saved the moment it changes. Loaded after audio.js and common.js; it has its own `$`,
+// The settings page (templates/settings.html): every setting of the program in sections (the plan:
+// docs/plans/SETTINGS_REDESIGN_PLAN.md), each saved the moment it changes. Loaded after audio.js and common.js; it has its own `$`,
 // `api` and connection (scanner.js, collection.js and library.js are for other pages and declare
 // the same names).
 //
@@ -49,13 +49,18 @@ function recall(key, fallback) {
     try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
 }
 
-const CATEGORIES = ['cameras', 'sounds', 'reading', 'data', 'server'];
+const CATEGORIES = ['cameras', 'reading', 'carddata', 'backups', 'storage', 'server'];
+
+// The sections the page had before the redesign of 2026-10-22, and where their contents went: other pages link to the old addresses
+// (the collection page sends #data, an older bookmark #sounds) and a browser may remember one as its last section
+const OLD_CATEGORIES = {sounds: 'cameras', data: 'backups'};
 
 // ============================================================================
 // Categories
 // ============================================================================
 
 function showCategory(name, remembered = true) {
+    name = OLD_CATEGORIES[name] || name;
     if (!CATEGORIES.includes(name)) name = 'cameras';
     CATEGORIES.forEach(category => {
         $('cat-' + category).hidden = category !== name;
@@ -71,9 +76,11 @@ function showCategory(name, remembered = true) {
 // The old addresses: the scanner page's drawer (#settings) was cameras, sound and the AI; the
 // collection page's was backups and storage
 function categoryFromAddress() {
-    const name = location.hash.replace('#', '');
+    const asked = location.hash.replace('#', '');
+    const name = OLD_CATEGORIES[asked] || asked;
     if (CATEGORIES.includes(name)) return name;
-    return recall('settingsCategory', 'cameras');
+    const remembered = recall('settingsCategory', 'cameras');
+    return OLD_CATEGORIES[remembered] || remembered;
 }
 
 // ============================================================================
@@ -122,7 +129,7 @@ function connect() {
         $('update-database').disabled = false;
         $('update-database').textContent = 'Update card database';
         $('database-progress').textContent = `Updated: ${data.total_cards.toLocaleString()} cards loaded.`;
-        notify('Card data updated - the picture index can be updated now (Card reading > Picture)', 'success');
+        notify('Card data updated', 'success');
         loadDatabaseState();
         loadIndex();
         loadUpdateSchedule();
@@ -407,15 +414,15 @@ function applyReadingState(reading) {
         : 'Off: OCR, then the vision AI, as before the picture matching existed';
     const missing = [];
     if (reading.index_printings === null || reading.index_printings === undefined) {
-        missing.push('there is no picture index (the button below)');
+        missing.push('there is no picture index (Card data)');
     }
     // OCR off is no strip: only the picture alone can decide then, so it is a gap only while that is off too
     if (!reading.ocr_enabled && !reading.accept_image_alone) missing.push('OCR is switched off and the picture alone is not allowed');
     const pictureOnly = evidence && !reading.ocr_enabled && reading.accept_image_alone && reading.index_printings;
     // While the index lacks printings of the card data, the picture alone adds nothing (the server refuses it: a missing printing would be added as another one)
     const stale = evidence && reading.accept_image_alone && reading.index_missing
-        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (below), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
-    // (the index's size is not repeated here: the picture index's own status sits right below, in the same card)
+        ? `The picture index lacks ${reading.index_missing.toLocaleString()} printing${reading.index_missing === 1 ? '' : 's'} of the card data: until it is updated (Card data), the picture alone adds nothing - those cards go on to OCR, the AI or review. ` : '';
+    // (the index's size is not repeated here: it is under Card data, with the button that updates it)
     $('reading-status').textContent = stale + (pictureOnly ? 'OCR is switched off: the picture alone decides what it can, the rest goes to the vision AI. ' : '')
         + (evidence && missing.length ? `Not working yet: ${missing.join(' and ')} - every card is read as before.` : '');
 }
@@ -556,7 +563,7 @@ function bindReading() {
         if (toggle.checked) {
             const ok = await confirmDialog({
                 title: 'Add cards the picture alone decided?',
-                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: extend the picture index after every card data update (Settings > Storage) and look at what is added.',
+                message: 'A printing newer than the image index whose collector line cannot be read can then be added as another printing of the card, with no one asking. It is the picture-first design: keep the picture index current (Settings > Card data) and look at what is added.',
                 confirmText: 'Turn on', danger: true
             });
             if (!ok) { toggle.checked = false; return; }
@@ -594,7 +601,7 @@ function bindReading() {
 }
 
 // ============================================================================
-// Collection and data: backups, card data, storage
+// Backups, card data (with the picture index and the automatic updates), storage
 // ============================================================================
 
 async function loadBackups() {

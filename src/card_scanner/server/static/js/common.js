@@ -609,7 +609,7 @@ function watchCardData() {
 document.addEventListener('DOMContentLoaded', watchCardData);
 
 // The picture index on the Scanner pages (the banner is only there: _topbar.html): cards are read by their picture first, so a missing or stale index changes what is read -
-// said at the top, with a link to where it is updated (Settings > Card reading > Picture). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
+// said at the top, with a link to where it is updated (Settings > Card data). index_missing is the count the server itself goes by (PrintingCheck.missing_printings).
 function showIndexNotice(reading) {
     const banner = document.getElementById('index-banner');
     if (!banner) return;
@@ -628,7 +628,7 @@ function showIndexNotice(reading) {
         }
     }
     banner.hidden = !text;
-    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#reading">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card reading)</a>` : '';
+    banner.innerHTML = text ? `${escapeHtml(text)} <a href="/settings#carddata">${build && build.running ? 'Details' : 'Update it'} (Settings &rarr; Card data)</a>` : '';
     // While a build runs, look again every few seconds so the count moves (and the banner goes when it ends); otherwise the slow timer below is enough
     clearTimeout(indexNoticeTimer);
     if (build && build.running) indexNoticeTimer = setTimeout(loadIndexNotice, 3000);
