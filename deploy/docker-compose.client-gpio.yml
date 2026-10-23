@@ -1,0 +1,13 @@
+# The card dropper's GPIO for a USB-webcam station in Docker (station/dropper.py; Settings > Cameras > Card dropper), laid over
+# docker-compose.client.yml - only on a machine that has GPIO (a Raspberry Pi), since a PC has no /dev/gpiochip0 and Docker
+# refuses to start a container given a device that is not there:
+#
+#   docker compose -f deploy/docker-compose.client.yml -f deploy/docker-compose.client-gpio.yml up -d --build
+#
+# docker-compose.client.yml mounts the host's /dev but only lets the container use video devices; this lets it use the GPIO
+# chip of the Pi's 40-pin header too (/dev/gpiochip0 on a Raspberry Pi 4 and 5, checked 2026-10-22). The Pi-camera station
+# (docker-compose.client-pi.yml) needs nothing: it runs privileged already.
+services:
+  station:
+    devices:
+      - /dev/gpiochip0:/dev/gpiochip0

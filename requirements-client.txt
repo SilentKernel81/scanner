@@ -12,4 +12,8 @@ requests
 # config.yaml (camera index, resolution, capture thresholds)
 pyyaml>=6.0
 
+# The card dropper's GPIO pin (station/dropper.py; libgpiod 2, LGPL-2.1): only on 64-bit ARM - a Raspberry Pi. Imported only when
+# the dropper pulses, so a PC station needs nothing; the Pi-camera image takes Debian's python3-libgpiod instead (deploy/Dockerfile)
+gpiod>=2.1; platform_machine == "aarch64"
+
 # Raspberry Pi Camera (optional - install via apt on the Pi: python3-picamera2)

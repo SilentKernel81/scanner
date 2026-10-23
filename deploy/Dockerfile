@@ -110,7 +110,7 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
          python3 python3-picamera2 python3-opencv python3-socketio python3-websocket \
-         python3-requests python3-yaml v4l-utils \
+         python3-requests python3-yaml v4l-utils python3-libgpiod \
     && apt-get purge -y curl && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 

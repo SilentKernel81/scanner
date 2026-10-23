@@ -132,6 +132,52 @@
                             </div>
                         </div>
 
+                        <!-- The card dropper (station/dropper.py): a mechanism wired to the station's GPIO pins releases the next card - off unless switched on.
+                             What it drives is the mechanism's business; the station only pulses the pin, once per card (settings.js: applyDropper) -->
+                        <div class="settings-card">
+                            <h3>Card dropper</h3>
+                            <label class="switch-row">
+                                <span class="switch-text">
+                                    <span class="switch-title">Release the next card by itself</span>
+                                    <span class="switch-desc">For a mechanism wired to the station's GPIO pins: one pulse per card, after each capture</span>
+                                </span>
+                                <input type="checkbox" class="switch" id="toggle-dropper">
+                            </label>
+                            <div class="input-group">
+                                <label for="dropper-pin">GPIO pin</label>
+                                <input type="number" id="dropper-pin" class="text-input narrow" min="0" max="63" step="1" inputmode="numeric" placeholder="17">
+                                <div class="hint">The GPIO number on a Raspberry Pi pinout (GPIO17 is 17), not the pin's position on the header.</div>
+                            </div>
+                            <div class="input-group">
+                                <label for="dropper-pulse">Pulse (milliseconds)</label>
+                                <input type="number" id="dropper-pulse" class="text-input narrow" min="10" max="2000" step="10" inputmode="numeric">
+                            </div>
+                            <details class="settings-more">
+                                <summary>Details</summary>
+                                <p class="hint">After each capture the server has received - and was not a card back - and once the focus has settled, the station
+                                    sets the pin active for the pulse, then inactive. With auto-add off, the next card comes once you add or skip the card.
+                                    While the server cannot be reached, no card is released. Starting auto-scanning releases
+                                    the first card. A card that is not captured releases nothing, so the stack never runs on by itself. Try it with common or
+                                    sleeved cards first.</p>
+                                <div class="input-group">
+                                    <label for="dropper-chip">GPIO chip</label>
+                                    <input type="text" id="dropper-chip" class="text-input narrow" maxlength="20" autocomplete="off" spellcheck="false">
+                                    <div class="hint">/dev/gpiochip0 on a Raspberry Pi 4 and 5. A station in Docker with a USB webcam needs deploy/docker-compose.client-gpio.yml.</div>
+                                </div>
+                                <label class="switch-row">
+                                    <span class="switch-text">
+                                        <span class="switch-title">Active when low</span>
+                                        <span class="switch-desc">For a relay board that switches on a low input</span>
+                                    </span>
+                                    <input type="checkbox" class="switch" id="dropper-active-low">
+                                </label>
+                            </details>
+                            <div class="settings-actions">
+                                <button type="button" class="btn btn-small" id="dropper-test">Drop one card</button>
+                            </div>
+                            <div class="hint" id="dropper-state"></div>
+                        </div>
+
                         <details class="settings-advanced">
                             <summary>Troubleshooting</summary>
                             <label class="switch-row">
@@ -457,6 +503,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=28"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=27"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=28"></script>
 </body>
 </html>

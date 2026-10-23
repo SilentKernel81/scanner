@@ -11,7 +11,7 @@ from card_scanner.core.review import REVIEW_DIR
 
 from card_scanner.server.state import app, database, identification, inventory, maintenance_barrier, printing_check, review, scan_inventory, socketio, stations
 from card_scanner.server.logs import logger
-from card_scanner.server.desks import GENERAL_ROOM, desk, desk_for, emit_desk, log_to_client, page_stations, scanner
+from card_scanner.server.desks import GENERAL_ROOM, desk, desk_for, emit_desk, log_to_client, page_stations, review_done, scanner
 from card_scanner.server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
 from card_scanner.server.stations_api import undo_station_add
 
@@ -143,6 +143,9 @@ def handle_add_inventory(data):
 def add_selected_card(data):
     """The card on the page goes into the scanned cards (handle_add_inventory, under its barrier)"""
     card = desk().current_card_info
+    live = desk().current_review_id is None      # the camera's own capture, not an item of the review queue (that one releases no card)
+    # The shown card's own capture (its picture), read before anything clears it: Add settles exactly that one (desks.review_done)
+    shown_capture = (card or {}).get('capture') or desk().pending_capture
     if not scan_inventory or not card:
         logger.warning("Add to inventory requested but no card selected")
         emit('error', {'message': 'No card selected'})
@@ -222,6 +225,8 @@ def add_selected_card(data):
         if scanner:
             scanner.card_under_review = False
             logger.info("Card review completed - auto-capture re-enabled")
+        if live:
+            review_done(shown_capture)   # the station's card dropper may release the next card (not on the error path below)
 
     except Exception as e:
         logger.exception(f"Exception in handle_add_inventory: {e}")
@@ -330,6 +335,7 @@ def handle_dismiss_card(data=None):
     """Handle card dismissal - user cancels current card review"""
 
     logger.info("Card dismissed by user")
+    shown_capture = desk().pending_capture      # the capture shown, before it is cleared: Skip settles exactly that one
     desk().current_card_info = None
     # "Not found" dismisses itself to let auto scanning go on; the capture stays for a
     # manual search. Skip drops it
@@ -340,6 +346,11 @@ def handle_dismiss_card(data=None):
     if scanner:
         scanner.card_under_review = False
         logger.info("Card review dismissed - auto-capture re-enabled")
+    # Only the person's Skip settles the capture. "Not found" dismisses itself (keep_capture) so that scanning may go on, the
+    # picture kept for a manual search - nobody has dealt with that card yet: the card dropper waits (a Codex review of 2026-10-22).
+    # Found by that search and added, the Add settles it (its picture is still the pending capture)
+    if not (data or {}).get('keep_capture'):
+        review_done(shown_capture)
 
     emit('card_dismissed', {'message': 'Card dismissed'})
 

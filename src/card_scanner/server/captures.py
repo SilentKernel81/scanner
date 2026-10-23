@@ -19,7 +19,7 @@ from card_scanner.server.state import (
     pending, printing_check, review, scan_inventory, seen_captures, socketio, stations,
 )
 from card_scanner.server.logs import logger, scanned_cards_logger
-from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client, queue_changed, scanner
+from card_scanner.server.desks import desk, desk_for, emit_desk, in_desk, log_to_client, queue_changed, review_done, scanner
 
 
 def get_ai_model_info():
@@ -78,6 +78,7 @@ def queue_for_review(game, image_path, name='', number='', set_code='', foil='un
     # Nothing waits on the page for this card (normal mode blocks auto-capture until Add / Skip)
     if scanner:
         scanner.card_under_review = False
+    review_done(image_path)   # ... so the station's card dropper may release the next card (only if it owes one for THIS capture)
     return why
 
 
@@ -106,6 +107,9 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
                       f"{games.get(game_id).label} review queue", level="warning")
         if scanner:
             scanner.card_under_review = False
+        # Queued: the station's card dropper may release the next card, as for any capture queued (queue_for_review) - else, with
+        # auto-add off, it waited for an Add / Skip on the page that can never come (a Codex review of 2026-10-22)
+        review_done(image_path)
         return {'status': 'review', 'reason': 'game switched'}
     reviewing = desk().current_review_id is not None
     if not fast and not reviewing:

@@ -21,6 +21,7 @@ config.yaml. See remote_scanner.py for the messages.
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -39,10 +40,12 @@ import signal
 import socketio
 
 from card_scanner.station import station_setup
+from card_scanner.station.dropper import Dropper
 from card_scanner.config import Config
 
 NAMESPACE = '/station'
 STATUS_INTERVAL = 0.2    # seconds between status reports
+DROP_WAIT_FOR_FOCUS = 20.0  # seconds a card release waits for a focus check or a refocus sweep to end (a sweep takes ~8 s)
 PREVIEW_INTERVAL = 0.08  # at most ~12 preview frames a second, while the page is watched
 NOTE_SUFFIX = '.upload.json'  # the note beside a capture that is not on the server yet
 # What the server may call and set (remote_scanner.py: METHODS, DECIDED, SENT)
@@ -79,6 +82,10 @@ class ServerSettings:
 
 
 class Station:
+    # Seconds between attempts at hello while the connection lasts (the last one repeats): a hello whose answer is lost is asked again,
+    # or the card dropper - held until hello succeeds (dropper_synced) - would wait on a healthy connection for ever (a Codex review)
+    HELLO_RETRY_DELAYS = (1, 2, 5, 10, 30)
+
     def __init__(self, server, station_id, name, token):
         self.server = server.rstrip('/')
         self.id = station_id
@@ -97,11 +104,49 @@ class Station:
         # station id: kept, not sent, until the setup page says what to do with them
         self.held = []
         self.held_lock = threading.Lock()
+        # The card dropper (dropper.py): off until the server's settings switch it on. drop_owed: with auto-add off, (capture_id,
+        # scanning session) of the capture whose next card is owed - released only when the server says THAT capture was added,
+        # skipped or sent to the review queue (on_review_done), never on an error or a stop. Set, paid and cleared under release_lock
+        self.dropper = Dropper()
+        self.drop_owed = None
+        # The releases (release_next_card): one runs at a time (wait for the focus, then the pulse); one more asked for meanwhile is
+        # kept and runs right after - a card captured while the previous pulse was still on its way owes its next card all the same
+        # (a Codex review of 2026-10-22: refusing it stalled the feeding for good). A third is refused: one card per capture
+        self.release_lock = threading.Lock()
+        # Held while the server's settings are applied - a hello's answer, or a live 'set' - so that they are applied one after the
+        # other, in the order the server sent them: a hello whose connection has ended is refused under it BEFORE it changes anything
+        # (a Codex review of 2026-10-22: a stale hello applied its settings first and checked after - its 'dropper on' undid a newer
+        # 'off'). Reentrant: hello applies through on_set. Taken before release_lock, never the other way
+        self.settings_lock = threading.RLock()
+        # The newest number (remote_scanner: '_revision') applied, setting by setting, and the server start they belong to: an older
+        # value - a hello's answer overtaken by a live change, a live change overtaken by a hello - is ignored (a Codex review of
+        # 2026-10-22). Per setting: a delayed change of one setting must not hide a newer change of another. Under settings_lock
+        self.settings_server = None
+        self.settings_revisions = {}
+        self.release_busy = False
+        self.release_pending = None     # (reason, scanning session) of the release kept for after the current one
+        # The scanning session: one more each time auto-scanning is switched on or off, and when the dropper is switched off. A release belongs to the session that asked
+        # for it and is refused before its pulse once another has begun - a release still waiting for the focus when scanning was
+        # stopped and started again would otherwise pulse beside the new session's first card: two cards, no capture between
+        # (a Codex review of 2026-10-22)
+        self.scan_session = 0
+        self.last_capture_session = None   # the session the latest capture started in: the first card is owed only by a session that has none
+        # Connected to the server and its hello applied: only then may a card be released. While the Socket.IO connection is down the
+        # server's stop cannot reach this station (uploads may still get through over HTTP), so a release that comes up then is KEPT
+        # (release_deferred) and decided after the next hello - by then a stop pressed meanwhile has been replayed and has made it
+        # stale (a Codex review of 2026-10-22: a stop during an outage was followed by more cards)
+        self.dropper_synced = False
+        self.release_deferred = None
+        # The connection's number: one more at every connect and disconnect. A hello belongs to the connection it was started for, and
+        # marks the station in step only if that connection is still the current one - a disconnect while its answer is being applied
+        # must not be undone by it (a Codex review of 2026-10-22). Changed and read under release_lock
+        self.connection = 0       # (reason, session, first) of the release kept until the station is in step again
         self.sio = socketio.Client(reconnection=True, reconnection_delay=1, reconnection_delay_max=5)
         self.sio.on('connect', self.on_connect, namespace=NAMESPACE)
         self.sio.on('disconnect', self.on_disconnect, namespace=NAMESPACE)
         self.sio.on('command', self.on_command, namespace=NAMESPACE)
         self.sio.on('set', self.on_set, namespace=NAMESPACE)
+        self.sio.on('review_done', self.on_review_done, namespace=NAMESPACE)
 
     # ------------------------------------------------------------------------
     # Connection
@@ -126,6 +171,7 @@ class Station:
         finally:
             if self.scanner:
                 self.scanner.cleanup()
+            self.dropper.close()   # the pin is let go (it was left inactive after the last pulse)
             self.sio.disconnect()
 
     def connected(self):
@@ -140,31 +186,79 @@ class Station:
 
     def on_connect(self):
         logger.info(f"Connected to {self.server} as {self.name} ({self.id})")
+        with self.release_lock:
+            self.connection += 1
+            connection = self.connection
         # Not from this handler's thread: hello waits for the server's answer
-        threading.Thread(target=self.hello, daemon=True).start()
+        threading.Thread(target=self.hello, args=(connection,), daemon=True).start()
 
     def on_disconnect(self, *_args):
         logger.warning("Connection to the server lost - scanning goes on, captures wait to be sent")
         self.preview_wanted = False
+        with self.release_lock:
+            self.connection += 1            # a hello still under way belongs to a connection that has ended (see hello)
+            self.dropper_synced = False     # no card is released until the next hello (see dropper_synced)
 
-    def hello(self):
-        """Take the camera's settings from the server; the first time, start the scanner with them"""
-        try:
-            answer = self.sio.call('hello', {}, namespace=NAMESPACE, timeout=10) or {}
-        except Exception as e:
-            logger.error(f"The server did not answer hello: {e}")
-            return
-        if self.scanner is None:
-            from card_scanner.station.scanner import CardScanner  # opens the camera
-            settings = ServerSettings(answer.get('settings') or {},
-                                      lambda key, value: self.emit('setting', {'key': key, 'value': value}))
-            scanner = CardScanner(log_callback=self.send_log, settings=settings)
-            scanner.fast_scan_mode = True
-            scanner.auto_capture_callback = self.auto_captured
-            self.apply(scanner, answer.get('set') or {})
-            self.scanner = scanner
-        else:
-            self.apply(self.scanner, answer.get('set') or {})
+    def hello(self, connection=None):
+        """
+        Take the camera's settings from the server; the first time, start the scanner with them. Asked again while the same connection
+        lasts (HELLO_RETRY_DELAYS); only a hello of the connection still current puts the station in step (dropper_synced)
+        """
+        if connection is None:
+            connection = self.connection
+        delays = iter(self.HELLO_RETRY_DELAYS)
+        delay = next(delays)
+        while True:
+            if self.stopping or connection != self.connection:
+                return                      # that connection has ended: the next one asks for itself
+            try:
+                answer = self.sio.call('hello', {}, namespace=NAMESPACE, timeout=10) or {}
+                break
+            except Exception as e:
+                logger.error(f"The server did not answer hello: {e} - asking again in {delay} s")
+                time.sleep(delay)
+                delay = next(delays, delay)
+        with self.settings_lock:
+            # Too late? A newer connection's hello - or a disconnect - came while this answer was on its way: it changes NOTHING
+            if connection != self.connection:
+                logger.warning("The server's answer to hello came for a connection that has ended - not applied")
+                return
+            if self.scanner is None:
+                from card_scanner.station.scanner import CardScanner  # opens the camera
+                settings = ServerSettings(answer.get('settings') or {},
+                                          lambda key, value: self.emit('setting', {'key': key, 'value': value}))
+                scanner = CardScanner(log_callback=self.send_log, settings=settings)
+                scanner.fast_scan_mode = True
+                scanner.auto_capture_callback = self.auto_captured
+                values = self._newer_only(answer.get('set') or {})
+                self.apply(scanner, values)
+                self.scanner = scanner
+                if 'dropper' in values:           # (not when a newer live value has set it already)
+                    self.configure_dropper(values['dropper'])
+            else:
+                # Through on_set: a stop the server replays (pressed while this station was away) goes through the session's
+                # bookkeeping - a new session, everything pending, kept or deferred cleared - as a stop does when it comes live. Never a
+                # START by connecting: that would release a card (the server sends none; refused here all the same)
+                values = dict(answer.get('set') or {})
+                if values.get('auto_capture_enabled'):
+                    values.pop('auto_capture_enabled')
+                self.on_set(values)
+            # In step with the server again: releases may go - if this hello's connection is still the current one (a disconnect
+            # while its answer was being applied has made it stale: the station stays out of step until the next hello). Never a card
+            # released by connecting itself - only ...
+            with self.release_lock:
+                if connection != self.connection:
+                    logger.warning("Card dropper: the connection went while its hello was applied - not in step until the next one")
+                    return
+                self.dropper_synced = True
+                deferred, self.release_deferred = self.release_deferred, None
+        # ... the one owed for a capture the page settled while this station was away: the server repeats the last settled capture at
+        # every connection, and on_review_done pays only a debt for exactly that capture, once ...
+        if answer.get('review_done'):
+            self.on_review_done({'capture_id': answer['review_done']})
+        # ... and a release that came up during the outage, if its session still runs (a replayed stop has made it stale)
+        if deferred:
+            self.release_next_card(deferred[0], session=deferred[1], first=deferred[2])
 
     @staticmethod
     def apply(scanner, values):
@@ -183,7 +277,11 @@ class Station:
     def state(self):
         """What the server shows and decides by (RemoteScanner: REPORTED and SENT names, the camera settings)"""
         s = self.scanner
+        # Read BEFORE the switch: the number of the last scanning change applied, which the server's waiting stop is confirmed by
+        # (RemoteScanner._take_state) - read first, a newer change can only make the state that follows newer, never older
+        applied = self.settings_revisions.get('auto_capture_enabled')
         return {
+            'auto_capture_revision': [self.settings_server, applied] if applied is not None else None,
             'camera_error': s.camera_error, 'camera_type': s.camera_type,
             'auto_capture_enabled': bool(s.auto_capture_enabled), 'card_under_review': bool(s.card_under_review),
             'capture_pending': bool(s.capture_pending), 'rotation': s.rotation, 'refocus_every': s.refocus_every,
@@ -191,11 +289,209 @@ class Station:
             'fixed_area': s.fixed_area, 'fixed_area_enabled': bool(s.fixed_area_enabled),
             'focus_locked_value': s.focus_locked_value, 'focus_sweep_running': bool(s.focus_sweep_running),
             'focus_probe_running': bool(s.focus_probe_running), 'enable_detection': bool(s.enable_detection),
+            'dropper_state': self.dropper.state(),
         }
 
     def on_set(self, values):
+        """The server's settings for this station (live, or from hello's answer): applied one at a time (settings_lock), newer only"""
+        with self.settings_lock:
+            self._apply_set(self._newer_only(values or {}))
+
+    def _newer_only(self, values):
+        """
+        values without the settings this station has had a newer value of (settings_revisions); under settings_lock. A server
+        that numbers nothing (an older one) has everything applied, as before
+        """
+        values = dict(values)
+        revision = values.pop('_revision', None)
+        if not (isinstance(revision, (list, tuple)) and len(revision) == 2):
+            return values
+        server, number = revision
+        if server != self.settings_server:     # another server start: its numbers begin again
+            self.settings_server, self.settings_revisions = server, {}
+        newer = {}
+        for name, value in values.items():
+            if number < self.settings_revisions.get(name, -1):
+                logger.info(f"An older value of {name} from the server - ignored, a newer one is applied")
+                continue
+            self.settings_revisions[name] = number
+            newer[name] = value
+        return newer
+
+    def _apply_set(self, values):
+        if 'dropper' in values:
+            self.configure_dropper(values['dropper'])
         if self.scanner:
-            self.apply(self.scanner, values or {})
+            scanner = self.scanner
+            started = None                    # the session a start began (its first card belongs to it)
+            if 'auto_capture_enabled' in values:
+                # The whole switch under release_lock, from reading the old state to the new one - and nowhere else: a start paused
+                # between its check and its write must not switch scanning back on after a stop that came meanwhile (a Codex review
+                # of 2026-10-22: written again by apply outside the lock, a start undid the later stop and released a card).
+                # Scanning switched on or off: the new session begins - everything asked for before is stale - and only THEN is the
+                # switch itself made (the lock a capture reads its session under, _auto_captured): a capture that starts the moment
+                # scanning is on can only see the new session (the review before: switched on first, a capture in that instant took
+                # the old one, the new one refused its release - the feeding stopped)
+                wanted = bool(values['auto_capture_enabled'])
+                with self.release_lock:
+                    if wanted != bool(scanner.auto_capture_enabled):
+                        self.scan_session += 1
+                        self.release_pending = None
+                        self.release_deferred = None
+                        self.drop_owed = None
+                        scanner.auto_capture_enabled = wanted
+                        if wanted:
+                            started = self.scan_session
+                values = {name: value for name, value in values.items() if name != 'auto_capture_enabled'}
+            self.apply(scanner, values)       # the rest (the switch is made above, under the lock, only)
+            self.after_set(started)
+
+    def after_set(self, started):
+        """
+        What the server's settings change for the card dropper, once applied (the session moved already, in on_set). Auto-scanning
+        switched on (started: the session that start began): the first card is released - for THAT session, so a stop that came
+        meanwhile makes it stale - and only into an empty field (_still_wanted, first=True): a card already in view brings the
+        next one by its own capture. card_under_review going back to False pays NOTHING: the server clears it on errors and stops
+        too (on_review_done pays).
+        """
+        if started is not None:
+            self.release_next_card('scanning started', session=started, first=True)
+
+    def on_review_done(self, data=None):
+        """
+        The server: the live capture capture_id was added or skipped on the page, or went to the review queue by itself
+        (desks.review_done). The card owed for exactly that capture is released; any other capture_id - a manual capture, an
+        older one - releases nothing.
+        """
+        capture_id = (data or {}).get('capture_id')
+        with self.release_lock:
+            owed = self.drop_owed
+            if not owed or owed[0] != capture_id:
+                return
+            self.drop_owed = None
+        self.release_next_card('the card was added or skipped', session=owed[1])
+
+    # ------------------------------------------------------------------------
+    # The card dropper (dropper.py: what it does; here: when)
+    # ------------------------------------------------------------------------
+
+    def configure_dropper(self, config):
+        """The dropper's settings from the server; wrong ones are refused (the server checks them first: dropper.checked)"""
+        try:
+            values = self.dropper.configure(config)
+        except ValueError as e:
+            logger.error(f"Card dropper: the server's settings are refused ({e}) - it stays as it was")
+            return
+        if not values['enabled']:
+            # Off: everything asked for before is cancelled - the debt, the release kept for later, and the one waiting for the focus
+            # (a new session: _release refuses it right before its pulse). Switched on again, nothing of before can come back
+            # (a Codex review of 2026-10-22). Other changes (the pulse, the pin) while it stays on cancel nothing: a card waiting
+            # for its release would then never come
+            with self.release_lock:
+                self.drop_owed = None
+                self.release_pending = None
+                self.scan_session += 1
+
+    def release_next_card(self, reason, session=None, first=False):
+        """
+        Release the next card onto the pile (dropper on only), in the background: the caller is the capture's thread or the
+        connection's. It first waits for a focus check or a refocus sweep to end (a card falling while the lens moves is a
+        blurred card), at most DROP_WAIT_FOR_FOCUS; then, if auto-scanning is still on and the camera is there, one pulse.
+        One release runs at a time; one more asked for meanwhile is kept and runs right after it (a card captured while the
+        previous pulse was still on its way); a third is refused - one card per capture, never more.
+        """
+        if not self.dropper.enabled or self.scanner is None:
+            return
+        with self.release_lock:
+            # The session asking: a capture's own (taken when it started), else the current one. A release outlives none
+            session = self.scan_session if session is None else session
+            if session != self.scan_session:
+                logger.info(f"Card dropper: asked for in a scanning session that has ended - no card released ({reason})")
+                return
+            if self.release_busy:
+                if self.release_pending is None:
+                    self.release_pending = (reason, session, first)
+                    logger.info(f"Card dropper: after the release under way ({reason})")
+                else:
+                    logger.warning(f"Card dropper: a release is already kept for later - not another one ({reason})")
+                return
+            self.release_busy = True
+        threading.Thread(target=self._release_loop, args=(reason, session, first), daemon=True, name="Card dropper").start()
+
+    def _release_loop(self, reason, session, first=False):
+        """The releases, one after the other: this one, then the one kept meanwhile (if any), then the thread ends"""
+        while True:
+            try:
+                self._release(reason, session, first)
+            except Exception as e:
+                logger.exception(f"Card dropper: the release failed ({reason}): {e}")
+            with self.release_lock:
+                kept, self.release_pending = self.release_pending, None
+                if kept is None:
+                    self.release_busy = False
+                    return
+            reason, session, first = kept
+
+    def _release(self, reason, session, first=False):
+        """One release: wait for the focus to settle, check the scanning still wants a card - in the same session - then one pulse"""
+        scanner = self.scanner
+        deadline = time.time() + DROP_WAIT_FOR_FOCUS
+        while (scanner.focus_sweep_running or scanner.focus_probe_running) and time.time() < deadline:
+            time.sleep(0.05)
+        if scanner.focus_sweep_running or scanner.focus_probe_running:
+            self.send_log("Card dropper: the focus is still being adjusted - drop the next card by hand", level="warning")
+            return
+        if not scanner.auto_capture_enabled:
+            logger.info(f"Card dropper: auto-scanning was stopped meanwhile - no card released ({reason})")
+            return
+        if getattr(scanner, 'camera', None) is None:
+            logger.info(f"Card dropper: the camera is not there - no card released ({reason})")
+            return
+        if session != self.scan_session:
+            # Asked for in a scanning session that has ended (stopped, perhaps started again since): not this session's card
+            logger.info(f"Card dropper: scanning was stopped meanwhile - no card released ({reason})")
+            return
+        # Checked again at the very last moment, atomically with the pin going active (the gate): the checks above are early answers
+        if not self.dropper.pulse(reason, gate=lambda: self._still_wanted(session, first, reason)) and self.dropper.error:
+            self.send_log(f"Card dropper: {self.dropper.error} - drop the next card by hand", level="error")
+
+    @contextlib.contextmanager
+    def _still_wanted(self, session, first=False, reason=''):
+        """
+        The dropper's gate (Dropper.pulse): held under release_lock - the lock every cancellation takes (on_set, configure_dropper) -
+        while the pin goes active, so a stop, a restart or the dropper switched off cannot fall between this check and the pulse.
+        first (the card released when scanning starts): only while this session has had no capture and none is coming - a capture
+        under way, or a card in view not captured yet. Such a card brings the next one by its own capture; the start's card as
+        well would be two cards for one capture, one of them dropped onto a card being captured. A card in view that was captured
+        before (it lies on the pile: awaiting_new_card, another session) does not hold it back. A restart during a capture thus
+        releases nothing - that capture is the old session's - and the feeding waits ("Drop one card" goes on): never two cards
+        """
+        scanner = self.scanner
+        with self.release_lock:
+            if not self.dropper_synced:
+                # The server cannot be heard (a stop may be on its way): kept, decided after the next hello - never pulsed now
+                if self.release_deferred is None:
+                    self.release_deferred = (reason, session, first)
+                logger.info(f"Card dropper: not connected to the server - the release waits for it ({reason})")
+                yield False
+                return
+            wanted = (session == self.scan_session and scanner is not None and bool(scanner.auto_capture_enabled)
+                      and getattr(scanner, 'camera', None) is not None)
+            if wanted and first:
+                coming = (self.last_capture_session == self.scan_session or bool(scanner.capture_pending)
+                          or (scanner.is_card_detected() and not getattr(scanner, 'awaiting_new_card', False)))
+                wanted = not coming
+                if coming:
+                    logger.info("Card dropper: a card is about to be captured - it brings the next one by its own capture")
+            yield wanted
+
+    def drop_card(self):
+        """The Settings page's "Drop one card": one pulse now, whatever the scanning is doing - to try the mechanism"""
+        if not self.dropper.enabled:
+            raise ValueError('The card dropper is off')
+        if not self.dropper.pulse('a test from the Settings page'):
+            raise ValueError(self.dropper.error or 'A card is still being released')
+        return self.dropper.pulses
 
     def on_command(self, data):
         """Run a CardScanner method for the server; the answer carries the state after it"""
@@ -206,6 +502,8 @@ class Station:
             if method == 'capture':
                 threading.Thread(target=self.manual_capture, daemon=True).start()
                 result = True
+            elif method == 'drop_card':       # the station's own, not CardScanner's: the dropper is the station's
+                result = self.drop_card()
             elif method in METHODS:
                 result = getattr(self.scanner, method)(*data.get('args', []), **data.get('kwargs', {}))
             else:
@@ -255,6 +553,11 @@ class Station:
             self.send_log(f"The capture failed ({e}) - ready for the next card", level="error")
 
     def _auto_captured(self, scanner):
+        # The card dropper's scanning session as the capture STARTS: a capture still running when scanning was stopped and started
+        # again belongs to the old session - its release, or the card it would owe, is refused (a Codex review of 2026-10-22).
+        # Read under release_lock - the lock scanning is switched on under (on_set), so never "on, but the old session" - and so that
+        # it cannot fail: nothing of the dropper may cost a card (a station built without it just releases nothing)
+        session = self._capture_session()
         fast = bool(getattr(scanner, 'fast_scan_mode', True))  # as it is now, not when it is sent
         if not scanner.is_card_detected():
             logger.warning("Auto-capture triggered but no card detected")
@@ -291,8 +594,58 @@ class Station:
                        if beep_sent - image_taken > 0.15 else ""))
         if fast:
             scanner.card_under_review = False  # ready for the next drop; else until Add / Skip on the page
+        # The capture's id made HERE, before the upload exists: with auto-add off the card dropper's debt for it is recorded
+        # first, so the server's review_done for it - which may come as soon as the upload is sent - always finds it
+        # (a Codex review of 2026-10-22: recorded after queue_upload, a quick answer was lost and the feeding stopped)
+        capture_id = uuid.uuid4().hex
+        if not fast:
+            self.owe_drop(capture_id, session, number)
+        # Auto-add on: the next card is released once the server has ANSWERED this upload, and not with "card back" (after_upload) -
+        # the card-back check is the server's, and a release at queue time buried the face-down card meant to stop the stack, or went
+        # on feeding for as long as the server was away (a Codex review of 2026-10-22). The upload carries the session it belongs to
         self.queue_upload(image_path, card_image, foil_image, 'auto' if fast else 'review',
-                          getattr(scanner, 'last_capture_frame', None))
+                          getattr(scanner, 'last_capture_frame', None), capture_id=capture_id,
+                          release_session=session if fast else None)
+
+    def _capture_session(self):
+        """The scanning session a capture starts in (None for a station built without the dropper's state: it releases nothing)"""
+        lock = getattr(self, 'release_lock', None)
+        if lock is None:
+            return None
+        with lock:
+            self.last_capture_session = self.scan_session     # this session has a capture: it, not the start, brings the next card
+            return self.scan_session
+
+    def owe_drop(self, capture_id, session, number):
+        """
+        Auto-add off: the next card is owed for this capture until the server says it was added, skipped or queued for review
+        (on_review_done) - only while the dropper is on and the session the capture started in still runs. Never raises.
+        """
+        try:
+            with self.release_lock:
+                if self.dropper.enabled and session == self.scan_session:
+                    self.drop_owed = (capture_id, session)
+        except Exception as e:
+            logger.exception(f"Card dropper: no card owed for capture #{number}: {e}")
+
+    def after_upload(self, item, status):
+        """
+        The server ANSWERED an auto-add capture's upload (send_until_settled, 'accepted'): the card-back check is behind it. A card back
+        stops the stack - nothing is released (the server switches auto-capture off); anything else releases the next card, for the
+        session the capture started in. A capture without release_session (auto-add off, a manual one, one sent again after a restart)
+        releases nothing here. Never raises: the upload is settled whatever the dropper does.
+        """
+        session = item.get('release_session')
+        if session is None:
+            return
+        name = item['image'].name if item.get('image') else 'a capture'
+        try:
+            if status == 'card_back':
+                logger.info(f"Card dropper: {name} was a card back - no card released, the stack ends here")
+                return
+            self.release_next_card(f'after {name}', session=session)
+        except Exception as e:
+            logger.exception(f"Card dropper: nothing released after {name}: {e}")
 
     def manual_capture(self):
         """The page's Capture button: whatever is in view, shown on the page for Add / Skip"""
@@ -304,10 +657,13 @@ class Station:
         else:
             self.send_log("Failed to capture image", level="error")
 
-    def queue_upload(self, image_path, card_image, foil_image, mode, frame=None):
+    def queue_upload(self, image_path, card_image, foil_image, mode, frame=None, capture_id=None, release_session=None):
         """
         frame: {'jpeg', 'meta'} - the camera frame the card was cut from (debug trace on, see
-        CardScanner._frame_snapshot): kept beside the picture and sent with it as training data
+        CardScanner._frame_snapshot): kept beside the picture and sent with it as training data.
+        capture_id: the capture's id when the caller made it already (an auto-capture: the card dropper's debt is keyed by it).
+        release_session: auto-add on - the card dropper releases the next card once the server answered this upload (after_upload),
+        for this scanning session. Kept with the item only, never in its note: a capture sent again after a restart owes no card
         """
         foil_path = None
         if foil_image is not None and foil_image is not card_image:
@@ -315,8 +671,8 @@ class Station:
             foil_path = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
             cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
         item = {'image': Path(image_path), 'foil': foil_path, 'mode': mode,
-                'foil_is_image': foil_image is card_image, 'capture_id': uuid.uuid4().hex,
-                'frame': None, 'frame_meta': None}
+                'foil_is_image': foil_image is card_image, 'capture_id': capture_id or uuid.uuid4().hex,
+                'frame': None, 'frame_meta': None, 'release_session': release_session}
         if frame and frame.get('jpeg'):
             frame_path = Path(image_path).with_name(f"{Path(image_path).stem}_frame.jpg")
             try:
@@ -513,6 +869,7 @@ class Station:
                 return
             if verdict == 'accepted':
                 self.remove_capture(item)
+                self.after_upload(item, item.get('answer_status'))   # the card dropper: the next card, unless this was a card back
                 return
             if verdict == 'refused':
                 # The server will never take this picture (unreadable, too large): it is kept
@@ -567,6 +924,11 @@ class Station:
             logger.warning(f"Could not send {item['image'].name} ({type(e).__name__}) - trying again")
             return 'retry'
         verdict = upload_verdict(response)
+        if verdict == 'accepted':
+            try:
+                item['answer_status'] = response.json().get('status')   # 'card_back' stops the stack (after_upload)
+            except ValueError:
+                item['answer_status'] = None
         if verdict == 'refused':
             logger.error(f"The server refused {item['image'].name}: {response.text[:200]} - the picture is kept")
         elif verdict == 'retry':

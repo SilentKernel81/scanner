@@ -132,6 +132,10 @@ game sits behind one interface (`games/`), so another could be added.
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.
 - **Card data updates** (download and safe replacement) and a check for new data.
+- **A card dropper** (since 2026-10-22, code only): a station can pulse a GPIO pin of its Raspberry Pi to release the next
+  card itself - once the server has each capture (and it was not a card back), after Add / Skip with auto-add off, the first
+  card when scanning starts; one pulse per card, never more, and none while the server is away. Settings > Cameras > Card dropper, with a "Drop one card" test. Tested with a stand-in pin; never with a
+  real pin or mechanism - no mechanism has been designed yet.
 - **Automatic updates** (since 2026-10-22, off by default): Settings > Card data can download the card data again every day, 3 days,
   week or month, and go back to the pictures the picture index still lacks (a build Scryfall refused, one stopped) every
   6 hours, day or week - while the program runs; a computer that was off catches up when it starts. Never the index's

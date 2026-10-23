@@ -24,6 +24,7 @@ from card_scanner.server.state import (
 )
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import (
+    forget_capture_id, remember_capture_id,
     desk, desk_for, desks, desks_lock, emit_desk, in_desk, log_to_client, queue_changed, scanner,
 )
 from card_scanner.server.captures import (
@@ -311,6 +312,7 @@ def station_capture(station_id):
     # station_client.py's mode 'review': the card is shown on the station's page, not added
     if request.form.get('camera') == '1' and request.form.get('mode') == 'review':
         # A manual capture, or auto scanning that waits for Add / Skip: read now and shown
+        remember_capture_id(image_path, capture_id)    # the card dropper's next card waits for this capture (desks.review_done)
         queue_changed(+1)
         try:
             card_info = identification.identify(image, foil_image)
@@ -319,6 +321,7 @@ def station_capture(station_id):
             logger.exception(f"Capture {image_path.name} failed: {e}")
             log_to_client(f"Capture error: {e}", level="error")
             scanner.card_under_review = False  # don't hold the next capture back
+            forget_capture_id(image_path)      # ... but release no card: the person has not dealt with this one
             outcome = {'status': 'error', 'message': str(e)}
         finally:
             queue_changed(-1)
