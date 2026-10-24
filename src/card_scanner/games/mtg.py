@@ -128,6 +128,7 @@ class Magic(Game):
             'type': card['type_line'],
             'price': card['price'],
             'price_foil': card['price_foil'],
+            'price_etched': card.get('price_etched') or 0.0,
             'image_uri': card['image_uri'],
             'treatments': card['treatments'],
             'finishes': card['finishes'],
@@ -160,9 +161,11 @@ class Magic(Game):
 
     def inventory_fields(self, card, finish):
         colors = card.get('colors') or []
-        # Foil and surge foil copies are priced as foils; fall back to the other price if missing
-        prices = (card.get('price_foil'), card.get('price')) if finish in ('foil', 'surge') \
-            else (card.get('price'), card.get('price_foil'))
+        # Foil and surge foil copies are priced as foils; fall back to the other prices if missing. An etched foil is a 'foil'
+        # copy too (suggested_finish): an etched-only printing has no foil price, only the etched one - which it lacked
+        # before 2026-10-23, so its copies went in at 0
+        prices = (card.get('price_foil'), card.get('price_etched'), card.get('price')) if finish in ('foil', 'surge') \
+            else (card.get('price'), card.get('price_foil'), card.get('price_etched'))
         return {
             'card_id': card.get('id'),
             'name': card['name'],
@@ -176,6 +179,18 @@ class Magic(Game):
             'color_identity': color_identity(colors),
             'price': next((float(p) for p in prices if p), 0.0),
         }
+
+    def current_prices(self, entries):
+        cards = self.db.cards_by_ids([entry['card_id'] for entry in entries])
+        prices = {}
+        for entry in entries:
+            card = cards.get(entry['card_id'])
+            # A printing that is gone from the card data, or has no price in it today, keeps the price it was added with:
+            # 0 would say "worthless", when it only means "Scryfall has no price" (a few percent of printings on any day)
+            price = self.inventory_fields(card, entry['finish'])['price'] if card else 0.0
+            if price:
+                prices[entry['id']] = (entry['card_id'], entry['finish'], price)
+        return prices
 
     def card_details(self, card_ids):
         return {card_id: {'image_uri': card['image_uri'], 'cmc': card['cmc'],
@@ -198,7 +213,7 @@ class Magic(Game):
         # Straight from the card data: the manual search (find_printings) writes to the activity log
         _resolved, cards = self.db.find_printings(name)
         return [{key: card[key] for key in ('id', 'set', 'set_code', 'number', 'image_uri', 'price',
-                                            'price_foil', 'finishes', 'treatments')} for card in cards]
+                                            'price_foil', 'price_etched', 'finishes', 'treatments')} for card in cards]
 
     def deck_card_payload(self, card):
         return {
@@ -213,7 +228,7 @@ class Magic(Game):
             'oracle_text': card['oracle_text'] or '',
             'image_uri': card['image_uri'],
             # The cheapest printing: what completing a deck costs at least
-            'price': card.get('cheapest') or card['price'] or card['price_foil'],
+            'price': card.get('cheapest') or card['price'] or card['price_foil'] or card.get('price_etched'),
         }
 
     def check_deck(self, deck_format, entries):

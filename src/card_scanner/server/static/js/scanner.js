@@ -464,6 +464,9 @@ function cardPricesHtml(card) {
         if (card.price_foil > 0) {
             prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
         }
+        if (card.price_etched > 0) {
+            prices.push(`<span class="price-label">etched</span> <span class="price">$${card.price_etched.toFixed(2)}</span>`);
+        }
     }
     if (prices.length === 0) {
         prices.push('<span class="price-label">No price data</span>');
@@ -517,7 +520,8 @@ function displayPrintings(cardName, cards) {
     const printings = cards.map(card => {
         // Scryfall's "small" image size keeps the grid light
         const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
-        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
+        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil`
+            : card.price_etched > 0 ? `$${card.price_etched.toFixed(2)} etched` : 'N/A');
         return `
             <div class="printing-card" data-printing="${escapeHtml(card.id)}">
                 ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}

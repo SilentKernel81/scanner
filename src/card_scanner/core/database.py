@@ -55,6 +55,13 @@ CARD_COLUMNS = [
     ('color_identity', 'TEXT'),
     ('legalities', 'TEXT'),
     ('keywords', 'TEXT'),
+    # Scryfall's other prices (since 2026-10-23; empty until the card data is downloaded again). At the end, not beside
+    # price_usd: an older file gets them by ALTER TABLE ... ADD COLUMN, which appends. Etched: the price of an etched foil,
+    # the only one an etched-only printing has. EUR: Cardmarket's, as Scryfall gives it - kept for a choice of price source
+    # (docs/plans/PRICE_SOURCES_PLAN.md), read by nothing yet
+    ('price_usd_etched', 'REAL'),
+    ('price_eur', 'REAL'),
+    ('price_eur_foil', 'REAL'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -430,9 +437,9 @@ class CardDatabase:
                 if card.get('layout') == 'art_series':
                     continue
                 
-                prices = card.get('prices', {})
-                price_usd = prices.get('usd')
-                price_usd_foil = prices.get('usd_foil')
+                # Scryfall sends prices as strings ("0.25") or null
+                prices = card.get('prices') or {}
+                price = lambda key: float(prices[key]) if prices.get(key) else None
                 
                 # Double-faced cards keep their images on each face
                 image_uris = card.get('image_uris') or (card.get('card_faces') or [{}])[0].get('image_uris', {})
@@ -449,8 +456,8 @@ class CardDatabase:
                     card.get('set_name'),
                     card.get('collector_number'),
                     card.get('rarity'),
-                    float(price_usd) if price_usd else None,
-                    float(price_usd_foil) if price_usd_foil else None,
+                    price('usd'),
+                    price('usd_foil'),
                     image_uri,
                     card.get('oracle_text'),
                     card.get('type_line'),
@@ -472,6 +479,9 @@ class CardDatabase:
                     json.dumps({name: status for name, status in (card.get('legalities') or {}).items()
                                 if status != 'not_legal'}),
                     json.dumps(card.get('keywords', [])),
+                    price('usd_etched'),
+                    price('eur'),
+                    price('eur_foil'),
                 ))
                 
                 inserted += 1
@@ -689,7 +699,7 @@ class CardDatabase:
         key = search_key(partial_name) or ''
         with self._lock:
             return self.conn.execute('''
-                SELECT name, set_name, price_usd FROM cards
+                SELECT name, set_name, COALESCE(price_usd, price_usd_foil, price_usd_etched) AS price_usd FROM cards
                 WHERE name_search LIKE ? OR flavor_search LIKE ?
                 ORDER BY name
                 LIMIT ?
@@ -707,6 +717,7 @@ class CardDatabase:
             'rarity': row['rarity'],
             'price': row['price_usd'] or 0.0,
             'price_foil': row['price_usd_foil'] or 0.0,
+            'price_etched': row['price_usd_etched'] or 0.0,
             'image_uri': row['image_uri'],
             'oracle_text': row['oracle_text'],
             'type_line': row['type_line'],
@@ -804,7 +815,7 @@ class CardDatabase:
         SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END)
                         || (CASE WHEN finishes LIKE '%"nonfoil"%' THEN '1' ELSE '0' END)
                         || COALESCE(released_at, '')) AS _pick,
-               (SELECT MIN(COALESCE(p.price_usd, p.price_usd_foil)) FROM cards p
+               (SELECT MIN(COALESCE(p.price_usd, p.price_usd_foil, p.price_usd_etched)) FROM cards p
                 WHERE p.name_search = c.name_search) AS cheapest
         FROM cards c WHERE {where} GROUP BY c.name
     """
@@ -972,7 +983,7 @@ class CardDatabase:
 
         # Get cards with prices
         try:
-            cursor.execute('SELECT COUNT(*) FROM cards WHERE price_usd IS NOT NULL')
+            cursor.execute('SELECT COUNT(*) FROM cards WHERE COALESCE(price_usd, price_usd_foil, price_usd_etched) IS NOT NULL')
             result = cursor.fetchone()
             cards_with_prices = result[0] if result else 0
         except Exception:

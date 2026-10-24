@@ -1087,6 +1087,30 @@ class InventoryManager(storage.Transactional):
             self.conn.execute('UPDATE inventory SET price_usd = ? WHERE id = ?', (float(price), row_id))
             self._commit()
 
+    def priced_entries(self, game):
+        """[{'id', 'card_id', 'finish', 'price_usd'}] of a game's entries that know their printing - what reprice() is worked out from.
+        Entries without one (CSV imports of an unknown printing) cannot be priced again and are left out"""
+        with self._lock:
+            return [dict(row) for row in self.conn.execute(
+                "SELECT id, card_id, finish, price_usd FROM inventory WHERE game = ? AND COALESCE(card_id, '') != ''", (game,))]
+
+    @_writes
+    def reprice(self, prices):
+        """
+        New prices for many entries at once: {row id: (card_id, finish, price)}, from priced_entries() and the current card data.
+        One transaction. An entry is changed only while it is still that printing in that finish: the prices are worked out
+        before this runs, and an edit made meanwhile (another printing, foil instead of regular) must not get the old one's
+        price. Returns how many entries got a different price.
+        """
+        changed = 0
+        with self._lock:
+            for row_id, (card_id, finish, price) in prices.items():
+                changed += self.conn.execute(
+                    'UPDATE inventory SET price_usd = ? WHERE id = ? AND card_id = ? AND finish = ? AND price_usd IS NOT ?',
+                    (float(price), row_id, card_id, finish, float(price))).rowcount
+            self._commit()
+        return changed
+
     @_writes
     def undo_last_add(self, source=None):
         """

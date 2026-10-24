@@ -1775,7 +1775,7 @@ swap (`replace_table`) does not happen: the old cards stay.
 | Group | Columns |
 |---|---|
 | Identity | `id` (Scryfall id), `name`, `flavor_name`, `set_code`, `set_name`, `collector_number`, `rarity`, `released_at` |
-| Prices | `price_usd`, `price_usd_foil` |
+| Prices | `price_usd`, `price_usd_foil`; since 2026-10-23 also `price_usd_etched` (what an etched-only printing has instead - 892 printings in this checkout's data), `price_eur`, `price_eur_foil` (Cardmarket's, as Scryfall gives it; read by nothing yet - `docs/plans/PRICE_SOURCES_PLAN.md`). The three are at the end of `CARD_COLUMNS` (an older file gets them by `ADD COLUMN`) and empty until the next download |
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
@@ -1934,6 +1934,24 @@ its table is missing, empty, or holds less than half the cards in use (`MIN_SHAR
 cut short); the cards in use then stay. Only `cards` / `cards_import` are accepted (`CARD_TABLES`).
 
 **`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
+
+**Prices follow the card data** (since 2026-10-23; `server/card_data.py`: `reprice_collections`, `Game.current_prices`,
+`InventoryManager.priced_entries` / `reprice`; `tests/test_prices.py`). An entry keeps its own price (`inventory.price_usd`),
+taken when it is added; before this date it never changed after that. Now every successful card data download (the button
+or the schedule) prices again the entries of the collection and of the scanned cards that know their printing (`card_id`):
+`inventory_fields(card, finish)['price']` of the new data, in one transaction per inventory, then `inventory_prices_updated`
+(the pages reload their totals). Left alone: an entry without a printing (a CSV import of an unknown one), a printing gone
+from the data or without a price today (it keeps the one it has - Scryfall has no USD price for about 14% of the printings),
+an entry edited between the computation and the write (the `UPDATE` asks that the printing and finish are still the same),
+the digital collection (no prices, on purpose) and other people's collections (their prices are what they offered). A
+failure is logged and leaves the old prices; the download counts as done either way. The prices are worked out
+outside `maintenance_barrier` and written inside it (a full backup never copies half of it). `scripts/setup_database.py`
+(no server) does not price again: the next download by the server does. Copies an open trade holds are
+priced too (its triggers refuse only deletes and lower quantities). An etched foil is a `foil` copy (`suggested_finish`):
+`inventory_fields` takes the foil price, then the etched one, then the regular one (regular copies: regular, foil, etched) -
+before, an etched-only printing's copies went in at 0. Tried on copies of this checkout's databases (2026-10-23): 1,594 of
+1,595 entries priced, 0 changed - the data had not changed since they were added; **a run after a real download was never
+watched**.
 
 **Update check.** 10 s after startup and then once a day, `Game.check_for_update()` runs for
 each game with data. Magic: Scryfall's bulk data description (one small request) - since

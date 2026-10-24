@@ -158,7 +158,8 @@ function loadEditPrintings(rowId) {
             if (currentEditId !== rowId || !data.success || !data.printings.length) return;
             const price = value => value ? `$${Number(value).toFixed(2)}` : '';
             select.innerHTML = data.printings.map(printing => {
-                const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : ''].filter(Boolean).join(' / ');
+                const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : '',
+                                printing.price_etched ? `etched ${price(printing.price_etched)}` : ''].filter(Boolean).join(' / ');
                 return `<option value="${escapeHtml(printing.id)}">${escapeHtml(printing.set)} (${escapeHtml((printing.set_code || '').toUpperCase())}) #${escapeHtml(printing.number)}${prices ? ' - ' + prices : ''}</option>`;
             }).join('');
             const current = data.printings.find(printing => printing.current);

@@ -82,6 +82,10 @@ game sits behind one interface (`games/`), so another could be added.
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
 - **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a switch in Settings > Card data turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
+- **Prices follow the card data** (since 2026-10-23): after each card data update the collection's and the scanned
+  cards' entries take their printing's price in the new data (before, an entry kept the price of the day it was added);
+  an etched-only printing is priced by its etched price (it went in at 0). Tests on temporary databases only - **never
+  watched after a real download**.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.

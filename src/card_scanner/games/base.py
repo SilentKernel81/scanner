@@ -141,6 +141,14 @@ class Game:
         """Card fields sent to the web page"""
         raise NotImplementedError
 
+    def current_prices(self, entries):
+        """
+        Today's price of inventory entries ([{'id', 'card_id', 'finish'}], InventoryManager.priced_entries) from the card
+        data: {row id: (card_id, finish, price)} - InventoryManager.reprice's argument. An entry whose printing has no price
+        now is left out (it keeps the one it has). A game whose card data holds no prices (fetches_prices) has nothing here.
+        """
+        return {}
+
     # -- Inventory -----------------------------------------------------------
 
     def inventory_fields(self, card, finish):
@@ -173,7 +181,7 @@ class Game:
 
     def printings(self, name):
         """Every printing of a card, newest first, for the deck builder's printing picker:
-        [{'id', 'set', 'set_code', 'number', 'image_uri', 'price', 'price_foil', 'finishes', 'treatments'}]"""
+        [{'id', 'set', 'set_code', 'number', 'image_uri', 'price', 'price_foil', 'price_etched', 'finishes', 'treatments'}]"""
         raise NotImplementedError
 
     def deck_card_payload(self, card):

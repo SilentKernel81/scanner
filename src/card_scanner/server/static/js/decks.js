@@ -914,7 +914,8 @@ async function openPrintings(name, board) {
             <span class="printing-set">${escapeHtml(printing.set)}</span>
             <span class="printing-meta">
                 <span>${escapeHtml((printing.set_code || '').toUpperCase())} #${escapeHtml(printing.number)}</span>
-                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil' : ''}</span>
+                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil'
+                    : printing.price_etched ? money(printing.price_etched) + ' etched' : ''}</span>
                 ${printing.owned ? `<span class="own have">✓ ${printing.owned} owned</span>` : ''}
             </span>
             ${printing.treatments.length ? `<span class="printing-meta">${escapeHtml(printing.treatments.join(', '))}</span>` : ''}
