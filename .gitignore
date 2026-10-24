@@ -92,3 +92,6 @@ CODE_REVIEW.md
 # AppImage build (scripts/build-appimage.sh)
 build/
 dist/
+
+# Launch videos made by /brag (frames, audio, renders)
+brag-output/

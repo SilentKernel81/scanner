@@ -914,7 +914,8 @@ async function openPrintings(name, board) {
             <span class="printing-set">${escapeHtml(printing.set)}</span>
             <span class="printing-meta">
                 <span>${escapeHtml((printing.set_code || '').toUpperCase())} #${escapeHtml(printing.number)}</span>
-                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil' : ''}</span>
+                <span>${printing.price ? money(printing.price) : printing.price_foil ? money(printing.price_foil) + ' foil'
+                    : printing.price_etched ? money(printing.price_etched) + ' etched' : ''}</span>
                 ${printing.owned ? `<span class="own have">✓ ${printing.owned} owned</span>` : ''}
             </span>
             ${printing.treatments.length ? `<span class="printing-meta">${escapeHtml(printing.treatments.join(', '))}</span>` : ''}
@@ -1365,7 +1366,9 @@ const refreshOwned = debounce(() => {
 
 // The inventory changes while scanning on another tab or device
 // - and so does the Arena collection, when an export is imported (the list then has other Arena decks)
-['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated', 'arena_updated'].forEach(name => socket.on(name, refreshOwned));
+// Another price source: its currency, then what the deck shows is asked again (its prices and totals come from the server)
+socket.on('price_source_changed', data => { window.PRICE_SYMBOL = data.symbol; });
+['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated', 'arena_updated', 'price_source_changed'].forEach(name => socket.on(name, refreshOwned));
 socket.on('game_changed', () => window.location.reload());
 socket.on('database_update_progress', data => { $('deck-data-progress').textContent = data.message; });
 socket.on('database_update_complete', () => {

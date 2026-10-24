@@ -39,6 +39,11 @@ class Desk:
         # The capture being reviewed (image path): kept with the card added from it - also
         # when the card is found by a manual search after the AI couldn't identify it
         self.pending_capture = None
+        # The capture_id of each of the station's captures shown for Add / Skip (station_client's mode 'review': auto-scanning with auto-add
+        # off, or a manual capture), by the capture's OWN picture (str path) - the key the shown card carries (card['capture'], pending_capture).
+        # Its card dropper releases the next card only once THAT capture is added, skipped or sent to the review queue (review_done). Never one
+        # shared field: a later capture arriving while an earlier one is still shown must not take its place (a Codex review of 2026-10-22)
+        self.capture_ids = {}
         self.processing = 0                 # captures being identified (shown on its page)
         self.last_capture = None            # file name (in scanned_cards/) of the picture a camera-less station sent last
         # The printings the review screen showed for the open item (printing_check.candidates' ids, nearest first): the reading log notes which of them the
@@ -130,6 +135,38 @@ def make_remote_scanner(station_id):
     remote.fast_scan_mode = auto_add
     remote.required_stable_frames = Config.FAST_SCAN_STABILITY_FRAMES if auto_add else Config.AUTO_CAPTURE_STABILITY_FRAMES
     return remote
+
+
+CAPTURE_IDS_KEPT = 50     # captures shown and never settled (the page closed, the server busy elsewhere) are let go after this many
+
+
+def remember_capture_id(image_path, capture_id):
+    """A station's capture that will be shown for Add / Skip arrived: its id, under its own picture (stations_api.station_capture)"""
+    if not capture_id:
+        return
+    ids = desk().capture_ids
+    ids[str(image_path)] = capture_id
+    while len(ids) > CAPTURE_IDS_KEPT:
+        ids.pop(next(iter(ids)))        # the oldest: dicts keep their order
+
+
+def forget_capture_id(image_path):
+    """Reading the capture failed: nothing to add or skip, and no card released for it"""
+    if image_path:
+        desk().capture_ids.pop(str(image_path), None)
+
+
+def review_done(image_path):
+    """
+    The capture whose picture is image_path was settled by the person - added or skipped while it was SHOWN - or went to the review
+    queue by itself: its station may release the next card (station_client: on_review_done; only a card dropper that owes a card for
+    exactly that capture does). image_path is the shown card's own picture, never "the latest capture", so settling one card cannot
+    release another's next card. Never called when something failed or scanning stopped: a card dropper must not drop a card onto
+    one the person has not dealt with (clearing card_under_review, which errors also do, used to count as Add / Skip).
+    """
+    capture_id = desk().capture_ids.pop(str(image_path), None) if image_path else None
+    if capture_id and scanner and hasattr(scanner, 'review_done'):
+        scanner.review_done(capture_id)
 
 
 def queue_changed(change):

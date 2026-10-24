@@ -18,6 +18,16 @@ function finishLabel(key) {
     return finish ? finish[1] : key;
 }
 
+// The prices' currency: the chosen price source's (Settings > Card data > Prices), given to the page by _topbar.html and changed
+// by the event price_source_changed while the page is open. Every price a page shows goes through formatPrice (not priceText: collection.js has its own, which calls money())
+function priceSymbol() {
+    return window.PRICE_SYMBOL || '$';
+}
+
+function formatPrice(value) {
+    return priceSymbol() + Number(value || 0).toFixed(2);
+}
+
 function escapeHtml(text) {
     const map = {
         '&': '&amp;',
@@ -156,9 +166,10 @@ function loadEditPrintings(rowId) {
         .then(response => response.json())
         .then(data => {
             if (currentEditId !== rowId || !data.success || !data.printings.length) return;
-            const price = value => value ? `$${Number(value).toFixed(2)}` : '';
+            const price = value => value ? formatPrice(value) : '';
             select.innerHTML = data.printings.map(printing => {
-                const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : ''].filter(Boolean).join(' / ');
+                const prices = [price(printing.price), printing.price_foil ? `foil ${price(printing.price_foil)}` : '',
+                                printing.price_etched ? `etched ${price(printing.price_etched)}` : ''].filter(Boolean).join(' / ');
                 return `<option value="${escapeHtml(printing.id)}">${escapeHtml(printing.set)} (${escapeHtml((printing.set_code || '').toUpperCase())}) #${escapeHtml(printing.number)}${prices ? ' - ' + prices : ''}</option>`;
             }).join('');
             const current = data.printings.find(printing => printing.current);

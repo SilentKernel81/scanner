@@ -45,8 +45,8 @@ sys.path.insert(0, str(SRC))
 
 # The modules by where they belong - their names never changed, only their folder
 SHARED = {'paths', 'config', 'config_loader', 'settings'}
-STATION = {'station_client', 'station_setup', 'station_login', 'scanner', 'object_detector', 'corner_net'}
-CORE = {'identification', 'card_ocr', 'foil_marker', 'image_index', 'printing_check', 'card_identifier', 'prompts', 'api_keys',
+STATION = {'station_client', 'station_setup', 'station_login', 'scanner', 'object_detector', 'corner_net', 'dropper'}
+CORE = {'identification', 'prices', 'card_ocr', 'foil_marker', 'image_index', 'printing_check', 'card_identifier', 'prompts', 'api_keys',
         'database', 'card_search', 'setup_database',
         'inventory', 'decks', 'trades', 'others', 'backups', 'storage', 'pending', 'review', 'cleanup',
         'stations', 'remote_scanner', 'recommendations', 'arena', 'frames', 'record', 'report', 'capture', 'card_back'}

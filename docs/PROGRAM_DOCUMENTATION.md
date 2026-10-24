@@ -1775,7 +1775,7 @@ swap (`replace_table`) does not happen: the old cards stay.
 | Group | Columns |
 |---|---|
 | Identity | `id` (Scryfall id), `name`, `flavor_name`, `set_code`, `set_name`, `collector_number`, `rarity`, `released_at` |
-| Prices | `price_usd`, `price_usd_foil` |
+| Prices | `price_usd`, `price_usd_foil`; since 2026-10-23 also `price_usd_etched` (what an etched-only printing has instead - 892 printings in this checkout's data), `price_eur`, `price_eur_foil` (Cardmarket's, as Scryfall gives it). The three are at the end of `CARD_COLUMNS` (an older file gets them by `ADD COLUMN`) and empty until the next download. **What is read**: `price`, `price_foil`, `price_etched` (since 2026-10-24) - the chosen price source's copy of its columns (*The price source* below); nothing reads the others for a price shown or counted |
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
@@ -1935,6 +1935,52 @@ cut short); the cards in use then stay. Only `cards` / `cards_import` are accept
 
 **`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
 
+**The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
+`price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;
+`tests/test_prices.py`, `PriceSources`). Two sources so far, both from Scryfall's file: TCGplayer in US dollars
+(`scryfall_usd`, the default) and Cardmarket in euros (`scryfall_eur`, no etched price). The chosen one is remembered in
+`data/settings.json` (`price_source`) and copied by one `UPDATE` (`prices.apply_sql`) into the columns everything reads -
+`cards.price`, `price_foil`, `price_etched`: at every start (about a second; the file may have been filled elsewhere),
+when the choice changes, and on the import table **before** each new card data is swapped in (a change during an import
+is applied again after the swap). A price the source lacks is NULL there, never another source's: a euro never stands
+in for a missing dollar. A change then prices every entry again (`reprice_collections`) and sends `price_source_changed`
+(`source`, `currency`, `symbol`); the pages take the symbol from `_topbar.html` (`window.PRICE_SYMBOL`, from
+`pages.page_links`) and show every price through `common.js`: `formatPrice` / `priceSymbol` (not `priceText`, which
+`collection.js` has for itself and which calls `money()`: one shared name made each call the other until the stack ran
+out, found on the trial server). A source the card data holds no price from (card data downloaded before its columns
+were kept) is refused with 409 and greyed out in the list: it would show the new currency on the old numbers. The CSV
+export's price column says its currency (`Price (EUR)`, `€0.90`); in dollars it is the file it always was (the Android
+app's `ExportParityTest`), and the import reads both. **Mixed currencies, on purpose:** entries without a printing (a
+CSV import of an unknown one) keep the number they came with, other people's collections and trades' records keep
+theirs, and the entries' column is still named `price_usd`. Tried on a trial server with copies of this checkout's data
+(2026-10-24): refused before a card data update (Cardmarket: 0 printings priced), after one 98,743 printings priced
+in euros against 100,066 in dollars; to euros 1,547 entries repriced, $5,678.30 -> €5,266.15, back to dollars exactly
+$5,678.30; the collection, deck, scanner and settings pages without a script error and in euros. **Not tried**: with the
+settings password set (the padlock and its prompt), a page left open during the change.
+
+**Prices follow the card data** (since 2026-10-23; `server/card_data.py`: `reprice_collections`, `Game.current_prices`,
+`InventoryManager.priced_entries` / `reprice`; `tests/test_prices.py`). An entry keeps its own price (`inventory.price_usd`),
+taken when it is added; before this date it never changed after that. Now every successful card data download (the button
+or the schedule) prices again the entries of the collection and of the scanned cards that know their printing (`card_id`):
+`inventory_fields(card, finish)['price']` of the new data, in one transaction per inventory, then `inventory_prices_updated`
+(the pages reload their totals). Left alone: an entry without a printing (a CSV import of an unknown one), a printing gone
+from the data or without a price today (it keeps the one it has - Scryfall has no USD price for about 14% of the printings),
+an entry edited between the computation and the write (the `UPDATE` asks that the printing and finish are still the same),
+the digital collection (no prices, on purpose) and other people's collections (their prices are what they offered). A
+failure is logged and leaves the old prices; the download counts as done either way. The prices are worked out
+outside `maintenance_barrier` and written inside it (a full backup never copies half of it). `scripts/setup_database.py`
+(no server) does not price again: the next download by the server does. Copies an open trade holds are
+priced too (its triggers refuse only deletes and lower quantities). An etched foil is a `foil` copy (`suggested_finish`):
+`inventory_fields` takes the foil price, then the etched one, then the regular one (regular copies: regular, foil, etched) -
+before, an etched-only printing's copies went in at 0. Tried on copies of this checkout's databases (2026-10-23): 1,594 of
+1,595 entries priced, 0 changed - the data had not changed since they were added. **First run after a real download
+(2026-10-24)**, on a trial server with copies of this checkout's databases (own data folder, port 5077), card data from
+2026-10-05 replaced by Scryfall's of 2026-10-24 (116,416 printings, 29 s from the request to `database_update_complete`):
+1,452 of 1,595 entries priced again, none set to 0, one raised from 0 (an etched-only Lathril, Blade of the Elves: $1.52, its
+etched price); new / old median 0.97, 1,154 of 1,451 within 20%, the extremes 0.38 and 2.47; the collection's value $5,986.52
+-> $5,678.30; `inventory_prices_updated` sent. The new data: 1,218 printings with an etched price (all 892 etched-only
+ones), 87,837 with a EUR price. **Not watched**: a page open during it, the scheduled update.
+
 **Update check.** 10 s after startup and then once a day, `Game.check_for_update()` runs for
 each game with data. Magic: Scryfall's bulk data description (one small request) - since
 Scryfall republishes every day for prices, the data only counts as outdated once it is
@@ -1980,6 +2026,132 @@ the others from their turn.
 Tested: `tests/test_update_schedule.py` (stand-ins: nothing is downloaded); the routes and the two cards in a server on
 copied data and headless Chromium. **First live run, 2026-10-22** (a server on a copy of the card data from 2026-10-05 and the index of 2026-10-20, schedule "every day", index retry off): started 09:31:10, update check at 09:31:20, the automatic download at 09:41:20 (the first tick after 5 minutes), 116,357 cards in by 09:41:28; the index extended itself after it (`extend_index_after_update`, 3,592 new pictures, all 116,357 covered by about 09:47); the page's line then said last run ok, "116,357 cards", next 2026-10-23 09:41. No error in the log. One run: the index RETRY itself was not exercised live (its schedule was off; nothing was missing after the extension). **The retry's own live run, the same day** (a server on a copy of card data from 2026-10-12 and its index, card data every day, "The picture index follows" OFF, the retry every 6 hours): started 12:12:18; the automatic card data download at 12:22:28 (116,357 cards at 12:22:37) and, the switch being off, no extension - 3,592 printings without a picture; at the next tick, 12:32:28, the retry started on its own ("automatic update of what is missing (every 6 h)"), published the extended index at 12:38:30 - all 116,357 covered - and noted the run (ok, "3592 new pictures", next 18:32). No error in the log. Never tried: a month-long run, a Pi whose network comes late.
 A phone downloading the index meanwhile: see *What happens when the index changes during a download* (the listing says when it is changing).
+
+## The card dropper
+
+**Since 2026-10-22: the station's code, and a mechanism designed but never printed or run** (`station/dropper.py`,
+`station/station_client.py`; plan: `docs/plans/PRODUCT_PLAN.md`, phase 5; the mechanism: `hardware/dropper/` - six
+silicone-tyred wheels under the stack, two axles driven by servos through one-way bearings, roll the bottom card out
+under an adjustable gate; a Raspberry Pi Pico turns each pulse into one card's feed, and keeps a pulse that comes during
+a feed for right after it - and `docs/plans/CARD_DROPPER_MECHANISM_PLAN.md`). A station can release the next card itself by pulsing one GPIO pin of its
+Raspberry Pi; what the pin drives (a servo's driver, a relay, a solenoid's transistor) is the mechanism's business - one
+pulse means one card. Off unless switched on for a camera (Settings > Cameras > This camera > Card dropper).
+
+**When a card is released** (`Station.release_next_card`, always in the background):
+- **auto-add on**: once the server has ANSWERED the capture's upload, and not with `card_back` (`Station.after_upload`,
+  from `send_until_settled` on an accepted upload; the upload item carries `release_session`, in memory only - never in
+  its note, so a capture sent again after a restart owes no card). The card-back check is the server's and runs before
+  anything else for a station's capture: released at queue time, the dropper buried the face-down card meant to stop
+  the stack, and went on feeding for as long as the server was away (a Codex review of 2026-10-22). No answer (the
+  server away), a refused or a set-aside upload: nothing is released - the feeding waits;
+- **auto-add off**: the release is *owed* for that capture (`drop_owed` = its `capture_id` and session) until the server says
+  THAT capture is settled - `desks.review_done`, sent (`review_done`, with the `capture_id`, to `Station.on_review_done`)
+  on Add of the live card (not of a review-queue item), on the person's Skip, and when the card went to the review queue
+  by itself; NOT when "not found" dismisses itself (`dismiss_card` with `keep_capture`: the picture kept for a manual
+  search) - the dropper waits, and the card found by that search and added settles it (the next review);
+  never when reading or adding it failed, a card back stopped the camera or the game changed. `card_under_review` going
+  back to False pays nothing: the server clears it on those errors and stops too (a Codex review of 2026-10-22). The
+  server remembers each shown capture's id under the capture's OWN picture (`Desk.capture_ids`,
+  `desks.remember_capture_id` in `stations_api.station_capture`, mode `review`; an error forgets it), and Add / Skip
+  settle the picture of the card actually SHOWN (`card['capture']`, else the camera's `pending_capture`), a capture
+  queued for review its own - never "the latest capture", which a later one replaces while the earlier is still shown
+  (a Codex review of 2026-10-22). A manual Capture that replaces an automatic capture on the page (as it always did)
+  leaves that capture unsettled: the dropper waits - "Drop one card", or stopping and starting the scanning, goes on;
+- **auto-scanning switched on**: the first card - only while this session has had no capture and none is coming (a capture
+  under way, or a card in view not captured yet: `Station._still_wanted`, `first`); such a card brings the next one by its
+  own capture, and the start's card as well would be two cards for one capture, one dropped onto a card being captured.
+  The new session begins, and what was pending is cleared, BEFORE scanning is switched on, both under `release_lock`
+  (`Station.on_set`), and a capture reads its session under the same lock (`_capture_session`, which also notes
+  `last_capture_session`): a capture that starts the moment scanning is on belongs to the new session (a Codex review of
+  2026-10-22). A stop and restart DURING a capture releases nothing - that capture is the old session's and the start's
+  card waits for it - so the feeding waits there ("Drop one card" goes on): never two cards. Connecting (also again after a
+  lost connection) never releases one;
+- each release first waits for a focus probe or a refocus sweep to end (`DROP_WAIT_FOR_FOCUS`, 20 s; a sweep takes
+  about 8 s) and is dropped when auto-scanning was stopped or the camera went meanwhile;
+- one release runs at a time; one more asked for meanwhile is kept and runs right after it - a card captured while the
+  previous pulse was still on its way (pulses may last 2 s, auto-capture can take a card after 1 s) owes its next card
+  all the same (a Codex review of 2026-10-22: refusing it stalled the feeding for good); a third is refused, and
+  stopping auto-scanning drops the one kept;
+- every release belongs to the **scanning session** that asked for it (`Station.scan_session`, one more each time
+  auto-scanning is switched on or off, and when the dropper is switched off - a release waiting then cannot come back
+  when it is switched on again; other changes while it stays on cancel nothing). The last check is made ATOMICALLY with the
+  pin going active: `Dropper.pulse` enters the station's gate (`Station._still_wanted`, under `release_lock`, which every
+  cancellation also takes) after opening the line and sets the pin inside it - a stop or restart falls wholly before the
+  check (refused) or after the pin is active (the card already moving); a check, then the line opened, then the pin, left
+  a gap a stop and restart fell into (a Codex review of 2026-10-22, pinned by a test that holds the line's opening).
+  `Dropper.pulse` also looks at `enabled` again once it holds its own lock - the one `configure` changes the settings
+  under - so a switch-off between its first look and the lock activates nothing (the next review; the test button has
+  no gate) and is refused right before its pulse once another session has begun - a release
+  still waiting for the focus when scanning was stopped and started again would otherwise pulse beside the new session's
+  first card: two cards, no capture between (a Codex review of 2026-10-22, reproduced and pinned by a test). A
+  capture's session is the one it STARTED in (`_auto_captured` takes it first): a capture still being taken when
+  scanning was stopped and started again releases nothing and owes nothing (the next review, reproduced too);
+- the debt is recorded BEFORE the upload exists: `_auto_captured` makes the capture's id itself and hands it to
+  `queue_upload`, so the server's `review_done` - possible as soon as the upload is sent - always finds it (recorded
+  after, a quick answer was lost and the feeding stopped). The debt is set, paid and cleared under `release_lock`;
+- **while the station's Socket.IO connection is down, no card is released** (`Station.dropper_synced`, false from the
+  disconnect to the end of the next `hello`): uploads may still get through over HTTP while a stop cannot reach the
+  station, so a release that comes up then is KEPT (`release_deferred`, set by the gate) and decided after `hello`. The
+  server REPEATS every stop in each `hello` until the station's own report says it is off (`RemoteScanner.stop_unsent`,
+  cleared in `_take_state`; a start cancels it - a newer command - and is never replayed itself, the station refusing one
+  on connecting all the same). "Off" applied to a station that is off changes nothing, so repeating is safe, and a lost
+  `hello` reply or a live stop sent into a dropping connection is not lost (the next review: crossed off when the hello was
+  built, a lost reply lost the stop). `hello` applies it through `on_set` - a new session, the kept release stale (a Codex
+  review of 2026-10-22: a stop during an outage was followed by more cards). A card back seen over HTTP during the outage stops the station the same way when it reconnects.
+  A `hello` belongs to the connection it was started for (`Station.connection`, one more at every connect and disconnect)
+  and puts the station in step only if that connection is still the current one - a disconnect while its answer is being
+  applied is not undone by it; and a `hello` that fails is asked again while its connection lasts (`HELLO_RETRY_DELAYS`:
+  1, 2, 5, 10, then every 30 s) - else the feeding waited on a healthy connection for ever (the next review);
+- **the scanning switch is made in one place, under `release_lock`**: `on_set` reads the old state, moves the session and
+  writes the new state there, and `apply` never writes `auto_capture_enabled`; the first card of a start is released for
+  the session THAT start began (`after_set(started)`). Written again outside the lock, a start paused there undid a stop
+  that came meanwhile, switched scanning back on and released a card (a Codex review of 2026-10-22);
+- **the server's settings are applied one at a time** (`Station.settings_lock`, held by `on_set` and by `hello` while it
+  applies its answer): a `hello` whose connection has ended is refused under it BEFORE it changes anything. Checked only
+  after applying, an older `hello` answering late switched the dropper back on after a newer connection's `hello` had
+  switched it off (the next review);
+- **every value the server sends a station is numbered** (`'_revision': [server start, n]` in each `set` and in `hello`'s
+  answer, the newest change it includes; `RemoteScanner._revision`, `SERVER_START`), and the station applies, setting by
+  setting, only a value at least as new as the one it has (`Station._newer_only`, `settings_revisions`). The lock alone
+  orders what is applied, not what was SENT: a `hello` answer built before a live "dropper off" and applied after it
+  switched the dropper back on, on the same connection (the next review). Per setting, so a delayed change of one
+  setting hides no newer change of another; a new server start begins its numbers again and the station starts afresh;
+  a server that numbers nothing has everything applied, as before;
+- **a waiting stop is confirmed by its number, not by "off"**: `stop_unsent` holds the stop's own number, and the
+  station's report says which scanning change it last applied (`state()['auto_capture_revision']`, read before the
+  switch itself); only a report of "off" with that stop's number or a newer one crosses it off (`_take_state`, under the
+  numbering lock). A plain "off" crossed off a stop that never arrived: an idle report, delayed, came after the start
+  and the lost stop (the next review). A station that reports no number never confirms: the stop is repeated in each
+  `hello` until a start - harmless;
+- a `review_done` sent while the station is away is not lost: `RemoteScanner.review_settled` keeps the last settled
+  capture and `hello` repeats it at every connection (`Station.hello` -> `on_review_done`). Repeating is harmless - only
+  a debt for exactly that capture is paid, once (a Codex review of 2026-10-22). Not covered: a *server* restart in that
+  window (it is kept in memory) - stopping and starting the scanning, or "Drop one card", releases the next card then. A card that is not captured releases nothing, so the stack can never run
+  on by itself. A card back
+  releases nothing (auto-add on: its upload's answer; auto-add off: no `review_done` for it).
+
+**The pin**: libgpiod 2 (`gpiod`, LGPL-2.1), imported only when a pulse is due - a PC station, or one without the package,
+runs as before and the page says why the dropper cannot work (`Dropper.error`, reported in the station's state as
+`dropper_state`). The line is requested inactive (requesting it never releases a card) and set inactive again after
+every pulse, also when the pulse fails. On a Raspberry Pi 4 and 5 the 40-pin header is `/dev/gpiochip0` and the GPIO
+(BCM) number is the line's offset - read on 2026-10-22 on both (Pi 5: pinctrl-rp1, 54 lines; Pi 4: pinctrl-bcm2711, 58
+lines; `/dev/gpiochip4` is the same chip under its older name); the chip stays a setting.
+
+**Settings** (`dropper.checked`, the one place their rules are written - the server before saving, the station before
+using; `enabled`, `chip` `/dev/gpiochipN`, `pin` 0-63, `pulse_ms` 10-2000, `active_low`; on needs a pin): saved per
+camera (`remote_scanner.CAMERA_SETTINGS` `dropper`), sent to the station when changed and when it connects (`DECIDED`).
+Events `set_dropper` (answered `dropper_updated`; refused whole, the page goes back) and `test_dropper` ("Drop one card",
+answered `dropper_tested`) - not guarded, like the camera's other settings.
+
+**Images**: the station's requirements take `gpiod` on 64-bit ARM only; the Pi-camera image Debian's `python3-libgpiod`
+(it runs privileged, so it reaches the chip). A USB-webcam station in Docker needs `deploy/docker-compose.client-gpio.yml`
+laid over its compose file (the chip as a device; a PC has none, so it is not in the default file).
+
+Tested: `tests/test_station_dropper.py` (76 tests, a stand-in pin and camera: the settings' rules, the pulse, a pin that
+cannot be opened or fails half way, every moment above, a capture during a 2 s pulse, a stop and restart while a
+release waits and while a capture is taken, a `review_done` arriving as the upload is queued, one sent while the station was away (repeated on reconnecting, paid once), settling a shown card while another capture is read, a manual capture during an automatic review, a card-back answer and an absent server through the real upload code, the dropper switched off and on while a release waits, a stop and restart while the line is being opened, a switch-off between the pulse's first look and its lock, "not found" dismissing itself, a capture starting the moment scanning switches on, a card captured before the start's card goes, a release and a stop during a connection outage, a lost `hello` reply, a disconnect while a `hello` is applied, a stop while a start is still being applied, an older `hello` answering after a newer one, a live change overtaken by an older `hello`'s answer, a delayed "off" report from before a start, a `hello` that times out, an error that clears the review flag, `review_done` on Add / Skip but not for a queue item or a failed Add, the server's events). The page tried in headless Chromium on
+copied data (on without a pin refused, on with GPIO 17 saved, the test refused with no station connected). **Never
+tried**: a real pin, a mechanism, a card released by it - and whether it damages cards (try commons and sleeved cards first).
 
 ## Focus
 
@@ -2823,7 +2995,7 @@ go to Cameras and Backups: `OLD_CATEGORIES`; `/scan/<id>#settings` and `/collect
 | **Overview** (the default) | One line per section - cameras connected, how cards are read, the card data and its next update, the picture index, the last backup, capture files, the password and network - each a button to its section, the ones to look at marked. No route of its own: each loader hands its part over (`setOverview`) |
 | **Cameras** | *This camera*, chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Stop at a card back, Camera rotation, the fixed area's state (it is drawn on the camera's page), Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings); under Troubleshooting: Debug trace. *All cameras*: Capture size, Sounds (Sound effects, Capture beep, Card added, Volume) |
 | **Card recognition** | The three steps, numbered in their order: 1 Picture (read by the picture; in its Details: Add a card only the picture decided), 2 OCR, 3 Vision AI (provider, key, model, Prompts - the summary, and a link to the editor) |
-| **Card data** | The card database (state, update), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
+| **Card data** | The card database (state, update), Prices (the price source, guarded), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
 | **Backups** | Automatic backups (schedule, how many kept); Your backups (make, upload, list: restore / download / delete) |
 | **Storage** | Capture files in use, how long received pictures are kept, Clean up now, Compress large copies, Keep camera frames |
 | **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Troubleshooting: Debug mode |
@@ -2854,8 +3026,8 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 
 | Page → server | Server → page |
 |---|---|
-| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Cameras: that camera's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
-| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
+| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Cameras: that camera's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add, or the entries priced again), `price_source_changed` (another price source: its currency; sent by `POST /api/prices/source`), `inventory_undone`, `card_dismissed` |
+| `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`), `set_dropper` (`dropper`: the card dropper's settings, checked whole; answered `dropper_updated`), `test_dropper` (one pulse now; answered `dropper_tested`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data) | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
 | `review_open`, `review_skip`, `review_close` | `review_item` (the station's oldest item, or `id: null` when empty; `station`: its name; `candidates`: the printings the picture looks like, `[]` without an index), `review_queue_update` (count; `queued: true` when a card was just queued - the page plays the queue alert) |
@@ -2946,7 +3118,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), the price source (`POST /api/prices/source`: it rewrites every entry's price), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO

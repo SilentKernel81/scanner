@@ -11,8 +11,8 @@ import time
 from card_scanner import games
 from card_scanner.config import Config
 
-from card_scanner.core import image_index
-from card_scanner.server.state import app, app_settings, database, printing_check, socketio
+from card_scanner.core import image_index, prices
+from card_scanner.server.state import app, app_settings, database, inventory, maintenance_barrier, printing_check, scan_inventory, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded
 
@@ -65,6 +65,7 @@ def start_card_data_update(game, retry=False, on_done=None):
                     socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
                     logger.info(f"{game.label} card data updated: {total} cards")
                     finished(True, f"{total:,} cards")
+                    reprice_collections(game)
                     extend_index_after_update()
                     return
                 except Exception as e:
@@ -84,6 +85,32 @@ def start_card_data_update(game, retry=False, on_done=None):
 
     threading.Thread(target=update_task, daemon=True).start()
     return True
+
+
+def reprice_collections(game):
+    """
+    After a card data update: the collection's and the scanned cards' entries take their printing's price in the new data.
+    Until 2026-10-23 an entry kept the price of the day it was added, for good. Not the digital collection (Arena cards
+    have no price, on purpose: arena_api.py) nor other people's (theirs is what they offered). A failure is logged and
+    leaves the old prices: the card data itself is updated either way.
+    """
+    try:
+        changed = 0
+        for store in (inventory, scan_inventory):
+            if store:
+                # Worked out outside the barrier (reprice checks that each entry is still that printing), written inside it:
+                # a full backup (backups.create_full) waits for what is under way and must never copy half a write
+                prices = game.current_prices(store.priced_entries(game.id))
+                with maintenance_barrier:
+                    changed += store.reprice(prices)
+        logger.info(f"{game.label}: {changed} entries priced again from the new card data")
+        if changed:
+            # The pages that show totals or lists reload them (scanner.js, collection.js, decks.js)
+            socketio.emit('inventory_prices_updated', {'stats': scan_inventory.get_stats(game.id)}, namespace='/')
+        return changed
+    except Exception as e:
+        logger.exception(f"{game.label}: the entries could not be priced again: {e}")
+        return 0
 
 
 def check_card_data_updates():
@@ -583,6 +610,44 @@ def parse_update_schedule(data):
     if not changes:
         raise ValueError
     return changes
+
+
+def price_source_state():
+    """The price source chosen, its currency and the choices (Settings > Card data > Prices)"""
+    chosen = prices.source(database.price_source)
+    # 'priced': how many printings each source has a price for - 0 means not choosable until the card data is downloaded again
+    choices = [{**choice, 'priced': database.priced_printings(choice['id'])} for choice in prices.choices()]
+    return {'source': database.price_source, 'currency': chosen['currency'], 'symbol': chosen['symbol'],
+            'from': chosen['from'], 'choices': choices}
+
+
+@app.route('/api/prices/source')
+def price_source():
+    return jsonify({'success': True, **price_source_state()})
+
+
+@app.route('/api/prices/source', methods=['POST'])
+@guarded
+def set_price_source():
+    """
+    Show and count another source's prices (JSON: 'source', an id of prices.SOURCES). The card data's shown prices change
+    at once; then every entry of the collection and of the scanned cards is priced again in that source
+    (reprice_collections) - the totals are in its currency from then on. Guarded: it rewrites every entry's price.
+    """
+    source_id = (request.get_json(silent=True) or {}).get('source')
+    if not prices.known(source_id):
+        return jsonify({'success': False, 'error': 'Unknown price source'}), 400
+    if not database.priced_printings(source_id):
+        # Card data from before its prices were kept: every card would show the new currency with the old number
+        return jsonify({'success': False, 'error': 'The card data has no prices from that source yet: update the card database first'}), 409
+    app_settings.set('price_source', source_id)
+    database.set_price_source(source_id)
+    changed = reprice_collections(games.active())
+    chosen = prices.source(source_id)
+    # Every page shows prices: they take the new currency (common.js: priceSymbol) and reload their totals
+    socketio.emit('price_source_changed', {'source': source_id, 'currency': chosen['currency'], 'symbol': chosen['symbol']}, namespace='/')
+    logger.info(f"Price source: {source_id}, {changed} entries priced again")
+    return jsonify({'success': True, 'repriced': changed, **price_source_state()})
 
 
 @app.route('/api/updates/schedule')

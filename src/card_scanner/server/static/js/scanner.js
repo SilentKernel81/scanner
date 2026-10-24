@@ -377,8 +377,16 @@ socket.on('inventory_updated', function(data) {
     currentCard = null;
 });
 
-// Prices fetched after an add (games with Game.fetches_prices): new totals, and the list if it is open
+// Prices fetched after an add (games with Game.fetches_prices), or priced again (a card data update, another price source):
+// new totals, and the list if it is open
 socket.on('inventory_prices_updated', function() {
+    loadStats();
+    if (isOpen('inventory-modal')) loadInventory();
+});
+
+// Another price source (Settings > Card data > Prices): prices in its currency from now on
+socket.on('price_source_changed', function(data) {
+    window.PRICE_SYMBOL = data.symbol;
     loadStats();
     if (isOpen('inventory-modal')) loadInventory();
 });
@@ -456,13 +464,16 @@ function cardPricesHtml(card) {
     if (card.prices) {
         // [[finish label, price]] (games other than Magic)
         card.prices.forEach(([label, price]) => prices.push(
-            `<span class="price-label">${escapeHtml(label.toLowerCase())}</span> <span class="price">$${price.toFixed(2)}</span>`));
+            `<span class="price-label">${escapeHtml(label.toLowerCase())}</span> <span class="price">${formatPrice(price)}</span>`));
     } else {
         if (card.price > 0) {
-            prices.push(`<span class="price">$${card.price.toFixed(2)}</span>`);
+            prices.push(`<span class="price">${formatPrice(card.price)}</span>`);
         }
         if (card.price_foil > 0) {
-            prices.push(`<span class="price-label">foil</span> <span class="price">$${card.price_foil.toFixed(2)}</span>`);
+            prices.push(`<span class="price-label">foil</span> <span class="price">${formatPrice(card.price_foil)}</span>`);
+        }
+        if (card.price_etched > 0) {
+            prices.push(`<span class="price-label">etched</span> <span class="price">${formatPrice(card.price_etched)}</span>`);
         }
     }
     if (prices.length === 0) {
@@ -517,7 +528,8 @@ function displayPrintings(cardName, cards) {
     const printings = cards.map(card => {
         // Scryfall's "small" image size keeps the grid light
         const thumb = card.thumb_uri || (card.image_uri ? card.image_uri.replace('/normal/', '/small/') : '');
-        const price = card.price > 0 ? `$${card.price.toFixed(2)}` : (card.price_foil > 0 ? `$${card.price_foil.toFixed(2)} foil` : 'N/A');
+        const price = card.price > 0 ? `${formatPrice(card.price)}` : (card.price_foil > 0 ? `${formatPrice(card.price_foil)} foil`
+            : card.price_etched > 0 ? `${formatPrice(card.price_etched)} etched` : 'N/A');
         return `
             <div class="printing-card" data-printing="${escapeHtml(card.id)}">
                 ${thumb ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(card.name)}" loading="lazy">` : ''}
@@ -908,7 +920,7 @@ function loadStats() {
             setReviewCount(data.review || 0);
             if (data.inventory) {
                 $('inv-cards').textContent = data.inventory.total_cards.toLocaleString();
-                $('total-value').textContent = '$' + data.inventory.total_value.toFixed(2);
+                $('total-value').textContent = formatPrice(data.inventory.total_value);
             }
         })
         // Not shown in the activity log - expected when the server is down
@@ -1301,8 +1313,8 @@ function inventoryRowHtml(card, index) {
                 </div>
             </div>
             <div class="inventory-card-price">
-                <div class="inventory-price-value">$${(card.price * card.quantity).toFixed(2)}</div>
-                ${card.quantity > 1 ? `<div class="inventory-price-each">$${card.price.toFixed(2)} each</div>` : ''}
+                <div class="inventory-price-value">${formatPrice((card.price * card.quantity))}</div>
+                ${card.quantity > 1 ? `<div class="inventory-price-each">${formatPrice(card.price)} each</div>` : ''}
                 <div class="inventory-timestamp">${escapeHtml(card.timestamp)}</div>
             </div>
             <div class="inventory-card-actions">
@@ -1339,9 +1351,9 @@ function renderInventory() {
     const specialCount = filteredInventory.reduce((sum, card) => sum + (card.finish !== defaultFinish() ? card.quantity : 0), 0);
 
     statsDiv.innerHTML = inventoryStatHtml(totalCards, 'Total Cards')
-        + inventoryStatHtml(`$${totalValue.toFixed(2)}`, 'Total Value')
+        + inventoryStatHtml(`${formatPrice(totalValue)}`, 'Total Value')
         + inventoryStatHtml(specialCount, 'Foil Cards')
-        + inventoryStatHtml(`$${(totalValue / totalCards).toFixed(2)}`, 'Avg. Value');
+        + inventoryStatHtml(`${formatPrice((totalValue / totalCards))}`, 'Avg. Value');
     listDiv.innerHTML = filteredInventory.map(inventoryRowHtml).join('');
 }
 

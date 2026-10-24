@@ -90,7 +90,7 @@ function categoryFromAddress() {
 // ============================================================================
 
 const OVERVIEW_ORDER = [
-    ['cameras', 'Cameras', 'cameras'], ['reading', 'Card recognition', 'reading'], ['carddata', 'Card data', 'carddata'],
+    ['cameras', 'Cameras', 'cameras'], ['reading', 'Card recognition', 'reading'], ['carddata', 'Card data', 'carddata'], ['prices', 'Prices', 'carddata'],
     ['index', 'Picture index', 'carddata'], ['backups', 'Backups', 'backups'], ['storage', 'Storage', 'storage'], ['server', 'Server', 'server'],
 ];
 const overview = {};     // line -> {text, warn}
@@ -154,6 +154,9 @@ function connect() {
     socket.on('refocus_every_updated', data => { $('refocus-every').value = String(data.captures); });
     socket.on('refocus_on_drop_updated', data => showRefocusOnDrop(data.ratio));
     socket.on('fixed_area_updated', () => loadCameraSettings());
+    socket.on('dropper_updated', applyDropper);
+    socket.on('dropper_tested', data => notify(data.ok ? `Card released (${plural(data.pulses, 'card')} since the station started)`
+                                                       : `The card dropper did not release a card: ${data.message}`, data.ok ? 'success' : 'error'));
 
     // Card recognition
     socket.on('ocr_toggled', data => applyOcrState(data.enabled, data.installed));
@@ -265,6 +268,7 @@ async function loadCameraSettings() {
     showRefocusOnDrop(data.refocus_on_drop);
     $('camera-rotation').value = String(data.camera_rotation || 0);
     $('toggle-debug-trace').checked = Boolean(data.debug_trace);
+    applyDropper(data.dropper);
     $('fixed-area-state').textContent = data.fixed_area_enabled
         ? 'Fixed area: on. Cards are judged by the area drawn on the camera\'s page, not by their outline. Draw or turn it off there.'
         : 'Fixed area: off. Cards are found by their outline; the area for sleeved cards is drawn on the camera\'s page.';
@@ -276,6 +280,37 @@ async function loadCameraSettings() {
     applyAiState(data.ai_enabled, data.ai_available);
     applyReadingState(data.reading);
     applyDebugMode(data.debug_mode, data.debug_mode_running, data.debugger_running);
+}
+
+// The card dropper (station/dropper.py; the server's settings_events: set_dropper / test_dropper): this camera's settings, and what
+// the station says of it - the cards released since it started, or why the last one could not be
+function applyDropper(payload) {
+    if (!payload) return;
+    const settings = payload.settings || {}, state = payload.state;
+    $('toggle-dropper').checked = Boolean(settings.enabled);
+    // Not while it is being typed in: the answer to the previous change would undo the next keystrokes
+    if (document.activeElement !== $('dropper-pin')) $('dropper-pin').value = settings.pin === null || settings.pin === undefined ? '' : String(settings.pin);
+    if (document.activeElement !== $('dropper-pulse')) $('dropper-pulse').value = String(settings.pulse_ms);
+    if (document.activeElement !== $('dropper-chip')) $('dropper-chip').value = settings.chip || '';
+    $('dropper-active-low').checked = Boolean(settings.active_low);
+    $('dropper-test').disabled = !settings.enabled || !payload.connected;
+    $('dropper-state').textContent = !payload.connected ? 'The station is not connected: its settings are sent when it connects.'
+        : !state ? 'This station\'s program has no card dropper yet - update the station.'
+        : state.error ? `It could not release a card: ${state.error}`
+        : settings.enabled ? `On: ${plural(state.pulses, 'card')} released since the station started.`
+        : 'Off.';
+}
+
+function saveDropper() {
+    // The whole set each time: the server checks it whole (an empty pin is "none")
+    const pin = $('dropper-pin').value.trim();
+    socket.emit('set_dropper', {dropper: {
+        enabled: $('toggle-dropper').checked,
+        pin: pin === '' ? null : parseInt(pin, 10),
+        pulse_ms: parseInt($('dropper-pulse').value, 10),
+        chip: $('dropper-chip').value.trim(),
+        active_low: $('dropper-active-low').checked,
+    }});
 }
 
 // The two focus checks act on a LOCKED focus only (autofocus off): greyed out while the camera focuses by itself
@@ -357,6 +392,10 @@ function bindCameras() {
         socket.emit('set_refocus_on_drop', {ratio: parseFloat(event.target.value)}));
     $('camera-rotation').addEventListener('change', event =>
         socket.emit('set_camera_rotation', {rotation: parseInt(event.target.value)}));
+    for (const id of ['toggle-dropper', 'dropper-pin', 'dropper-pulse', 'dropper-chip', 'dropper-active-low']) {
+        $(id).addEventListener('change', saveDropper);
+    }
+    $('dropper-test').addEventListener('click', () => socket.emit('test_dropper', {}));
     $('toggle-debug-trace').addEventListener('change', event => {
         socket.emit('toggle_debug_trace', {enabled: event.target.checked});
         notify(`Debug trace ${event.target.checked ? 'on' : 'off'} for this camera`, 'success');
@@ -858,6 +897,35 @@ function lastRunText(last) {
     return `Last began ${at} (still running, or the program stopped during it).`;
 }
 
+// Prices: whose prices the pages show and the collection is counted in (core/prices.py). Changing it prices every entry again
+function showPriceSource(state) {
+    const select = $('price-source');
+    // A source the card data has no prices from yet (downloaded before they were kept) cannot be chosen until it is updated
+    select.innerHTML = state.choices.map(choice =>
+        `<option value="${escapeHtml(choice.id)}"${choice.priced ? '' : ' disabled'}>${escapeHtml(choice.label)}`
+        + `${choice.priced ? '' : ' - after the next card data update'}</option>`).join('');
+    select.value = state.source;
+    window.PRICE_SYMBOL = state.symbol;
+    $('price-source-hint').textContent = `${state.from}. The collection, the scanned cards and the decks are counted in ${state.currency}; `
+        + 'a change prices every card again (cards imported without their printing keep the price they came with).';
+    setOverview('prices', state.choices.find(choice => choice.id === state.source).label);
+}
+
+async function loadPriceSource() {
+    const state = await api('/api/prices/source');
+    if (state) showPriceSource(state);
+}
+
+async function savePriceSource(source) {
+    // Guarded on the server: with a settings password set, common.js asks for it and sends the request again
+    $('price-source').disabled = true;
+    const state = await api('/api/prices/source', {method: 'POST', body: {source}});
+    $('price-source').disabled = false;
+    if (!state) return loadPriceSource();       // refused (or the password dialog cancelled): back to what is saved
+    showPriceSource(state);
+    notify(`Prices from ${state.choices.find(choice => choice.id === state.source).label} - ${plural(state.repriced, 'entry', 'entries')} priced again`, 'success');
+}
+
 function showUpdateSchedule(state) {
     const card = state.card_data, index = state.image_index;
     cardDataSchedule = card;
@@ -944,6 +1012,7 @@ function bindData() {
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value)}));
     $('database-every').addEventListener('change', event => saveUpdateSchedule({card_data: parseInt(event.target.value)}));
+    $('price-source').addEventListener('change', event => savePriceSource(event.target.value));
     $('index-every').addEventListener('change', event => saveUpdateSchedule({image_index: parseInt(event.target.value)}));
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');
@@ -1130,4 +1199,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCaptureCopy();
     loadIndex();
     loadUpdateSchedule();
+    loadPriceSource();
 });

@@ -47,8 +47,9 @@ def settings_page():
 
 @app.context_processor
 def page_links():
-    """settings_url: the settings page (since 2026-10-15 one page for all of them)"""
-    return {'settings_url': '/settings'}
+    """settings_url: the settings page (since 2026-10-15 one page for all of them). price_symbol: the currency of the
+    prices shown ('$', '€': Settings > Card data > Prices), handed to the pages' scripts by _topbar.html"""
+    return {'settings_url': '/settings', 'price_symbol': database.price_symbol() if database else '$'}
 
 
 @app.route('/collection')

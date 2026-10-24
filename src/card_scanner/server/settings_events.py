@@ -13,6 +13,9 @@ from card_scanner.core.card_ocr import CardOcr
 from card_scanner.core.cleanup import cleanup_old_images, get_images_stats
 from card_scanner.config import Config
 from card_scanner import games
+# The card dropper's rules are written once, beside the code that drives the pin: the server checks with them before saving,
+# the station before using (a plain module: it opens nothing and imports no GPIO library when imported)
+from card_scanner.station.dropper import checked as dropper_checked
 
 from card_scanner.server.state import app, app_settings, identification, inventory, maintenance_barrier, printing_check, services, socketio, stations
 from card_scanner.server.logs import logger
@@ -174,6 +177,7 @@ def get_scan_settings():
         'ai_available': bool(identification and identification.card_identifier),
         'reading': reading_status(),
         'debug_trace': bool(scanner.debug_trace_enabled) if scanner else False,
+        'dropper': dropper_payload(),
         'debug_mode': saved_debug_mode(),
         'debug_mode_running': bool(services.debug_mode_running),
         'debugger_running': bool(services.debugger_running),
@@ -436,6 +440,58 @@ def handle_set_reading_mode(data=None):
     # (with OCR off there is no strip: only the picture alone can decide, so that is the gap only while it is not allowed)
     if status['mode'] == 'evidence' and (status['index_printings'] is None or (not status['ocr_enabled'] and not status['accept_image_alone'])):
         log_to_client("Evidence reading needs the image index, and OCR or the picture alone - until they are there every card is read as before", level="warning")
+
+
+def dropper_payload():
+    """
+    The card dropper as the Settings page shows it: this camera's settings (the defaults - off - when never set, or when
+    data/stations.json holds values that do not pass), what the station reports of it (pulses sent, the last error; None from
+    a station whose program has no dropper yet) and whether the station is connected at all.
+    """
+    if not scanner:
+        return {'settings': dropper_checked(None), 'state': None, 'connected': False}
+    try:
+        settings = dropper_checked(scanner.dropper)
+    except ValueError:
+        settings = dropper_checked(None)
+    return {'settings': settings, 'state': scanner.dropper_state if scanner.connected else None, 'connected': bool(scanner.connected)}
+
+
+@socketio.on('set_dropper')
+def handle_set_dropper(data):
+    """
+    This camera's card dropper (station/dropper.py): switched on or off, its pin, its pulse. Checked whole before anything is
+    saved; saved with the camera's settings and sent to the station (RemoteScanner: DECIDED 'dropper'), now and whenever it
+    connects. Not guarded, like the camera's other settings - it moves cards, it changes nothing that is kept.
+    """
+    if not scanner:
+        emit('error', {'message': 'Scanner not initialized'})
+        return
+    try:
+        values = dropper_checked((data or {}).get('dropper'))
+    except ValueError as e:
+        emit('error', {'message': str(e)})
+        emit('dropper_updated', dropper_payload())    # the page goes back to what is saved
+        return
+    scanner.dropper = values
+    scanner.settings.set('dropper', values)
+    logger.info(f"Card dropper: {'on, GPIO' + str(values['pin']) + ', ' + str(values['pulse_ms']) + ' ms' if values['enabled'] else 'off'}")
+    emit('dropper_updated', dropper_payload())
+
+
+@socketio.on('test_dropper')
+def handle_test_dropper(_data=None):
+    """The Settings page's "Drop one card": one pulse now, to try the mechanism (the station answers how it went)"""
+    if not scanner:
+        emit('dropper_tested', {'ok': False, 'message': 'Scanner not initialized'})
+        return
+    try:
+        pulses = scanner.drop_card()
+    except ValueError as e:
+        emit('dropper_tested', {'ok': False, 'message': str(e)})
+        return
+    emit('dropper_tested', {'ok': True, 'pulses': pulses})
+    emit('dropper_updated', dropper_payload())
 
 
 @socketio.on('toggle_debug_trace')

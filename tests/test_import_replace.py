@@ -44,6 +44,10 @@ class FakeDatabase:
     def search_card(self, name, fuzzy=True):
         return BY_NAME.get(name.lower())
 
+    def price_currency(self):
+        # The export's price column says its currency (games.base.write_collection_csv)
+        return 'USD', '$'
+
 
 def moxfield(*rows):
     lines = ['Count,Name,Edition,Condition,Foil,Collector Number,Tags']

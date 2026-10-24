@@ -440,6 +440,20 @@
    "precon_covers"
   ],
   [
+   "/api/prices/source",
+   [
+    "GET"
+   ],
+   "price_source"
+  ],
+  [
+   "/api/prices/source",
+   [
+    "POST"
+   ],
+   "set_price_source"
+  ],
+  [
    "/api/prompts",
    [
     "GET"
@@ -736,11 +750,13 @@
   "set_ai_provider",
   "set_autofocus",
   "set_camera_rotation",
+  "set_dropper",
   "set_fixed_area",
   "set_game",
   "set_reading_mode",
   "set_refocus_every",
   "set_refocus_on_drop",
+  "test_dropper",
   "test_prompt",
   "toggle_ai",
   "toggle_auto_capture",

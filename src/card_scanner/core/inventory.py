@@ -397,7 +397,10 @@ def read_collection_csv(reader, game, finishes, imported_at, stats, log):
             except ValueError:
                 quantity = 1
             try:
-                price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
+                # The column says its currency since 2026-10-24 (games.base.write_collection_csv): read either; the number
+                # is taken as it is - a file in euros read into a collection in dollars is repriced at the next card data update
+                text = row.get('Price (USD)') or row.get('Price (EUR)') or '0'
+                price = float(text.replace('$', '').replace('€', '').replace(',', '').strip() or 0)
             except ValueError:
                 price = 0.0
             timestamp = (row.get('Timestamp') or '').strip()
@@ -1047,7 +1050,7 @@ class InventoryManager(storage.Transactional):
             self.last_added[source] = (row['id'], quantity, capture_id, batch)
         if not quiet:
             self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
-                     f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
+                     f"{values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
         return row['id']
 
     @_writes
@@ -1086,6 +1089,30 @@ class InventoryManager(storage.Transactional):
         with self._lock:
             self.conn.execute('UPDATE inventory SET price_usd = ? WHERE id = ?', (float(price), row_id))
             self._commit()
+
+    def priced_entries(self, game):
+        """[{'id', 'card_id', 'finish', 'price_usd'}] of a game's entries that know their printing - what reprice() is worked out from.
+        Entries without one (CSV imports of an unknown printing) cannot be priced again and are left out"""
+        with self._lock:
+            return [dict(row) for row in self.conn.execute(
+                "SELECT id, card_id, finish, price_usd FROM inventory WHERE game = ? AND COALESCE(card_id, '') != ''", (game,))]
+
+    @_writes
+    def reprice(self, prices):
+        """
+        New prices for many entries at once: {row id: (card_id, finish, price)}, from priced_entries() and the current card data.
+        One transaction. An entry is changed only while it is still that printing in that finish: the prices are worked out
+        before this runs, and an edit made meanwhile (another printing, foil instead of regular) must not get the old one's
+        price. Returns how many entries got a different price.
+        """
+        changed = 0
+        with self._lock:
+            for row_id, (card_id, finish, price) in prices.items():
+                changed += self.conn.execute(
+                    'UPDATE inventory SET price_usd = ? WHERE id = ? AND card_id = ? AND finish = ? AND price_usd IS NOT ?',
+                    (float(price), row_id, card_id, finish, float(price))).rowcount
+            self._commit()
+        return changed
 
     @_writes
     def undo_last_add(self, source=None):

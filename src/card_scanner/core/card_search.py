@@ -51,7 +51,7 @@ class CardSearcher:
 
         if card_info:
             set_info = f" ({card_info['set']} #{card_info['number']})" if card_info.get('number') else ""
-            self.log(f"Card found: {card_info['name']}{set_info} - ${card_info['price']:.2f}")
+            self.log(f"Card found: {card_info['name']}{set_info} - {self.db.price_symbol()}{card_info['price']:.2f}")
             return card_info
         else:
             self.log(f"Card not found: {card_name}{ai_suffix}", level="warning")

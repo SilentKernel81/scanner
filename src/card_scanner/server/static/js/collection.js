@@ -476,7 +476,8 @@ function activeFilters() {
     if ($('filter-free').checked) chips.push({text: 'Not in a deck', clear: () => { $('filter-free').checked = false; }});
     const min = $('filter-price-min').value, max = $('filter-price-max').value;
     if ((min || max) && !digital) {
-        chips.push({text: 'Price: ' + (min && max ? `$${min} – $${max}` : min ? `from $${min}` : `up to $${max}`),
+        const symbol = priceSymbol();
+        chips.push({text: 'Price: ' + (min && max ? `${symbol}${min} – ${symbol}${max}` : min ? `from ${symbol}${min}` : `up to ${symbol}${max}`),
                     clear: () => { $('filter-price-min').value = ''; $('filter-price-max').value = ''; }});
     }
     return chips;
@@ -1752,7 +1753,9 @@ function bindEvents() {
 
 // The inventory changes while scanning on another tab or device
 // (collection_updated: a trade changed - only this page listens)
-['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated'].forEach(name =>
+// Another price source: its currency first, then the same reload as any change
+socket.on('price_source_changed', data => { window.PRICE_SYMBOL = data.symbol; });
+['inventory_updated', 'inventory_undone', 'inventory_prices_updated', 'collection_updated', 'price_source_changed'].forEach(name =>
     socket.on(name, debounce(() => {
         loadInventory();
         if (currentTab === 'trades') loadTrades();

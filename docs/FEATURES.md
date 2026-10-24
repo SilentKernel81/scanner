@@ -82,6 +82,14 @@ game sits behind one interface (`games/`), so another could be added.
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
   update, and the picture index's button for their pictures).
 - **The picture index extends itself after a card data update** (since 2026-10-21): when the download succeeded and an index exists, the new printings' pictures are fetched from Scryfall without a button, and the Scanner banner shows how far it is; a switch in Settings > Card data turns it off. Never starts the first build. First live run 2026-10-21: an update that brought 2 new printings, the index current again about 10 s after the download ended (one run, a small update: a large one was never timed).
+- **Prices follow the card data** (since 2026-10-23): after each card data update the collection's and the scanned
+  cards' entries take their printing's price in the new data (before, an entry kept the price of the day it was added);
+  an etched-only printing is priced by its etched price (it went in at 0). Run once after a real download on copied data
+  (2026-10-24: 1,452 of 1,595 entries repriced, median change -3%); never with a page open meanwhile.
+- **A choice of price source** (since 2026-10-24, Settings > Card data > Prices): TCGplayer in dollars or Cardmarket in
+  euros, both from Scryfall's card data; the collection, the scanned cards and the decks are counted in it, every page
+  shows its currency, and a change prices every card again. Tried on copied data in a trial server; never with the
+  settings password set. More shops (MTGJSON: Card Kingdom, Mana Pool) are planned.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.
@@ -132,6 +140,16 @@ game sits behind one interface (`games/`), so another could be added.
   one copy back to the review queue with its photo, to find the right printing.
 - **Manual search** of the card data, by name, set and number, with all printings of a card.
 - **Card data updates** (download and safe replacement) and a check for new data.
+- **A card dropper** (since 2026-10-22, the station's code; the mechanism below): a station can pulse a GPIO pin of its Raspberry Pi to release the next
+  card itself - once the server has each capture (and it was not a card back), after Add / Skip with auto-add off, the first
+  card when scanning starts; one pulse per card, never more, and none while the server is away. Settings > Cameras > Card dropper, with a "Drop one card" test. Tested with a stand-in pin; never with a
+  real pin or mechanism.
+- **The card dropper's mechanism** (2026-10-22/23, design only: `hardware/dropper/`): a 3D-printed feeder for sleeved
+  and unsleeved cards - six silicone-tyred wheels under the stack (two of the three axles driven by servos through
+  one-way bearings) roll only the bottom card out under an adjustable gate; it slides on its back into a tray under a
+  camera arm. A Raspberry Pi Pico turns the station's pulse into one card's feed. Also as FreeCAD and STEP files.
+  Checked for collisions and a card's path in CAD, the controller on a simulated Pico; never printed, never run, no
+  card fed - card damage is to be tested first (`docs/plans/CARD_DROPPER_MECHANISM_PLAN.md`).
 - **Automatic updates** (since 2026-10-22, off by default): Settings > Card data can download the card data again every day, 3 days,
   week or month, and go back to the pictures the picture index still lacks (a build Scryfall refused, one stopped) every
   6 hours, day or week - while the program runs; a computer that was off catches up when it starts. Never the index's
