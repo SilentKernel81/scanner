@@ -86,6 +86,10 @@ game sits behind one interface (`games/`), so another could be added.
   cards' entries take their printing's price in the new data (before, an entry kept the price of the day it was added);
   an etched-only printing is priced by its etched price (it went in at 0). Run once after a real download on copied data
   (2026-10-24: 1,452 of 1,595 entries repriced, median change -3%); never with a page open meanwhile.
+- **A choice of price source** (since 2026-10-24, Settings > Card data > Prices): TCGplayer in dollars or Cardmarket in
+  euros, both from Scryfall's card data; the collection, the scanned cards and the decks are counted in it, every page
+  shows its currency, and a change prices every card again. Tried on copied data in a trial server; never with the
+  settings password set. More shops (MTGJSON: Card Kingdom, Mana Pool) are planned.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.

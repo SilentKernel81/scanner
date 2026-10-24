@@ -12,7 +12,7 @@ import threading
 import unicodedata
 from datetime import datetime
 from difflib import SequenceMatcher, get_close_matches
-from card_scanner.core import storage
+from card_scanner.core import prices, storage
 from card_scanner.config import Config
 
 # Create database logger
@@ -62,6 +62,11 @@ CARD_COLUMNS = [
     ('price_usd_etched', 'REAL'),
     ('price_eur', 'REAL'),
     ('price_eur_foil', 'REAL'),
+    # The prices shown and counted: the chosen source's, copied from the columns above (prices.apply_sql; since
+    # 2026-10-24). Everything that reads a price reads these three - never price_usd & co., which stay each source's own
+    ('price', 'REAL'),
+    ('price_foil', 'REAL'),
+    ('price_etched', 'REAL'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -207,6 +212,8 @@ class CardDatabase:
         self._import_lock = threading.Lock()  # populate_database: one refresh at a time
         self.conn = None
         self._lock = threading.RLock()  # Thread-safe database access
+        # Whose prices the shown columns hold (prices.SOURCES); the server sets the saved choice at start (set_price_source)
+        self.price_source = prices.DEFAULT_SOURCE
         self.initialize_database()
 
     def initialize_database(self):
@@ -223,6 +230,11 @@ class CardDatabase:
             if column not in existing_columns:
                 logger.info(f"Adding {column} column to existing cards table")
                 cursor.execute(f"ALTER TABLE cards ADD COLUMN {column} {column_type}")
+
+        if 'price' not in existing_columns:
+            # An older file: the shown prices are filled from the default source's (the server applies the chosen one next)
+            logger.info("Filling the shown price columns")
+            cursor.execute(prices.apply_sql('cards', self.price_source))
 
         if 'name_search' not in existing_columns:
             logger.info("Filling search name columns")
@@ -417,12 +429,19 @@ class CardDatabase:
             self._create_cards_table(cursor, table='cards_import')
             importer.commit()
             inserted = self._fill_import(importer, cursor, cards_data, progress_callback)
+            # The chosen source's prices into the shown columns BEFORE the swap: the new cards are never seen without them
+            applied = self.price_source
+            cursor.execute(prices.apply_sql('cards_import', applied))
+            importer.commit()
         finally:
             importer.close()
 
         # The new cards and what is known about them go in together (or neither)
         self.replace_table('cards_import', 'cards', self._create_card_indexes,
                            info=('mtg', getattr(self, 'last_download_source', None), inserted))
+        if self.price_source != applied:
+            # The choice changed during the import: it went to the old table, the new one has the earlier choice's
+            self.set_price_source(self.price_source)
         if progress_callback:
             progress_callback(f"Database populated with {inserted} cards!")
         return inserted
@@ -482,6 +501,8 @@ class CardDatabase:
                     price('usd_etched'),
                     price('eur'),
                     price('eur_foil'),
+                    # The shown prices: filled for the whole table by prices.apply_sql before the swap (_populate)
+                    None, None, None,
                 ))
                 
                 inserted += 1
@@ -699,7 +720,7 @@ class CardDatabase:
         key = search_key(partial_name) or ''
         with self._lock:
             return self.conn.execute('''
-                SELECT name, set_name, COALESCE(price_usd, price_usd_foil, price_usd_etched) AS price_usd FROM cards
+                SELECT name, set_name, COALESCE(price, price_foil, price_etched) AS price FROM cards
                 WHERE name_search LIKE ? OR flavor_search LIKE ?
                 ORDER BY name
                 LIMIT ?
@@ -715,9 +736,9 @@ class CardDatabase:
             'set': row['set_name'],
             'number': row['collector_number'],
             'rarity': row['rarity'],
-            'price': row['price_usd'] or 0.0,
-            'price_foil': row['price_usd_foil'] or 0.0,
-            'price_etched': row['price_usd_etched'] or 0.0,
+            'price': row['price'] or 0.0,
+            'price_foil': row['price_foil'] or 0.0,
+            'price_etched': row['price_etched'] or 0.0,
             'image_uri': row['image_uri'],
             'oracle_text': row['oracle_text'],
             'type_line': row['type_line'],
@@ -779,6 +800,33 @@ class CardDatabase:
                 facts[row['id']] = (row['name'], row['set_code'], row['collector_number'], row['oracle_id'], finishes, row['released_at'], row['frame'])
         return facts
 
+    def set_price_source(self, source_id):
+        """
+        Show and count another source's prices (prices.SOURCES; an unknown id is the default one): one UPDATE of the
+        shown columns, about a second for the whole card data. The entries' own prices are the caller's to redo
+        (server/card_data.py: reprice_collections). Returns the source's id.
+        """
+        source_id = source_id if prices.known(source_id) else prices.DEFAULT_SOURCE
+        with self._lock:
+            self.price_source = source_id
+            self.conn.execute(prices.apply_sql('cards', source_id))
+            self.conn.commit()
+        logger.info(f"Prices shown from {source_id}")
+        return source_id
+
+    def priced_printings(self, source_id):
+        """How many printings have a price in that source (prices.priced_sql)"""
+        with self._lock:
+            return self.conn.execute(prices.priced_sql('cards', source_id)).fetchone()[0]
+
+    def price_currency(self):
+        """(currency code, symbol) of the prices shown: ('USD', '$'), ('EUR', '€')"""
+        chosen = prices.source(self.price_source)
+        return chosen['currency'], chosen['symbol']
+
+    def price_symbol(self):
+        return self.price_currency()[1]
+
     def get_card_by_id(self, card_id):
         """Get a single printing by its Scryfall id"""
         with self._lock:
@@ -815,7 +863,7 @@ class CardDatabase:
         SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END)
                         || (CASE WHEN finishes LIKE '%"nonfoil"%' THEN '1' ELSE '0' END)
                         || COALESCE(released_at, '')) AS _pick,
-               (SELECT MIN(COALESCE(p.price_usd, p.price_usd_foil, p.price_usd_etched)) FROM cards p
+               (SELECT MIN(COALESCE(p.price, p.price_foil, p.price_etched)) FROM cards p
                 WHERE p.name_search = c.name_search) AS cheapest
         FROM cards c WHERE {where} GROUP BY c.name
     """
@@ -983,7 +1031,7 @@ class CardDatabase:
 
         # Get cards with prices
         try:
-            cursor.execute('SELECT COUNT(*) FROM cards WHERE COALESCE(price_usd, price_usd_foil, price_usd_etched) IS NOT NULL')
+            cursor.execute('SELECT COUNT(*) FROM cards WHERE COALESCE(price, price_foil, price_etched) IS NOT NULL')
             result = cursor.fetchone()
             cards_with_prices = result[0] if result else 0
         except Exception:

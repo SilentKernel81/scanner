@@ -7,7 +7,7 @@
 // connection, and two files declaring the same name stop a page from loading at all.
 
 const $ = id => document.getElementById(id);
-const money = value => '$' + (value || 0).toFixed(2);
+const money = value => formatPrice(value);   // common.js: in the chosen price source's currency
 const plural = (count, word, many = word + 's') => `${count} ${count === 1 ? word : many}`;
 const entriesText = count => plural(count, 'entry', 'entries');
 const totalQuantity = rows => rows.reduce((sum, row) => sum + row.quantity, 0);

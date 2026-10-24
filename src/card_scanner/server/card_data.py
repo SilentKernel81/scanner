@@ -11,7 +11,7 @@ import time
 from card_scanner import games
 from card_scanner.config import Config
 
-from card_scanner.core import image_index
+from card_scanner.core import image_index, prices
 from card_scanner.server.state import app, app_settings, database, inventory, maintenance_barrier, printing_check, scan_inventory, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded
@@ -610,6 +610,44 @@ def parse_update_schedule(data):
     if not changes:
         raise ValueError
     return changes
+
+
+def price_source_state():
+    """The price source chosen, its currency and the choices (Settings > Card data > Prices)"""
+    chosen = prices.source(database.price_source)
+    # 'priced': how many printings each source has a price for - 0 means not choosable until the card data is downloaded again
+    choices = [{**choice, 'priced': database.priced_printings(choice['id'])} for choice in prices.choices()]
+    return {'source': database.price_source, 'currency': chosen['currency'], 'symbol': chosen['symbol'],
+            'from': chosen['from'], 'choices': choices}
+
+
+@app.route('/api/prices/source')
+def price_source():
+    return jsonify({'success': True, **price_source_state()})
+
+
+@app.route('/api/prices/source', methods=['POST'])
+@guarded
+def set_price_source():
+    """
+    Show and count another source's prices (JSON: 'source', an id of prices.SOURCES). The card data's shown prices change
+    at once; then every entry of the collection and of the scanned cards is priced again in that source
+    (reprice_collections) - the totals are in its currency from then on. Guarded: it rewrites every entry's price.
+    """
+    source_id = (request.get_json(silent=True) or {}).get('source')
+    if not prices.known(source_id):
+        return jsonify({'success': False, 'error': 'Unknown price source'}), 400
+    if not database.priced_printings(source_id):
+        # Card data from before its prices were kept: every card would show the new currency with the old number
+        return jsonify({'success': False, 'error': 'The card data has no prices from that source yet: update the card database first'}), 409
+    app_settings.set('price_source', source_id)
+    database.set_price_source(source_id)
+    changed = reprice_collections(games.active())
+    chosen = prices.source(source_id)
+    # Every page shows prices: they take the new currency (common.js: priceSymbol) and reload their totals
+    socketio.emit('price_source_changed', {'source': source_id, 'currency': chosen['currency'], 'symbol': chosen['symbol']}, namespace='/')
+    logger.info(f"Price source: {source_id}, {changed} entries priced again")
+    return jsonify({'success': True, 'repriced': changed, **price_source_state()})
 
 
 @app.route('/api/updates/schedule')

@@ -14,7 +14,7 @@ try:
 except ImportError:  # not on Linux or macOS: no lock, as before
     fcntl = None
 
-from card_scanner.core import arena, foil_marker
+from card_scanner.core import arena, foil_marker, prices
 from card_scanner.core.cleanup import get_images_stats
 from card_scanner.config import Config
 from card_scanner.core.database import CardDatabase
@@ -71,6 +71,9 @@ def initialize_components():
     # now runs station_client.py beside this program)
     logger.info("Initializing scanner...")
     services.app_settings = Settings()
+    # Whose prices are shown and counted (Settings > Card data > Prices): copied into the card data's shown columns -
+    # again at every start, about a second: the file may have been filled elsewhere since (scripts/setup_database.py)
+    services.database.set_price_source(services.app_settings.get('price_source', prices.DEFAULT_SOURCE))
     # How large the large copy of each capture is (the person's choice on the scanner page)
     from card_scanner.core import inventory as inventory_module
     inventory_module.set_full_capture_size(services.app_settings.get('capture_copy_size', inventory_module.FULL_CAPTURE_DEFAULT))

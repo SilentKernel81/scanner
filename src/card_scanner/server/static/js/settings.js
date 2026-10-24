@@ -90,7 +90,7 @@ function categoryFromAddress() {
 // ============================================================================
 
 const OVERVIEW_ORDER = [
-    ['cameras', 'Cameras', 'cameras'], ['reading', 'Card recognition', 'reading'], ['carddata', 'Card data', 'carddata'],
+    ['cameras', 'Cameras', 'cameras'], ['reading', 'Card recognition', 'reading'], ['carddata', 'Card data', 'carddata'], ['prices', 'Prices', 'carddata'],
     ['index', 'Picture index', 'carddata'], ['backups', 'Backups', 'backups'], ['storage', 'Storage', 'storage'], ['server', 'Server', 'server'],
 ];
 const overview = {};     // line -> {text, warn}
@@ -897,6 +897,35 @@ function lastRunText(last) {
     return `Last began ${at} (still running, or the program stopped during it).`;
 }
 
+// Prices: whose prices the pages show and the collection is counted in (core/prices.py). Changing it prices every entry again
+function showPriceSource(state) {
+    const select = $('price-source');
+    // A source the card data has no prices from yet (downloaded before they were kept) cannot be chosen until it is updated
+    select.innerHTML = state.choices.map(choice =>
+        `<option value="${escapeHtml(choice.id)}"${choice.priced ? '' : ' disabled'}>${escapeHtml(choice.label)}`
+        + `${choice.priced ? '' : ' - after the next card data update'}</option>`).join('');
+    select.value = state.source;
+    window.PRICE_SYMBOL = state.symbol;
+    $('price-source-hint').textContent = `${state.from}. The collection, the scanned cards and the decks are counted in ${state.currency}; `
+        + 'a change prices every card again (cards imported without their printing keep the price they came with).';
+    setOverview('prices', state.choices.find(choice => choice.id === state.source).label);
+}
+
+async function loadPriceSource() {
+    const state = await api('/api/prices/source');
+    if (state) showPriceSource(state);
+}
+
+async function savePriceSource(source) {
+    // Guarded on the server: with a settings password set, common.js asks for it and sends the request again
+    $('price-source').disabled = true;
+    const state = await api('/api/prices/source', {method: 'POST', body: {source}});
+    $('price-source').disabled = false;
+    if (!state) return loadPriceSource();       // refused (or the password dialog cancelled): back to what is saved
+    showPriceSource(state);
+    notify(`Prices from ${state.choices.find(choice => choice.id === state.source).label} - ${plural(state.repriced, 'entry', 'entries')} priced again`, 'success');
+}
+
 function showUpdateSchedule(state) {
     const card = state.card_data, index = state.image_index;
     cardDataSchedule = card;
@@ -983,6 +1012,7 @@ function bindData() {
     $('backup-every').addEventListener('change', event => saveBackupSchedule({every_hours: parseInt(event.target.value)}));
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value)}));
     $('database-every').addEventListener('change', event => saveUpdateSchedule({card_data: parseInt(event.target.value)}));
+    $('price-source').addEventListener('change', event => savePriceSource(event.target.value));
     $('index-every').addEventListener('change', event => saveUpdateSchedule({image_index: parseInt(event.target.value)}));
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');
@@ -1169,4 +1199,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCaptureCopy();
     loadIndex();
     loadUpdateSchedule();
+    loadPriceSource();
 });

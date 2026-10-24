@@ -440,6 +440,20 @@
    "precon_covers"
   ],
   [
+   "/api/prices/source",
+   [
+    "GET"
+   ],
+   "price_source"
+  ],
+  [
+   "/api/prices/source",
+   [
+    "POST"
+   ],
+   "set_price_source"
+  ],
+  [
    "/api/prompts",
    [
     "GET"

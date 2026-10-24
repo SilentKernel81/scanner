@@ -46,8 +46,8 @@
                     <details class="multi-filter" id="filter-tags" title="Tags - tick several: the cards that have any of them"><summary class="select"></summary><div class="multi-panel"></div></details>
                     <select id="filter-added" class="select" title="When the cards were added to the collection"></select>
                     <label class="chip-toggle" id="filter-free-label" title="Hide the cards that a deck already uses"><input type="checkbox" id="filter-free"><span>Not in a deck</span></label>
-                    <span class="price-range" title="Price of one copy (USD)">
-                        $ <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
+                    <span class="price-range" title="Price of one copy">
+                        {{ price_symbol }} <input type="number" id="filter-price-min" class="text-input" min="0" step="0.5" placeholder="min">
                         – <input type="number" id="filter-price-max" class="text-input" min="0" step="0.5" placeholder="max">
                     </span>
                     <button class="btn btn-small btn-danger" id="batch-remove" hidden title="Take these cards back out of the collection">Remove this batch</button>
@@ -204,8 +204,8 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/library.js') }}?v=6"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=72"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=8"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=73"></script>
 </body>
 </html>

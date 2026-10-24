@@ -397,7 +397,10 @@ def read_collection_csv(reader, game, finishes, imported_at, stats, log):
             except ValueError:
                 quantity = 1
             try:
-                price = float((row.get('Price (USD)') or '0').replace('$', '').replace(',', ''))
+                # The column says its currency since 2026-10-24 (games.base.write_collection_csv): read either; the number
+                # is taken as it is - a file in euros read into a collection in dollars is repriced at the next card data update
+                text = row.get('Price (USD)') or row.get('Price (EUR)') or '0'
+                price = float(text.replace('$', '').replace('€', '').replace(',', '').strip() or 0)
             except ValueError:
                 price = 0.0
             timestamp = (row.get('Timestamp') or '').strip()
@@ -1047,7 +1050,7 @@ class InventoryManager(storage.Transactional):
             self.last_added[source] = (row['id'], quantity, capture_id, batch)
         if not quiet:
             self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
-                     f"${values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
+                     f"{values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
         return row['id']
 
     @_writes

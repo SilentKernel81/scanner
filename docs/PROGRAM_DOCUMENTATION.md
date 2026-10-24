@@ -1775,7 +1775,7 @@ swap (`replace_table`) does not happen: the old cards stay.
 | Group | Columns |
 |---|---|
 | Identity | `id` (Scryfall id), `name`, `flavor_name`, `set_code`, `set_name`, `collector_number`, `rarity`, `released_at` |
-| Prices | `price_usd`, `price_usd_foil`; since 2026-10-23 also `price_usd_etched` (what an etched-only printing has instead - 892 printings in this checkout's data), `price_eur`, `price_eur_foil` (Cardmarket's, as Scryfall gives it; read by nothing yet - `docs/plans/PRICE_SOURCES_PLAN.md`). The three are at the end of `CARD_COLUMNS` (an older file gets them by `ADD COLUMN`) and empty until the next download |
+| Prices | `price_usd`, `price_usd_foil`; since 2026-10-23 also `price_usd_etched` (what an etched-only printing has instead - 892 printings in this checkout's data), `price_eur`, `price_eur_foil` (Cardmarket's, as Scryfall gives it). The three are at the end of `CARD_COLUMNS` (an older file gets them by `ADD COLUMN`) and empty until the next download. **What is read**: `price`, `price_foil`, `price_etched` (since 2026-10-24) - the chosen price source's copy of its columns (*The price source* below); nothing reads the others for a price shown or counted |
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
@@ -1934,6 +1934,29 @@ its table is missing, empty, or holds less than half the cards in use (`MIN_SHAR
 cut short); the cards in use then stay. Only `cards` / `cards_import` are accepted (`CARD_TABLES`).
 
 **`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
+
+**The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
+`price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;
+`tests/test_prices.py`, `PriceSources`). Two sources so far, both from Scryfall's file: TCGplayer in US dollars
+(`scryfall_usd`, the default) and Cardmarket in euros (`scryfall_eur`, no etched price). The chosen one is remembered in
+`data/settings.json` (`price_source`) and copied by one `UPDATE` (`prices.apply_sql`) into the columns everything reads -
+`cards.price`, `price_foil`, `price_etched`: at every start (about a second; the file may have been filled elsewhere),
+when the choice changes, and on the import table **before** each new card data is swapped in (a change during an import
+is applied again after the swap). A price the source lacks is NULL there, never another source's: a euro never stands
+in for a missing dollar. A change then prices every entry again (`reprice_collections`) and sends `price_source_changed`
+(`source`, `currency`, `symbol`); the pages take the symbol from `_topbar.html` (`window.PRICE_SYMBOL`, from
+`pages.page_links`) and show every price through `common.js`: `formatPrice` / `priceSymbol` (not `priceText`, which
+`collection.js` has for itself and which calls `money()`: one shared name made each call the other until the stack ran
+out, found on the trial server). A source the card data holds no price from (card data downloaded before its columns
+were kept) is refused with 409 and greyed out in the list: it would show the new currency on the old numbers. The CSV
+export's price column says its currency (`Price (EUR)`, `€0.90`); in dollars it is the file it always was (the Android
+app's `ExportParityTest`), and the import reads both. **Mixed currencies, on purpose:** entries without a printing (a
+CSV import of an unknown one) keep the number they came with, other people's collections and trades' records keep
+theirs, and the entries' column is still named `price_usd`. Tried on a trial server with copies of this checkout's data
+(2026-10-24): refused before a card data update (Cardmarket: 0 printings priced), after one 98,743 printings priced
+in euros against 100,066 in dollars; to euros 1,547 entries repriced, $5,678.30 -> €5,266.15, back to dollars exactly
+$5,678.30; the collection, deck, scanner and settings pages without a script error and in euros. **Not tried**: with the
+settings password set (the padlock and its prompt), a page left open during the change.
 
 **Prices follow the card data** (since 2026-10-23; `server/card_data.py`: `reprice_collections`, `Game.current_prices`,
 `InventoryManager.priced_entries` / `reprice`; `tests/test_prices.py`). An entry keeps its own price (`inventory.price_usd`),
@@ -2969,7 +2992,7 @@ go to Cameras and Backups: `OLD_CATEGORIES`; `/scan/<id>#settings` and `/collect
 | **Overview** (the default) | One line per section - cameras connected, how cards are read, the card data and its next update, the picture index, the last backup, capture files, the password and network - each a button to its section, the ones to look at marked. No route of its own: each loader hands its part over (`setOverview`) |
 | **Cameras** | *This camera*, chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Stop at a card back, Camera rotation, the fixed area's state (it is drawn on the camera's page), Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings); under Troubleshooting: Debug trace. *All cameras*: Capture size, Sounds (Sound effects, Capture beep, Card added, Volume) |
 | **Card recognition** | The three steps, numbered in their order: 1 Picture (read by the picture; in its Details: Add a card only the picture decided), 2 OCR, 3 Vision AI (provider, key, model, Prompts - the summary, and a link to the editor) |
-| **Card data** | The card database (state, update), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
+| **Card data** | The card database (state, update), Prices (the price source, guarded), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
 | **Backups** | Automatic backups (schedule, how many kept); Your backups (make, upload, list: restore / download / delete) |
 | **Storage** | Capture files in use, how long received pictures are kept, Clean up now, Compress large copies, Keep camera frames |
 | **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Troubleshooting: Debug mode |
@@ -3000,7 +3023,7 @@ Socket.IO events of the pages (namespace `/`; the stations' own connection is de
 
 | Page → server | Server → page |
 |---|---|
-| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Cameras: that camera's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add), `inventory_undone`, `card_dismissed` |
+| `capture_card`, `search_card`, `select_printing`, `add_to_inventory` (`finish` + `quantity`, or `items` for several finishes), `undo_last_add` (with `station` from Settings → Cameras: that camera's), `dismiss_card` (`keep_capture` from the automatic "not found" dismissal) | `card_captured`, `card_found`, `card_printings`, `similar_cards`, `card_not_found`, `inventory_updated` (`added`: what was added; `undone`: a station's card taken back; `cleared`: scanned cards were cleared - only the counters reload), `inventory_prices_updated` (prices fetched after an add, or the entries priced again), `price_source_changed` (another price source: its currency; sent by `POST /api/prices/source`), `inventory_undone`, `card_dismissed` |
 | `toggle_auto_capture`, `toggle_fast_scan` (add automatically), `toggle_detection`, `toggle_ocr` (read with OCR first), `toggle_ai` (ask the vision AI at all; answers `ai_toggled`; open like `toggle_ocr`: it adds nothing, it only stops asking), `set_reading_mode` (`mode`: cascade / evidence, and / or `accept_image_alone`, `extend_index`; guarded; answered by `reading_mode_changed`, which carries the status the page shows), `toggle_debug_trace`, `toggle_debug_mode` (Debug mode, for the next start: the request log, and the interactive debugger only where `program.debugger_allowed` says so), `reset_focus` (refocus + lock), `set_autofocus`, `set_fixed_area` (`enabled` / `area` / `use_detected`), `set_camera_rotation`, `set_refocus_every` (`captures`: focus probe interval), `toggle_stop_at_card_back` (`enabled`: a card back stops this camera; answered `stop_at_card_back_toggled`), `set_dropper` (`dropper`: the card dropper's settings, checked whole; answered `dropper_updated`), `test_dropper` (one pulse now; answered `dropper_tested`) | `auto_capture_triggered` (image taken, focus probe done: drop the next card), `auto_capture_toggled` (also when the station's client restarted or went away, and when a card back stopped it), `card_back_seen` (`number`, `similarity`: a face-down card stopped this camera's auto-capture), `processing_queue_update` (the station's captures being read), `*_toggled`, `focus_reset`, `fixed_area_updated`, `camera_rotation_updated`, `refocus_every_updated` |
 | `set_ai_provider`, `save_ai_credential`, `update_database` (the active game's data) | `ai_provider_set`, `ai_credential_saved`, `database_update_progress` / `_complete` / `_error`, `database_update_available` (update check found newer data), `log`, `error` |
 | `save_prompt` (scope `model` / `all`), `reset_prompt`, `test_prompt` | `prompts_updated`, `prompt_test_result` (sent only to the page that asked) |
@@ -3092,7 +3115,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), the price source (`POST /api/prices/source`: it rewrites every entry's price), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO

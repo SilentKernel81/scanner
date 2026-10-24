@@ -111,7 +111,7 @@ class Magic(Game):
 
     def similar(self, name, limit=5):
         return [{'name': row['name'], 'set': row['set_name'],
-                 'price': f"${row['price_usd']:.2f}" if row['price_usd'] else 'N/A'}
+                 'price': f"{self.db.price_symbol()}{row['price']:.2f}" if row['price'] else 'N/A'}
                 for row in self.searcher.find_similar_cards(name, limit=limit)]
 
     def get_card(self, card_id):
@@ -179,6 +179,9 @@ class Magic(Game):
             'color_identity': color_identity(colors),
             'price': next((float(p) for p in prices if p), 0.0),
         }
+
+    def price_currency(self):
+        return self.db.price_currency()
 
     def current_prices(self, entries):
         cards = self.db.cards_by_ids([entry['card_id'] for entry in entries])

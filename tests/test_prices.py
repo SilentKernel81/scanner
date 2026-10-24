@@ -150,5 +150,95 @@ class PricedAgain(CardData):
         self.assertEqual(self.price(self.collection, row_id), 1.25)
 
 
+class PriceSources(CardData):
+    """The chosen source in the shown columns (core/prices.py, CardDatabase.set_price_source; since 2026-10-24)"""
+
+    def shown(self, card_id):
+        card = self.cards.get_card_by_id(card_id)
+        return card['price'], card['price_foil'], card['price_etched']
+
+    def test_the_default_shows_scryfalls_dollars(self):
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        self.assertEqual(self.cards.price_source, 'scryfall_usd')
+        self.assertEqual(self.shown('id-2'), (1.0, 3.0, 0.0))
+        self.assertEqual(self.shown('id-1'), (0.0, 0.0, 4.5))
+        self.assertEqual(self.cards.price_currency(), ('USD', '$'))
+
+    def test_euros_and_back(self):
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        self.assertEqual(self.cards.set_price_source('scryfall_eur'), 'scryfall_eur')
+        self.assertEqual(self.shown('id-2'), (0.9, 2.5, 0.0))
+        # No euro price: nothing, never the dollar one standing in (the etched-only printing has none in euros)
+        self.assertEqual(self.shown('id-1'), (0.0, 0.0, 0.0))
+        self.assertEqual(self.cards.price_currency(), ('EUR', '€'))
+        self.assertEqual(self.cards.cards_by_names(['Card 2'])['card 2']['cheapest'], 0.9)
+        self.cards.set_price_source('scryfall_usd')
+        self.assertEqual(self.shown('id-2'), (1.0, 3.0, 0.0))                  # Scryfall's own columns were never overwritten
+
+    def test_how_many_printings_a_source_prices(self):
+        # Card data from before the EUR prices were kept has none: the route refuses that source (server/card_data.py)
+        self.cards.populate_database(FILLER + [ETCHED, BOTH, UNPRICED])
+        self.assertEqual(self.cards.priced_printings('scryfall_usd'), 42)    # the 40 fillers, the etched one, BOTH
+        self.assertEqual(self.cards.priced_printings('scryfall_eur'), 1)
+        self.cards.conn.execute('UPDATE cards SET price_eur = NULL, price_eur_foil = NULL')
+        self.assertEqual(self.cards.priced_printings('scryfall_eur'), 0)
+
+    def test_an_unknown_source_is_the_default(self):
+        self.cards.populate_database(FILLER + [BOTH])
+        self.assertEqual(self.cards.set_price_source('nowhere'), 'scryfall_usd')
+        self.assertEqual(self.shown('id-2'), (1.0, 3.0, 0.0))
+
+    def test_new_card_data_comes_in_the_chosen_source(self):
+        # Applied to the import table before the swap: the new cards are never shown in another currency
+        self.cards.populate_database(FILLER + [BOTH])
+        self.cards.set_price_source('scryfall_eur')
+        self.cards.populate_database(FILLER + [{**BOTH, 'prices': {'usd': '1.50', 'eur': '1.20'}}])
+        self.assertEqual(self.shown('id-2')[0], 1.2)
+
+    def test_a_switch_during_an_import_is_kept(self):
+        # The choice changes while the new cards are filled: the swapped-in table gets the new choice too
+        self.cards.populate_database(FILLER + [BOTH])
+        fill = self.cards._fill_import
+        def fill_then_switch(*args):
+            inserted = fill(*args)
+            self.cards.set_price_source('scryfall_eur')          # the old table gets it ...
+            return inserted
+        self.cards._fill_import = fill_then_switch
+        self.cards.populate_database(FILLER + [BOTH])            # ... and the new one, after the swap
+        self.assertEqual(self.shown('id-2')[0], 0.9)
+
+    def test_the_entries_follow_a_switch(self):
+        self.cards.populate_database(FILLER + [BOTH])
+        row_id = self.collection.add_card(self.game.inventory_fields(self.cards.get_card_by_id('id-2'), 'foil'), GAME, 'foil', quiet=True)
+        self.cards.set_price_source('scryfall_eur')
+        self.collection.reprice(self.game.current_prices(self.collection.priced_entries(GAME)))
+        self.assertEqual(self.collection.get_entry(row_id)['price_usd'], 2.5)
+
+    def test_an_older_file_gets_the_shown_columns_filled(self):
+        self.cards.populate_database(FILLER + [BOTH])
+        for column in ('price', 'price_foil', 'price_etched'):
+            self.cards.conn.execute(f'ALTER TABLE cards DROP COLUMN {column}')
+        self.cards.conn.commit()
+        self.cards.conn.close()
+        self.cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        self.assertEqual(self.shown('id-2'), (1.0, 3.0, 0.0))
+
+    def test_the_csv_says_its_currency(self):
+        import io
+        from card_scanner.games.base import write_collection_csv
+        row = {'name': 'Card 2', 'set_name': 'Test', 'set_code': 'tst', 'number': '2', 'finish': 'regular', 'quantity': 1,
+               'condition': 'Near Mint', 'price': 0.9, 'rarity': '', 'type_line': '', 'mana_cost': '', 'colors': '',
+               'color_identity': '', 'card_id': 'id-2', 'timestamp': ''}
+        dollars, euros = io.StringIO(), io.StringIO()
+        write_collection_csv([row], dollars)                       # as it always was (the Android app's ExportParityTest)
+        self.assertIn('Price (USD)', dollars.getvalue().splitlines()[0])
+        self.assertIn('$0.90', dollars.getvalue())
+        self.cards.populate_database(FILLER + [BOTH])
+        self.cards.set_price_source('scryfall_eur')
+        self.game.export_formats()['csv'][2]([row], euros)
+        self.assertIn('Price (EUR)', euros.getvalue().splitlines()[0])
+        self.assertIn('€0.90', euros.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -13,14 +13,16 @@ COLLECTION_COLUMNS = ['Card Name', 'Set', 'Set Code', 'Card Number', 'Finish', '
                       'Color Identity', 'Card ID', 'Timestamp']
 
 
-def write_collection_csv(rows, file):
+def write_collection_csv(rows, file, currency='USD', symbol='$'):
+    # The price column says its currency (since 2026-10-24: Settings > Card data > Prices). In dollars the file is what it
+    # always was - the Android app writes the same file byte for byte (its ExportParityTest, with the defaults)
     writer = csv.writer(file)
-    writer.writerow(COLLECTION_COLUMNS)
+    writer.writerow([f'Price ({currency})' if column == 'Price (USD)' else column for column in COLLECTION_COLUMNS])
     for row in rows:
         writer.writerow([
             row['name'], row['set_name'], row['set_code'], row['number'], row['finish'], row['quantity'],
             row['condition'], row.get('location', ''), ', '.join(row.get('tags') or []),
-            f"${row['price']:.2f}", row['rarity'], row['type_line'], row['mana_cost'], row['colors'],
+            f"{symbol}{row['price']:.2f}", row['rarity'], row['type_line'], row['mana_cost'], row['colors'],
             row['color_identity'], row['card_id'] or '', row['timestamp'],
         ])
 
@@ -206,7 +208,13 @@ class Game:
     # Export key -> (label, file name prefix, writer(rows, file)); rows come from
     # InventoryManager.get_all_cards
     def export_formats(self):
-        return {'csv': ('Card Scanner (everything)', f'{self.id}_collection', write_collection_csv)}
+        currency = self.price_currency()
+        return {'csv': ('Card Scanner (everything)', f'{self.id}_collection',
+                        lambda rows, file: write_collection_csv(rows, file, *currency))}
+
+    def price_currency(self):
+        """(currency code, symbol) of the prices the game shows and the entries hold"""
+        return 'USD', '$'
 
     # Names of the other apps' collection files the game reads (the import dialog lists them)
     import_formats = ()

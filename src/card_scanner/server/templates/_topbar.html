@@ -1,6 +1,8 @@
 {# The header of every page (page: 'scanner', 'stations' - the cameras' overview - 'collection', 'decks' or 'settings'): two rows. Brand and game above, the page
    links (Scanner, Collection, Decks) below them and Settings in the right corner: all in the same place from page to page; only the part right of the
    links (.topbar-page) is the page's own. The upper row scrolls away, the lower one stays (style.css: .topbar) #}
+{# The prices' currency for the pages' scripts (common.js: priceSymbol) - the chosen price source's, pages.py: page_links #}
+<script>window.PRICE_SYMBOL = {{ price_symbol|tojson }};</script>
 <header class="topbar">
     <div class="topbar-top">
         <div class="topbar-inner">
@@ -45,7 +47,7 @@
                 </div>
                 <div class="stat-box">
                     <span class="stat-label">Value</span>
-                    <span class="stat-value" id="total-value">$0.00</span>
+                    <span class="stat-value" id="total-value">{{ price_symbol }}0.00</span>
                 </div>
                 <div class="stat-box" id="processing-queue-box" title="Cards waiting to be identified">
                     <span class="stat-label">Processing</span>

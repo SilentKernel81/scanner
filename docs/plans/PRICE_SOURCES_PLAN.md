@@ -7,7 +7,9 @@ Mana Pool, or MTGO prices - all of them from **one** MTGJSON file a day.
 **Status:** phase 1 done (2026-10-23): Scryfall's etched and EUR prices kept (as three columns of `cards`, not rows of
 `card_prices` - see phase 1 below), the etched price used, the entries priced again after each card data update
 (`reprice_collections`); `tests/test_prices.py` (10 tests), on temporary databases and copies of this checkout's data;
-run once after a real download on copied data (2026-10-24: 1,452 of 1,595 entries repriced - PROGRAM_DOCUMENTATION). Phases 2-4 not started. What is under *Measured* was measured on 2026-10-23 on that day's
+run once after a real download on copied data (2026-10-24: 1,452 of 1,595 entries repriced - PROGRAM_DOCUMENTATION). Phase 2a done 2026-10-24: the dropdown (Settings > Card data > Prices) with Scryfall's two sources, TCGplayer USD and
+Cardmarket EUR, through shown columns of their own (`cards.price`, `price_foil`, `price_etched` - the second of the two ways
+named under phase 1 below); the currency on every page and in the CSV. Phase 2b (MTGJSON's shops) and 3-4 not started. What is under *Measured* was measured on 2026-10-23 on that day's
 files and a copy of this checkout's card data (112,765 printings).
 
 ## The licence (read 2026-10-23)
@@ -78,6 +80,9 @@ prices").
 
 ### 2. One chosen source, applied to `cards` - the readers stay as they are
 
+**Done otherwise (2026-10-24, see Status):** the chosen source goes to shown columns of its own (`cards.price`, `price_foil`,
+`price_etched`), never into `price_usd` & co. - Scryfall's own prices are kept, so a switch back needs no download.
+
 **Choice:** the setting `price_source` (`data/settings.json`, default `scryfall`; Settings > Card data) is
 *applied*: after each price import, after each card data import (which rewrites `cards` with Scryfall's
 values) and when the setting changes, one statement copies the chosen source's retail `normal` / `foil` into
@@ -145,6 +150,13 @@ the apply with its fallback; `reprice` leaving CSV entries and Arena alone; a fa
 table), the route list recorded again (`tests/test_app_surface.py --record`), and the docs this repository
 expects: PROGRAM_DOCUMENTATION (the schema table "Prices", Card data), FEATURES.md, TEST_CASES.md, CLAUDE.md
 (Where Things Live), README *Acknowledgments* ("prices: Scryfall and MTGJSON").
+
+## Follow-ups found on the way (2026-10-24)
+
+- The MCP server (`mcp_server/tools.py`) hands prices on as bare numbers: an assistant reading a collection counted in
+  euros would take them for dollars. It should say the currency (`/api/prices/source`).
+- The activity log's "Added to inventory: ... - 3.00 for 2" has lost its `$` and has no symbol yet (`inventory.add_card`
+  does not know the source).
 
 ## Never tried
 

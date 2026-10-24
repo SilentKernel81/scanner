@@ -332,6 +332,15 @@
                     </div>
 
                     <div class="settings-card">
+                        <h3>Prices</h3>
+                        <div class="schedule-row">
+                            <label for="price-source" data-guarded>Price source</label>
+                            <select id="price-source" class="select"></select>
+                        </div>
+                        <div class="hint" id="price-source-hint">Loading...</div>
+                    </div>
+
+                    <div class="settings-card">
                         <h3>Picture index</h3>
                         <div class="input-group">
                             <div class="storage-usage" id="index-status">Loading...</div>
@@ -502,7 +511,7 @@
     {% include '_dialogs.html' %}
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=29"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=28"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=30"></script>
 </body>
 </html>
