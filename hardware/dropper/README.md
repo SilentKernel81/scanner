@@ -22,6 +22,8 @@ test it for card damage before trusting it with valuable cards:
 | `freecad/card_dropper.FCStd` | The same parts in FreeCAD (1.x), each a solid of its own, in its place (the unsleeved magazine set beside the other). Made from the .scad - see below. |
 | `stl/*.stl` | The 14 parts to print, as STL for a slicer, each lying as it is printed (exported by the loop below; checked: closed meshes, on the bed, the same volumes as the STEP files). Print six `wheel` and two `clutch_hub`. |
 | `freecad/step/*.step` | The same 14 parts as STEP, for any CAD program or slicer. |
+| `assembly/dropper_drive_assembly.png` | How a servo drives its 8 mm axle, in assembly order (six steps and the drive cut along its axle, labelled), rendered from the .scad. |
+| `assembly/make_sheet.sh` | Draws it again: OpenSCAD exports each step's parts (`drive.scad`), Blender renders them (`render_steps.py`), Pillow lays out the sheet (`compose.py`, which holds its texts). Run it after a change to the .scad. |
 | `freecad/to_freecad.sh` | Makes the two above from `card_dropper.scad` (OpenSCAD + `freecadcmd`); `conversion_report.json` is its check (one valid solid per object, the volumes). |
 
 **The .scad is the source.** The FreeCAD file is a conversion: FreeCAD's OpenSCAD importer rebuilds

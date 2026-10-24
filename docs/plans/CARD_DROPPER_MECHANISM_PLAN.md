@@ -211,14 +211,26 @@ What the firmware does, and why:
 
 ## Assembly and calibration (in this order)
 
+How a servo drives its axle, step by step, drawn from the .scad: `hardware/dropper/assembly/dropper_drive_assembly.png`
+(steps 1, 2 and 4 below, for one driven axle, and the drive cut along its axle).
+
 1. Press the 608 bearings into the block's housings (from outside), the HF0812s into the hubs (arrow: gripping when
-   the card goes forward). Trim both servo horns to 26 mm; screw each into its hub's pocket.
+   the card goes forward - check by hand first: a piece of rod in it turns freely one way and locks the other). Trim
+   both servo horns to 26 mm; lay each in its hub's pocket and drive two small horn screws through its holes into the
+   hub. **The horn's centre screw stays out**: once the horn is in the hub nothing can reach it (the hub's recess for
+   its head is unused). Without it the hub can slide only 1 mm along its rod before it touches the bearing housing,
+   so the horn cannot come off the servo's shaft - whether it grips the spline well enough is untested.
 2. Slide the rods through the bearings, threading the wheels on inside the block (axle 2's at ±12 mm, the others' at
    ±24 mm from the centre line); O-rings on the wheels; tighten the grub screws on the filed flats. Each axle must turn
    freely by hand.
 3. Plate on the block (6 x M3 self-tapping), PTFE tape on its rails; chute and landing base on the block's front wall
    (2 x M3 + nuts each, reached from below); tray in the base, post in its socket, arm on the post.
-4. Servos in the bracket (2 x M2 each), bracket on the block's side (6 x M3 from inside), each hub onto its rod.
+4. Servos into the bracket **from inside** - the body goes out through the window, the tabs rest on the bracket's inner
+   face (2 x M2 each). **Each hub onto its rod, horn facing out, BEFORE the bracket goes on**: with the bracket on,
+   there are 19.6 mm between a servo's shaft and the bearing housing for the 19 mm hub, and the rod stands 12.5 mm
+   into that gap (a correction of 2026-10-24, found by drawing the steps: this step first put the bracket on, then the
+   hubs). Then the bracket with both servos up to the block's side, each shaft into its horn's centre hole (turn a hub
+   by hand to line its horn up), and 6 x M3 from inside the block.
 5. Load `main.py` on the Pico; in its REPL (Ctrl+C at start-up) `calibrate(3, 0)` / `calibrate(3, 90)`: find each
    servo's rest (`AXLE2_REST_US`, `AXLE3_REST_US`) and its microseconds per degree (`US_PER_DEG`, negative if that
    servo turns the card forward with shorter pulses). With a card on the wheels and a ruler beside it, the travel of a
