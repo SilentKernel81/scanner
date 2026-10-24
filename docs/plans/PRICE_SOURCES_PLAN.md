@@ -6,8 +6,8 @@ Mana Pool, or MTGO prices - all of them from **one** MTGJSON file a day.
 
 **Status:** phase 1 done (2026-10-23): Scryfall's etched and EUR prices kept (as three columns of `cards`, not rows of
 `card_prices` - see phase 1 below), the etched price used, the entries priced again after each card data update
-(`reprice_collections`); `tests/test_prices.py` (10 tests), on temporary databases and copies of this checkout's data -
-never after a real download. Phases 2-4 not started. What is under *Measured* was measured on 2026-10-23 on that day's
+(`reprice_collections`); `tests/test_prices.py` (10 tests), on temporary databases and copies of this checkout's data;
+run once after a real download on copied data (2026-10-24: 1,452 of 1,595 entries repriced - PROGRAM_DOCUMENTATION). Phases 2-4 not started. What is under *Measured* was measured on 2026-10-23 on that day's
 files and a copy of this checkout's card data (112,765 printings).
 
 ## The licence (read 2026-10-23)

@@ -1950,8 +1950,13 @@ outside `maintenance_barrier` and written inside it (a full backup never copies 
 priced too (its triggers refuse only deletes and lower quantities). An etched foil is a `foil` copy (`suggested_finish`):
 `inventory_fields` takes the foil price, then the etched one, then the regular one (regular copies: regular, foil, etched) -
 before, an etched-only printing's copies went in at 0. Tried on copies of this checkout's databases (2026-10-23): 1,594 of
-1,595 entries priced, 0 changed - the data had not changed since they were added; **a run after a real download was never
-watched**.
+1,595 entries priced, 0 changed - the data had not changed since they were added. **First run after a real download
+(2026-10-24)**, on a trial server with copies of this checkout's databases (own data folder, port 5077), card data from
+2026-10-05 replaced by Scryfall's of 2026-10-24 (116,416 printings, 29 s from the request to `database_update_complete`):
+1,452 of 1,595 entries priced again, none set to 0, one raised from 0 (an etched-only Lathril, Blade of the Elves: $1.52, its
+etched price); new / old median 0.97, 1,154 of 1,451 within 20%, the extremes 0.38 and 2.47; the collection's value $5,986.52
+-> $5,678.30; `inventory_prices_updated` sent. The new data: 1,218 printings with an etched price (all 892 etched-only
+ones), 87,837 with a EUR price. **Not watched**: a page open during it, the scheduled update.
 
 **Update check.** 10 s after startup and then once a day, `Game.check_for_update()` runs for
 each game with data. Magic: Scryfall's bulk data description (one small request) - since
