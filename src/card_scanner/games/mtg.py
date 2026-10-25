@@ -22,6 +22,11 @@ def color_identity(colors):
     return 'Multicolor'
 
 
+# The conditions Card Kingdom's listed buylist prices are for: it states they assume Near Mint and are graded lower for
+# a worn copy (cardkingdom.com/sellcart). A Mint copy is no worse; Excellent (lightly played) and below get less than the
+# list - how much less the shop decides when it grades the card, and MTGJSON publishes no number for it
+BUYLIST_CONDITIONS = ('Mint', 'Near Mint')
+
 # Moxfield's condition names (and the short forms its import takes) -> the conditions used here
 MOXFIELD_CONDITIONS = {
     'mint': 'Mint', 'm': 'Mint', 'near mint': 'Near Mint', 'nm': 'Near Mint',
@@ -194,6 +199,9 @@ class Magic(Game):
             if price:
                 result[entry['id']] = float(price)
         return result
+
+    def buylist_as_listed(self, entry):
+        return entry['condition'] in BUYLIST_CONDITIONS
 
     def buylist_date(self):
         # MTGJSON's date of the shops' prices in use, recorded by each price update (core/shop_prices.py: INFO_KEY)

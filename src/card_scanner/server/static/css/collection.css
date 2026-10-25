@@ -1557,7 +1557,7 @@ details.trade .trade-row {
     margin-bottom: 12px;
 }
 
-/* An offer of Card Kingdom's from prices not updated for days (collection.js: buylistAge) */
+/* An offer of Card Kingdom's to read with care: prices not updated for days (collection.js: buylistAge), or a worn copy, which it grades lower than the Near Mint quote shown */
 .inventory-price-each.is-old {
     color: var(--warning);
 }

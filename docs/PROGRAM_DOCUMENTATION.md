@@ -1958,15 +1958,21 @@ price update and stay until the next one replaces them - one that fails or is sw
 `/api/inventory` also gives `buylist_date` (MTGJSON's date of the prices in use, `Game.buylist_date`, from
 `shop_prices.INFO_KEY`), every place says "offered ... on 2026-10-24", and offers more than two days old
 (`BUYLIST_OLD_AFTER_DAYS`: MTGJSON publishes daily) say how old they are and where to update them (`collection.js`:
-`buylistAge`, `buylistWhen`; a list row's line in the warning colour, `.is-old`). Shown: under a list row's value ("Card
-Kingdom offered $8.50 each"), a Statistics tile with the copies it covers ("$2378.07 - Card Kingdom offered, for 1,243 of
-3,953 cards, on 2026-10-24": a partial total must not read as the collection's), and in an open trade's summary (from the
+`buylistAge`, `buylistWhen`; a list row's line in the warning colour, `.is-old`). **Near Mint's, and only Near Mint
+copies counted** (a Codex finding): Card Kingdom states its listed buylist prices assume Near Mint and are graded lower for
+a worn copy, by an amount it decides and MTGJSON does not publish. So every offer is said as Near Mint's ("for Near
+Mint"), `/api/inventory` gives each entry `buylist_as_listed` (`Game.buylist_as_listed`: its condition is one of
+`games/mtg.py` `BUYLIST_CONDITIONS`, Mint and Near Mint), the totals (the tile, a trade) count only those copies, and a
+worn copy's row keeps the quote with "yours is Played, graded lower" in the warning colour - never a guessed discount. Shown: under a list row's value ("Card
+Kingdom offered $8.50 each for Near Mint"), a Statistics tile with the copies it covers ("$2378.07 - Card Kingdom offered,
+for 1,243 of 3,953 cards (Near Mint copies it buys), on 2026-10-24": a partial total must not read as the collection's), and in an open trade's summary (from the
 entries; a confirmed trade's cards have none). Nothing shows before
 the first *Update the shops' prices*. **Tried 2026-10-24** on a copy of this checkout's data with that day's MTGJSON prices
 (102,652 printings; offers for 46,542 regular, 35,764 foil, 890 etched): 784 of 1,604 entries with an offer, 74 of them
 foils; on the dearest cards the offer was 55-76% of TCGplayer's value (The One Ring HOC: $131.05 / $100.00). Never compared
 with Card Kingdom's own page. The date's wording tried the same day on the copy with its prices' date set to 9 days
-earlier ("9 days ago - update the shops' prices"). `tests/test_prices.py` (`TheBuylist`).
+earlier ("9 days ago - update the shops' prices"), and with its dearest offered card set to Played: out of the total
+($2378.07 -> $2278.07, 1,243 -> 1,242 cards), its row "offered $100.00 for Near Mint - yours is Played, graded lower". `tests/test_prices.py` (`TheBuylist`).
 
 **The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
 `price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;

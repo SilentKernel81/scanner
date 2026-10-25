@@ -629,6 +629,12 @@ class TheBuylist(CardData):
         self.cards.replace_shop_prices(self.ROWS, '2026-10-25')
         self.assertEqual(self.game.buylist_date(), '2026-10-25')
 
+    def test_only_near_mint_and_mint_count_at_the_listed_price(self):
+        # Card Kingdom's list is Near Mint's; a worn copy is graded lower by an amount nobody publishes
+        for condition, listed in (('Mint', True), ('Near Mint', True), ('Excellent', False), ('Good', False),
+                                  ('Played', False), ('Poor', False)):
+            self.assertEqual(self.game.buylist_as_listed({'condition': condition}), listed, condition)
+
     def test_it_does_not_follow_the_price_source(self):
         # Not a price source: what Card Kingdom pays is the same whichever value the collection is shown in
         self.cards.replace_shop_prices(self.ROWS, '2026-10-24')

@@ -55,11 +55,14 @@ function buylistMoney(amount) {
 }
 
 function buylistTotal(entries) {
-    // {value, copies (those it offers for), all (every copy)} of [{buylist, quantity}] - quantity: the copies counted
+    // {value, copies (those it offers for), all (every copy)} of [{buylist, buylist_as_listed, quantity}] - quantity: the
+    // copies counted. Only copies in a condition the listed price is for (Mint, Near Mint: /api/inventory's
+    // `buylist_as_listed`): Card Kingdom grades a worn copy lower, by an amount nobody publishes, so it is left out of
+    // a total rather than counted at Near Mint's price
     let value = 0, copies = 0, all = 0;
     for (const entry of entries) {
         all += entry.quantity;
-        if (entry.buylist) {
+        if (entry.buylist && entry.buylist_as_listed) {
             value += entry.buylist * entry.quantity;
             copies += entry.quantity;
         }
@@ -695,7 +698,7 @@ function listRowHtml(card) {
             <div class="inventory-card-price">
                 <div class="inventory-price-value">${priceText(card.price * card.quantity)}</div>
                 ${card.quantity > 1 && !digital ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
-                ${card.buylist && !digital ? `<div class="inventory-price-each${(buylistAge() || {}).old ? ' is-old' : ''}" title="What ${BUYLIST_SHOP}'s buylist offered for one copy in this finish ${escapeHtml(buylistWhen())} (MTGJSON's prices, in US dollars) - not counted in the value">${BUYLIST_SHOP} offered ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''}</div>` : ''}
+                ${card.buylist && !digital ? `<div class="inventory-price-each${(buylistAge() || {}).old || !card.buylist_as_listed ? ' is-old' : ''}" title="What ${BUYLIST_SHOP}'s buylist offered for one Near Mint copy in this finish ${escapeHtml(buylistWhen())} (MTGJSON's prices, in US dollars) - not counted in the value${card.buylist_as_listed ? '' : `. This copy is ${escapeHtml(card.condition)}: ${BUYLIST_SHOP} grades it lower, by an amount it decides, so it is not counted in the totals`}">${BUYLIST_SHOP} offered ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''} for Near Mint${card.buylist_as_listed ? '' : ` - yours is ${escapeHtml(card.condition)}, graded lower`}</div>` : ''}
                 <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
             </div>
             <div class="inventory-card-actions">
@@ -1085,7 +1088,7 @@ function renderStats() {
     const buylist = inArena() ? null : buylistTotal(inventory);
     if (buylist && buylist.copies) {
         $('stats-tiles').innerHTML += tile(buylistMoney(buylist.value),
-            `${BUYLIST_SHOP} offered, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards, ${escapeHtml(buylistWhen())}`);
+            `${BUYLIST_SHOP} offered, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards (Near Mint copies it buys), ${escapeHtml(buylistWhen())}`);
     }
     // Arena cards have no price: the bars count cards there, and the choice is not offered
     const measure = inArena() ? 'cards' : statsMeasure;
@@ -1154,10 +1157,12 @@ function tradeHtml(trade) {
     const open = trade.status === 'open';
     const receives = trade.receives || [];
     // The cards' offers from their entries (`inventory`: the paper collection unless Arena is shown, whose ids are other cards)
-    const offer = open && !inArena() ? buylistTotal(trade.cards.map(card =>
-        ({buylist: (inventory.find(entry => entry.id === card.id) || {}).buylist, quantity: card.quantity}))) : null;
+    const offer = open && !inArena() ? buylistTotal(trade.cards.map(card => {
+        const entry = inventory.find(item => item.id === card.id) || {};
+        return {buylist: entry.buylist, buylist_as_listed: entry.buylist_as_listed, quantity: card.quantity};
+    })) : null;
     const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong>`
-        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for these cards ${escapeHtml(buylistWhen())} (US dollars)">${BUYLIST_SHOP} offered ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}${(buylistAge() || {}).old ? ` (${buylistAge().days} days ago)` : ''}</span>` : '')
+        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for the Near Mint copies among these cards ${escapeHtml(buylistWhen())} (US dollars) - worn copies are graded lower and not counted">${BUYLIST_SHOP} offered ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}${(buylistAge() || {}).old ? ` (${buylistAge().days} days ago)` : ''}</span>` : '')
         + (receives.length ? ` · receives ${plural(trade.receive_quantity, 'card')} · <strong>${money(trade.receive_value)}</strong>` : '') + ' · '
         + (open ? `since ${escapeHtml(trade.created_at.slice(0, 10))}` : `confirmed ${escapeHtml((trade.closed_at || '').slice(0, 10))}`);
     const exports = (trade.cards.length || !receives.length ? `<select class="select trade-export" title="Download the cards you give as a file for another site or app">

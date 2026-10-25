@@ -107,6 +107,9 @@ def get_inventory():
             for card in cards:
                 card['details'] = details.get(card['card_id'], {})
                 card['buylist'] = buylist.get(card['id'])
+                # The quote is Near Mint's: a worn copy is graded lower, so it is shown as Near Mint's and never counted
+                # in what Card Kingdom would pay for the collection or a trade (games/mtg.py: BUYLIST_CONDITIONS)
+                card['buylist_as_listed'] = bool(card['buylist']) and game.buylist_as_listed(card)
                 card['decks'] = decks_using(card, in_decks, placed)
                 card['trades'] = in_trades.get(card['id'], [])
 
