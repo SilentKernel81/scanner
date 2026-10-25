@@ -905,6 +905,25 @@ class CardDatabase:
         with self._lock:
             return self.conn.execute(f'SELECT COUNT(*) FROM {prices.SHOP_TABLE}').fetchone()[0]
 
+    def buylist_by_ids(self, card_ids):
+        """
+        {printing id: (regular, foil, etched)} - what Card Kingdom pays for one copy (prices.BUYLIST, MTGJSON's buylist kept
+        by the shops' price update; None: no such price), for the printings that have a row. Read when a page asks - the
+        collection page's /api/inventory, beside card_details - and never written into an inventory: it is not the value the
+        collection is counted at, so no repricing, price change or lock of theirs concerns it. Under self._lock like
+        cards_by_ids: never called from inside an inventory's write (card_for_pricing says why that would wait forever)
+        """
+        result = {}
+        ids = [card_id for card_id in dict.fromkeys(card_ids) if card_id]
+        columns = ', '.join(prices.BUYLIST['columns'])
+        with self._lock:
+            for start in range(0, len(ids), 500):  # SQLite's parameter limit
+                chunk = ids[start:start + 500]
+                for row in self.conn.execute(
+                        f"SELECT id, {columns} FROM {prices.SHOP_TABLE} WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                    result[row['id']] = tuple(row[column] for column in prices.BUYLIST['columns'])
+        return result
+
     def priced_printings(self, source_id):
         """How many printings have a price in that source (prices.priced_sql)"""
         with self._lock:

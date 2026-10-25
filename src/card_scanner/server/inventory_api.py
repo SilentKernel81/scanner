@@ -101,8 +101,12 @@ def get_inventory():
             placed = copies_by_location(cards)
             # The open trades that hold copies of each entry (the collection only)
             in_trades = trade_store.by_entry(game.id) if inventory_area() is inventory else {}
+            # What Card Kingdom would pay for one copy (the collection only; None: no offer). Read now from the shops'
+            # table, never stored with the entry, and not withheld during a change of price source: it is not the value
+            buylist = game.buylist_prices(cards) if inventory_area() is inventory else {}
             for card in cards:
                 card['details'] = details.get(card['card_id'], {})
+                card['buylist'] = buylist.get(card['id'])
                 card['decks'] = decks_using(card, in_decks, placed)
                 card['trades'] = in_trades.get(card['id'], [])
 

@@ -26,6 +26,26 @@ function inArena() {
     return inventoryArea === 'arena';
 }
 
+// What Card Kingdom would pay (/api/inventory's `buylist`: one copy, None without an offer - core/prices.py BUYLIST).
+// Always in US dollars, whatever price source the values are in: never through money(), which follows that source
+const BUYLIST_SHOP = 'Card Kingdom';
+function buylistMoney(amount) {
+    return '$' + Number(amount || 0).toFixed(2);
+}
+
+function buylistTotal(entries) {
+    // {value, copies (those it offers for), all (every copy)} of [{buylist, quantity}] - quantity: the copies counted
+    let value = 0, copies = 0, all = 0;
+    for (const entry of entries) {
+        all += entry.quantity;
+        if (entry.buylist) {
+            value += entry.buylist * entry.quantity;
+            copies += entry.quantity;
+        }
+    }
+    return {value, copies, all};
+}
+
 function priceText(amount) {
     // A card in Arena has no price: what the paper printing costs says nothing about it
     return inArena() ? '–' : money(amount);
@@ -653,6 +673,7 @@ function listRowHtml(card) {
             <div class="inventory-card-price">
                 <div class="inventory-price-value">${priceText(card.price * card.quantity)}</div>
                 ${card.quantity > 1 && !digital ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
+                ${card.buylist && !digital ? `<div class="inventory-price-each" title="What ${BUYLIST_SHOP}'s buylist offers for one copy in this finish today (MTGJSON's daily prices, in US dollars) - not counted in the value">${BUYLIST_SHOP} pays ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''}</div>` : ''}
                 <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
             </div>
             <div class="inventory-card-actions">
@@ -1037,6 +1058,12 @@ function renderStats() {
     $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
         + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
         + (inArena() ? '' : tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card'));
+    // What Card Kingdom would pay: only once its buylist is downloaded (Settings > Card data > Prices) and offers for something
+    const buylist = inArena() ? null : buylistTotal(inventory);
+    if (buylist && buylist.copies) {
+        $('stats-tiles').innerHTML += tile(buylistMoney(buylist.value),
+            `${BUYLIST_SHOP} would pay, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards`);
+    }
     // Arena cards have no price: the bars count cards there, and the choice is not offered
     const measure = inArena() ? 'cards' : statsMeasure;
     $('stats-measure').closest('.stats-controls').hidden = inArena();
@@ -1103,7 +1130,11 @@ function receiveCardHtml(card, open) {
 function tradeHtml(trade) {
     const open = trade.status === 'open';
     const receives = trade.receives || [];
+    // The cards' offers from their entries (`inventory`: the paper collection unless Arena is shown, whose ids are other cards)
+    const offer = open && !inArena() ? buylistTotal(trade.cards.map(card =>
+        ({buylist: (inventory.find(entry => entry.id === card.id) || {}).buylist, quantity: card.quantity}))) : null;
     const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong>`
+        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offers today (US dollars)">${BUYLIST_SHOP} would pay ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}</span>` : '')
         + (receives.length ? ` · receives ${plural(trade.receive_quantity, 'card')} · <strong>${money(trade.receive_value)}</strong>` : '') + ' · '
         + (open ? `since ${escapeHtml(trade.created_at.slice(0, 10))}` : `confirmed ${escapeHtml((trade.closed_at || '').slice(0, 10))}`);
     const exports = (trade.cards.length || !receives.length ? `<select class="select trade-export" title="Download the cards you give as a file for another site or app">

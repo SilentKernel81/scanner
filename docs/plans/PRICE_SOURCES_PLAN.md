@@ -9,11 +9,11 @@ Mana Pool, or MTGO prices - all of them from **one** MTGJSON file a day.
 (`reprice_collections`); `tests/test_prices.py` (10 tests), on temporary databases and copies of this checkout's data;
 run once after a real download on copied data (2026-10-24: 1,452 of 1,595 entries repriced - PROGRAM_DOCUMENTATION). Phase 2a done 2026-10-24: the dropdown (Settings > Card data > Prices) with Scryfall's two sources, TCGplayer USD and
 Cardmarket EUR, through shown columns of their own (`cards.price`, `price_foil`, `price_etched` - the second of the two ways
-named under phase 1 below); the currency on every page and in the CSV. **Phases 2b and 3 done 2026-10-24** (not deployed):
+named under phase 1 below); the currency on every page and in the CSV. **Phases 2b and 3 done 2026-10-24** (deployed the same day):
 Card Kingdom and Mana Pool from MTGJSON in the same list (`core/shop_prices.py`, the table `shop_prices` beside `cards` -
 not `card_prices` rows, see *Phases*), the button *Update the shops' prices* and its schedule, and the three follow-ups below.
 The owner chose **market value** (2026-10-24): no `price_added`, and a change of source leaves an entry the new source
-cannot price without a price. Phase 4 (the buylist beside the value) not started; Card Kingdom's buylist is already kept.
+cannot price without a price. **Phase 4 done 2026-10-24**: what Card Kingdom would pay, beside the value (PROGRAM_DOCUMENTATION, *What Card Kingdom would pay*).
 Trial results: PROGRAM_DOCUMENTATION, *The shops' prices*. What is under *Measured* was measured on 2026-10-23 on that day's
 files and a copy of this checkout's card data (112,765 printings).
 
@@ -154,8 +154,9 @@ the smaller change. Moxfield's `Purchase Price` column (`mtg.py:46`) gets the nu
    replaces `cards` whole. Scryfall's own prices stay in `cards` (phase 1).
 3. **Done** (2026-10-24): the schedule's third question (`scheduled_shop_price_update`); `money()` and the exports' currency
    were done in 2a.
-4. (Optional, not started) The buylist beside the retail value: `shop_prices.cardkingdom_buy*` are filled, nothing reads
-   them yet.
+4. **Done** (2026-10-24): the buylist beside the retail value - read when the page asks (`CardDatabase.buylist_by_ids`,
+   `Game.buylist_prices`), never written into an inventory; under a list row, a Statistics tile with its coverage, a
+   trade's summary; US dollars always; no fallback between finishes. `tests/test_prices.py` (`TheBuylist`).
 
 Each phase: `tests/test_prices.py` on temporary databases (the import of a hand-written 3-card price file -
 one double-faced card with a provider on one face only, one etched-only printing, one id not in `cards`;

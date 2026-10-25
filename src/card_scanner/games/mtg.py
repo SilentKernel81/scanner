@@ -180,6 +180,21 @@ class Magic(Game):
             'price': next((float(p) for p in prices if p), 0.0),
         }
 
+    def buylist_prices(self, entries):
+        # Card Kingdom's buylist (prices.BUYLIST). A foil or surge foil copy takes the foil buy price, or the etched one
+        # of an etched-only printing (an etched foil is a 'foil' copy - see inventory_fields); a regular copy only the
+        # regular one. Never the other finish's, unlike the value's fallback: a shop pays very differently for a foil and
+        # a regular copy, and a borrowed number would be an offer nobody made. No price: not in the answer (never 0,
+        # which would read as "worthless")
+        buylists = self.db.buylist_by_ids(entry['card_id'] for entry in entries)
+        result = {}
+        for entry in entries:
+            regular, foil, etched = buylists.get(entry['card_id'], (None, None, None))
+            price = (foil or etched) if entry['finish'] in ('foil', 'surge') else regular
+            if price:
+                result[entry['id']] = float(price)
+        return result
+
     def price_currency(self):
         return self.db.price_currency()
 

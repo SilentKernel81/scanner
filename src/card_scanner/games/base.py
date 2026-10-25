@@ -193,6 +193,13 @@ class Game:
         """
         return {}
 
+    def buylist_prices(self, entries):
+        """
+        {entry id: what a shop pays for one copy} for inventory rows (dicts with 'id', 'card_id', 'finish') - only the
+        entries it has a price for. Shown beside the value, never counted in it; a game without a buylist has none
+        """
+        return {}
+
     # -- Decks (games with deck_formats) --------------------------------------
 
     def has_deck_data(self):

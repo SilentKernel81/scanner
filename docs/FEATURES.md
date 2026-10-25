@@ -94,6 +94,10 @@ game sits behind one interface (`games/`), so another could be added.
   survive a card data download. A card the chosen source has no price for is left without one, never with another
   shop's. Tried on copied data in a trial server (import 5.6 s, a round trip back to the cent); never the schedule's own
   run, never with the settings password set, no price compared with a shop's own page.
+- **What Card Kingdom would pay** (since 2026-10-24): its buylist offer for each card, beside the value - under each list
+  row, a Statistics tile saying how many cards it covers, and in a trade's summary; in US dollars, never counted in the
+  value, the foil offer only for a foil copy. Shown once *Update the shops' prices* has run. Tried on copied data with that
+  day's prices; never compared with Card Kingdom's own page.
 - **AI assistants see the currency** (MCP server, since 2026-10-24): every answer says what its prices are in
   (`prices_in`). Tested with a stand-in server only.
 - **The exact printing** from set code + collector number, checked against the name, in a

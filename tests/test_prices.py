@@ -584,3 +584,45 @@ class ActivityLog(CardData):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# ----------------------------------------------------------------------------
+# What a shop would pay (phase 4): Card Kingdom's buylist beside the value
+# ----------------------------------------------------------------------------
+
+class TheBuylist(CardData):
+    """Game.buylist_prices: the finish picks the buy price, never the other finish's; nothing when there is none"""
+
+    # 'id-2' is bought in both finishes, 'id-1' (etched only) only as an etched foil, 'id-3' only as a regular copy
+    ROWS = {'id-2': {'cardkingdom': 1.49, 'cardkingdom_buy': 0.60, 'cardkingdom_buy_foil': 1.80},
+            'id-1': {'cardkingdom_buy_etched': 2.25}, 'id-3': {'cardkingdom_buy': 0.05},
+            **{f'id-{n}': {'cardkingdom': 0.25} for n in range(100, 140)}}
+
+    def setUp(self):
+        super().setUp()
+        self.cards.populate_database(FILLER + [ETCHED, BOTH, UNPRICED])
+
+    def entry(self, number, card_id, finish):
+        return {'id': number, 'card_id': card_id, 'finish': finish}
+
+    def test_nothing_before_the_first_price_update(self):
+        self.assertEqual(self.game.buylist_prices([self.entry(1, 'id-2', 'regular')]), {})
+
+    def test_each_finish_takes_its_own_buy_price(self):
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        found = self.game.buylist_prices([
+            self.entry(1, 'id-2', 'regular'), self.entry(2, 'id-2', 'foil'), self.entry(3, 'id-2', 'surge'),
+            self.entry(4, 'id-1', 'foil'),        # an etched foil is a 'foil' copy: the etched buy price
+            self.entry(5, 'id-3', 'foil'),        # bought only as a regular copy: no offer for a foil, never the regular one
+            self.entry(6, 'id-1', 'regular'),     # no regular buy price for an etched-only printing
+            self.entry(7, 'id-100', 'regular'),   # a shop sells it, nobody buys it: no offer
+            self.entry(8, None, 'regular'),       # an entry imported without its printing
+            self.entry(9, 'id-gone', 'regular'),  # a printing that left the card data
+        ])
+        self.assertEqual(found, {1: 0.60, 2: 1.80, 3: 1.80, 4: 2.25})
+
+    def test_it_does_not_follow_the_price_source(self):
+        # Not a price source: what Card Kingdom pays is the same whichever value the collection is shown in
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        self.cards.set_price_source('scryfall_eur')
+        self.assertEqual(self.game.buylist_prices([self.entry(1, 'id-2', 'foil')]), {1: 1.80})

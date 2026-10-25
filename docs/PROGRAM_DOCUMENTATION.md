@@ -1938,10 +1938,28 @@ One more row, `mtgjson_prices` (`shop_prices.INFO_KEY`): MTGJSON's date of the s
 
 **`shop_prices`** (since 2026-10-24; `core/shop_prices.py`, `CardDatabase.replace_shop_prices`) - the shops' prices from
 MTGJSON, one row per printing: `id` (as `cards.id`, the primary key) and a REAL column per shop, kind and finish -
-`cardkingdom`, `cardkingdom_foil`, `cardkingdom_etched`, the same three for `cardkingdom_buy` (Card Kingdom's buylist: kept, not
-shown yet) and for `manapool`. A table of its own, beside `cards`, because a card data download replaces `cards` whole: the
+`cardkingdom`, `cardkingdom_foil`, `cardkingdom_etched`, the same three for `cardkingdom_buy` (Card Kingdom's buylist: never a price source, shown
+beside the value since 2026-10-24 - *What Card Kingdom would pay* below) and for `manapool`. A table of its own, beside `cards`, because a card data download replaces `cards` whole: the
 shops' prices survive it, and new printings of the download are priced at once when the shops know them (the join).
 Created empty at start; replaced whole by each price update (`replace_table`, like `cards`).
+
+**What Card Kingdom would pay** (since 2026-10-24, phase 4 of `docs/plans/PRICE_SOURCES_PLAN.md`; `core/prices.py`: `BUYLIST`;
+`CardDatabase.buylist_by_ids`; `Game.buylist_prices` - `games/mtg.py` beside `inventory_fields`; `server/inventory_api.py`;
+`collection.js`: `buylistMoney`, `buylistTotal`). Card Kingdom's buylist - what the shop offers for a copy, not what it is
+worth - shown beside the value, never counted in it. `/api/inventory` gives each entry of the collection (not the scanned
+cards, not Arena's) `buylist`: the offer for one copy, `null` without one. It is **read when the page asks, from the shops'
+table, and never written into an inventory**: no repricing, price change, `pricing_lock` or transition concerns it, and it is
+not withheld while a change of currency is half done (keep it that way - stored in the entries it would need all of
+them). The finish picks the column, with no fallback to the other finish (unlike the value's): a foil or surge foil copy
+the foil offer, or the etched one of an etched-only printing; a regular copy the regular one - a shop pays very differently
+for each, and a borrowed number would be an offer nobody made. Always in US dollars (`buylistMoney`, never `money()`),
+whatever the price source. Shown: under a list row's value ("Card Kingdom pays $8.50 each"), a Statistics tile with the
+copies it covers ("$2378.07 - Card Kingdom would pay, for 1,243 of 3,953 cards": a partial total must not read as the
+collection's), and in an open trade's summary (from the entries; a confirmed trade's cards have none). Nothing shows before
+the first *Update the shops' prices*. **Tried 2026-10-24** on a copy of this checkout's data with that day's MTGJSON prices
+(102,652 printings; offers for 46,542 regular, 35,764 foil, 890 etched): 784 of 1,604 entries with an offer, 74 of them
+foils; on the dearest cards the offer was 55-76% of TCGplayer's value (The One Ring HOC: $131.05 / $100.00). Never compared
+with Card Kingdom's own page. `tests/test_prices.py` (`TheBuylist`).
 
 **The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
 `price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;
