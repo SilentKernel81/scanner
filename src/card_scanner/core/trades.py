@@ -5,6 +5,7 @@
 # cancelled. The tables and the triggers that keep the copies are in
 # inventory.py (TRADES_TABLE, TRADE_CARDS_TABLE, TRADE_TRIGGERS).
 # ============================================================================
+import hashlib
 import json
 
 from card_scanner.core.inventory import _row_dict, now
@@ -68,6 +69,8 @@ class Trades:
                 trade['receives'] = self.receives(trade['id'])
                 trade['receive_quantity'] = sum(card['quantity'] for card in trade['receives'])
                 trade['receive_value'] = round(sum(card['price'] * card['quantity'] for card in trade['receives']), 2)
+                # What an open trade holds, as one string: a confirm sends the one its dialog was shown with (confirm)
+                trade['fingerprint'] = self.fingerprint(trade['id']) if trade['status'] == 'open' else None
         return trades
 
     def cards(self, trade_id):
@@ -93,6 +96,24 @@ class Trades:
             return [{**json.loads(row['card']), 'row': row['id'], 'quantity': row['quantity'], 'most': row['most'],
                      'seller': row['source']} for row in self.conn.execute(
                 'SELECT * FROM trade_receives WHERE trade_id = ? ORDER BY source COLLATE NOCASE, id', (trade_id,))]
+
+    def fingerprint(self, trade_id):
+        """
+        A digest of exactly what an open trade holds: every card it gives - its row, entry, copies and the entry's
+        identity (printing, name, set, number, finish, condition, location: an edit of the entry changes the card given) -
+        and every card it receives (row, seller, card, copies). Two moments with the same digest hold the same cards; totals
+        alone do not say that (one card swapped for another, copies moved between rows - a Codex finding). The price is
+        left out: a repricing changes it every day without changing what is given, and would refuse confirms for nothing.
+        """
+        with self._lock:
+            gives = self.conn.execute(
+                "SELECT c.id, c.inventory_id, c.quantity, i.card_id, i.card_name, i.set_name, i.card_number, i.finish, "
+                "i.condition, i.location FROM trade_cards c LEFT JOIN inventory i ON i.id = c.inventory_id "
+                "WHERE c.trade_id = ? ORDER BY c.id", (trade_id,)).fetchall()
+            receives = self.conn.execute("SELECT id, source, key, quantity FROM trade_receives WHERE trade_id = ? ORDER BY id",
+                                         (trade_id,)).fetchall()
+        content = json.dumps([[list(row) for row in gives], [list(row) for row in receives]])
+        return hashlib.sha256(content.encode()).hexdigest()[:32]
 
     def by_entry(self, game):
         """{inventory id: [{'id', 'name', 'quantity'}]}: the open trades holding copies of each entry"""
@@ -251,15 +272,21 @@ class Trades:
         The trade happened: its copies leave the collection (the newest captures and the
         stations' counts with them, as when a quantity is lowered) and the trade stays as a
         record of the cards as they were. One transaction. Returns {'cards', 'entries', 'value'}.
-        expected: {'quantity', 'receive_quantity'} the person was shown when they confirmed - refused when the trade
-        holds other numbers now (changed in another tab meanwhile): what leaves must be what was agreed to.
+        expected: what the person was shown when they confirmed - {'fingerprint'} (list(), fingerprint()), or from a page
+        of before it {'quantity', 'receive_quantity'} - refused when the trade holds anything else now (changed in another
+        tab meanwhile): what leaves must be what was agreed to. Compared inside this transaction, under the lock every
+        change of a trade takes, so nothing can change between the check and the copies leaving.
         """
         def change():
             self._trade(trade_id)
             if expected is not None:
-                now_held = [self.conn.execute(f'SELECT COALESCE(SUM(quantity), 0) FROM {table} WHERE trade_id = ?',
-                                              (trade_id,)).fetchone()[0] for table in ('trade_cards', 'trade_receives')]
-                if now_held != [expected.get('quantity'), expected.get('receive_quantity')]:
+                if 'fingerprint' in expected:
+                    changed = expected['fingerprint'] != self.fingerprint(trade_id)
+                else:   # a page from before the fingerprint: its totals, which miss a swap of cards
+                    now_held = [self.conn.execute(f'SELECT COALESCE(SUM(quantity), 0) FROM {table} WHERE trade_id = ?',
+                                                  (trade_id,)).fetchone()[0] for table in ('trade_cards', 'trade_receives')]
+                    changed = now_held != [expected.get('quantity'), expected.get('receive_quantity')]
+                if changed:
                     raise TradeError('This trade changed since it was shown: look at it again and confirm once more')
             manager = self.inventory
             if manager.prices_withheld():

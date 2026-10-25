@@ -1353,8 +1353,8 @@ async function tradeAction(trade, action) {
     let request = null;
     if (action === 'picture') return openSalePicture(trade);   // only draws: nothing to reload after it
     if (action === 'confirm') {
-        // The trade as the server has it now (another tab may have changed it): the numbers in the dialog are sent with
-        // the confirm, and the server refuses it if the trade holds others by then
+        // The trade as the server has it now (another tab may have changed it): its fingerprint - exactly the cards and
+        // copies the dialog shows - goes with the confirm, and the server refuses it if the trade holds anything else by then
         await loadTrades();
         trade = trades.find(item => item.id === trade.id);
         if (!trade || trade.status !== 'open') return notify('This trade is not open any more', 'warning');
@@ -1363,7 +1363,7 @@ async function tradeAction(trade, action) {
                                      : 'None of your cards are in it, so nothing leaves your collection.')
                 + (trade.receives.length ? ` What you receive (${plural(trade.receive_quantity, 'card')}, ${money(trade.receive_value)}) is only kept in the record: add those cards to your collection yourself.` : '')});
         if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST',
-                                  body: {quantity: trade.quantity, receive_quantity: trade.receive_quantity}});
+                                  body: {fingerprint: trade.fingerprint}});
     } else if (action === 'cancel') {
         // Not confirmDialog: its "Cancel" beside "Cancel trade" says nothing
         const ok = await choiceDialog({title: `Cancel the trade "${trade.name}"?`,

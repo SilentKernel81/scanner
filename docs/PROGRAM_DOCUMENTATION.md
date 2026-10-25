@@ -2604,8 +2604,12 @@ downloads its cards in one of the game's export formats (`GET /api/trades/<id>/e
 - Moxfield's collection CSV for Magic, or the app's own; `quantity` is the copies in the
 trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>?action=cancel`: the
 trade and its rows go, the cards are simply free again) and **Confirm trade**
-(`POST /api/trades/<id>/confirm`, `Trades.confirm`; the page reads the trade again first and sends the `quantity` /
-`receive_quantity` its dialog showed - refused when the trade holds other numbers by then, changed in another tab): in one transaction each row keeps the
+(`POST /api/trades/<id>/confirm`, `Trades.confirm`; the page reads the trade again first and sends the trade's
+`fingerprint` its dialog was shown with - `Trades.fingerprint`, in `GET /api/trades` for each open trade: a digest of every
+card given (row, entry, copies, the entry's printing / finish / condition / location) and received (row, seller, card,
+copies), never the price, which a repricing changes daily - compared inside the confirm's transaction and refused when the
+trade holds anything else by then; totals alone missed a card swapped for another, a Codex finding. A page of before sends
+`quantity` / `receive_quantity`, still checked): in one transaction each row keeps the
 card as it was and lets go of its entry, the copies leave the collection - the entry is
 deleted or lowered, with the newest photos and the cameras' counts as for any lowered quantity
 (`_take_copies`, `_trim_sources`, `_trim_captures`) - and the trade becomes `done`. It stays

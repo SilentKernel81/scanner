@@ -97,11 +97,14 @@ def trade_receive(trade_id, row_id):
 
 @app.route('/api/trades/<int:trade_id>/confirm', methods=['POST'])
 def trade_confirm(trade_id):
-    """The trade happened: its cards leave the collection, the trade stays as a record. JSON quantity, receive_quantity:
-    what the page showed - refused when the trade holds other numbers now"""
+    """The trade happened: its cards leave the collection, the trade stays as a record. JSON fingerprint: the one of
+    the trade the page showed (GET /api/trades) - refused when the trade holds anything else now; quantity,
+    receive_quantity: the same from a page of before the fingerprint"""
     data = request.get_json(silent=True) or {}
     expected = None
-    if 'quantity' in data or 'receive_quantity' in data:
+    if data.get('fingerprint'):
+        expected = {'fingerprint': str(data['fingerprint'])}
+    elif 'quantity' in data or 'receive_quantity' in data:
         try:
             expected = {'quantity': int(data.get('quantity') or 0), 'receive_quantity': int(data.get('receive_quantity') or 0)}
         except (ValueError, TypeError):

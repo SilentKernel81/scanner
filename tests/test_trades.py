@@ -235,6 +235,44 @@ class StaleRequests(ClosingATrade):
         self.assertEqual(self.owned(), {'Test Card': 3, 'Other Card': 1})      # nothing left
         self.assertEqual(self.trades.confirm(self.id, {'quantity': 2, 'receive_quantity': 0})['cards'], 2)
 
+    def shown(self):
+        # What a page has when its dialog asks: the trade's fingerprint from the listing
+        return {'fingerprint': self.trade()['fingerprint']}
+
+    def test_a_swap_that_keeps_the_totals_is_refused(self):
+        # Another tab takes a copy of one card out and puts a copy of another in: still 3 copies (a Codex finding)
+        shown = self.shown()
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        third = self.collection.add_card(OTHER, GAME, 'regular', quiet=True, location='Box 9')
+        self.trades.add(GAME, 'Jo', [third])
+        self.assertEqual(self.trade()['quantity'], 3)
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+        self.assertEqual(self.collection.get_stats(GAME)['total_cards'], 5)   # nothing left (3 + 1 + the new 1)
+        self.assertEqual(self.trade()['status'], 'open')
+
+    def test_an_edit_of_a_held_card_is_refused(self):
+        # The card itself changed (a single card is edited where it is and stays in its trade): not the one agreed to
+        shown = self.shown()
+        self.collection.conn.execute("UPDATE inventory SET finish = 'foil' WHERE id = ?", (self.other,))
+        self.collection.conn.commit()
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+
+    def test_a_new_price_is_not_a_change(self):
+        # A repricing changes the value every day, never which cards are given
+        shown = self.shown()
+        self.collection.conn.execute('UPDATE inventory SET price_usd = price_usd + 1')
+        self.collection.conn.commit()
+        self.assertEqual(self.trades.confirm(self.id, shown)['cards'], 3)
+
+    def test_what_a_trade_receives_is_in_the_fingerprint(self):
+        shown = self.shown()
+        self.trades.receive(GAME, 'Jo', 'Sam', [{'card': {**CARD, 'game': GAME}, 'key': 'k', 'quantity': 1, 'most': 2}])
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+
 
 class TradeRoutes(TradeData):
     """The same through the routes and Flask's test client, as the page sends them (temporary data behind the server)"""
@@ -249,6 +287,13 @@ class TradeRoutes(TradeData):
         self.state = state
         # Not self.saved: TemporaryData keeps its folders there
         self.saved_services = {name: getattr(state.services, name) for name in ('inventory', 'trade_store')}
+        # The routes ask which game is active (GET /api/trades lists its trades): this test's
+        from types import SimpleNamespace
+        from unittest import mock
+        from card_scanner.server import trades_api
+        patch = mock.patch.object(trades_api.games, 'active', return_value=SimpleNamespace(id=GAME))
+        patch.start()
+        self.addCleanup(patch.stop)
         state.services.inventory, state.services.trade_store = self.collection, self.trades
         self.client = launcher.app.test_client()
 
@@ -274,9 +319,13 @@ class TradeRoutes(TradeData):
         self.assertEqual(self.trades.list(GAME), [])
 
     def test_a_stale_confirm_is_refused(self):
-        answer = self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 5, 'receive_quantity': 0})
-        self.assertEqual(answer.status_code, 400)
+        # The page sends the fingerprint of the trade it showed; a page of before it, the totals
+        listed = self.client.get('/api/trades').get_json()['trades'][0]
+        self.assertEqual(listed['fingerprint'], self.trades.fingerprint(self.id))
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': 'something else'}).status_code, 400)
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 5, 'receive_quantity': 0}).status_code, 400)
         self.assertEqual(self.trade()['status'], 'open')
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': listed['fingerprint']}).status_code, 200)
 
 
 class TradesInBackups(TradeData):
