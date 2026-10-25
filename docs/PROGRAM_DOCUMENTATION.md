@@ -1953,13 +1953,20 @@ not withheld while a change of currency is half done (keep it that way - stored 
 them). The finish picks the column, with no fallback to the other finish (unlike the value's): a foil or surge foil copy
 the foil offer, or the etched one of an etched-only printing; a regular copy the regular one - a shop pays very differently
 for each, and a borrowed number would be an offer nobody made. Always in US dollars (`buylistMoney`, never `money()`),
-whatever the price source. Shown: under a list row's value ("Card Kingdom pays $8.50 each"), a Statistics tile with the
-copies it covers ("$2378.07 - Card Kingdom would pay, for 1,243 of 3,953 cards": a partial total must not read as the
-collection's), and in an open trade's summary (from the entries; a confirmed trade's cards have none). Nothing shows before
+whatever the price source. **Always with its day, never as "today"** (a Codex finding): the offers are those of the last
+price update and stay until the next one replaces them - one that fails or is switched off leaves them as they were - so
+`/api/inventory` also gives `buylist_date` (MTGJSON's date of the prices in use, `Game.buylist_date`, from
+`shop_prices.INFO_KEY`), every place says "offered ... on 2026-10-24", and offers more than two days old
+(`BUYLIST_OLD_AFTER_DAYS`: MTGJSON publishes daily) say how old they are and where to update them (`collection.js`:
+`buylistAge`, `buylistWhen`; a list row's line in the warning colour, `.is-old`). Shown: under a list row's value ("Card
+Kingdom offered $8.50 each"), a Statistics tile with the copies it covers ("$2378.07 - Card Kingdom offered, for 1,243 of
+3,953 cards, on 2026-10-24": a partial total must not read as the collection's), and in an open trade's summary (from the
+entries; a confirmed trade's cards have none). Nothing shows before
 the first *Update the shops' prices*. **Tried 2026-10-24** on a copy of this checkout's data with that day's MTGJSON prices
 (102,652 printings; offers for 46,542 regular, 35,764 foil, 890 etched): 784 of 1,604 entries with an offer, 74 of them
 foils; on the dearest cards the offer was 55-76% of TCGplayer's value (The One Ring HOC: $131.05 / $100.00). Never compared
-with Card Kingdom's own page. `tests/test_prices.py` (`TheBuylist`).
+with Card Kingdom's own page. The date's wording tried the same day on the copy with its prices' date set to 9 days
+earlier ("9 days ago - update the shops' prices"). `tests/test_prices.py` (`TheBuylist`).
 
 **The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
 `price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;

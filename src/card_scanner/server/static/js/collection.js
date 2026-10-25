@@ -26,9 +26,30 @@ function inArena() {
     return inventoryArea === 'arena';
 }
 
-// What Card Kingdom would pay (/api/inventory's `buylist`: one copy, None without an offer - core/prices.py BUYLIST).
+// What Card Kingdom offered (/api/inventory's `buylist`: one copy, None without an offer - core/prices.py BUYLIST).
 // Always in US dollars, whatever price source the values are in: never through money(), which follows that source
 const BUYLIST_SHOP = 'Card Kingdom';
+// The offers are of one day - /api/inventory's `buylist_date`, MTGJSON's date of the shops' prices in use - and are kept
+// until the next price update: a failed or switched-off update leaves them as they were. So they are always said with
+// their date, never as "today", and older than this many days they are called old (MTGJSON publishes every day)
+const BUYLIST_OLD_AFTER_DAYS = 2;
+let buylistDate = null;
+
+function buylistAge() {
+    // {date ('2026-10-24'), days (how old, whole days), old} of the offers shown, or null without a date
+    if (!buylistDate) return null;
+    const [year, month, day] = buylistDate.split('-').map(Number);
+    const now = new Date();
+    const days = Math.max(0, Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(year, month - 1, day)) / 86400000));
+    return {date: buylistDate, days, old: days > BUYLIST_OLD_AFTER_DAYS};
+}
+
+function buylistWhen() {
+    // How the offers' day is said: "on 2026-10-24", and how old when the prices have not been updated for a while
+    const age = buylistAge();
+    if (!age) return '';
+    return `on ${age.date}` + (age.old ? ` (${age.days} days ago - update the shops' prices in Settings > Card data)` : '');
+}
 function buylistMoney(amount) {
     return '$' + Number(amount || 0).toFixed(2);
 }
@@ -279,6 +300,7 @@ async function loadInventory() {
         return;
     }
     inventory = data.cards;
+    buylistDate = data.buylist_date || null;
     selected = new Set([...selected].filter(id => inventory.some(card => card.id === id)));
     fillFilterOptions();
     if (savedFilters) restoreFilters();
@@ -673,7 +695,7 @@ function listRowHtml(card) {
             <div class="inventory-card-price">
                 <div class="inventory-price-value">${priceText(card.price * card.quantity)}</div>
                 ${card.quantity > 1 && !digital ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
-                ${card.buylist && !digital ? `<div class="inventory-price-each" title="What ${BUYLIST_SHOP}'s buylist offers for one copy in this finish today (MTGJSON's daily prices, in US dollars) - not counted in the value">${BUYLIST_SHOP} pays ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''}</div>` : ''}
+                ${card.buylist && !digital ? `<div class="inventory-price-each${(buylistAge() || {}).old ? ' is-old' : ''}" title="What ${BUYLIST_SHOP}'s buylist offered for one copy in this finish ${escapeHtml(buylistWhen())} (MTGJSON's prices, in US dollars) - not counted in the value">${BUYLIST_SHOP} offered ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''}</div>` : ''}
                 <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
             </div>
             <div class="inventory-card-actions">
@@ -1058,11 +1080,12 @@ function renderStats() {
     $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
         + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
         + (inArena() ? '' : tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card'));
-    // What Card Kingdom would pay: only once its buylist is downloaded (Settings > Card data > Prices) and offers for something
+    // What Card Kingdom offered: only once its buylist is downloaded (Settings > Card data > Prices) and offers for
+    // something - with the offers' day, and how old they are when the prices have not been updated for a while
     const buylist = inArena() ? null : buylistTotal(inventory);
     if (buylist && buylist.copies) {
         $('stats-tiles').innerHTML += tile(buylistMoney(buylist.value),
-            `${BUYLIST_SHOP} would pay, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards`);
+            `${BUYLIST_SHOP} offered, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards, ${escapeHtml(buylistWhen())}`);
     }
     // Arena cards have no price: the bars count cards there, and the choice is not offered
     const measure = inArena() ? 'cards' : statsMeasure;
@@ -1134,7 +1157,7 @@ function tradeHtml(trade) {
     const offer = open && !inArena() ? buylistTotal(trade.cards.map(card =>
         ({buylist: (inventory.find(entry => entry.id === card.id) || {}).buylist, quantity: card.quantity}))) : null;
     const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong>`
-        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offers today (US dollars)">${BUYLIST_SHOP} would pay ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}</span>` : '')
+        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for these cards ${escapeHtml(buylistWhen())} (US dollars)">${BUYLIST_SHOP} offered ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}${(buylistAge() || {}).old ? ` (${buylistAge().days} days ago)` : ''}</span>` : '')
         + (receives.length ? ` · receives ${plural(trade.receive_quantity, 'card')} · <strong>${money(trade.receive_value)}</strong>` : '') + ' · '
         + (open ? `since ${escapeHtml(trade.created_at.slice(0, 10))}` : `confirmed ${escapeHtml((trade.closed_at || '').slice(0, 10))}`);
     const exports = (trade.cards.length || !receives.length ? `<select class="select trade-export" title="Download the cards you give as a file for another site or app">

@@ -1556,3 +1556,8 @@ details.trade .trade-row {
 .deck-filters {
     margin-bottom: 12px;
 }
+
+/* An offer of Card Kingdom's from prices not updated for days (collection.js: buylistAge) */
+.inventory-price-each.is-old {
+    color: var(--warning);
+}

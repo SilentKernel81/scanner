@@ -200,6 +200,11 @@ class Game:
         """
         return {}
 
+    def buylist_date(self):
+        """The date of the offers buylist_prices gives ('2026-10-24'), or None: they are kept until the next price update
+        replaces them - one that fails or is switched off leaves them as they were, so a page must say how old they are"""
+        return None
+
     # -- Decks (games with deck_formats) --------------------------------------
 
     def has_deck_data(self):

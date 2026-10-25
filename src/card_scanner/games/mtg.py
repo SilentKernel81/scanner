@@ -195,6 +195,11 @@ class Magic(Game):
                 result[entry['id']] = float(price)
         return result
 
+    def buylist_date(self):
+        # MTGJSON's date of the shops' prices in use, recorded by each price update (core/shop_prices.py: INFO_KEY)
+        from card_scanner.core.shop_prices import INFO_KEY
+        return (self.db.get_data_info(INFO_KEY) or {}).get('source_updated')
+
     def price_currency(self):
         return self.db.price_currency()
 

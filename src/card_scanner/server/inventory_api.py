@@ -113,6 +113,9 @@ def get_inventory():
             return jsonify({
                 'success': True,
                 'cards': cards,
+                # The date of the `buylist` offers (None before the first shops' price update): kept until the next
+                # update, so the page says what day they are of, never "today"
+                'buylist_date': game.buylist_date() if buylist else None,
                 'total': len(cards)
             })
         except Exception as e:

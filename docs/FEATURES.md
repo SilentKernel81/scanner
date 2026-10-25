@@ -96,7 +96,8 @@ game sits behind one interface (`games/`), so another could be added.
   run, never with the settings password set, no price compared with a shop's own page.
 - **What Card Kingdom would pay** (since 2026-10-24): its buylist offer for each card, beside the value - under each list
   row, a Statistics tile saying how many cards it covers, and in a trade's summary; in US dollars, never counted in the
-  value, the foil offer only for a foil copy. Shown once *Update the shops' prices* has run. Tried on copied data with that
+  value, the foil offer only for a foil copy, always with the day of the offers (and how old, when the shops' prices
+  have not been updated for more than two days). Shown once *Update the shops' prices* has run. Tried on copied data with that
   day's prices; never compared with Card Kingdom's own page.
 - **AI assistants see the currency** (MCP server, since 2026-10-24): every answer says what its prices are in
   (`prices_in`). Tested with a stand-in server only.

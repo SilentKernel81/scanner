@@ -621,6 +621,14 @@ class TheBuylist(CardData):
         ])
         self.assertEqual(found, {1: 0.60, 2: 1.80, 3: 1.80, 4: 2.25})
 
+    def test_the_offers_say_their_day(self):
+        # Kept until the next price update replaces them: the page needs their date, never "today"
+        self.assertIsNone(self.game.buylist_date())
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        self.assertEqual(self.game.buylist_date(), '2026-10-24')
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-25')
+        self.assertEqual(self.game.buylist_date(), '2026-10-25')
+
     def test_it_does_not_follow_the_price_source(self):
         # Not a price source: what Card Kingdom pays is the same whichever value the collection is shown in
         self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
