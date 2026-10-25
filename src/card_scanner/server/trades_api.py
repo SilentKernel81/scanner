@@ -56,15 +56,16 @@ def trade_list():
 
 @app.route('/api/trades/<int:trade_id>', methods=['PUT', 'DELETE'])
 def trade_item(trade_id):
-    """PUT (JSON: name): rename. DELETE: cancel an open trade (its cards stay in the
-    collection), or take a confirmed one out of the history."""
+    """PUT (JSON: name): rename. DELETE ?action=cancel: cancel an open trade (its cards stay in the collection);
+    ?action=forget: take a confirmed one out of the history. Each refuses the other's trade - never one in place of the
+    other: a "Cancel" from a page still showing a trade confirmed meanwhile once deleted its record (no action: cancel,
+    which a page from before this asked for both)."""
     if request.method == 'PUT':
         trade_store.rename(trade_id, (request.get_json(silent=True) or {}).get('name'))
+    elif request.args.get('action') == 'forget':
+        trade_store.delete(trade_id)
     else:
-        try:
-            trade_store.cancel(trade_id)
-        except TradeError:
-            trade_store.delete(trade_id)
+        trade_store.cancel(trade_id)
     collection_changed()
     return jsonify({'success': True})
 
@@ -90,13 +91,22 @@ def trade_receive(trade_id, row_id):
     except (ValueError, TypeError):
         return jsonify({'success': False, 'error': 'quantity must be a number'}), 400
     trade_store.set_receive_quantity(trade_id, row_id, quantity)
+    collection_changed()   # other pages show the trade again (nothing of the collection itself changed)
     return jsonify({'success': True})
 
 
 @app.route('/api/trades/<int:trade_id>/confirm', methods=['POST'])
 def trade_confirm(trade_id):
-    """The trade happened: its cards leave the collection, the trade stays as a record"""
-    result = trade_store.confirm(trade_id)
+    """The trade happened: its cards leave the collection, the trade stays as a record. JSON quantity, receive_quantity:
+    what the page showed - refused when the trade holds other numbers now"""
+    data = request.get_json(silent=True) or {}
+    expected = None
+    if 'quantity' in data or 'receive_quantity' in data:
+        try:
+            expected = {'quantity': int(data.get('quantity') or 0), 'receive_quantity': int(data.get('receive_quantity') or 0)}
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'quantity must be a number'}), 400
+    result = trade_store.confirm(trade_id, expected)
     collection_changed()
     return jsonify({'success': True, **result})
 

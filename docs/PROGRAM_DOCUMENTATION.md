@@ -2602,14 +2602,21 @@ change how many copies the trade holds, **×** takes the card out
 (`PUT /api/trades/<id>/cards/<row>`, JSON `quantity`, 0 = out). Per trade: **Export…**
 downloads its cards in one of the game's export formats (`GET /api/trades/<id>/export/<format>`
 - Moxfield's collection CSV for Magic, or the app's own; `quantity` is the copies in the
-trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>`: the
+trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>?action=cancel`: the
 trade and its rows go, the cards are simply free again) and **Confirm trade**
-(`POST /api/trades/<id>/confirm`, `Trades.confirm`): in one transaction each row keeps the
+(`POST /api/trades/<id>/confirm`, `Trades.confirm`; the page reads the trade again first and sends the `quantity` /
+`receive_quantity` its dialog showed - refused when the trade holds other numbers by then, changed in another tab): in one transaction each row keeps the
 card as it was and lets go of its entry, the copies leave the collection - the entry is
 deleted or lowered, with the newest photos and the cameras' counts as for any lowered quantity
 (`_take_copies`, `_trim_sources`, `_trim_captures`) - and the trade becomes `done`. It stays
 under **Confirmed trades** as a record (cards, value, date; it can still be exported) until
-**Delete from history** (`DELETE` again).
+**Delete from history** (`DELETE ...?action=forget`). The two never stand in for each other (since 2026-10-24,
+`docs/plans/TRADES_REVIEW_PLAN.md` part 1): a cancel of a trade confirmed meanwhile is refused ("confirmed meanwhile: it
+stays in the history"), a forget of an open one too ("cancel it instead") - before, the route fell back from cancel to
+delete, so a tab still showing a confirmed trade as open removed its record when Cancel was pressed. A `DELETE` without
+`action` (a page from before) is a cancel. Receiving cards (`others_api`) and changing their copies tell the other pages
+(`collection_updated`), and an answer says the copies that went in, not those asked (they are cut at what the other
+person has).
 
 **Sale picture…** (open trades only - a confirmed trade's cards have no entry, so no scans;
 added 2026-10-24; `collection.js`: `openSalePicture`, `drawSalePicture`, `drawSalePreview`,

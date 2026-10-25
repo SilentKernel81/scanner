@@ -116,12 +116,14 @@ class Receiving(OthersData):
 
     def test_the_same_name_is_the_same_trade_and_the_copies_add_up_to_what_the_seller_has(self):
         collection = self.sam()
-        self.receive(collection=collection, quantity=3)
-        self.receive(collection=collection, quantity=3)             # Sam has 4 of the first card (sorted by name: Forest 20)
+        first = self.receive(collection=collection, quantity=3)
+        again = self.receive(collection=collection, quantity=3)     # Sam has 4 of the first card (sorted by name: Forest 20)
         trade = self.trades.list(GAME)
         self.assertEqual(len(trade), 1)
         card = trade[0]['receives'][0]
         self.assertEqual(card['quantity'], min(6, card['most']))
+        # What each answer says went in is what did: the second one is cut at what Sam has (plan, part 2)
+        self.assertEqual(first['cards'] + again['cards'], card['quantity'])
 
     def test_the_number_is_changed_and_cut_at_what_the_seller_has(self):
         self.receive(quantity=1)

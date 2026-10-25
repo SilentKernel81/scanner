@@ -1353,21 +1353,29 @@ async function tradeAction(trade, action) {
     let request = null;
     if (action === 'picture') return openSalePicture(trade);   // only draws: nothing to reload after it
     if (action === 'confirm') {
+        // The trade as the server has it now (another tab may have changed it): the numbers in the dialog are sent with
+        // the confirm, and the server refuses it if the trade holds others by then
+        await loadTrades();
+        trade = trades.find(item => item.id === trade.id);
+        if (!trade || trade.status !== 'open') return notify('This trade is not open any more', 'warning');
         const ok = await confirmDialog({title: `Confirm the trade "${trade.name}"?`, confirmText: 'Confirm trade', danger: true,
             message: (trade.quantity ? `Its ${plural(trade.quantity, 'card')} (${money(trade.value)}) are removed from your collection. This can't be undone.`
                                      : 'None of your cards are in it, so nothing leaves your collection.')
                 + (trade.receives.length ? ` What you receive (${plural(trade.receive_quantity, 'card')}, ${money(trade.receive_value)}) is only kept in the record: add those cards to your collection yourself.` : '')});
-        if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST'});
+        if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST',
+                                  body: {quantity: trade.quantity, receive_quantity: trade.receive_quantity}});
     } else if (action === 'cancel') {
         // Not confirmDialog: its "Cancel" beside "Cancel trade" says nothing
         const ok = await choiceDialog({title: `Cancel the trade "${trade.name}"?`,
-            message: `Its ${plural(trade.quantity, 'card')} stay in your collection and are free again.`,
+            message: trade.quantity ? `Its ${plural(trade.quantity, 'card')} stay in your collection and are free again.`
+                                    : 'None of your cards are in it: nothing of your collection changes.',
             choices: [{label: 'Keep the trade', value: false}, {label: 'Cancel the trade', value: true, style: 'danger'}]});
-        if (ok === true) request = api(`/api/trades/${trade.id}`, {method: 'DELETE'});
+        // Says which: the server refuses to cancel a trade confirmed meanwhile, instead of deleting its record
+        if (ok === true) request = api(`/api/trades/${trade.id}?action=cancel`, {method: 'DELETE'});
     } else if (action === 'forget') {
         const ok = await confirmDialog({title: `Delete "${trade.name}" from the history?`, confirmText: 'Delete', danger: true,
             message: 'Only the record of the trade goes; your collection is not changed.'});
-        if (ok) request = api(`/api/trades/${trade.id}`, {method: 'DELETE'});
+        if (ok) request = api(`/api/trades/${trade.id}?action=forget`, {method: 'DELETE'});
     } else if (action === 'rename') {
         const name = await valueDialog({title: 'Rename the trade', label: 'Name', value: trade.name});
         if (name) request = api(`/api/trades/${trade.id}`, {method: 'PUT', body: {name}});

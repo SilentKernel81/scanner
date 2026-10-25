@@ -1,6 +1,8 @@
 # Plan: the trade pipeline's review - a bug, small fixes, improvements (2026-10-24)
 
-**Status:** not started. Written from a review of 2026-10-24 (the trade store `core/trades.py`, its routes
+**Status:** parts 1 and 2 done 2026-10-24 (`tests/test_trades.py`: `StaleRequests`, `TradeRoutes` - the reproduction of
+part 1 through Flask's test client; `tests/test_others.py`: the receive count; both stale cases also driven in a headless
+browser on copied data). Part 3 not started (the owner's choice). Before: Written from a review of 2026-10-24 (the trade store `core/trades.py`, its routes
 `server/trades_api.py`, the triggers `inventory.TRADE_TRIGGERS`, receiving from other people's collections
 `server/others_api.py`, the Trades tab in `collection.js`). Part 1 was reproduced on a server with copied data;
 parts 2 and 3 were found by reading the code, nothing of them was measured.

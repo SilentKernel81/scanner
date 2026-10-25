@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # app.py, for the routes' tests
 
 from card_scanner.core import inventory as inv  # noqa: E402
 from card_scanner.games.base import write_collection_csv  # noqa: E402
@@ -203,6 +204,79 @@ class ClosingATrade(TradeData):
         self.assertEqual((self.trade()['status'], self.trade()['quantity']), ('open', 3))
         self.assertEqual(self.collection.conn.execute('SELECT COUNT(*) FROM inventory_captures').fetchone()[0], 2)
         self.assertEqual(len(list(inv.CAPTURES_DIR.glob('*'))), 2)
+
+
+class StaleRequests(ClosingATrade):
+    """docs/plans/TRADES_REVIEW_PLAN.md, part 1: a page still showing a trade as it was (another tab, the phone) must not
+    do what the person did not mean - a Cancel once deleted the record of a trade confirmed meanwhile"""
+
+    def test_a_confirmed_trade_is_not_cancelled_and_keeps_its_record(self):
+        self.trades.confirm(self.id)
+        with self.assertRaisesRegex(TradeError, 'confirmed meanwhile'):
+            self.trades.cancel(self.id)
+        self.assertEqual(self.trade()['status'], 'done')
+
+    def test_an_open_trade_is_not_deleted_from_the_history(self):
+        with self.assertRaisesRegex(TradeError, 'cancel it instead'):
+            self.trades.delete(self.id)
+        self.assertEqual((self.trade()['status'], self.trade()['quantity']), ('open', 3))
+
+    def test_an_unknown_trade_is_not_found(self):
+        for change in (lambda: self.trades.cancel(999), lambda: self.trades.delete(999)):
+            with self.assertRaisesRegex(TradeError, 'not found'):
+                change()
+
+    def test_a_confirm_of_other_numbers_than_shown_is_refused(self):
+        # The page showed 3 copies; another tab took one out meanwhile
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, {'quantity': 3, 'receive_quantity': 0})
+        self.assertEqual(self.owned(), {'Test Card': 3, 'Other Card': 1})      # nothing left
+        self.assertEqual(self.trades.confirm(self.id, {'quantity': 2, 'receive_quantity': 0})['cards'], 2)
+
+
+class TradeRoutes(TradeData):
+    """The same through the routes and Flask's test client, as the page sends them (temporary data behind the server)"""
+
+    def setUp(self):
+        super().setUp()
+        # The trade of ClosingATrade (not inherited from it: its tests would run a second time here)
+        self.id = self.trades.add(GAME, 'Jo', [self.card, self.other])['trade']
+        self.trades.set_quantity(self.id, next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card'), 2)
+        import app as launcher
+        from card_scanner.server import state
+        self.state = state
+        # Not self.saved: TemporaryData keeps its folders there
+        self.saved_services = {name: getattr(state.services, name) for name in ('inventory', 'trade_store')}
+        state.services.inventory, state.services.trade_store = self.collection, self.trades
+        self.client = launcher.app.test_client()
+
+    def tearDown(self):
+        for name, value in self.saved_services.items():
+            setattr(self.state.services, name, value)
+        super().tearDown()
+
+    def test_cancel_from_a_stale_page_keeps_the_confirmed_record(self):
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 3, 'receive_quantity': 0}).status_code, 200)
+        answer = self.client.delete(f'/api/trades/{self.id}?action=cancel')
+        self.assertEqual(answer.status_code, 400)
+        self.assertIn('confirmed meanwhile', answer.get_json()['error'])
+        self.assertEqual(self.trade()['status'], 'done')
+        # A page from before ?action asked for both with nothing: that is a cancel now, refused the same way
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}').status_code, 400)
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=forget').status_code, 200)
+        self.assertEqual(self.trades.list(GAME), [])
+
+    def test_forget_does_not_cancel_an_open_trade(self):
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=forget').status_code, 400)
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=cancel').status_code, 200)
+        self.assertEqual(self.trades.list(GAME), [])
+
+    def test_a_stale_confirm_is_refused(self):
+        answer = self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 5, 'receive_quantity': 0})
+        self.assertEqual(answer.status_code, 400)
+        self.assertEqual(self.trade()['status'], 'open')
 
 
 class TradesInBackups(TradeData):
