@@ -1353,17 +1353,24 @@ async function tradeAction(trade, action) {
     let request = null;
     if (action === 'picture') return openSalePicture(trade);   // only draws: nothing to reload after it
     if (action === 'confirm') {
-        // The trade as the server has it now (another tab may have changed it): its fingerprint - exactly the cards and
-        // copies the dialog shows - goes with the confirm, and the server refuses it if the trade holds anything else by then
-        await loadTrades();
+        // What is confirmed is the trade the person looked at: the one on the screen when Confirm was pressed, by its
+        // fingerprint (exactly its cards and copies). If it changed since (another tab, the phone), the new list is shown
+        // and nothing is asked - the dialog shows only totals, and a card swapped for another would pass unseen under them
+        // (a Codex finding): the person looks again and presses Confirm again. The server gets the fingerprint that was
+        // SEEN, never one read behind the person's back, and refuses it if the trade holds anything else by then
+        const seen = trade.fingerprint;
+        await loadTrades();   // draws the trades as they are now
         trade = trades.find(item => item.id === trade.id);
         if (!trade || trade.status !== 'open') return notify('This trade is not open any more', 'warning');
+        if (trade.fingerprint !== seen) {
+            return notify('This trade changed since it was shown (in another tab or on another device): look at its cards again, then confirm', 'warning');
+        }
         const ok = await confirmDialog({title: `Confirm the trade "${trade.name}"?`, confirmText: 'Confirm trade', danger: true,
             message: (trade.quantity ? `Its ${plural(trade.quantity, 'card')} (${money(trade.value)}) are removed from your collection. This can't be undone.`
                                      : 'None of your cards are in it, so nothing leaves your collection.')
                 + (trade.receives.length ? ` What you receive (${plural(trade.receive_quantity, 'card')}, ${money(trade.receive_value)}) is only kept in the record: add those cards to your collection yourself.` : '')});
         if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST',
-                                  body: {fingerprint: trade.fingerprint}});
+                                  body: {fingerprint: seen}});
     } else if (action === 'cancel') {
         // Not confirmDialog: its "Cancel" beside "Cancel trade" says nothing
         const ok = await choiceDialog({title: `Cancel the trade "${trade.name}"?`,

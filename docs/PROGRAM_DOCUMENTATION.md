@@ -2604,8 +2604,11 @@ downloads its cards in one of the game's export formats (`GET /api/trades/<id>/e
 - Moxfield's collection CSV for Magic, or the app's own; `quantity` is the copies in the
 trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>?action=cancel`: the
 trade and its rows go, the cards are simply free again) and **Confirm trade**
-(`POST /api/trades/<id>/confirm`, `Trades.confirm`; the page reads the trade again first and sends the trade's
-`fingerprint` its dialog was shown with - `Trades.fingerprint`, in `GET /api/trades` for each open trade: a digest of every
+(`POST /api/trades/<id>/confirm`, `Trades.confirm`; what is confirmed is the trade the person looked at: the page keeps
+the `fingerprint` of the trade on the screen when Confirm was pressed, reads the trades again, and if that trade changed
+meanwhile it shows the new list with a warning and asks nothing - the dialog shows only totals, under which a swapped card
+would pass unseen (a second Codex finding) - so the person looks again and presses Confirm again; the server gets the
+fingerprint that was seen - `Trades.fingerprint`, in `GET /api/trades` for each open trade: a digest of every
 card given (row, entry, copies, the entry's printing / finish / condition / location) and received (row, seller, card,
 copies), never the price, which a repricing changes daily - compared inside the confirm's transaction and refused when the
 trade holds anything else by then; totals alone missed a card swapped for another, a Codex finding. A page of before sends
