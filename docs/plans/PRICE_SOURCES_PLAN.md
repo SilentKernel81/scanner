@@ -9,7 +9,12 @@ Mana Pool, or MTGO prices - all of them from **one** MTGJSON file a day.
 (`reprice_collections`); `tests/test_prices.py` (10 tests), on temporary databases and copies of this checkout's data;
 run once after a real download on copied data (2026-10-24: 1,452 of 1,595 entries repriced - PROGRAM_DOCUMENTATION). Phase 2a done 2026-10-24: the dropdown (Settings > Card data > Prices) with Scryfall's two sources, TCGplayer USD and
 Cardmarket EUR, through shown columns of their own (`cards.price`, `price_foil`, `price_etched` - the second of the two ways
-named under phase 1 below); the currency on every page and in the CSV. Phase 2b (MTGJSON's shops) and 3-4 not started. What is under *Measured* was measured on 2026-10-23 on that day's
+named under phase 1 below); the currency on every page and in the CSV. **Phases 2b and 3 done 2026-10-24** (not deployed):
+Card Kingdom and Mana Pool from MTGJSON in the same list (`core/shop_prices.py`, the table `shop_prices` beside `cards` -
+not `card_prices` rows, see *Phases*), the button *Update the shops' prices* and its schedule, and the three follow-ups below.
+The owner chose **market value** (2026-10-24): no `price_added`, and a change of source leaves an entry the new source
+cannot price without a price. Phase 4 (the buylist beside the value) not started; Card Kingdom's buylist is already kept.
+Trial results: PROGRAM_DOCUMENTATION, *The shops' prices*. What is under *Measured* was measured on 2026-10-23 on that day's
 files and a copy of this checkout's card data (112,765 printings).
 
 ## The licence (read 2026-10-23)
@@ -120,7 +125,9 @@ one revalued.
 
 A third "due" question in `card_data.py:run_update_schedule` beside the card data and the index:
 `prices_every_hours` (default 24, off until switched on like the others), never before 14:00 UTC (MTGJSON's
-files are live by 9:00 AM EST), a failure retried after an hour. A button *Update prices now* (Settings >
+files are live by 9:00 AM EST), a failure retried after an hour. **Built otherwise:** no clock time - the files were out by
+06:13 UTC on 2026-10-23 and -24, earlier than the FAQ says; a try before them finds MTGJSON's date (`Meta.json`)
+unchanged, downloads nothing else, and the hour's back-off brings the next. A button *Update prices now* (Settings >
 Card data), guarded like the other card data buttons.
 
 ### 5. Currency on the pages and in exports
@@ -140,9 +147,15 @@ the smaller change. Moxfield's `Purchase Price` column (`mtg.py:46`) gets the nu
    Scryfall would have nothing to go back to until the next download). Either the chosen source is read where a row
    becomes a card (`database._format_card_result`, plus `cheapest`'s SQL and `search_cards_by_partial_name`), or the
    apply writes to columns of its own - to decide when phase 2 starts.
-2. `core/prices.py`: the MTGJSON import, the button, the apply step and the setting with its currency.
-3. The schedule's third question; `money()` and the exports' currency.
-4. (Optional) The buylist beside the retail value.
+2. **Done** (2a and 2b, 2026-10-24). `core/prices.py`: the sources and the apply step; `core/shop_prices.py`: the MTGJSON
+   import - into a table of its own, `shop_prices` (one row per printing, a column per shop / kind / finish), not the long
+   `card_prices` of section 1: the readers go through the shown columns anyway, the apply step is one subquery per column,
+   and `replace_table` swaps it as it swaps `cards` (its checks unchanged). It survives a card data download, which
+   replaces `cards` whole. Scryfall's own prices stay in `cards` (phase 1).
+3. **Done** (2026-10-24): the schedule's third question (`scheduled_shop_price_update`); `money()` and the exports' currency
+   were done in 2a.
+4. (Optional, not started) The buylist beside the retail value: `shop_prices.cardkingdom_buy*` are filled, nothing reads
+   them yet.
 
 Each phase: `tests/test_prices.py` on temporary databases (the import of a hand-written 3-card price file -
 one double-faced card with a provider on one face only, one etched-only printing, one id not in `cards`;
@@ -151,15 +164,17 @@ table), the route list recorded again (`tests/test_app_surface.py --record`), an
 expects: PROGRAM_DOCUMENTATION (the schema table "Prices", Card data), FEATURES.md, TEST_CASES.md, CLAUDE.md
 (Where Things Live), README *Acknowledgments* ("prices: Scryfall and MTGJSON").
 
-## Follow-ups found on the way (2026-10-24)
+## Follow-ups found on the way (2026-10-24) - all done the same day
 
-- The MCP server (`mcp_server/tools.py`) hands prices on as bare numbers: an assistant reading a collection counted in
-  euros would take them for dollars. It should say the currency (`/api/prices/source`).
-- The activity log's "Added to inventory: ... - 3.00 for 2" has lost its `$` and has no symbol yet (`inventory.add_card`
-  does not know the source).
+- The MCP server (`mcp_server/tools.py`) handed prices on as bare numbers: every answer now says `prices_in`
+  (`with_currency`), `collection_summary` has `value` and `currency`.
+- The activity log's "Added to inventory" line says the symbol again (`InventoryManager.price_symbol`, set by the server).
+- Entries imported without their printing kept a number in the old currency after a change of currency: they lose it now
+  (`Game.price_changes`) - and, found on the trial server, so does an entry a new source cannot price, also in the same
+  currency (a round trip TCGplayer -> Mana Pool -> TCGplayer had left Mana Pool's number on 23 entries).
 
 ## Never tried
 
-Whether the MTGJSON values are right (no price was compared with a shop's page); how long the import takes
-and how much memory the 113,000-uuid JSON needs on a Raspberry Pi; whether the uuid -> Scryfall id mapping
-stays this clean on other days.
+Whether the MTGJSON values are right (no price was compared with a shop's page - Mana Pool's run well below TCGplayer's,
+median x0.74); how much memory the import needs on a Raspberry Pi (199 MB peak for the whole process on the laptop, 5.6 s);
+whether the uuid -> Scryfall id mapping stays this clean on other days; the automatic update's own run.

@@ -14,7 +14,12 @@ import urllib.request
 
 
 class ScannerError(Exception):
-    """Something the assistant should be told in words: the server is away, a deck does not exist ..."""
+    """Something the assistant should be told in words: the server is away, a deck does not exist ... status: the HTTP
+    status the server answered, or None when it did not answer (away, a time-out)"""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class ScannerApi:
@@ -39,7 +44,7 @@ class ScannerApi:
                 message = json.loads(e.read().decode('utf-8')).get('error')
             except (ValueError, OSError):
                 message = None
-            raise ScannerError(message or f"The scanner server answered {e.code} for {path}")
+            raise ScannerError(message or f"The scanner server answered {e.code} for {path}", status=e.code)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise ScannerError(f"Could not reach the scanner server at {self.base}: {getattr(e, 'reason', e)}")
 

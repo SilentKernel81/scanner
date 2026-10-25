@@ -900,15 +900,55 @@ function lastRunText(last) {
 // Prices: whose prices the pages show and the collection is counted in (core/prices.py). Changing it prices every entry again
 function showPriceSource(state) {
     const select = $('price-source');
-    // A source the card data has no prices from yet (downloaded before they were kept) cannot be chosen until it is updated
-    select.innerHTML = state.choices.map(choice =>
-        `<option value="${escapeHtml(choice.id)}"${choice.priced ? '' : ' disabled'}>${escapeHtml(choice.label)}`
-        + `${choice.priced ? '' : ' - after the next card data update'}</option>`).join('');
-    select.value = state.source;
+    // A source without prices yet cannot be chosen: Scryfall's until the card data is downloaded again (data from before they
+    // were kept), a shop's until its prices are downloaded (the button below)
+    const until = choice => choice.kind === 'shops' ? ' - after the first update of the shops\' prices' : ' - after the next card data update';
+    if (document.activeElement !== select) {
+        select.innerHTML = state.choices.map(choice =>
+            `<option value="${escapeHtml(choice.id)}"${choice.priced ? '' : ' disabled'}>${escapeHtml(choice.label)}`
+            + `${choice.priced ? '' : until(choice)}</option>`).join('');
+        select.value = state.source;
+    }
     window.PRICE_SYMBOL = state.symbol;
     $('price-source-hint').textContent = `${state.from}. The collection, the scanned cards and the decks are counted in ${state.currency}; `
-        + 'a change prices every card again (cards imported without their printing keep the price they came with).';
+        + 'a change prices every card again, and a card the new source has no price for is left without one '
+        + '(cards imported without their printing keep theirs, unless the currency changes).';
     setOverview('prices', state.choices.find(choice => choice.id === state.source).label);
+    showShopPrices(state.shops || {});
+}
+
+// The shops' prices (server/card_data.py: shop_prices_status): MTGJSON's date of those in use, and an update's progress. While
+// one runs the page asks every two seconds how far it is (also after a reload), as for the picture index
+let shopWatch = null;
+
+function showShopPrices(shops) {
+    const status = $('shop-prices-status');
+    $('update-shop-prices').disabled = !!shops.running;
+    if (shops.running) {
+        status.textContent = `Updating: ${shops.message || 'starting'}...`;
+        if (!shopWatch) shopWatch = setInterval(loadPriceSource, 2000);
+        return;
+    }
+    const wasWatching = Boolean(shopWatch);
+    if (shopWatch) { clearInterval(shopWatch); shopWatch = null; }
+    status.textContent = shops.date
+        ? `Prices of ${shops.date} for ${shops.printings.toLocaleString()} printings` + (shops.downloaded_at
+            ? `, downloaded ${new Date(shops.downloaded_at).toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}` : '')
+        : 'Not downloaded yet: Card Kingdom and Mana Pool can be chosen after the first update.';
+    if (shops.error) status.textContent += ` - the last update did not finish: ${shops.error}`;
+    if (wasWatching) {
+        loadUpdateSchedule();       // an automatic update that just ended changes the "last / next" line
+        if (shops.error) notify(`Shops' prices: ${shops.error}`, 'error');
+        else if (shops.result) notify(`Shops' prices: ${shops.result}`, 'success');
+    }
+}
+
+async function updateShopPrices() {
+    // Guarded on the server: with a settings password set, common.js asks for it and sends the request again
+    $('update-shop-prices').disabled = true;
+    const state = await api('/api/prices/update', {method: 'POST'});
+    if (!state) return loadPriceSource();
+    showPriceSource(state);
 }
 
 async function loadPriceSource() {
@@ -923,11 +963,13 @@ async function savePriceSource(source) {
     $('price-source').disabled = false;
     if (!state) return loadPriceSource();       // refused (or the password dialog cancelled): back to what is saved
     showPriceSource(state);
-    notify(`Prices from ${state.choices.find(choice => choice.id === state.source).label} - ${plural(state.repriced, 'entry', 'entries')} priced again`, 'success');
+    const label = state.choices.find(choice => choice.id === state.source).label;
+    notify(`Prices from ${label} - ${plural(state.repriced, 'entry', 'entries')} priced again`
+           + (state.unpriced ? `, ${plural(state.unpriced, 'entry', 'entries')} without a price there` : ''), 'success');
 }
 
 function showUpdateSchedule(state) {
-    const card = state.card_data, index = state.image_index;
+    const card = state.card_data, index = state.image_index, shops = state.prices;
     cardDataSchedule = card;
     overviewCardData();
     $('database-every').value = String(card.every_hours);
@@ -938,6 +980,10 @@ function showUpdateSchedule(state) {
     $('index-auto').textContent = index.every_hours
         ? `${lastRunText(index.last)} Next look: ${whenText(index.next)}, if any are missing. Never the first build.`
         : 'Off: what a build left out (a rate limit, a stop) waits for the button or the next card data update.';
+    $('prices-every').value = String(shops.every_hours);
+    $('prices-auto').textContent = shops.every_hours
+        ? `${lastRunText(shops.last)} Next look: ${whenText(shops.next)} (MTGJSON's new prices are out in the morning, UTC).`
+        : 'Off: the shops\' prices change only with the button in Prices above.';
 }
 
 async function loadUpdateSchedule() {
@@ -951,7 +997,7 @@ async function saveUpdateSchedule(change) {
     if (!state) return loadUpdateSchedule();       // refused (or the password dialog cancelled): the selects go back to what is saved
     showUpdateSchedule(state);
     const [what, hours] = Object.entries(change)[0];
-    const label = what === 'card_data' ? 'Automatic card data update' : 'Picture index retry';
+    const label = {card_data: 'Automatic card data update', image_index: 'Picture index retry', prices: 'Automatic price update'}[what];
     notify(hours ? `${label} saved` : `${label} switched off`, 'success');
 }
 
@@ -1013,7 +1059,11 @@ function bindData() {
     $('backup-keep').addEventListener('change', event => saveBackupSchedule({keep: parseInt(event.target.value)}));
     $('database-every').addEventListener('change', event => saveUpdateSchedule({card_data: parseInt(event.target.value)}));
     $('price-source').addEventListener('change', event => savePriceSource(event.target.value));
+    // The list is not rebuilt while it has the focus (showPriceSource): a shop that became choosable meanwhile shows on leaving it
+    $('price-source').addEventListener('blur', loadPriceSource);
     $('index-every').addEventListener('change', event => saveUpdateSchedule({image_index: parseInt(event.target.value)}));
+    $('prices-every').addEventListener('change', event => saveUpdateSchedule({prices: parseInt(event.target.value)}));
+    $('update-shop-prices').addEventListener('click', updateShopPrices);
     $('backup-list').addEventListener('click', event => {
         const button = event.target.closest('[data-backup-action]');
         if (button) backupAction(button.closest('[data-backup]'), button.dataset.backupAction);

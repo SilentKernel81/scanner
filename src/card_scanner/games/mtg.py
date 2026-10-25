@@ -183,6 +183,11 @@ class Magic(Game):
     def price_currency(self):
         return self.db.price_currency()
 
+    def current_price(self, card_id, finish):
+        # Without the card data's lock (card_for_pricing): asked while an inventory holds SQLite's write lock
+        card = self.db.card_for_pricing(card_id) if card_id else None
+        return self.inventory_fields(card, finish)['price'] if card else None
+
     def current_prices(self, entries):
         cards = self.db.cards_by_ids([entry['card_id'] for entry in entries])
         prices = {}

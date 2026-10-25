@@ -196,12 +196,19 @@ class ScheduleRoute(unittest.TestCase):
                          self.downloaded.replace(microsecond=0) + timedelta(hours=168))
         self.assertIsNotNone(datetime.fromisoformat(state['card_data']['next']).tzinfo)
 
+    def test_the_shops_prices_have_a_schedule_too(self):
+        state = self.post({'prices': 24}).get_json()
+        self.assertEqual(self.settings['prices_every_hours'], 24)
+        self.assertEqual(state['prices']['every_hours'], 24)
+        self.assertEqual(state['prices']['choices'], [0, 24, 72, 168])
+
     def test_data_older_than_the_interval_is_due_now(self):
         state = self.post({'card_data': 24}).get_json()
         self.assertLessEqual(datetime.fromisoformat(state['card_data']['next']).replace(tzinfo=None), datetime.now())
 
     def test_wrong_values_are_refused_and_nothing_is_saved(self):
         for body in ({'card_data': True}, {'card_data': 12}, {'card_data': '24'}, {'image_index': 72}, {'backup': 24}, {},
+                     {'prices': 6}, {'prices': True},
                      {'card_data': 24, 'image_index': 5}, [24], None):
             answer = self.post(body)
             self.assertEqual(answer.status_code, 400, body)
@@ -420,8 +427,68 @@ class IndexSchedule(unittest.TestCase):
                 self.assertEqual(card_data.index_schedule(), 0, wrong)
 
 
+class PricesSchedule(unittest.TestCase):
+    """scheduled_shop_price_update / shop_prices_due: when MTGJSON's prices are downloaded on their own (off by default)"""
+
+    def setUp(self):
+        self.settings = FakeSettings(prices_every_hours=24)
+        self.came = None                           # the prices in use: when they were downloaded (None: never)
+        self.started = []
+        self.outcome = (True, 'Prices of 2026-10-22: 100 printings')
+        database = mock.Mock()
+        database.get_data_info.side_effect = lambda key: {'downloaded_at': self.came} if key == 'mtgjson_prices' else {}
+
+        def start(force=False, on_done=None):
+            self.started.append(force)
+            on_done(*self.outcome)
+            return True
+        for patch in (mock.patch.object(card_data, 'app_settings', self.settings),
+                      mock.patch.object(card_data, 'database', database),
+                      mock.patch.object(card_data, 'start_shop_price_update', start),
+                      mock.patch.object(card_data, 'data_updates_running', set())):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def came_ago(self, **ago):
+        self.came = (NOW - timedelta(**ago)).isoformat(timespec='seconds')
+
+    def test_off_by_default(self):
+        del self.settings['prices_every_hours']
+        self.assertFalse(card_data.scheduled_shop_price_update(NOW))
+        self.assertEqual(self.started, [])
+
+    def test_never_downloaded_is_due(self):
+        self.assertTrue(card_data.scheduled_shop_price_update(NOW))
+        self.assertEqual(self.settings['shop_prices_auto_last']['ok'], True)
+
+    def test_due_once_the_prices_are_as_old_as_the_interval(self):
+        self.came_ago(hours=23)
+        self.assertFalse(card_data.scheduled_shop_price_update(NOW))
+        self.came_ago(hours=24)
+        self.assertTrue(card_data.scheduled_shop_price_update(NOW))
+
+    def test_nothing_newer_at_mtgjson_is_asked_again_an_hour_later(self):
+        # Before MTGJSON's file of the day is out the import finds its date unchanged: the prices in use stay as old as
+        # they were, so the schedule looks again - after the hour's back-off, never at every tick
+        self.came_ago(days=1, hours=2)
+        self.outcome = (True, 'The prices of 2026-10-21 are the ones in use')
+        self.assertTrue(card_data.scheduled_shop_price_update(NOW))
+        self.assertFalse(card_data.scheduled_shop_price_update(NOW + timedelta(minutes=59)))
+        self.assertTrue(card_data.scheduled_shop_price_update(NOW + timedelta(hours=1)))
+
+    def test_not_while_a_card_data_download_runs(self):
+        with mock.patch.object(card_data, 'data_updates_running', {'mtg'}):
+            self.assertFalse(card_data.scheduled_shop_price_update(NOW))
+
+    def test_the_buttons_update_first_puts_back_the_last_attempt(self):
+        self.settings['shop_prices_auto_last'] = previous = {'at': '2026-10-20T08:00:00', 'ok': True, 'message': 'x'}
+        with mock.patch.object(card_data, 'start_shop_price_update', lambda **kwargs: False):
+            self.assertFalse(card_data.scheduled_shop_price_update(NOW))
+        self.assertEqual(self.settings['shop_prices_auto_last'], previous)
+
+
 class ScheduleTick(unittest.TestCase):
-    """schedule_tick: the update check, the card data and the index each get their turn, whatever the others do"""
+    """schedule_tick: the update check, the card data, the index and the shops' prices each get their turn, whatever the others do"""
 
     def tick(self, check_due, downloads_due, **failing):
         called = []
@@ -435,20 +502,23 @@ class ScheduleTick(unittest.TestCase):
         with mock.patch.object(card_data, 'check_card_data_updates', step('check')), \
                 mock.patch.object(card_data, 'scheduled_card_data_updates', step('card_data')), \
                 mock.patch.object(card_data, 'scheduled_index_update', step('index')), \
+                mock.patch.object(card_data, 'scheduled_shop_price_update', step('prices')), \
+                mock.patch.object(card_data, 'finish_unfinished_repricing', step('repricing')), \
                 mock.patch.object(card_data.logger, 'error'):
             card_data.schedule_tick(check_due, downloads_due)
         return called
 
     def test_in_order_card_data_before_the_index(self):
-        self.assertEqual(self.tick(True, True), ['check', 'card_data', 'index'])
+        self.assertEqual(self.tick(True, True), ['check', 'card_data', 'index', 'prices', 'repricing'])
 
     def test_one_failing_does_not_keep_the_others_from_their_turn(self):
-        self.assertEqual(self.tick(True, True, check=OSError('no network')), ['check', 'card_data', 'index'])
-        self.assertEqual(self.tick(True, True, card_data=RuntimeError('bad settings')), ['check', 'card_data', 'index'])
+        self.assertEqual(self.tick(True, True, check=OSError('no network')), ['check', 'card_data', 'index', 'prices', 'repricing'])
+        self.assertEqual(self.tick(True, True, card_data=RuntimeError('bad settings')), ['check', 'card_data', 'index', 'prices', 'repricing'])
+        self.assertEqual(self.tick(True, True, index=RuntimeError('no index')), ['check', 'card_data', 'index', 'prices', 'repricing'])
 
     def test_no_download_in_the_first_minutes(self):
         self.assertEqual(self.tick(True, False), ['check'])
-        self.assertEqual(self.tick(False, True), ['card_data', 'index'])
+        self.assertEqual(self.tick(False, True), ['card_data', 'index', 'prices', 'repricing'])
 
 
 if __name__ == '__main__':

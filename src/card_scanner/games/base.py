@@ -151,6 +151,32 @@ class Game:
         """
         return {}
 
+    def current_price(self, card_id, finish):
+        """A printing's price in a finish in the card data as it is now (InventoryManager.current_price, through the
+        server), or None: no card data prices (fetches_prices games), or no such printing - the price given is kept"""
+        return None
+
+    def price_changes(self, store, new_source=False, new_currency=False):
+        """
+        What pricing an inventory again changes (server/card_data.py: reprice_collections): (prices, cleared) - prices for
+        InventoryManager.reprice (current_prices of the entries that know their printing), and the entries that lose their
+        price, for InventoryManager.clear_prices: {row id: (card_id, finish)}. An entry is worth what the chosen source says
+        (its market value), so:
+        - the same source, a new day without a price for it: it keeps the one it has (no price today is not "worthless");
+        - new_source: an entry the new source has no price for loses it - keeping it would add up one shop's number with
+          another's (a round trip TCGplayer -> Mana Pool -> TCGplayer left Mana Pool's on 23 entries, 2026-10-24);
+        - new_currency: also the entries that do not know their printing (no source can price them; the price they came
+          with is kept as long as the currency is the same) - a number in the old currency would be shown in the new one.
+        """
+        entries = store.priced_entries(self.id)
+        prices = self.current_prices(entries)
+        cleared = {}
+        if new_source or new_currency:
+            cleared = {entry['id']: (entry['card_id'], entry['finish']) for entry in entries if entry['id'] not in prices}
+        if new_currency:
+            cleared.update({entry['id']: (entry['card_id'], entry['finish']) for entry in store.unpriceable_entries(self.id)})
+        return prices, cleared
+
     # -- Inventory -----------------------------------------------------------
 
     def inventory_fields(self, card, finish):

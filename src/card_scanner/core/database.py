@@ -8,11 +8,12 @@ import re
 import json
 import logging
 import requests
+import sqlite3
 import threading
 import unicodedata
 from datetime import datetime
 from difflib import SequenceMatcher, get_close_matches
-from card_scanner.core import prices, storage
+from card_scanner.core import prices, shop_prices, storage
 from card_scanner.config import Config
 
 # Create database logger
@@ -212,6 +213,7 @@ class CardDatabase:
         self._import_lock = threading.Lock()  # populate_database: one refresh at a time
         self.conn = None
         self._lock = threading.RLock()  # Thread-safe database access
+        self._pricing_readers = threading.local()   # card_for_pricing: a read-only connection per thread, no lock
         # Whose prices the shown columns hold (prices.SOURCES); the server sets the saved choice at start (set_price_source)
         self.price_source = prices.DEFAULT_SOURCE
         self.initialize_database()
@@ -243,6 +245,17 @@ class CardDatabase:
 
         self._create_card_indexes(cursor)
 
+        # The shops' prices (core/shop_prices.py), empty until the first price update: a shop's source counts 0 priced
+        # printings until then, and the shown columns' SQL (prices.apply_sql) can always read the table. A column a newer
+        # version adds (a shop, a kind: shop_prices.COLUMNS) is added here, empty until the next price update - without it
+        # every source's count (priced_sql, asked for each choice) would fail, and the Prices card with it
+        self._create_shop_table(cursor, prices.SHOP_TABLE, if_not_exists=True)
+        shop_columns = {row['name'] for row in cursor.execute(f"PRAGMA table_info({prices.SHOP_TABLE})").fetchall()}
+        for column in shop_prices.COLUMNS:
+            if column not in shop_columns:
+                logger.info(f"Adding {column} column to the shops' prices")
+                cursor.execute(f"ALTER TABLE {prices.SHOP_TABLE} ADD COLUMN {column} REAL")
+
         # When each game's card data was downloaded, and the source's own date (update check)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS card_data_info (
@@ -265,6 +278,11 @@ class CardDatabase:
                 {columns_sql}
             )
         ''')
+
+    def _create_shop_table(self, cursor, table, if_not_exists=False):
+        """The shops' prices: a printing's id (as `cards.id`) and a column per shop, kind and finish (shop_prices.COLUMNS)"""
+        columns_sql = ', '.join(f'{column} REAL' for column in shop_prices.COLUMNS)
+        cursor.execute(f"CREATE TABLE {'IF NOT EXISTS ' if if_not_exists else ''}{table} (id TEXT PRIMARY KEY, {columns_sql})")
 
     def _create_card_indexes(self, cursor):
         """Create performance indexes on the cards table"""
@@ -292,14 +310,15 @@ class CardDatabase:
 
     # replace_table: the card tables that may be replaced, and how much smaller than the table
     # in use an import may be (a download cut short must not replace a complete catalog)
-    CARD_TABLES = {'cards': 'cards_import'}
+    CARD_TABLES = {'cards': 'cards_import', prices.SHOP_TABLE: 'shop_prices_import'}
     MIN_SHARE = 0.5
 
-    def replace_table(self, staging, table, create_indexes=None, info=None):
+    def replace_table(self, staging, table, create_indexes=None, info=None, also=None):
         """
         Put a freshly filled staging table in place of a card table in one step, so searches
         never see a half-imported table (imports fill `staging`, committing as they go). One
-        transaction: the old table is dropped, the new one renamed and indexed and - with info:
+        transaction: the old table is dropped, the new one renamed and indexed, `also(cursor)` run
+        (the chosen price source applied to what the new table changes: _reapply_in) and - with info:
         (game, source_updated, card_count) - its card_data_info row written, or, when any of it
         fails, everything stays as it was. Refused before anything is touched: a staging table
         that is missing, empty, has repeated ids, or less than MIN_SHARE of the rows in use.
@@ -317,8 +336,11 @@ class CardDatabase:
                        else 'card ids repeat' if rows[0] != rows[1]
                        else f'only {rows[0]} cards, {current} are in use' if rows[0] < current * self.MIN_SHARE else None)
             if problem:
-                logger.error(f"Card data import refused ({problem}): {table} is unchanged")
-                raise RuntimeError(f"The card data was not replaced: {problem}")
+                # Said in the person's words: this is what Settings shows of a refused update
+                what = "The shops' prices" if table == prices.SHOP_TABLE else 'The card data'
+                logger.error(f"{what}: import refused ({problem}), {table} is unchanged")
+                raise RuntimeError(f"{what} were not replaced: {problem}" if table == prices.SHOP_TABLE
+                                   else f"{what} was not replaced: {problem}")
             cursor = self.conn.cursor()
             cursor.execute('BEGIN IMMEDIATE')  # explicit: Python's sqlite3 does not open one for DROP / ALTER
             try:
@@ -326,6 +348,8 @@ class CardDatabase:
                 cursor.execute(f'ALTER TABLE {staging} RENAME TO {table}')
                 if create_indexes:
                     create_indexes(cursor)
+                if also:
+                    also(cursor)
                 if info:
                     cursor.execute('INSERT OR REPLACE INTO card_data_info VALUES (?, ?, ?, ?)',
                                    (info[0], info[1], datetime.now().isoformat(timespec='seconds'), info[2]))
@@ -412,7 +436,8 @@ class CardDatabase:
         
         # One refresh at a time: a second one would drop the table the first is filling
         if not self._import_lock.acquire(blocking=False):
-            raise RuntimeError('The card data is being updated already')
+            # Also while the shops' prices are being saved (replace_shop_prices: a few seconds) - the same lock
+            raise RuntimeError('The card data or the prices are being updated: try again in a moment')
         try:
             return self._populate(cards_data, progress_callback)
         finally:
@@ -436,12 +461,12 @@ class CardDatabase:
         finally:
             importer.close()
 
-        # The new cards and what is known about them go in together (or neither)
+        # The new cards and what is known about them go in together (or neither) - and, if the choice of price source
+        # changed during the import (it went to the old table; the new one has the earlier choice's), the choice too: in
+        # the swap's transaction, under the lock a change takes (_reapply_in)
         self.replace_table('cards_import', 'cards', self._create_card_indexes,
-                           info=('mtg', getattr(self, 'last_download_source', None), inserted))
-        if self.price_source != applied:
-            # The choice changed during the import: it went to the old table, the new one has the earlier choice's
-            self.set_price_source(self.price_source)
+                           info=('mtg', getattr(self, 'last_download_source', None), inserted),
+                           also=lambda cursor: self._reapply_in(cursor, unless=applied))
         if progress_callback:
             progress_callback(f"Database populated with {inserted} cards!")
         return inserted
@@ -808,11 +833,77 @@ class CardDatabase:
         """
         source_id = source_id if prices.known(source_id) else prices.DEFAULT_SOURCE
         with self._lock:
+            # The choice is recorded only once its prices are in: an UPDATE that fails (the file locked past the timeout)
+            # leaves the previous source and its prices, never a new choice over the old prices (a Codex review of 2026-10-24)
+            try:
+                self.conn.execute(prices.apply_sql('cards', source_id))
+                self.conn.commit()
+            except BaseException:
+                self.conn.rollback()
+                raise
             self.price_source = source_id
-            self.conn.execute(prices.apply_sql('cards', source_id))
-            self.conn.commit()
         logger.info(f"Prices shown from {source_id}")
         return source_id
+
+    def replace_shop_prices(self, rows, source_date):
+        """
+        Put the shops' prices of a new day in place of the ones in use (core/shop_prices.py: {printing id: {column: value}}),
+        whole or not at all: filled beside the table in use on a connection of its own, then swapped in with its
+        card_data_info row (shop_prices.INFO_KEY) by replace_table - which refuses an import much smaller than the table in
+        use. Under the card data's import lock: a card data download applies the chosen source's prices to its new cards
+        before its swap (_populate), and must never read a shops' table that changes before that swap. A shop's source in
+        use is applied again right after, so the prices shown are the new day's. Returns how many printings got prices.
+        """
+        if not self._import_lock.acquire(blocking=False):
+            raise RuntimeError('The card data is being updated: the prices wait for it')
+        try:
+            staging = self.CARD_TABLES[prices.SHOP_TABLE]
+            importer = storage.connect(self.db_file)
+            try:
+                cursor = importer.cursor()
+                cursor.execute(f'DROP TABLE IF EXISTS {staging}')
+                self._create_shop_table(cursor, staging)
+                columns = shop_prices.COLUMNS
+                cursor.executemany(
+                    f"INSERT INTO {staging} (id, {', '.join(columns)}) VALUES ({', '.join('?' * (len(columns) + 1))})",
+                    ((card_id, *(values.get(column) for column in columns)) for card_id, values in rows.items()))
+                importer.commit()
+            finally:
+                importer.close()
+            # The new day's prices shown, when a shop is the source - in the swap's transaction: if applying them failed
+            # after the table and its date were in, the next update would find "the prices of today are the ones in use"
+            # and never apply them (a Codex review of 2026-10-24)
+            self.replace_table(staging, prices.SHOP_TABLE, info=(shop_prices.INFO_KEY, source_date, len(rows)),
+                               also=lambda cursor: self._reapply_in(cursor, kind='shops'))
+            return len(rows)
+        finally:
+            self._import_lock.release()
+
+    def reapply_price_source(self, unless=None, kind=None):
+        """
+        Copy the chosen source's prices into the shown columns again, after something changed beneath them (a card data
+        import, a shops' price update) - unless the choice is `unless`, or not of `kind`. The choice is read under the same
+        lock set_price_source changes it under: read before it, a change of source in between would be overwritten with the
+        old choice. Returns whether it applied.
+        """
+        with self._lock:
+            applied = self._reapply_in(self.conn.cursor(), unless, kind)
+            self.conn.commit()
+            return applied
+
+    def _reapply_in(self, cursor, unless=None, kind=None):
+        """reapply_price_source's work on a cursor, committing nothing: the caller holds self._lock (so the choice cannot
+        change meanwhile) and commits it with the rest of its transaction (replace_table's `also`)"""
+        source_id = self.price_source
+        if source_id == unless or (kind and prices.source(source_id)['kind'] != kind):
+            return False
+        cursor.execute(prices.apply_sql('cards', source_id))
+        return True
+
+    def shop_priced_printings(self):
+        """How many printings have a row in the shops' table (0 before the first price update)"""
+        with self._lock:
+            return self.conn.execute(f'SELECT COUNT(*) FROM {prices.SHOP_TABLE}').fetchone()[0]
 
     def priced_printings(self, source_id):
         """How many printings have a price in that source (prices.priced_sql)"""
@@ -826,6 +917,25 @@ class CardDatabase:
 
     def price_symbol(self):
         return self.price_currency()[1]
+
+    def card_for_pricing(self, card_id):
+        """
+        A printing by its id, for the price an inventory writes (Game.current_price, InventoryManager._priced) - read
+        WITHOUT this object's lock, on a read-only connection of the calling thread's own. The collection is in this file
+        too: an inventory asks this while it holds SQLite's write lock, and a change of price source holds self._lock while
+        its UPDATE waits for that write lock - through self._lock each would wait for the other until SQLite's timeout
+        (a Codex review of 2026-10-24). In WAL a reader waits for no writer; a price read before a change's UPDATE is
+        corrected by the repricing that follows it.
+        """
+        reader = getattr(self._pricing_readers, 'conn', None)
+        if reader is None:
+            reader = sqlite3.connect(f'file:{self.db_file}?mode=ro', uri=True, check_same_thread=False, timeout=10.0)
+            reader.row_factory = sqlite3.Row
+            self._pricing_readers.conn = reader
+        # fetchall: the statement ends here - a half-read one would keep this reader in an old snapshot (and hold back WAL
+        # checkpoints) until its next query
+        rows = reader.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchall()
+        return self._format_card_result(rows[0]) if rows else None
 
     def get_card_by_id(self, card_id):
         """Get a single printing by its Scryfall id"""

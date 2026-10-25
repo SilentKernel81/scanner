@@ -80,7 +80,7 @@ class Trades:
                 if row['id'] is None:  # confirmed: the card as it was
                     card = {**json.loads(row['card']), 'row': row['trade_row'], 'quantity': row['copies']}
                 else:
-                    card = {**_row_dict(row), 'row': row['trade_row'], 'quantity': row['copies'],
+                    card = {**_row_dict(row, withheld=self.inventory.prices_withheld()), 'row': row['trade_row'], 'quantity': row['copies'],
                             'entry_quantity': row['quantity'],
                             'most': row['quantity'] - self._set_aside(row['id'], row['trade_row'])}
                 cards.append(card)
@@ -243,11 +243,17 @@ class Trades:
         def change():
             self._trade(trade_id)
             manager = self.inventory
+            if manager.prices_withheld():
+                # A change of price source half-done (InventoryManager.prices_withheld): the record would keep 0 for every
+                # card, for good - it no longer refers to the entries a repricing corrects (a Codex review of 2026-10-24).
+                # Checked inside the collection's transaction and lock, which the repricing holds too
+                raise TradeError('The prices are being changed to another currency: confirm the trade once they are '
+                                 'repriced (a few minutes at most)')
             cards = entries = 0
             value = 0.0
             for row in self.conn.execute('SELECT * FROM trade_cards WHERE trade_id = ?', (trade_id,)).fetchall():
                 entry = manager._get_row(row['inventory_id'])
-                card = {**_row_dict(entry), 'quantity': row['quantity']}
+                card = {**_row_dict(entry, withheld=manager.prices_withheld()), 'quantity': row['quantity']}
                 # No entry any more: the copies are free to go (TRADE_TRIGGERS)
                 self.conn.execute('UPDATE trade_cards SET inventory_id = NULL, card = ? WHERE id = ?',
                                   (json.dumps(card), row['id']))

@@ -1,16 +1,22 @@
 """
-Prices (docs/plans/PRICE_SOURCES_PLAN.md, phase 1): Scryfall's etched and EUR prices kept by the card data import, the
-etched price used for an etched foil, and the collection's entries priced again from new card data. Everything runs on
-temporary databases; no application data is touched.
+Prices (docs/plans/PRICE_SOURCES_PLAN.md): Scryfall's etched and EUR prices kept by the card data import, the etched
+price used for an etched foil, the collection's entries priced again from new card data, the price source chosen (phase
+2a), and the shops' prices from MTGJSON (phase 2b: core/shop_prices.py, the `shop_prices` table). Everything runs on
+temporary databases and hand-written files; no application data is touched and nothing is downloaded.
 
     venv/bin/python -m unittest discover tests
 """
+import csv
+import io
+import json
+import lzma
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
 
+from card_scanner.core import shop_prices  # noqa: E402
 from card_scanner.core.database import CardDatabase  # noqa: E402
 from card_scanner.games.mtg import Magic  # noqa: E402
 from test_ownership import GAME, TemporaryData  # noqa: E402
@@ -238,6 +244,342 @@ class PriceSources(CardData):
         self.game.export_formats()['csv'][2]([row], euros)
         self.assertIn('Price (EUR)', euros.getvalue().splitlines()[0])
         self.assertIn('€0.90', euros.getvalue())
+
+
+# ----------------------------------------------------------------------------
+# The shops' prices (phase 2b)
+# ----------------------------------------------------------------------------
+
+def mtgjson_prices(**by_uuid):
+    """AllPricesToday's text: {uuid: {provider: {kind: {finish: value}}}} (paper), each value dated today"""
+    data = {uuid: {'paper': {provider: {'currency': 'USD', **{kind: {finish: {'2026-10-24': value} for finish, value in finishes.items()}
+                                                                for kind, finishes in kinds.items()}}
+                             for provider, kinds in providers.items()}}
+            for uuid, providers in by_uuid.items()}
+    return json.dumps({'meta': {'date': '2026-10-24'}, 'data': data}, indent=1)
+
+
+def identifiers(path, pairs):
+    """An identifier file as MTGJSON's (xz, a CSV with many columns): (uuid, Scryfall id) pairs"""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['cardKingdomId', 'uuid', 'name', 'scryfallId'])
+    for uuid, scryfall_id in pairs:
+        writer.writerow(['', uuid, 'A name, with a comma', scryfall_id])
+    with lzma.open(path, 'wt', encoding='utf-8') as f:
+        f.write(out.getvalue())
+    return path
+
+
+# The plan's cases: a double-faced card with a shop on one face only (two uuids, one Scryfall id), an etched-only
+# printing, an id that is not in the card data, a uuid in neither identifier file, and shops that are not kept
+PRICE_FILE = mtgjson_prices(
+    front={'cardkingdom': {'retail': {'normal': 1.49, 'foil': 3.99}, 'buylist': {'normal': 0.6}}},
+    back={'cardkingdom': {'retail': {'normal': 1.49}}, 'manapool': {'retail': {'normal': 1.2}}},
+    etched={'cardkingdom': {'retail': {'etched': 5.99}}},
+    elsewhere={'manapool': {'retail': {'normal': 9.0}}},
+    unmapped={'cardkingdom': {'retail': {'normal': 2.0}}},
+    others={'tcgplayer': {'retail': {'normal': 1.0}}, 'cardmarket': {'retail': {'normal': 0.8}}},
+)
+CARD_PAIRS = [('front', 'id-2'), ('back', 'id-2'), ('etched', 'id-1'), ('elsewhere', 'id-zzz'), ('others', 'id-3')]
+
+
+class ShopPriceFile(CardData):
+    """core/shop_prices.py: MTGJSON's files into one row per printing"""
+
+    def rows(self, text=PRICE_FILE):
+        cards = identifiers(self.tmp / 'cards.csv.xz', CARD_PAIRS)
+        tokens = identifiers(self.tmp / 'tokens.csv.xz', [])
+        return shop_prices.rows_from(text, [cards, tokens])
+
+    def test_the_faces_of_a_card_are_one_row(self):
+        rows = self.rows()
+        self.assertEqual(rows['id-2'], {'cardkingdom': 1.49, 'cardkingdom_foil': 3.99, 'cardkingdom_buy': 0.6, 'manapool': 1.2})
+
+    def test_an_etched_price_is_its_own_column(self):
+        self.assertEqual(self.rows()['id-1'], {'cardkingdom_etched': 5.99})
+
+    def test_only_the_kept_shops(self):
+        rows = self.rows()
+        self.assertNotIn('id-3', rows)                    # TCGplayer and Cardmarket come from Scryfall's card data
+        self.assertEqual(set(rows), {'id-1', 'id-2', 'id-zzz'})    # 'unmapped' is in neither identifier file
+
+    def test_the_latest_date_counts(self):
+        self.assertEqual(shop_prices.latest({'2026-10-23': 1.0, '2026-10-24': '1.5'}), 1.5)
+        self.assertIsNone(shop_prices.latest({}))
+        self.assertIsNone(shop_prices.latest({'2026-10-24': 'n/a'}))
+
+    def test_the_reader_reads_what_json_reads(self):
+        # One card at a time with raw_decode (memory) must give exactly what json.loads gives for the whole file
+        compact = PRICE_FILE.replace('\n', '').replace(' ', '')
+        for text in (PRICE_FILE, compact):
+            self.assertEqual(dict(shop_prices.each_price(text)), json.loads(text)['data'])
+        self.assertEqual(list(shop_prices.each_price('{"meta": {}, "data": {}}')), [])
+        with self.assertRaises(ValueError):
+            list(shop_prices.each_price('{"meta": {}}'))
+        with self.assertRaises(ValueError):
+            list(shop_prices.each_price('{"data": {"a": {}, '))           # cut short
+
+
+class ShopPricesInTheCardData(CardData):
+    """The `shop_prices` table: swapped in whole, kept across a card data download, a source like Scryfall's"""
+
+    ROWS = {'id-2': {'cardkingdom': 1.49, 'cardkingdom_foil': 3.99, 'manapool': 1.2}, 'id-1': {'cardkingdom_etched': 5.99},
+            'id-zzz': {'manapool': 9.0}, **{f'id-{n}': {'cardkingdom': 0.25} for n in range(100, 140)}}
+
+    def setUp(self):
+        super().setUp()
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+
+    def shown(self, card_id):
+        card = self.cards.get_card_by_id(card_id)
+        return card['price'], card['price_foil'], card['price_etched']
+
+    def test_nothing_to_choose_before_the_first_update(self):
+        self.assertEqual(self.cards.priced_printings('cardkingdom_usd'), 0)
+        self.assertEqual(self.cards.shop_priced_printings(), 0)
+
+    def test_a_shop_shows_its_own_prices_only(self):
+        self.assertEqual(self.cards.replace_shop_prices(self.ROWS, '2026-10-24'), 43)
+        self.assertEqual(self.cards.get_data_info(shop_prices.INFO_KEY)['source_updated'], '2026-10-24')
+        self.cards.set_price_source('cardkingdom_usd')
+        self.assertEqual(self.shown('id-2'), (1.49, 3.99, 0.0))
+        self.assertEqual(self.shown('id-1'), (0.0, 0.0, 5.99))
+        self.cards.set_price_source('manapool_usd')
+        self.assertEqual(self.shown('id-2'), (1.2, 0.0, 0.0))            # no Mana Pool foil price: none, never another shop's
+        self.assertEqual(self.shown('id-1'), (0.0, 0.0, 0.0))
+        # Counted among the card data's printings only ('id-zzz' is not in it)
+        self.assertEqual(self.cards.priced_printings('manapool_usd'), 1)
+        self.assertEqual(self.cards.priced_printings('cardkingdom_usd'), 42)
+
+    def test_a_card_data_download_keeps_the_shops_prices(self):
+        # The point of a table of their own: the download replaces `cards` whole
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        self.cards.set_price_source('cardkingdom_usd')
+        self.cards.populate_database(FILLER + [ETCHED, {**BOTH, 'prices': {'usd': '9.00'}}])
+        self.assertEqual(self.shown('id-2'), (1.49, 3.99, 0.0))          # applied to the new cards before their swap
+        self.assertEqual(self.cards.shop_priced_printings(), 43)
+
+    def test_new_prices_are_shown_at_once(self):
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        self.cards.set_price_source('cardkingdom_usd')
+        self.cards.replace_shop_prices({**self.ROWS, 'id-2': {'cardkingdom': 1.99}}, '2026-10-25')
+        self.assertEqual(self.shown('id-2'), (1.99, 0.0, 0.0))
+
+    def test_a_failed_update_keeps_the_prices_in_use(self):
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        with self.assertRaises(RuntimeError):
+            self.cards.replace_shop_prices({}, '2026-10-25')                              # nothing came
+        with self.assertRaises(RuntimeError):
+            self.cards.replace_shop_prices({'id-2': {'cardkingdom': 1.0}}, '2026-10-25')  # far fewer than in use
+        self.assertEqual(self.cards.shop_priced_printings(), 43)
+        self.assertEqual(self.cards.get_data_info(shop_prices.INFO_KEY)['source_updated'], '2026-10-24')
+
+    def test_a_newer_version_s_column_is_added_at_start(self):
+        # A shop or kind added to shop_prices.SHOPS: an existing file gets its column (empty), so every source's count works
+        self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        self.cards.conn.execute('ALTER TABLE shop_prices DROP COLUMN manapool_etched')
+        self.cards.conn.commit()
+        self.cards.conn.close()
+        self.cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        self.assertEqual(self.cards.priced_printings('manapool_usd'), 1)
+        self.assertEqual(self.cards.shop_priced_printings(), 43)
+
+    def test_a_refusal_says_what_was_refused(self):
+        with self.assertRaisesRegex(RuntimeError, "The shops' prices were not replaced: shop_prices_import is empty"):
+            self.cards.replace_shop_prices({}, '2026-10-24')
+
+    def test_never_while_the_card_data_is_imported(self):
+        self.cards._import_lock.acquire()
+        try:
+            with self.assertRaises(RuntimeError):
+                self.cards.replace_shop_prices(self.ROWS, '2026-10-24')
+        finally:
+            self.cards._import_lock.release()
+        self.assertEqual(self.cards.shop_priced_printings(), 0)
+
+
+class Response:
+    """What requests.get answers, for the files of a fake MTGJSON"""
+
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return json.loads(self.body)
+
+    def iter_content(self, size):
+        yield self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class ShopPriceImport(CardData):
+    """shop_prices.import_prices: the three files of the day, and nothing downloaded while MTGJSON's date is the one in use"""
+
+    def setUp(self):
+        super().setUp()
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        self.asked = []
+        self.date = '2026-10-24'
+        pairs = CARD_PAIRS + [(f'filler-{n}', f'id-{n}') for n in range(100, 140)]
+        # The plan's file plus a price for each filler card (replace_table refuses a table much smaller than the one in use)
+        fillers = json.loads(mtgjson_prices(**{f'filler-{n}': {'cardkingdom': {'retail': {'normal': 0.25}}} for n in range(100, 140)}))
+        self.data = {**json.loads(PRICE_FILE)['data'], **fillers['data']}
+        self.file_date = None          # the price file's own date: None is Meta.json's (the two published apart)
+        self.files = {
+            'cardIdentifiers.csv.xz': identifiers(self.tmp / 'c.csv.xz', pairs).read_bytes(),
+            'tokenIdentifiers.csv.xz': identifiers(self.tmp / 't.csv.xz', []).read_bytes(),
+        }
+
+    def get(self, url, **kwargs):
+        name = url.rsplit('/', 1)[-1]
+        self.asked.append(name)
+        if name == 'Meta.json':
+            return Response(json.dumps({'meta': {'date': self.date}, 'data': {'date': self.date}}).encode())
+        if name == 'AllPricesToday.json.xz':
+            return Response(lzma.compress(json.dumps({'meta': {'date': self.file_date or self.date}, 'data': self.data}).encode()))
+        return Response(self.files[name])
+
+    def test_the_files_of_the_day_become_the_prices(self):
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get), ('2026-10-24', 43))
+        self.cards.set_price_source('cardkingdom_usd')
+        self.assertEqual(self.cards.get_card_by_id('id-2')['price_foil'], 3.99)
+
+    def test_nothing_newer_downloads_nothing(self):
+        shop_prices.import_prices(self.cards, get=self.get)
+        self.asked.clear()
+        with self.assertRaises(shop_prices.NothingNew):
+            shop_prices.import_prices(self.cards, get=self.get)
+        self.assertEqual(self.asked, ['Meta.json'])
+        self.date = '2026-10-25'
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get)[0], '2026-10-25')
+
+    def test_a_price_file_older_than_meta_says_is_not_taken_for_newer(self):
+        # Meta.json already says the 25th, the price file is still the 24th's (published or cached apart): the 24th's date
+        # is the one recorded - never the 25th for the 24th's prices, which made every later update "nothing new"
+        # (a Codex review of 2026-10-24)
+        shop_prices.import_prices(self.cards, get=self.get)                      # the 24th's, in use
+        self.date, self.file_date = '2026-10-25', '2026-10-24'
+        with self.assertRaises(shop_prices.NothingNew):                           # not newer than in use: nothing saved
+            shop_prices.import_prices(self.cards, get=self.get)
+        self.assertEqual(self.cards.get_data_info(shop_prices.INFO_KEY)['source_updated'], '2026-10-24')
+        self.file_date = None                                                     # the 25th's file is out
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get)[0], '2026-10-25')
+
+    def test_the_first_file_is_recorded_under_its_own_date(self):
+        self.date, self.file_date = '2026-10-25', '2026-10-24'
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get)[0], '2026-10-24')
+        self.file_date = None
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get)[0], '2026-10-25')   # Meta.json's differs: again
+
+    def test_an_older_file_than_in_use_is_refused(self):
+        self.date = '2026-10-25'
+        shop_prices.import_prices(self.cards, get=self.get)
+        self.date, self.file_date = '2026-10-26', '2026-10-23'
+        with self.assertRaises(ValueError):
+            shop_prices.import_prices(self.cards, get=self.get)
+        self.assertEqual(self.cards.get_data_info(shop_prices.INFO_KEY)['source_updated'], '2026-10-25')
+
+    def test_a_file_without_a_date_is_refused(self):
+        self.assertEqual(shop_prices.file_date('{"meta":{"date":"2026-10-23","version":"5.3.0"},"data":{}}'), '2026-10-23')
+        with self.assertRaises(ValueError):
+            shop_prices.file_date('{"meta":{},"data":{}}')
+
+
+class ShopPriceApplicationFails(ShopPriceImport):
+    """Applying a shop's new prices fails: the table and its date stay as they were, so the next update tries again
+    (a Codex review of 2026-10-24: they were swapped in first, and the next update found "today's prices are in use")"""
+
+    def test_the_swap_and_the_application_are_one(self):
+        self.cards.set_price_source('cardkingdom_usd')
+        shop_prices.import_prices(self.cards, get=self.get)
+        self.date = '2026-10-25'
+        self.data = {
+            **{f'filler-{n}': {'paper': {'cardkingdom': {'retail': {'normal': {'d': 0.5}}}}} for n in range(100, 140)},
+            'front': {'paper': {'cardkingdom': {'retail': {'normal': {'d': 2.49}}}}}}
+        real = self.cards._reapply_in
+        def failing(cursor, *args, **kwargs):
+            real(cursor, *args, **kwargs)
+            raise OSError('disk full')                     # after the UPDATE: it must be rolled back with the swap
+        self.cards._reapply_in = failing
+        with self.assertRaises(OSError):
+            shop_prices.import_prices(self.cards, get=self.get)
+        self.assertEqual(self.cards.get_data_info(shop_prices.INFO_KEY)['source_updated'], '2026-10-24')
+        self.assertEqual(self.cards.get_card_by_id('id-2')['price'], 1.49)          # yesterday's, as shown before
+        self.cards._reapply_in = real
+        self.assertEqual(shop_prices.import_prices(self.cards, get=self.get)[0], '2026-10-25')   # not "nothing new"
+        self.assertEqual(self.cards.get_card_by_id('id-2')['price'], 2.49)
+
+
+class CurrencyChange(PricedAgain):
+    """Game.price_changes: a change of currency takes the price away from what the new source cannot price"""
+
+    def test_another_currency_leaves_no_old_number_behind(self):
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        both = self.add(self.collection, 'id-2', 'regular')            # has a euro price
+        etched = self.add(self.collection, 'id-1', 'foil')             # has none (Scryfall gives no euro etched price)
+        csv_entry = self.collection.add_card({'card_id': None, 'name': 'Card 9', 'set_name': 'Test', 'set_code': 'tst',
+                                              'number': '9', 'price': 7.0}, GAME, 'regular', quiet=True)
+        self.cards.set_price_source('scryfall_eur')
+        new_prices, cleared = self.game.price_changes(self.collection, new_source=True, new_currency=True)
+        self.assertEqual(set(cleared), {etched, csv_entry})
+        self.collection.reprice(new_prices)
+        self.assertEqual(self.collection.clear_prices(cleared), 2)
+        self.assertEqual(self.price(self.collection, both), 0.9)
+        self.assertIsNone(self.price(self.collection, etched))
+        self.assertIsNone(self.price(self.collection, csv_entry))
+        self.assertEqual(self.collection.get_stats(GAME)['total_value'], 0.9)
+
+    def test_another_shop_in_the_same_currency_clears_only_what_knows_its_printing(self):
+        # A shop without a price for a printing: none, never the previous shop's (market value); a card imported without
+        # its printing keeps what it came with - no shop can price it, and its dollars are still dollars
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        etched = self.add(self.collection, 'id-1', 'foil')
+        both = self.add(self.collection, 'id-2', 'regular')
+        csv_entry = self.collection.add_card({'card_id': None, 'name': 'Card 9', 'set_name': 'Test', 'set_code': 'tst',
+                                              'number': '9', 'price': 7.0}, GAME, 'regular', quiet=True)
+        self.cards.replace_shop_prices({'id-2': {'manapool': 0.8}, **{f'id-{n}': {'manapool': 0.1} for n in range(100, 140)}}, '2026-10-24')
+        self.cards.set_price_source('manapool_usd')
+        new_prices, cleared = self.game.price_changes(self.collection, new_source=True)
+        self.assertEqual(set(cleared), {etched})
+        self.collection.reprice(new_prices)
+        self.collection.clear_prices(cleared)
+        self.assertEqual((self.price(self.collection, both), self.price(self.collection, etched), self.price(self.collection, csv_entry)),
+                         (0.8, None, 7.0))
+
+    def test_a_new_day_of_the_same_source_keeps_them(self):
+        # No change of source: a printing without a price today keeps its own (test_no_price_today_keeps_the_old_one)
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        self.add(self.collection, 'id-1', 'foil')
+        self.cards.set_price_source('scryfall_eur')
+        self.assertEqual(self.game.price_changes(self.collection)[1], {})
+
+    def test_an_edit_made_meanwhile_keeps_its_price(self):
+        self.cards.populate_database(FILLER + [ETCHED, BOTH])
+        etched = self.add(self.collection, 'id-1', 'foil')
+        self.cards.set_price_source('scryfall_eur')
+        cleared = self.game.price_changes(self.collection, new_source=True, new_currency=True)[1]
+        self.collection.conn.execute("UPDATE inventory SET finish = 'regular' WHERE id = ?", (etched,))
+        self.collection.conn.commit()
+        self.assertEqual(self.collection.clear_prices(cleared), 0)
+
+
+class ActivityLog(CardData):
+    def test_the_added_line_says_the_currency(self):
+        lines = []
+        self.collection.log_callback = lambda message, level='info': lines.append(message)
+        self.collection.price_symbol = lambda: '€'
+        self.collection.add_card({'card_id': 'x', 'name': 'Card 2', 'set_name': 'Test', 'set_code': 'tst', 'number': '2',
+                                  'price': 0.9}, GAME, 'regular')
+        self.assertTrue(any('€0.90 for 1' in line for line in lines), lines)
 
 
 if __name__ == '__main__':

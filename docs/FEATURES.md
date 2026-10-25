@@ -89,7 +89,13 @@ game sits behind one interface (`games/`), so another could be added.
 - **A choice of price source** (since 2026-10-24, Settings > Card data > Prices): TCGplayer in dollars or Cardmarket in
   euros, both from Scryfall's card data; the collection, the scanned cards and the decks are counted in it, every page
   shows its currency, and a change prices every card again. Tried on copied data in a trial server; never with the
-  settings password set. More shops (MTGJSON: Card Kingdom, Mana Pool) are planned.
+  settings password set. Since 2026-10-24 also **Card Kingdom and Mana Pool** (US dollars), from MTGJSON's prices of the
+  day: a button *Update the shops' prices* and an automatic update (off until chosen; daily, every 3 days, weekly). They
+  survive a card data download. A card the chosen source has no price for is left without one, never with another
+  shop's. Tried on copied data in a trial server (import 5.6 s, a round trip back to the cent); never the schedule's own
+  run, never with the settings password set, no price compared with a shop's own page.
+- **AI assistants see the currency** (MCP server, since 2026-10-24): every answer says what its prices are in
+  (`prices_in`). Tested with a stand-in server only.
 - **The exact printing** from set code + collector number, checked against the name, in a
   local copy of Scryfall's card data, which also gives prices, images and finishes. Name
   matching tolerates misreads, accents, flavor names and shortened legendary names.

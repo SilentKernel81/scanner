@@ -1934,29 +1934,148 @@ its table is missing, empty, or holds less than half the cards in use (`MIN_SHAR
 cut short); the cards in use then stay. Only `cards` / `cards_import` are accepted (`CARD_TABLES`).
 
 **`card_data_info`** - per game: the source's own date (Scryfall's `updated_at`), when it was downloaded, and the card count.
+One more row, `mtgjson_prices` (`shop_prices.INFO_KEY`): MTGJSON's date of the shops' prices in use, when they came, how many printings.
+
+**`shop_prices`** (since 2026-10-24; `core/shop_prices.py`, `CardDatabase.replace_shop_prices`) - the shops' prices from
+MTGJSON, one row per printing: `id` (as `cards.id`, the primary key) and a REAL column per shop, kind and finish -
+`cardkingdom`, `cardkingdom_foil`, `cardkingdom_etched`, the same three for `cardkingdom_buy` (Card Kingdom's buylist: kept, not
+shown yet) and for `manapool`. A table of its own, beside `cards`, because a card data download replaces `cards` whole: the
+shops' prices survive it, and new printings of the download are priced at once when the shops know them (the join).
+Created empty at start; replaced whole by each price update (`replace_table`, like `cards`).
 
 **The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
 `price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;
-`tests/test_prices.py`, `PriceSources`). Two sources so far, both from Scryfall's file: TCGplayer in US dollars
-(`scryfall_usd`, the default) and Cardmarket in euros (`scryfall_eur`, no etched price). The chosen one is remembered in
+`tests/test_prices.py`, `PriceSources`). Four sources: two from Scryfall's file - TCGplayer in US dollars
+(`scryfall_usd`, the default) and Cardmarket in euros (`scryfall_eur`, no etched price) - and two from MTGJSON's prices of the
+day, *the shops' prices* below - Card Kingdom (`cardkingdom_usd`) and Mana Pool (`manapool_usd`), both in dollars. A source
+says where its columns are (`kind`: `card_data`, the columns of `cards`; `shops`, those of `shop_prices`, read by a
+correlated subquery on its primary key - not `UPDATE ... FROM`, so any SQLite runs it). The chosen one is remembered in
 `data/settings.json` (`price_source`) and copied by one `UPDATE` (`prices.apply_sql`) into the columns everything reads -
 `cards.price`, `price_foil`, `price_etched`: at every start (about a second; the file may have been filled elsewhere),
 when the choice changes, and on the import table **before** each new card data is swapped in (a change during an import
 is applied again after the swap). A price the source lacks is NULL there, never another source's: a euro never stands
-in for a missing dollar. A change then prices every entry again (`reprice_collections`) and sends `price_source_changed`
+in for a missing dollar, nor one shop's price for another's. A change then prices every entry again (`reprice_collections`) and sends `price_source_changed`
 (`source`, `currency`, `symbol`); the pages take the symbol from `_topbar.html` (`window.PRICE_SYMBOL`, from
 `pages.page_links`) and show every price through `common.js`: `formatPrice` / `priceSymbol` (not `priceText`, which
 `collection.js` has for itself and which calls `money()`: one shared name made each call the other until the stack ran
 out, found on the trial server). A source the card data holds no price from (card data downloaded before its columns
-were kept) is refused with 409 and greyed out in the list: it would show the new currency on the old numbers. The CSV
+were kept), or a shop before the first price update, is refused with 409 and greyed out in the list ("after the next card
+data update" / "after the first update of the shops' prices"): it would show the new currency on the old numbers. **What a
+change does to an entry the new source cannot price** (`Game.price_changes`, `InventoryManager.clear_prices`, since
+2026-10-24 - the owner chose market value): it loses its price (NULL; the pages show 0 / N/A, the totals skip it), never
+keeps another shop's - a round trip TCGplayer -> Mana Pool -> TCGplayer first left Mana Pool's number on 23 entries. An
+entry imported without its printing keeps the number it came with while the currency stays (no shop can price it), and
+loses it on a change of currency. Without a change of source - a new day of the same one - an entry without a price today
+keeps its own, as before. The answer counts both (`repriced`, `unpriced`) and Settings says them. **One at a time, and
+finished even after a failure** (a Codex review of 2026-10-24; `tests/test_price_source_change.py`): every repricing works
+out its prices and writes them under `card_data.pricing_lock`, which a change of source holds from the choice to the end
+of its repricing - a shop's or the card data's update can no longer write back the prices of the source before a change.
+Both inventories are repriced in ONE pass inside `maintenance_barrier` (lock order: `pricing_lock`, then the barrier):
+"Add to collection" (`take_from`, under the barrier) cannot move scanned copies from the inventory not priced yet into
+the one priced already, where they kept their old price - in the old currency, after a change of source (a fifth Codex
+review). Each inventory is repriced in one transaction (`InventoryManager.apply_prices`: new prices and the ones taken
+away together), holding its own lock from its entries read to their prices written (`InventoryManager.exclusive`: an
+edit in between - copies split off to another location - made a row the repricing never saw, which kept the old
+currency; an eleventh Codex review), and then noted as done in the change's note (`done`). **While a change through another currency is
+unfinished, an inventory not done yet shows no prices** (a sixth Codex review: after a failure half-way it held dollars
+under the € sign until the next repricing): `card_data.prices_withheld`, asked through
+`InventoryManager.prices_withheld` (set in `startup.py`), makes its entries' prices 0 - the lists, the exports, the
+trades - and its totals 0 with `prices_pending: true` in `get_stats`. "Withheld?" is asked under the inventory's lock
+together with the rows it qualifies, and the repricing marks an inventory done under that same lock (a seventeenth Codex
+review: asked after the rows, a retry finishing in between let an old total pass as current). A trade is not CONFIRMED meanwhile (`Trades.confirm`
+answers "confirm it once they are repriced"; a fifteenth Codex review): its record would keep 0 for every card for good,
+as it no longer refers to the entries a repricing corrects. The schedule's tick tries an unfinished repricing
+again every 10 minutes (`finish_unfinished_repricing`), besides the next update and the next start. **An entry is written
+at the price its printing has at that moment** (a seventh Codex review): a card shown on the scanner page before a change
+of source, or an edit that read its new finish's price before one, was written in the old currency after the change's
+repricing had passed. Every insert of an entry that knows its printing (`InventoryManager._priced`: the scanner's add,
+the preconstructed decks, "Add to collection", the CSV import) and a change of finish or printing (`update_card`) take
+the price from `current_price` (`card_data.current_card_price` -> `Game.current_price`, set in `startup.py`), asked under
+the inventory's own lock, which the repricing needs too - so a change of source comes wholly before the write (it
+reads the new prices) or after it (the repricing covers what was written). A printing the card data lacks keeps the
+price given. **A day without a quote** (a ninth Codex review): an entry that only MOVES - "Add to collection", copies
+split off to another location or condition in the same printing and finish (`_priced(moving=True)`) - keeps its own
+price when the card data has none for it today, as a repricing does; a new entry takes the 0 (what reading its price now
+gives - a number its caller read earlier may be of a source chosen before). A move out of an inventory whose prices are
+withheld is not "as it is": its numbers may be of the old currency, so none is carried over (a tenth Codex review) - the
+price is the card data's quote at that moment, or none, also for a card without its printing or one the card data lacks. That price is read **without the card data's lock** (`CardDatabase.card_for_pricing`: a read-only
+connection per thread; an eighth Codex review): the collection is in the card data's file, so an inventory asks while
+it holds SQLite's write lock, and a change of source holds the card data's lock while its UPDATE waits for that write
+lock - through the lock, each waited for the other until SQLite's 10-second timeout (reproduced: 9.7 s). In WAL a
+reader waits for no writer, and a price read just before a change's UPDATE is corrected by the repricing after it.
+**A change of source is all or nothing**: `set_price_source` records the choice only once its UPDATE is in, and the
+route puts the change's note back and leaves the setting alone when it fails (500, "nothing was changed"). **What must be
+on disk first is written durably** (a twelfth Codex review: `Settings` printed a failed write and went on, so a restart
+could forget a change whose prices stayed): `Settings.set_durably` raises and puts the value back. The change's note is
+written so BEFORE anything changes (failing: nothing changes), the chosen source after its UPDATE (failing: the UPDATE
+is undone - and that undoing is itself a change of source: an entry may have been written at the new source's price
+meanwhile, so the note naming it is KEPT and the entries repriced back; a sixteenth Codex review), and a price change's `running` entry before the change (failing: the download does not begin). Writes after
+a change stay ordinary: one that fails leaves a note behind, which only means a repricing more.
+A change is noted in `data/settings.json` (`price_transition`: the source it came from and every source chosen while it
+is unfinished - a change that failed half-way may have written any of their prices) BEFORE anything changes, and
+forgotten only once both inventories are done; until then every repricing (the next card data or price update, choosing
+a source again, the next start: `resume_price_transition`) finishes it: every entry the source now chosen cannot price
+loses its price, and when any of those sources had another currency, so do the entries without their printing - so a
+failure half-way never leaves dollars shown as euros, nor euros as dollars after a change back (a second Codex review of
+2026-10-24: remembering only the first source, a change back to it kept the half-done change's euros). The route answers 500 then (and still tells the pages the new
+currency). The database re-applies the chosen source after an import with the choice read under its own lock
+(`reapply_price_source`): read before it, a change in between was undone. The CSV
 export's price column says its currency (`Price (EUR)`, `€0.90`); in dollars it is the file it always was (the Android
-app's `ExportParityTest`), and the import reads both. **Mixed currencies, on purpose:** entries without a printing (a
-CSV import of an unknown one) keep the number they came with, other people's collections and trades' records keep
-theirs, and the entries' column is still named `price_usd`. Tried on a trial server with copies of this checkout's data
+app's `ExportParityTest`), and the import reads both. **Mixed currencies, on purpose:** other people's collections and
+trades' records keep their numbers, and the entries' column is still named `price_usd`. The activity log's "Added to
+inventory" line says the symbol (`InventoryManager.price_symbol`, set in `startup.py`), and the MCP server's answers say
+the currency of their prices (`prices_in`; `collection_summary`: `value` and `currency`, `value_usd` until 2026-10-24) -
+`USD` only for a scanner that answers 404 (older than the choice), `unknown` for any other failure of the question
+(`ScannerError.status`; a fourteenth Codex review: a time-out labelled euros as dollars). Tried on a trial server with copies of this checkout's data
 (2026-10-24): refused before a card data update (Cardmarket: 0 printings priced), after one 98,743 printings priced
 in euros against 100,066 in dollars; to euros 1,547 entries repriced, $5,678.30 -> €5,266.15, back to dollars exactly
 $5,678.30; the collection, deck, scanner and settings pages without a script error and in euros. **Not tried**: with the
 settings password set (the padlock and its prompt), a page left open during the change.
+
+**The shops' prices** (since 2026-10-24; `core/shop_prices.py`: `import_prices`, `rows_from`, `each_price`;
+`server/card_data.py`: `start_shop_price_update`, `shop_prices_status`, guarded `POST /api/prices/update`, the schedule
+below; `tests/test_prices.py`: `ShopPriceFile`, `ShopPricesInTheCardData`, `ShopPriceImport`, `CurrencyChange`). MTGJSON
+(MIT; README, Acknowledgments) publishes every shop's price of the day in one file, keyed by its own card ids:
+`AllPricesToday.json.xz` (4.3 MB) and two files mapping them to Scryfall ids, `csv/cardIdentifiers.csv.xz` (11 MB) and
+`csv/tokenIdentifiers.csv.xz`. An update first asks `Meta.json` for MTGJSON's date: the date of the prices in use means
+nothing is downloaded (`NothingNew`; the button sends `force` only from code, never from the page). The date recorded is
+the price file's OWN (`file_date`: its `meta.date`), never `Meta.json`'s - the two are published and cached apart (a
+thirteenth Codex review: yesterday's file saved under today's date made every later update "nothing new"). A file not
+newer than the prices in use is not saved (the next update looks again), an older one is refused, and a file newer than
+those in use but older than `Meta.json` says is saved as what it is - the next update, seeing `Meta.json`'s other date,
+downloads again. Then the three files go
+into a temporary folder, the price file is read one card at a time (`raw_decode`: `json.load` of the whole file peaked at
+~580 MB), the identifiers row by row, and the faces of a double-faced card (one Scryfall id, a uuid per face) are merged
+by union - they never disagreed (the plan, *Measured*). Kept: Card Kingdom's retail and buylist, Mana Pool's retail, paper
+only; TCGplayer's and Cardmarket's come from Scryfall (one shop, one number), cardhoarder's are MTGO's. The rows replace
+the table whole (`replace_table`: refused when empty or much smaller than the table in use - the prices in use stay), under
+the card data's import lock (`_import_lock`: a card data download applies the chosen source to its new cards before its
+swap, and must not see the shops' table change in between - an update during one fails and is asked again). When a shop's
+source is shown, its prices are applied in the swap's own transaction (`replace_table`'s `also`, `_reapply_in`: a failure
+rolls back the table and its date with it, so the next update downloads again instead of finding "today's prices are in
+use"), and the entries are priced again - after every update that brought new prices, whatever the source is by then.
+**Never left unpriced** (the third and fourth Codex reviews of 2026-10-24): `reprice_pending` in `data/settings.json` holds
+one entry per change the entries must follow (`begin_price_change`: a card data download, a shops' update, a repricing
+itself), `running` from BEFORE it begins, `done` once it is in (`price_change_done`; dropped when nothing was swapped
+in). A repricing forgets only the entries that were done when it began, and only once both inventories are priced - so a
+change of source during a download (its repricing runs from the old table) no longer swallows the download's own
+repricing, as a single flag did. While an entry is done, an update that finds nothing new still reprices; at start every
+entry counts as done (`resume_price_transition`). A shops' update whose repricing fails is reported as failed ("tried
+again at the next update"). Settings > Card data > Prices shows MTGJSON's
+date, when it came and how many printings, and the button *Update the shops' prices* (guarded: when a shop is the source
+it rewrites every entry's price); while one runs the page asks every 2 s how far it is. **Measured 2026-10-24** on a copy
+of this checkout's card data (112,765 printings): the import in 5.6 s (download 3 s), peak RSS 199 MB for the whole
+process; 102,652 Scryfall ids with a price, 99,435 of our printings; Card Kingdom prices 94,253, Mana Pool 98,649
+(TCGplayer, from Scryfall, 97,312); after a card data download (116,418 printings, tokens included) 96,979 and 101,770 -
+the new printings joined without a new price download. Applying a shop's prices to the shown columns: 0.55 s. Against
+TCGplayer's price of the same printing (printings of $1 or more): Card Kingdom median x1.21 (p10 0.68, p90 1.84), Mana
+Pool median x0.74 (p10 0.33, p90 1.04) - MTGJSON's numbers as published, none compared with a shop's own page. **The
+trial** (a server on copies, port 5077): Card Kingdom refused before the first update (409), the first update 102,652
+printings; $5,986.52 (TCGplayer) -> $7,975.43 (Card Kingdom, 10 entries without a price) -> $4,773.89 (Mana Pool) ->
+exactly $5,986.52 back at TCGplayer; a card data download with Card Kingdom chosen kept its prices shown and the total
+($7,975.43); Cardmarket -> €5,228.69 (16 entries without a euro price) and back to exactly $7,975.43; a second update the
+same day downloaded nothing. The Settings page without a script error. **Never tried**: the schedule's own run, a page
+open during an update, the memory on a Raspberry Pi.
 
 **Prices follow the card data** (since 2026-10-23; `server/card_data.py`: `reprice_collections`, `Game.current_prices`,
 `InventoryManager.priced_entries` / `reprice`; `tests/test_prices.py`). An entry keeps its own price (`inventory.price_usd`),
@@ -1996,8 +2115,8 @@ one notification per page load. Updates are not started without the user unless 
 AppImage or a Pi that was off when it was due catches up once it runs again. Nothing is downloaded in the first
 5 minutes after start (`SCHEDULE_FIRST_DOWNLOAD`: a network that is not up yet); as the ticks are 10 minutes
 apart, the first automatic download comes about 10 minutes after start. Each tick (`schedule_tick`) asks the update check
-(when a day has passed), the card data and the picture index in that order, each in its own `try`: one failing never keeps
-the others from their turn.
+(when a day has passed), the card data, the picture index and the shops' prices in that order, each in its own `try`: one
+failing never keeps the others from their turn.
 - **The card data** (`scheduled_card_data_updates`, `card_data_due`): every game with data (the first download stays
   startup's, with its own retries) whose `card_data_info.downloaded_at` is the chosen number of hours old or older - a
   press of the button counts too - is downloaded again (`start_card_data_update`: the same safe swap, scanning goes on).
@@ -2015,7 +2134,12 @@ the others from their turn.
   is what bounds that. A build that never began (another process holds the index: `BuildRunning`; or the button was
   first) puts back the last real attempt (`image_index_auto_last`), so the next tick asks again (a Codex review of
   2026-10-22: the first version used up the interval - up to a week - on a build that never ran).
-- **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720) and `image_index_every_hours` (0, 6, 24, 168) in
+- **The shops' prices** (`scheduled_shop_price_update`, `shop_prices_due`; since 2026-10-24): when the prices in use came the
+  chosen number of hours ago or longer (or there are none), no update and no card data download runs, and no automatic
+  attempt was made in the last hour (`shop_prices_auto_last`). MTGJSON's file of the day was out by 06:13 UTC on
+  2026-10-23 and -24 (its FAQ says 9:00 AM EST): a try before it finds MTGJSON's date unchanged, downloads only
+  `Meta.json` and leaves the prices as old as they were, so the next look comes an hour later - never at every tick.
+- **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720), `prices_every_hours` (0, 24, 72, 168; no `config.yaml` key - off until chosen) and `image_index_every_hours` (0, 6, 24, 168) in
   `data/settings.json`, else `config.yaml`'s `database.auto_update_every_hours` / `reading.index_retry_every_hours` (both
   0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Card data
   and Settings > Card data: a select each, and a line with the last automatic run and the next
@@ -2995,7 +3119,7 @@ go to Cameras and Backups: `OLD_CATEGORIES`; `/scan/<id>#settings` and `/collect
 | **Overview** (the default) | One line per section - cameras connected, how cards are read, the card data and its next update, the picture index, the last backup, capture files, the password and network - each a button to its section, the ones to look at marked. No route of its own: each loader hands its part over (`setOverview`) |
 | **Cameras** | *This camera*, chosen at the top (its own connection, `?station=`): name, location, status, camera setup / undo last add / forget; Add cards automatically, Stop at a card back, Camera rotation, the fixed area's state (it is drawn on the camera's page), Camera autofocus, Check the focus every, Refocus when the cards get blurry (Off / half / a third / a fifth as sharp: `refocus_on_drop`, per camera, saved in `data/stations.json` like the other camera settings); under Troubleshooting: Debug trace. *All cameras*: Capture size, Sounds (Sound effects, Capture beep, Card added, Volume) |
 | **Card recognition** | The three steps, numbered in their order: 1 Picture (read by the picture; in its Details: Add a card only the picture decided), 2 OCR, 3 Vision AI (provider, key, model, Prompts - the summary, and a link to the editor) |
-| **Card data** | The card database (state, update), Prices (the price source, guarded), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry) |
+| **Card data** | The card database (state, update), Prices (the price source, guarded; the shops' prices: their date, *Update the shops' prices*), the picture index (coverage, update / stop), Automatic updates (the card database's schedule, "The picture index follows", the index's retry, the shops' prices) |
 | **Backups** | Automatic backups (schedule, how many kept); Your backups (make, upload, list: restore / download / delete) |
 | **Storage** | Capture files in use, how long received pictures are kept, Clean up now, Compress large copies, Keep camera frames |
 | **Server** | Restart Card Scanner, Quit (desktop program only), Reachable from other devices, Settings password, under Troubleshooting: Debug mode |
@@ -3118,7 +3242,7 @@ Never tested with the Android app in server mode reaching the server by a host n
 card can be locked behind one optional password, chosen on Settings -> Server (or fixed by
 `SCANNER_SETTINGS_PASSWORD`). Locked when it is set: the AI keys and endpoint (`save_ai_credential`), restart,
 quit, network access, Debug mode (`toggle_debug_mode`), how cards are read (`set_reading_mode`: it decides what is added) and, of the backups, restore, upload, download, delete and
-making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), the price source (`POST /api/prices/source`: it rewrites every entry's price), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
+making a *full* backup (it holds the keys), and what the Storage card deletes or shrinks (`POST /api/storage/cleanup`, `POST /api/storage/compress`), starts or stops a picture index build (`POST /api/image_index/update`, `/stop`: it downloads for hours the first time), the automatic updates (`POST /api/updates/schedule`: downloads the server makes on its own), the price source (`POST /api/prices/source`: it rewrites every entry's price), the shops' price update (`POST /api/prices/update`), and the `cleanup_days` field of `POST /api/capture_copy` - the rest of that route stays open). Open: scanning, the cameras and their settings, the collection, the
 decks, listing backups, making an ordinary backup. A route answers `401 {"locked": true}`; an event answers an
 `error` event with `locked: true`. `common.js` wraps every page's `fetch`: on a locked answer it asks for the
 password (`passwordDialog`), unlocks and repeats the request once; the Settings page reconnects its Socket.IO

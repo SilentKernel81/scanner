@@ -338,6 +338,12 @@
                             <select id="price-source" class="select"></select>
                         </div>
                         <div class="hint" id="price-source-hint">Loading...</div>
+                        <!-- Card Kingdom's and Mana Pool's prices: MTGJSON's file of the day, apart from the card data (settings.js: showShopPrices) -->
+                        <div class="input-group">
+                            <div class="storage-usage" id="shop-prices-status">Loading...</div>
+                            <button type="button" id="update-shop-prices" class="btn btn-block" data-guarded>Update the shops' prices</button>
+                            <div class="hint">Card Kingdom and Mana Pool, from MTGJSON's prices of the day (about 16 MB). Nothing is downloaded when MTGJSON has nothing newer.</div>
+                        </div>
                     </div>
 
                     <div class="settings-card">
@@ -381,6 +387,16 @@
                             </select>
                         </div>
                         <div class="hint" id="index-auto"></div>
+                        <div class="schedule-row">
+                            <label for="prices-every" data-guarded>Shops' prices</label>
+                            <select id="prices-every" class="select">
+                                <option value="0">Off</option>
+                                <option value="24">Every day</option>
+                                <option value="72">Every 3 days</option>
+                                <option value="168">Every week</option>
+                            </select>
+                        </div>
+                        <div class="hint" id="prices-auto"></div>
                     </div>
                 </section>
 
@@ -512,6 +528,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=30"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=31"></script>
 </body>
 </html>
