@@ -2580,6 +2580,40 @@ deleted or lowered, with the newest photos and the cameras' counts as for any lo
 under **Confirmed trades** as a record (cards, value, date; it can still be exported) until
 **Delete from history** (`DELETE` again).
 
+**Sale picture…** (open trades only - a confirmed trade's cards have no entry, so no scans;
+added 2026-10-24; `collection.js`: `openSalePicture`, `drawSalePicture`, `drawSalePreview`,
+`saveSalePicture`, the dialog `#sale-modal` in `collection.html`) draws a picture for a sale post
+in the browser, on a canvas: nothing on the server is involved but the pictures it already
+serves. The trade's cards are looked up among the collection's entries (`/api/inventory`'s
+`captures` and `details.image_uri` - fetched again while the Arena collection is shown, whose
+entries are other cards). Each scan of an entry is a tile to tick, only the newest ticked: a
+picture shows each card once, its caption saying how many copies the trade holds (`×16`) - an
+entry scanned 16 times would otherwise fill two pictures with one card; an entry with
+no scan gets Scryfall's picture of its printing in the `large` size, asked for with CORS
+(`crossOrigin = 'anonymous'`: without it the canvas is "tainted" and cannot be saved). Scans are
+loaded as their large copy (`/captures/<file>?size=full`); one answered with the 400 px
+thumbnail (no large copy kept) is marked **low res** once it has been drawn. A large copy is loaded
+only when its card is drawn (`saleImage`) - the page shown or a page being downloaded - never when
+the dialog opens, and those of the cards not on the page shown are let go after each drawing: at
+most nine held, plus a download's own (a Codex finding: a trade of a few hundred scans loaded them
+all, ~4 MB each decoded). Measured on a trade of 155 scans: 9 large copies loaded on opening,
+8 more per page turned, never more than 9 held. "Download all" lets go of each page's pictures
+once its file is saved (the pages to come keep only their cards and turns): on the same trade
+all ticked, 18 files, never more than 9 pictures held by the download, none at its end. Nine ticked tiles make one picture, 3 per
+row: each card fitted into a 859 × 1200 px cell (63:88) with its name (bold, shrunk or cut to
+fit) and set / number / a finish other than the usual / the copies under it, 48 px between cells. Saved as
+JPEG (quality 0.92), shrunk to 2048 px on its longest side (what Facebook keeps) or at full size
+(about 2770 × 4240 px for nine cards); "Download all" saves each picture as its own file. A download never saves the preview's canvas
+(redrawn on every change of page, choice or turn - a drawing still waiting for its pictures can be
+overtaken, and the file would hold another page's cards under this page's number, a Codex finding):
+the cards, their turns, the page's number, the choices and the trade's name are taken when the
+button is pressed and drawn on a canvas of the download's own (`exportSalePicture`,
+`saleSnapshot`, `saleOptions`); a dialog closed meanwhile saves nothing. A
+click on a card in the preview turns it 180° (scans are kept as the camera saw them, some
+upside down) - only in the picture, the scan is not changed. Checked on copied data in headless
+Chromium (two pictures from twelve scans, a Scryfall fallback saved without a tainted-canvas
+error, a thumbnail-only scan marked; a trade of nine entries of 14-20 real scans each: one picture, every name under its own scan); never posted to Facebook Marketplace.
+
 While a trade holds copies, the database refuses everything that would take them: deleting the
 entry, lowering its quantity below what is held, moving a whole stack of several copies to
 another location or merging the entry into another one by an edit (both delete the entry; a

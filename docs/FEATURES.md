@@ -239,6 +239,13 @@ This one was sent back from the collection.*
 - **Trades:** set cards aside for a named trade (they stay in your collection, marked, until
   you confirm it), change the copies, rename, cancel, or confirm (the copies leave); a history of
   confirmed trades; each trade can be exported.
+- **A sale picture:** an open trade's **Sale picture…** makes a 3 × 3 grid of your own scans of
+  its cards, each card once with its name, set / number / finish and copies under it, to post on Facebook
+  Marketplace or another site (2048 px - what Facebook keeps - or full size, about 2770 × 4240
+  px; dark, white or grey background); more than nine cards ticked make several pictures. A
+  click on a card turns it upside down; a card without a scan shows Scryfall's picture, marked "stock picture" under it.
+  Tried on copied data in a headless browser; never actually posted to Facebook Marketplace or
+  any other site.
 - **Other people's collections:** import a collection file (the app's CSV, Moxfield or ManaBox)
   under a person's name into a database of its own, browse and search it, and delete it when you
   are done. It never touches your collection or its backups.
