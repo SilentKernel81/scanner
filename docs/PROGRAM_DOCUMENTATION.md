@@ -2611,8 +2611,9 @@ would pass unseen (a second Codex finding) - so the person looks again and press
 fingerprint that was seen - `Trades.fingerprint`, in `GET /api/trades` for each open trade: a digest of every
 card given (row, entry, copies, the entry's printing / finish / condition / location) and received (row, seller, card,
 copies), never the price, which a repricing changes daily - compared inside the confirm's transaction and refused when the
-trade holds anything else by then; totals alone missed a card swapped for another, a Codex finding. A page of before sends
-`quantity` / `receive_quantity`, still checked): in one transaction each row keeps the
+trade holds anything else by then; totals alone missed a card swapped for another, a Codex finding. The fingerprint is
+required: a confirm without one - a page from before it, which sent nothing or only its totals - is refused with 409
+"reload it" before anything is looked at, so no old tab can skip the check (a third Codex finding)): in one transaction each row keeps the
 card as it was and lets go of its entry, the copies leave the collection - the entry is
 deleted or lowered, with the newest photos and the cameras' counts as for any lowered quantity
 (`_take_copies`, `_trim_sources`, `_trim_captures`) - and the trade becomes `done`. It stays

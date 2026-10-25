@@ -272,21 +272,16 @@ class Trades:
         The trade happened: its copies leave the collection (the newest captures and the
         stations' counts with them, as when a quantity is lowered) and the trade stays as a
         record of the cards as they were. One transaction. Returns {'cards', 'entries', 'value'}.
-        expected: what the person was shown when they confirmed - {'fingerprint'} (list(), fingerprint()), or from a page
-        of before it {'quantity', 'receive_quantity'} - refused when the trade holds anything else now (changed in another
-        tab meanwhile): what leaves must be what was agreed to. Compared inside this transaction, under the lock every
+        expected: what the person was shown when they confirmed - {'fingerprint'} (list(), fingerprint()) - refused when
+        the trade holds anything else now (changed in another tab meanwhile): what leaves must be what was agreed to. The
+        route always passes it (server/trades_api.py: trade_confirm refuses a request without one); None is for callers
+        inside the server that confirm what they hold. Compared inside this transaction, under the lock every
         change of a trade takes, so nothing can change between the check and the copies leaving.
         """
         def change():
             self._trade(trade_id)
             if expected is not None:
-                if 'fingerprint' in expected:
-                    changed = expected['fingerprint'] != self.fingerprint(trade_id)
-                else:   # a page from before the fingerprint: its totals, which miss a swap of cards
-                    now_held = [self.conn.execute(f'SELECT COALESCE(SUM(quantity), 0) FROM {table} WHERE trade_id = ?',
-                                                  (trade_id,)).fetchone()[0] for table in ('trade_cards', 'trade_receives')]
-                    changed = now_held != [expected.get('quantity'), expected.get('receive_quantity')]
-                if changed:
+                if expected.get('fingerprint') != self.fingerprint(trade_id):
                     raise TradeError('This trade changed since it was shown: look at it again and confirm once more')
             manager = self.inventory
             if manager.prices_withheld():

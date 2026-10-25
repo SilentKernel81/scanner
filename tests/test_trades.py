@@ -228,12 +228,13 @@ class StaleRequests(ClosingATrade):
 
     def test_a_confirm_of_other_numbers_than_shown_is_refused(self):
         # The page showed 3 copies; another tab took one out meanwhile
+        shown = {'fingerprint': self.trade()['fingerprint']}
         row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
         self.trades.set_quantity(self.id, row, 1)
         with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
-            self.trades.confirm(self.id, {'quantity': 3, 'receive_quantity': 0})
+            self.trades.confirm(self.id, shown)
         self.assertEqual(self.owned(), {'Test Card': 3, 'Other Card': 1})      # nothing left
-        self.assertEqual(self.trades.confirm(self.id, {'quantity': 2, 'receive_quantity': 0})['cards'], 2)
+        self.assertEqual(self.trades.confirm(self.id, {'fingerprint': self.trade()['fingerprint']})['cards'], 2)
 
     def shown(self):
         # What a page has when its dialog asks: the trade's fingerprint from the listing
@@ -303,7 +304,7 @@ class TradeRoutes(TradeData):
         super().tearDown()
 
     def test_cancel_from_a_stale_page_keeps_the_confirmed_record(self):
-        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 3, 'receive_quantity': 0}).status_code, 200)
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': self.trade()['fingerprint']}).status_code, 200)
         answer = self.client.delete(f'/api/trades/{self.id}?action=cancel')
         self.assertEqual(answer.status_code, 400)
         self.assertIn('confirmed meanwhile', answer.get_json()['error'])
@@ -319,13 +320,48 @@ class TradeRoutes(TradeData):
         self.assertEqual(self.trades.list(GAME), [])
 
     def test_a_stale_confirm_is_refused(self):
-        # The page sends the fingerprint of the trade it showed; a page of before it, the totals
+        # The page sends the fingerprint of the trade it showed
         listed = self.client.get('/api/trades').get_json()['trades'][0]
         self.assertEqual(listed['fingerprint'], self.trades.fingerprint(self.id))
         self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': 'something else'}).status_code, 400)
-        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'quantity': 5, 'receive_quantity': 0}).status_code, 400)
         self.assertEqual(self.trade()['status'], 'open')
         self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': listed['fingerprint']}).status_code, 200)
+
+
+class OldPagesCannotConfirm(TradeRoutes):
+    """A page from before the fingerprint sends nothing (before 2026-10-24's fixes) or only its totals: it cannot say what
+    the person saw, so its confirm is refused whatever the trade holds - and a swap made meanwhile leaves nothing (a Codex
+    finding: the old paths skipped the check, or missed a swap)"""
+
+    def swap(self):
+        # Another tab: one copy of Test Card out, one copy of a new entry in - still 3 copies
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        self.trades.add(GAME, 'Jo', [self.collection.add_card(OTHER, GAME, 'regular', quiet=True, location='Box 9')])
+
+    def assert_refused(self, **request):
+        before = self.collection.get_stats(GAME)['total_cards']
+        answer = self.client.post(f'/api/trades/{self.id}/confirm', **request)
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn('reload', answer.get_json()['error'])
+        self.assertEqual((self.trade()['status'], self.collection.get_stats(GAME)['total_cards']), ('open', before))
+
+    def test_a_confirm_without_a_body(self):
+        self.swap()
+        self.assert_refused()
+
+    def test_a_confirm_with_only_totals(self):
+        self.swap()
+        self.assert_refused(json={'quantity': 3, 'receive_quantity': 0})
+
+    def test_an_empty_or_odd_fingerprint(self):
+        for body in ({'fingerprint': ''}, {'fingerprint': None}, {'fingerprint': 12}):
+            self.assert_refused(json=body)
+
+    # TradeRoutes' own tests are run there, not a second time here
+    test_cancel_from_a_stale_page_keeps_the_confirmed_record = None
+    test_forget_does_not_cancel_an_open_trade = None
+    test_a_stale_confirm_is_refused = None
 
 
 class TradesInBackups(TradeData):

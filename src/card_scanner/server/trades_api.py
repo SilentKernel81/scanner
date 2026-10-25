@@ -97,19 +97,16 @@ def trade_receive(trade_id, row_id):
 
 @app.route('/api/trades/<int:trade_id>/confirm', methods=['POST'])
 def trade_confirm(trade_id):
-    """The trade happened: its cards leave the collection, the trade stays as a record. JSON fingerprint: the one of
-    the trade the page showed (GET /api/trades) - refused when the trade holds anything else now; quantity,
-    receive_quantity: the same from a page of before the fingerprint"""
+    """The trade happened: its cards leave the collection, the trade stays as a record. JSON fingerprint (required): the
+    one of the trade the person saw (GET /api/trades) - refused when the trade holds anything else now. A request without
+    one - a page from before the fingerprint, which sent nothing or only its totals - is refused before anything is
+    looked at: it cannot say what the person saw, and copies leaving cannot be undone (a Codex finding)"""
     data = request.get_json(silent=True) or {}
-    expected = None
-    if data.get('fingerprint'):
-        expected = {'fingerprint': str(data['fingerprint'])}
-    elif 'quantity' in data or 'receive_quantity' in data:
-        try:
-            expected = {'quantity': int(data.get('quantity') or 0), 'receive_quantity': int(data.get('receive_quantity') or 0)}
-        except (ValueError, TypeError):
-            return jsonify({'success': False, 'error': 'quantity must be a number'}), 400
-    result = trade_store.confirm(trade_id, expected)
+    fingerprint = data.get('fingerprint')
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return jsonify({'success': False, 'error': 'This page is older than the server: reload it, look at the trade '
+                                                   'again and confirm once more'}), 409
+    result = trade_store.confirm(trade_id, {'fingerprint': fingerprint})
     collection_changed()
     return jsonify({'success': True, **result})
 
