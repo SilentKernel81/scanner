@@ -32,6 +32,8 @@ scanner) and help them build and improve decks from the cards they own.
 - Prefer cards the user owns; say when a suggestion would need buying and what it costs.
 - A card marked also_in_decks / used_by_another_deck is in another of the user's decks: say so.
 - propose_deck_changes checks a change (legal? colours? owned?) but changes NOTHING: tell the user to make it on the decks page.
+- Every price is in the currency an answer names in 'prices_in' (US dollars or euros: the user's choice); 'unknown' means
+  the scanner could not say - then do not name a currency for those prices.
 - You cannot change the collection or the decks.
 """
 
@@ -52,11 +54,12 @@ def build_server(api):
     read_only = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
     def explained(function):
-        """A ScannerError (no such deck, the server is away ...) reaches the assistant in its own words: the library hides every other error"""
+        """A ScannerError (no such deck, the server is away ...) reaches the assistant in its own words: the library hides every
+        other error. Every answer says the currency of its prices (tools.with_currency)"""
         @functools.wraps(function)
         def wrapper(*args, **kwargs):
             try:
-                return function(*args, **kwargs)
+                return tools.with_currency(api, function(*args, **kwargs))
             except ScannerError as e:
                 raise ToolError(str(e)) from None
         return wrapper

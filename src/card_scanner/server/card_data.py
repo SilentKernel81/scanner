@@ -7,11 +7,12 @@ from flask import jsonify, request
 from flask_socketio import emit
 import threading
 import time
+import uuid
 
 from card_scanner import games
 from card_scanner.config import Config
 
-from card_scanner.core import image_index, prices
+from card_scanner.core import image_index, prices, shop_prices
 from card_scanner.server.state import app, app_settings, database, inventory, maintenance_barrier, printing_check, scan_inventory, socketio
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded
@@ -58,14 +59,20 @@ def start_card_data_update(game, retry=False, on_done=None):
             while True:
                 try:
                     logger.info(f"Updating {game.label} card data from {game.source}")
-                    game.download(progress_callback)
+                    change = begin_price_change()   # the download changes the shown prices: the entries follow (reprice_collections)
+                    try:
+                        game.download(progress_callback)
+                    except Exception:
+                        price_change_dropped(change)    # nothing was swapped in (the swap is the download's last step)
+                        raise
+                    price_change_done(change)
                     total = game.card_count()
                     data_update_notices.pop(game.id, None)
                     data_update_errors.pop(game.id, None)
                     socketio.emit('database_update_complete', {'game': game.id, 'total_cards': total})
                     logger.info(f"{game.label} card data updated: {total} cards")
                     finished(True, f"{total:,} cards")
-                    reprice_collections(game)
+                    reprice_collections(game)   # an entry without a price today keeps its own (unless a change of source is unfinished)
                     extend_index_after_update()
                     return
                 except Exception as e:
@@ -87,30 +94,198 @@ def start_card_data_update(game, retry=False, on_done=None):
     return True
 
 
-def reprice_collections(game):
+# Every repricing of the entries, and every change of price source with the repricing it needs, one at a time. Each
+# repricing works out the new prices from the shown columns as they are and writes them: a change of source between the
+# two (another thread) would otherwise be overwritten with the prices of the source before it (a Codex review of
+# 2026-10-24). An RLock: the change of source reprices while it holds it
+pricing_lock = threading.RLock()
+# data/settings.json: {'sources': [source ids]} while a change of source has not finished repricing both inventories -
+# the source it came from and EVERY source chosen since: a change that failed half-way may have written any of their prices
+# (a Codex review of 2026-10-24: remembering only the first, a change back to it kept euros of the half-done change as
+# dollars). Until it has finished, every repricing finishes it, also after a failure or a restart (resume_price_transition)
+PRICE_TRANSITION_KEY = 'price_transition'
+
+
+# data/settings.json: {token: 'running' | 'done'} - one entry per change of the shown prices that the entries must follow
+# (a card data download, a shops' price update, a repricing itself). 'running' from BEFORE the change begins, 'done' once it
+# is in; a repricing forgets only the entries that were 'done' when it began, and only once both inventories are priced.
+# A change still running when a repricing (a change of source, say) begins keeps its entry, and its own repricing follows
+# its swap - a single flag was cleared by that earlier repricing, and the swap's repricing skipped (a Codex review of
+# 2026-10-24). While any entry is 'done', an update that finds nothing new still reprices; at start every entry counts as
+# done (resume_price_transition) - one stopped before its swap costs a repricing that changes nothing
+REPRICE_PENDING_KEY = 'reprice_pending'
+pending_lock = threading.Lock()      # the read-modify-write of that entry in data/settings.json
+
+
+def _durable(key, value):
+    """A setting that must be on disk before the change it records goes on (Settings.set_durably: a failed write raises).
+    Only for what comes BEFORE a change - a write after one that fails leaves a note behind, and the note is safe"""
+    setter = getattr(app_settings, 'set_durably', None)
+    (setter or app_settings.set)(key, value)
+
+
+def _pending():
+    entries = app_settings.get(REPRICE_PENDING_KEY) if app_settings else None
+    return dict(entries) if isinstance(entries, dict) else {}
+
+
+def _set_pending(token, state):
+    """state 'running' / 'done', or None to forget the token. 'running' is written durably: it is noted before the change
+    it stands for, and a change that a restart could not know about must not begin (_durable raises - the change fails)"""
+    if not app_settings:
+        return
+    with pending_lock:
+        entries = _pending()
+        if state is None:
+            entries.pop(token, None)
+        else:
+            entries[token] = state
+        (_durable if state == 'running' else app_settings.set)(REPRICE_PENDING_KEY, entries)
+
+
+def begin_price_change():
+    """A change the entries must follow is about to begin: its token, noted as running"""
+    token = uuid.uuid4().hex
+    _set_pending(token, 'running')
+    return token
+
+
+def price_change_done(token):
+    """The change is in (the new prices shown): the next repricing follows it"""
+    _set_pending(token, 'done')
+
+
+def price_change_dropped(token):
+    """The change did not happen (a download that failed): nothing to follow"""
+    _set_pending(token, None)
+
+
+def reprice_pending():
+    """Whether a change that is in has not been followed by a finished repricing yet"""
+    return 'done' in _pending().values()
+
+
+def transition_done(name):
+    """Note that one inventory ('collection', 'scan') is repriced in an unfinished change of price source"""
+    pending = app_settings.get(PRICE_TRANSITION_KEY) if app_settings else None
+    if isinstance(pending, dict):
+        done = [store for store in pending.get('done') or [] if isinstance(store, str)]
+        if name not in done:
+            app_settings.set(PRICE_TRANSITION_KEY, {**pending, 'done': done + [name]})
+
+
+def prices_withheld(name):
     """
-    After a card data update: the collection's and the scanned cards' entries take their printing's price in the new data.
-    Until 2026-10-23 an entry kept the price of the day it was added, for good. Not the digital collection (Arena cards
-    have no price, on purpose: arena_api.py) nor other people's (theirs is what they offered). A failure is logged and
-    leaves the old prices: the card data itself is updated either way.
+    Whether an inventory's prices may be of another currency than the one shown: an unfinished change of price source went
+    through another currency, and has not repriced that inventory yet. InventoryManager.prices_withheld asks this (set in
+    startup.py): its entries then show no price and its totals 0 - never dollars as euros (a Codex review of 2026-10-24) -
+    until the next repricing finishes the change (reprice_collections; the schedule's tick tries every 10 minutes).
     """
-    try:
-        changed = 0
-        for store in (inventory, scan_inventory):
-            if store:
-                # Worked out outside the barrier (reprice checks that each entry is still that printing), written inside it:
-                # a full backup (backups.create_full) waits for what is under way and must never copy half a write
-                prices = game.current_prices(store.priced_entries(game.id))
-                with maintenance_barrier:
-                    changed += store.reprice(prices)
-        logger.info(f"{game.label}: {changed} entries priced again from the new card data")
-        if changed:
-            # The pages that show totals or lists reload them (scanner.js, collection.js, decks.js)
-            socketio.emit('inventory_prices_updated', {'stats': scan_inventory.get_stats(game.id)}, namespace='/')
-        return changed
-    except Exception as e:
-        logger.exception(f"{game.label}: the entries could not be priced again: {e}")
-        return 0
+    went_through = price_transition()
+    if not went_through or not database:
+        return False
+    pending = app_settings.get(PRICE_TRANSITION_KEY)
+    if name in ((pending.get('done') or []) if isinstance(pending, dict) else []):
+        return False
+    shown = prices.source(database.price_source)['currency']
+    return any(prices.source(source)['currency'] != shown for source in went_through)
+
+
+def current_card_price(game_id, card_id, finish):
+    """InventoryManager.current_price: a printing's price in a finish in the card data as it is now (the chosen source),
+    or None when the game or the printing is not there (the price given is kept)"""
+    game = games.get(game_id) if game_id else None
+    return game.current_price(card_id, finish) if game else None
+
+
+def finish_unfinished_repricing():
+    """The schedule's tick: a repricing that failed (a change of source half-done, new prices not followed) is tried again
+    - nothing schedules it otherwise until the next update or start"""
+    if price_transition() is not None or reprice_pending():
+        reprice_collections(games.active())
+
+
+def price_transition():
+    """The sources an unfinished change of price source went through (PRICE_TRANSITION_KEY), the first the one it came
+    from; None when there is none"""
+    pending = app_settings.get(PRICE_TRANSITION_KEY) if app_settings else None
+    sources = pending.get('sources') if isinstance(pending, dict) else None
+    sources = [source for source in sources if prices.known(source)] if isinstance(sources, list) else []
+    return sources or None
+
+
+def reprice_collections(game, strict=False):
+    """
+    After a card data update, a price update or a change of price source: the collection's and the scanned cards' entries
+    take their printing's price in the card data as it is now (Game.price_changes). Until 2026-10-23 an entry kept the
+    price of the day it was added, for good. While a change of source has not finished (price_transition), the entries
+    the source now chosen cannot price lose their price - any of them may hold the number of a source the change went
+    through - and, if any of those sources had another currency, so do the entries that do not know their printing. The
+    change counts as finished only once both inventories are done. Not the digital collection (Arena cards have no price,
+    on purpose: arena_api.py) nor other people's (theirs is what they offered). Under pricing_lock. A failure is logged
+    and leaves the old prices (and an unfinished change still to be finished); strict: it is raised, for the change of
+    source to answer it. Returns (entries priced again, entries whose price was taken away).
+    """
+    with pricing_lock:
+        try:
+            # This repricing's own entry, and the changes it follows: those done before it began - forgotten below, only once
+            # both inventories are priced; a change still running keeps its entry (its own repricing comes after it)
+            own = begin_price_change()
+            price_change_done(own)
+            followed = [token for token, state in _pending().items() if state == 'done']
+            went_through = price_transition()
+            chosen = database.price_source
+            # Unfinished: whatever an entry holds may be any of these sources' number - kept only where the chosen one has
+            # its own (conservative: a change back to where it began also clears what that source cannot price)
+            new_source = went_through is not None
+            new_currency = new_source and any(prices.source(source)['currency'] != prices.source(chosen)['currency']
+                                              for source in went_through)
+            changed = cleared = 0
+            # Both inventories in ONE pass inside the barrier, from the first price worked out to the notes forgotten: copies
+            # that move between them (scanned cards added to the collection: take_from, under the barrier too) must not go
+            # from the inventory not priced yet to the one priced already - they would keep their old price, maybe in the
+            # old currency, and the change be noted as finished (a Codex review of 2026-10-24). It also keeps a full backup
+            # (backups.create_full) from copying half a repricing. Lock order: pricing_lock, then the barrier - always
+            with maintenance_barrier:
+                for name, store in (('collection', inventory), ('scan', scan_inventory)):
+                    if store:
+                        # Its lock from the entries read to their prices written: no edit in between (InventoryManager.exclusive).
+                        # Only the card data is read meanwhile, with no SQLite write lock held: no cycle with a change of source
+                        with store.exclusive():
+                            new_prices, unpriced = game.price_changes(store, new_source, new_currency)
+                            # One transaction per inventory: done whole (and noted so - its prices are shown again) or not at all
+                            priced, taken = store.apply_prices(new_prices, unpriced)
+                            if went_through is not None:
+                                # Noted under the same lock the readers ask "withheld?" under, with the rows they read
+                                # (InventoryManager.get_stats / get_all_cards): new prices and "shown again" are one moment
+                                transition_done(name)
+                        changed, cleared = changed + priced, cleared + taken
+                if went_through is not None:
+                    app_settings.set(PRICE_TRANSITION_KEY, None)    # both inventories done: the change is finished
+                for token in followed:
+                    price_change_dropped(token)
+            logger.info(f"{game.label}: {changed} entries priced again" + (f", {cleared} without a price in the new source" if cleared else ''))
+            if changed or cleared:
+                # The pages that show totals or lists reload them (scanner.js, collection.js, decks.js)
+                socketio.emit('inventory_prices_updated', {'stats': scan_inventory.get_stats(game.id)}, namespace='/')
+            return changed, cleared
+        except Exception as e:
+            logger.exception(f"{game.label}: the entries could not be priced again: {e}")
+            if strict:
+                raise
+            return 0, 0
+
+
+def resume_price_transition():
+    """At start: a change of price source, or a repricing, that a failure or a stop left unfinished is finished (in the
+    background)"""
+    for token, state in _pending().items():
+        if state == 'running':
+            price_change_done(token)         # stopped before or after its change: priced again either way, to be sure
+    if price_transition() is not None or reprice_pending():
+        logger.info(f"Prices: finishing an unfinished repricing" + (f" (the change through {', '.join(price_transition())} to "
+                                                                   f"{database.price_source})" if price_transition() else ''))
+        threading.Thread(target=reprice_collections, args=(games.active(),), daemon=True, name='price-transition').start()
 
 
 def check_card_data_updates():
@@ -253,7 +428,8 @@ def schedule_tick(check_due, downloads_due):
     """
     steps = [('update check', check_card_data_updates)] if check_due else []
     if downloads_due:
-        steps += [('automatic card data update', scheduled_card_data_updates), ('automatic picture index update', scheduled_index_update)]
+        steps += [('automatic card data update', scheduled_card_data_updates), ('automatic picture index update', scheduled_index_update),
+                  ('automatic price update', scheduled_shop_price_update), ('unfinished repricing', finish_unfinished_repricing)]
     for name, step in steps:
         try:
             step()
@@ -534,6 +710,150 @@ def image_index_stop():
 
 
 # ============================================================================
+# The shops' prices (core/shop_prices.py): MTGJSON's file of the day - Card Kingdom's and Mana Pool's prices - downloaded
+# when the person asks (Settings > Card data > Prices) or on its own schedule (docs/plans/PRICE_SOURCES_PLAN.md, phase 3).
+# About 16 MB; nothing is downloaded while MTGJSON's date is the one in use. A shop's source in use is applied again and
+# the entries priced again when new prices come in.
+# ============================================================================
+
+shop_state = {'running': False, 'message': '', 'error': None, 'result': None}
+shop_lock = threading.Lock()
+PRICES_SCHEDULE_HOURS = (0, 24, 72, 168)       # 0: off; a day, three days, a week
+PRICES_AUTO_LAST_KEY = 'shop_prices_auto_last'  # data/settings.json: {'at', 'ok', 'message'} of the last automatic update
+
+
+def shop_prices_status():
+    """The shops' prices: MTGJSON's date of those in use, when they came, how many printings, and an update's progress"""
+    info = (database.get_data_info(shop_prices.INFO_KEY) if database else None) or {}
+    with shop_lock:
+        state = dict(shop_state)
+    return {**state, 'date': info.get('source_updated'), 'downloaded_at': _shown(_parse_time(info.get('downloaded_at'))),
+            'printings': database.shop_priced_printings() if database else 0}
+
+
+def start_shop_price_update(force=False, on_done=None):
+    """
+    Download the shops' prices of the day in the background (shop_prices.import_prices); False when an update runs
+    already. on_done(ok, message) once at the end - ok True also when MTGJSON had nothing newer. After new prices: when a
+    shop's source is the one shown, the entries are priced again (its prices are applied by replace_shop_prices itself).
+    """
+    with shop_lock:
+        if shop_state['running']:
+            return False
+        shop_state.update(running=True, message='Starting', error=None, result=None)
+
+    def progress(message):
+        with shop_lock:
+            shop_state['message'] = message
+        logger.info(f"Shop prices: {message}")
+
+    def task():
+        ok, message = False, ''
+        try:
+            change = begin_price_change()       # the swap may change the shown prices: noted before it (REPRICE_PENDING_KEY)
+            try:
+                date, count = shop_prices.import_prices(database, progress, force=force)
+                ok, message = True, f"Prices of {date}: {count:,} printings"
+                price_change_done(change)       # in, whatever the source is now (it may have changed during the download)
+            except shop_prices.NothingNew as e:
+                ok, message = True, str(e)
+                price_change_dropped(change)
+            except Exception:
+                price_change_dropped(change)    # nothing was swapped in: replace_shop_prices is whole or nothing
+                raise
+            if reprice_pending() or price_transition() is not None:
+                # New prices in, or an earlier repricing unfinished (also when MTGJSON had nothing new): a failure here is
+                # the update's failure, and the note stays for the next one
+                try:
+                    reprice_collections(games.active(), strict=True)
+                except Exception as e:
+                    ok, message = False, f"The prices are in, but the cards could not be priced again ({e}): tried again at the next update"
+        except Exception as e:
+            logger.exception(f"Shop prices: the update failed: {e}")
+            message = str(e)
+        finally:
+            with shop_lock:
+                shop_state.update(running=False, message='', error=None if ok else message, result=message)
+            if on_done:
+                try:
+                    on_done(ok, message)
+                except Exception as e:
+                    logger.exception(f"Shop prices: the end of the update could not be noted: {e}")
+
+    threading.Thread(target=task, daemon=True, name='shop-prices').start()
+    return True
+
+
+def prices_schedule():
+    """Every how many hours the shops' prices are downloaded on their own (0: off, the default) - the person's choice"""
+    value = app_settings.get('prices_every_hours', 0) if app_settings else 0
+    # As card_data_schedule: anything but one of the listed numbers is off
+    if isinstance(value, bool) or value not in PRICES_SCHEDULE_HOURS:
+        return 0
+    return value
+
+
+def last_price_attempt():
+    attempt = app_settings.get(PRICES_AUTO_LAST_KEY) if app_settings else None
+    return attempt if isinstance(attempt, dict) else None
+
+
+def shop_prices_due(now, every_hours):
+    """
+    Whether the schedule should download the shops' prices now: on; no price update and no card data download running;
+    the prices in use came every_hours ago or longer (or there are none); no automatic attempt in the last hour. MTGJSON's
+    new file is out by about 06:15 UTC (2026-10-23 and -24; its FAQ says 9:00 AM EST): a try before it finds MTGJSON's
+    date unchanged, costs one small request (Meta.json), and the hour's back-off brings the next try.
+    """
+    if not every_hours or not database:
+        return False
+    with shop_lock:
+        if shop_state['running']:
+            return False
+    if data_updates_running:
+        return False
+    came = _parse_time((database.get_data_info(shop_prices.INFO_KEY) or {}).get('downloaded_at'))
+    if came is not None and now - came < timedelta(hours=every_hours):
+        return False
+    attempt = _parse_time((last_price_attempt() or {}).get('at'))
+    return attempt is None or now - attempt >= AUTO_RETRY_AFTER
+
+
+def scheduled_shop_price_update(now=None):
+    """Start the automatic price update when it is due (shop_prices_due); True when one was started"""
+    every_hours = prices_schedule()
+    if not every_hours or not app_settings:
+        return False
+    now = now or datetime.now()
+    if not shop_prices_due(now, every_hours):
+        return False
+    previous = last_price_attempt()
+
+    def done(ok, message):
+        app_settings.set(PRICES_AUTO_LAST_KEY, {'at': now.isoformat(timespec='seconds'), 'ok': ok, 'message': message})
+
+    # Noted before it starts, as the card data's: a server stopped in the middle still counts it for the back-off
+    app_settings.set(PRICES_AUTO_LAST_KEY, {'at': now.isoformat(timespec='seconds'), 'ok': None, 'message': ''})
+    if not start_shop_price_update(on_done=done):
+        app_settings.set(PRICES_AUTO_LAST_KEY, previous)    # the button's update began meanwhile: not the schedule's
+        return False
+    logger.info(f"Shop prices: automatic update (every {every_hours} h)")
+    return True
+
+
+@app.route('/api/prices/update', methods=['POST'])
+@guarded
+def shop_price_update():
+    """Download the shops' prices of the day (background; GET /api/prices/source says how far). Guarded, like the other
+    downloads the Settings page starts (image_index_update): it changes every entry's price when a shop is the source"""
+    if not database:
+        return jsonify({'success': False, 'message': 'The card data is not ready'}), 503
+    if not start_shop_price_update(force=bool((request.get_json(silent=True) or {}).get('force'))):
+        return jsonify({'success': False, 'message': 'The prices are being updated already'}), 409
+    return jsonify({'success': True, **price_source_state()})
+
+
+# ============================================================================
 # The two schedules on the Settings page (docs/plans/UPDATE_SCHEDULE_PLAN.md, phase 3): what they are, how the last automatic
 # run ended and when the next is due; and the change, which needs the settings password - turning on downloads the server
 # makes on its own is the same kind of decision as the picture index's button (image_index_update), which is guarded too.
@@ -574,26 +894,39 @@ def index_next_due(every_hours):
     return attempt + timedelta(hours=every_hours) if attempt else datetime.now()
 
 
+def prices_next_due(every_hours):
+    """When the schedule will next look at MTGJSON's prices (shop_prices_due's rules turned into a time), or None when off"""
+    if not every_hours:
+        return None
+    came = _parse_time((database.get_data_info(shop_prices.INFO_KEY) or {}).get('downloaded_at')) if database else None
+    attempt = _parse_time((last_price_attempt() or {}).get('at'))
+    times = [moment for moment in (came and came + timedelta(hours=every_hours), attempt and attempt + AUTO_RETRY_AFTER) if moment]
+    return max(times) if times else datetime.now()
+
+
 def update_schedule_state():
-    """What the Settings page shows of the two schedules: the choice, the choices, the last automatic run and the next (the active game's card data)"""
+    """What the Settings page shows of the schedules: the choice, the choices, the last automatic run and the next (the active game's card data)"""
     game = games.active()
-    card_hours, index_hours = card_data_schedule(), index_schedule()
+    card_hours, index_hours, price_hours = card_data_schedule(), index_schedule(), prices_schedule()
     return {
         'card_data': {'every_hours': card_hours, 'choices': list(CARD_DATA_SCHEDULE_HOURS), 'game': game.label,
                       'last': _shown_attempt(last_auto_attempt(game.id)), 'next': _shown(card_data_next_due(game, card_hours))},
         'image_index': {'every_hours': index_hours, 'choices': list(INDEX_SCHEDULE_HOURS),
                         'min_coverage': INDEX_AUTO_MIN_COVERAGE,
                         'last': _shown_attempt(last_index_attempt()), 'next': _shown(index_next_due(index_hours))},
+        'prices': {'every_hours': price_hours, 'choices': list(PRICES_SCHEDULE_HOURS),
+                   'last': _shown_attempt(last_price_attempt()), 'next': _shown(prices_next_due(price_hours))},
     }
 
 
 SCHEDULE_FIELDS = {'card_data': ('card_data_every_hours', CARD_DATA_SCHEDULE_HOURS),
-                   'image_index': ('image_index_every_hours', INDEX_SCHEDULE_HOURS)}
+                   'image_index': ('image_index_every_hours', INDEX_SCHEDULE_HOURS),
+                   'prices': ('prices_every_hours', PRICES_SCHEDULE_HOURS)}
 
 
 def parse_update_schedule(data):
     """
-    The settings in a request to change the schedules ({'card_data', 'image_index'}: hours, each optional) as {setting key:
+    The settings in a request to change the schedules ({'card_data', 'image_index', 'prices'}: hours, each optional) as {setting key:
     value} - or ValueError before anything is saved (as backups.parse_schedule): a request refused for one value changes
     nothing. A boolean is refused although Python counts True as 1, and so is a number that is not one of the choices.
     """
@@ -618,7 +951,7 @@ def price_source_state():
     # 'priced': how many printings each source has a price for - 0 means not choosable until the card data is downloaded again
     choices = [{**choice, 'priced': database.priced_printings(choice['id'])} for choice in prices.choices()]
     return {'source': database.price_source, 'currency': chosen['currency'], 'symbol': chosen['symbol'],
-            'from': chosen['from'], 'choices': choices}
+            'from': chosen['from'], 'choices': choices, 'shops': shop_prices_status()}
 
 
 @app.route('/api/prices/source')
@@ -637,17 +970,60 @@ def set_price_source():
     source_id = (request.get_json(silent=True) or {}).get('source')
     if not prices.known(source_id):
         return jsonify({'success': False, 'error': 'Unknown price source'}), 400
-    if not database.priced_printings(source_id):
-        # Card data from before its prices were kept: every card would show the new currency with the old number
-        return jsonify({'success': False, 'error': 'The card data has no prices from that source yet: update the card database first'}), 409
-    app_settings.set('price_source', source_id)
-    database.set_price_source(source_id)
-    changed = reprice_collections(games.active())
     chosen = prices.source(source_id)
-    # Every page shows prices: they take the new currency (common.js: priceSymbol) and reload their totals
+    if not database.priced_printings(source_id):
+        # Card data from before its prices were kept, or no shop prices downloaded yet: every card would show the new
+        # currency with the old number, or nothing at all
+        first = 'update the prices first' if chosen['kind'] == 'shops' else 'update the card database first'
+        return jsonify({'success': False, 'error': f'There are no prices from that source yet: {first}'}), 409
+    with pricing_lock:
+        # Remembered BEFORE anything changes - the source shown now and this one, added to an earlier change that is still
+        # unfinished: a failure or a stop below leaves it for the next repricing to finish (price_transition)
+        before = app_settings.get(PRICE_TRANSITION_KEY)
+        went_through = price_transition() or ([database.price_source] if database.price_source != source_id else [])
+        previous = database.price_source
+        try:
+            if went_through:
+                # A new target: no inventory is repriced for it yet ('done' starts empty - each must be priced again and
+                # is withheld until it is). On disk BEFORE anything changes: a restart must know of the change
+                _durable(PRICE_TRANSITION_KEY, {'sources': went_through + [source_id]})
+        except Exception as e:
+            logger.exception(f"Price source: the change could not be noted: {e}")
+            return jsonify({'success': False, 'error': f'The settings could not be saved ({e}); nothing was changed'}), 500
+        try:
+            # All or nothing: the source is recorded only once its prices are in the shown columns (set_price_source)
+            database.set_price_source(source_id)
+        except Exception as e:
+            # The shown prices never changed, so nothing written meanwhile took the new source's: the note as it was
+            logger.exception(f"Price source: {source_id} could not be applied: {e}")
+            app_settings.set(PRICE_TRANSITION_KEY, before)
+            return jsonify({'success': False, 'error': f'The prices could not be changed ({e}); nothing was changed'}), 500
+        try:
+            # On disk too, or a restart would show the earlier source over prices of this one
+            _durable('price_source', source_id)
+        except Exception as e:
+            # Undone - which is itself a change of source: between the UPDATE and now an entry may have been written at the
+            # new source's price (InventoryManager._priced). The note, on disk already and naming this source, is KEPT, and
+            # the entries repriced back; a repricing that fails leaves it for the next one (a Codex review of 2026-10-24)
+            logger.exception(f"Price source: {source_id} could not be saved, going back to {previous}: {e}")
+            database.set_price_source(previous)
+            reprice_collections(games.active())
+            return jsonify({'success': False, 'error': f'The choice could not be saved ({e}); the prices are back to '
+                                                       f"{prices.source(previous)['label']}"}), 500
+        try:
+            # The entries the new source cannot price lose their price - with a new currency also those imported without
+            # their printing (Game.price_changes)
+            changed, cleared = reprice_collections(games.active(), strict=True)
+        except Exception:
+            changed = None
+    # Every page shows prices: they take the new currency (common.js: priceSymbol) and reload their totals - also when the
+    # repricing failed: the source and the card data's prices did change
     socketio.emit('price_source_changed', {'source': source_id, 'currency': chosen['currency'], 'symbol': chosen['symbol']}, namespace='/')
-    logger.info(f"Price source: {source_id}, {changed} entries priced again")
-    return jsonify({'success': True, 'repriced': changed, **price_source_state()})
+    if changed is None:
+        return jsonify({'success': False, 'error': 'The source is changed, but not every card could be priced again: '
+                                                   'it is finished at the next update or start, or by choosing it again'}), 500
+    logger.info(f"Price source: {source_id}, {changed} entries priced again, {cleared} left without a price")
+    return jsonify({'success': True, 'repriced': changed, 'unpriced': cleared, **price_source_state()})
 
 
 @app.route('/api/updates/schedule')
@@ -659,12 +1035,14 @@ def update_schedule():
 @app.route('/api/updates/schedule', methods=['POST'])
 @guarded
 def set_update_schedule():
-    """Change how often the card data is downloaded and the picture index goes back to what is missing (JSON: 'card_data', 'image_index': hours, 0 off)"""
+    """Change how often the card data is downloaded, the picture index goes back to what is missing and the shops' prices
+    are downloaded (JSON: 'card_data', 'image_index', 'prices': hours, 0 off)"""
     try:
         changes = parse_update_schedule(request.get_json(silent=True))    # all of it checked before any of it is saved
     except ValueError:
         return jsonify({'success': False, 'error': 'Unknown update interval'}), 400
     for key, value in changes.items():
         app_settings.set(key, value)
-    logger.info(f"Automatic updates: card data every {card_data_schedule()} h, picture index every {index_schedule()} h (0: off)")
+    logger.info(f"Automatic updates: card data every {card_data_schedule()} h, picture index every {index_schedule()} h, "
+                f"shop prices every {prices_schedule()} h (0: off)")
     return jsonify({'success': True, **update_schedule_state()})

@@ -21,7 +21,11 @@ nothing there.
 | `propose_deck_changes(deck, add, remove)` | what adding / removing cards would do: legal? in colours? owned? used by other decks? - **changes nothing** |
 | `search_collection(text, set_code, rarity, card_type, tag, location, in_a_deck, limit)` | the cards you own |
 | `find_card(name)` | copies owned (printing, finish, location), decks using them, the card's text |
-| `collection_summary()` | cards, value, biggest sets, rarities, types, locations |
+| `collection_summary()` | cards, value (and its currency), biggest sets, rarities, types, locations |
+
+Every answer says the currency of its prices (`prices_in`: `USD` or `EUR`, the price source chosen in the scanner's
+Settings; `USD` for a scanner from before that choice existed - one that answers 404 for it; `unknown` when the question
+failed otherwise, a time-out or an error: never a guess).
 
 `deck` is a name (or part of it), a commander, or an id. If it matches several decks the tool says which.
 

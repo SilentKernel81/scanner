@@ -454,6 +454,13 @@
    "set_price_source"
   ],
   [
+   "/api/prices/update",
+   [
+    "POST"
+   ],
+   "shop_price_update"
+  ],
+  [
    "/api/prompts",
    [
     "GET"

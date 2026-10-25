@@ -15,6 +15,32 @@ import time
 from scanner_api import ScannerError
 
 # ----------------------------------------------------------------------------
+# The currency of every price
+# ----------------------------------------------------------------------------
+
+
+def currency(api):
+    """
+    The currency the server's prices are in ('USD', 'EUR': Settings > Card data > Prices). Only a server that has no such
+    route (404: from before the choice existed, 2026-10-24) is known to price in TCGplayer's dollars; any other failure -
+    a time-out, the server away, an error - says 'unknown', never a guess (a Codex review of 2026-10-24: euros were
+    labelled dollars when the question failed)
+    """
+    try:
+        return api.get('/api/prices/source').get('currency') or 'unknown'
+    except ScannerError as e:
+        return 'USD' if e.status == 404 else 'unknown'
+
+
+def with_currency(api, answer):
+    """A tool's answer with the currency of its prices beside them ('prices_in'): a bare number in euros would be read as
+    dollars. card_scanner_mcp.py adds it to every answer"""
+    if isinstance(answer, dict):
+        return {**answer, 'prices_in': currency(api)}
+    return answer
+
+
+# ----------------------------------------------------------------------------
 # Finding a deck, a card
 # ----------------------------------------------------------------------------
 
@@ -338,7 +364,7 @@ def collection_summary(api, top=8):
                 return kind
         return 'Other'
     return {'cards': stats.get('total_cards'), 'different_entries': stats.get('unique_cards'),
-            'value_usd': stats.get('total_value'),
+            'value': stats.get('total_value'), 'currency': currency(api),
             'by_set': tally(lambda card: card.get('set_name') or '?')[:top],
             'by_rarity': tally(lambda card: card.get('rarity') or '?'),
             'by_type': tally(main_type),

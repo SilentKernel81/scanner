@@ -52,8 +52,9 @@ CARDS = {c['name'].lower(): c for c in (
 class FakeApi:
     """The server's answers for the paths the tools use; counts what was written (nothing should be)"""
 
-    def __init__(self):
+    def __init__(self, currency='EUR'):
         self.posts = []
+        self.currency = currency
 
     def get(self, path, **params):
         if path == '/api/decks':
@@ -64,6 +65,14 @@ class FakeApi:
             return {'cards': INVENTORY}
         if path == '/api/stats':
             return {'collection': {'total_cards': 4, 'unique_cards': 3, 'total_value': 12.0}}
+        if path == '/api/prices/source':
+            if self.currency is None:                    # a server from before the price sources: no such route
+                raise ScannerError('The scanner server answered 404 for /api/prices/source', status=404)
+            if self.currency == 'away':                  # a time-out, the server away: no answer at all
+                raise ScannerError('Could not reach the scanner server')
+            if self.currency == 500:
+                raise ScannerError('The scanner server answered 500 for /api/prices/source', status=500)
+            return {'success': True, 'source': 'scryfall_eur', 'currency': self.currency, 'symbol': '€'}
         if path == '/api/cards/search':
             name = (params.get('q') or '').lower()
             found = [c for key, c in CARDS.items() if name in key]
@@ -162,6 +171,18 @@ class Tools(unittest.TestCase):
         self.assertEqual((found['name'], found['copies_owned']), ('Sol Ring', 3))
         summary = tools.collection_summary(self.api)
         self.assertEqual((summary['cards'], summary['in_a_deck']), (4, 3))
+        self.assertEqual((summary['value'], summary['currency']), (12.0, 'EUR'))   # 'value_usd' until 2026-10-24
+
+    def test_every_answer_names_the_currency_of_its_prices(self):
+        # card_scanner_mcp.py passes each tool's answer through with_currency: a number in euros must not read as dollars
+        answer = tools.with_currency(self.api, tools.missing_cards(self.api, '7'))
+        self.assertEqual(answer['prices_in'], 'EUR')
+        self.assertIn('cost_of_the_missing', answer)
+        # A server from before the price sources (no route): its prices are dollars
+        self.assertEqual(tools.with_currency(FakeApi(currency=None), {'decks': []})['prices_in'], 'USD')
+        # Any other failure of the question: unknown - euros never labelled dollars (a Codex review of 2026-10-24)
+        self.assertEqual(tools.with_currency(FakeApi(currency='away'), {'decks': []})['prices_in'], 'unknown')
+        self.assertEqual(tools.with_currency(FakeApi(currency=500), {'decks': []})['prices_in'], 'unknown')
 
     def test_what_can_i_build_starts_a_search_and_returns_what_it_has(self):
         api = self.api

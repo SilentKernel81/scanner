@@ -63,8 +63,8 @@ class Settings:
             print(f"Error loading settings: {e}")
             return self.DEFAULT_SETTINGS.copy()
 
-    def _save_settings(self, settings):
-        """Save settings to JSON file"""
+    def _save_settings(self, settings, strict=False):
+        """Save settings to JSON file. A failure is printed and forgotten - or, strict, raised (set_durably)"""
         try:
             # Ensure data directory exists
             Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,6 +79,8 @@ class Settings:
                     os.fsync(f.fileno())
                 os.replace(temporary, self.SETTINGS_FILE)
         except Exception as e:
+            if strict:
+                raise
             print(f"Error saving settings: {e}")
 
     def get(self, key, default=None):
@@ -89,6 +91,24 @@ class Settings:
         """Set a setting value and save"""
         self.settings[key] = value
         self._save_settings(self.settings)
+
+    def set_durably(self, key, value):
+        """
+        Set a value that must be on disk before what depends on it goes on (the price source and the notes of a change of
+        it: server/card_data.py): a failed write is RAISED, and the value in memory is put back - never a choice that a
+        restart would forget while what it changed stays (a Codex review of 2026-10-24)
+        """
+        missing = object()
+        before = self.settings.get(key, missing)
+        self.settings[key] = value
+        try:
+            self._save_settings(self.settings, strict=True)
+        except BaseException:
+            if before is missing:
+                self.settings.pop(key, None)
+            else:
+                self.settings[key] = before
+            raise
 
     def get_ai_provider(self):
         """Get saved AI provider"""

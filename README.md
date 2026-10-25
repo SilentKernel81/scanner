@@ -613,6 +613,7 @@ before 2026-10-19 were released under the MIT license, and copies of those stay 
 ## Acknowledgments
 
 - Card data, prices and images: [Scryfall](https://scryfall.com)
+- Card Kingdom's and Mana Pool's prices: [MTGJSON](https://mtgjson.com) (MIT License, © Zach Halpern)
 - Deck ideas and deck lists: [EDHREC](https://edhrec.com) (cards played with a commander),
   [MTGJSON](https://mtgjson.com) (preconstructed decks), [Archidekt](https://archidekt.com)
   and [Moxfield](https://moxfield.com) (public decks, and decks imported by their address)

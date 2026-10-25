@@ -321,9 +321,10 @@ def clean_tags(tags):
     return result
 
 
-def _row_dict(row, batches=()):
+def _row_dict(row, batches=(), withheld=False):
     """
-    Inventory row as sent to the web page and the exporters. batches: the entry's
+    Inventory row as sent to the web page and the exporters. withheld: its price is not shown (0) - the inventory's prices
+    are of another currency than the one shown, until a change of price source has repriced it (prices_withheld). batches: the entry's
     inventory_batches rows, newest first - 'batches' lists them ([{'batch', 'added_at',
     'quantity'}]); 'added_at' / 'added_quantity' are the newest one's (0 copies: what the
     entry holds was there before every batch known)
@@ -343,7 +344,7 @@ def _row_dict(row, batches=()):
         'mana_cost': row['mana_cost'] or '',
         'colors': row['colors'] or '',
         'color_identity': row['color_identity'] or '',
-        'price': row['price_usd'] or 0.0,
+        'price': 0.0 if withheld else (row['price_usd'] or 0.0),
         'quantity': row['quantity'],
         'condition': row['condition'],
         'finish': row['finish'],
@@ -451,6 +452,19 @@ class InventoryManager(storage.Transactional):
         # source None is the scanner page; a station (stations.py) is its id
         self.last_added = {}
         self._doomed = []  # thumbnails of captures deleted in the open transaction (_commit)
+        # The currency symbol of the prices, for the activity log's lines: '' here (the inventory does not know the price
+        # source), the card data's price_symbol in the server (startup.py)
+        self.price_symbol = lambda: ''
+        # Whether this inventory's prices are of another currency than the one shown: a change of price source to another
+        # currency has not repriced it yet (it failed half-way, and is finished by the next repricing). Its entries then
+        # show no price and its totals 0, never old dollars as euros. False here; the server's in startup.py
+        self.prices_withheld = lambda: False
+        # The price of a printing in a finish as the card data says it NOW: (game, card_id, finish) -> price, or None (no
+        # opinion: the price given is kept). Asked at the moment an entry that knows its printing is written, under this
+        # inventory's lock - which a repricing needs too: a price read earlier by the caller (a card shown on the scanner
+        # page before a change of price source, an edit's read) is never written in another currency than the one shown
+        # (a Codex review of 2026-10-24). None here; the card data's in the server (startup.py)
+        self.current_price = lambda game, card_id, finish: None
         self.conn = storage.connect(self.db_file)
         self._initialize_table()
         self._add_constraints()
@@ -879,10 +893,26 @@ class InventoryManager(storage.Transactional):
         self.conn.execute('DELETE FROM inventory_batches')
         self.conn.execute(BACKFILL_BATCHES)
 
+    def _priced(self, values, moving=False):
+        """
+        An entry's values with the price its printing has in the card data now (current_price), when it knows its printing
+        and the card data has it; else as given (a CSV import of an unknown printing keeps the price it came with).
+        moving: an entry that exists already, moved as it is (to the collection, or its copies to another location or
+        condition - the same printing and finish): when the card data has no quote for it today (0), it keeps its own
+        price, as a repricing leaves it (Game.current_prices: no price today is not "worthless"; a Codex review of
+        2026-10-24). A new entry takes the 0: that is what reading its price now gives, and a price its caller read
+        earlier may be of a source chosen before.
+        """
+        if values.get('card_id'):
+            price = self.current_price(values.get('game'), values['card_id'], values.get('finish'))
+            if price is not None and not (moving and not price and values.get('price_usd')):
+                return {**values, 'price_usd': float(price)}
+        return values
+
     def _upsert(self, values, batch=None, added_at=None):
         """Put copies in (merged with the entry that has their key); with a batch, noted as
         part of it. Returns the entry's id"""
-        self.conn.execute(UPSERT, values)
+        self.conn.execute(UPSERT, self._priced(values))
         row_id = self.conn.execute(
             f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
             [values[c] for c in KEY_COLUMNS]).fetchone()['id']
@@ -1020,7 +1050,7 @@ class InventoryManager(storage.Transactional):
         values['added_at'] = added_at
         thumbnail = self._make_thumbnail(capture) if capture else None
         with self._lock:
-            self.conn.execute(UPSERT, values)
+            self.conn.execute(UPSERT, self._priced(values))
             row = self.conn.execute(
                 f"SELECT id, quantity FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                 [values[c] for c in KEY_COLUMNS]).fetchone()
@@ -1050,7 +1080,7 @@ class InventoryManager(storage.Transactional):
             self.last_added[source] = (row['id'], quantity, capture_id, batch)
         if not quiet:
             self.log(f"Added to inventory: {quantity}x {values['card_name']} ({finish}) - "
-                     f"{values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
+                     f"{self.price_symbol()}{values['price_usd'] * row['quantity']:.2f} for {row['quantity']}", level="success")
         return row['id']
 
     @_writes
@@ -1096,6 +1126,43 @@ class InventoryManager(storage.Transactional):
         with self._lock:
             return [dict(row) for row in self.conn.execute(
                 "SELECT id, card_id, finish, price_usd FROM inventory WHERE game = ? AND COALESCE(card_id, '') != ''", (game,))]
+
+    def unpriceable_entries(self, game):
+        """[{'id', 'card_id', 'finish'}] of a game's entries that do not know their printing (CSV imports of an unknown
+        printing): no card data can price them, so a change of currency can only take their price away (clear_prices)"""
+        with self._lock:
+            return [dict(row) for row in self.conn.execute(
+                "SELECT id, card_id, finish FROM inventory WHERE game = ? AND COALESCE(card_id, '') = ''", (game,))]
+
+    @_writes
+    def clear_prices(self, entries):
+        """
+        No price any more for these entries: {row id: (card_id, finish)}, after a change of currency, for the entries the
+        new source cannot price - their number was in the old currency, and would be shown and added up in the new one. As
+        reprice(): only while an entry is still that printing in that finish (an edit made meanwhile was priced in the new
+        currency). One transaction; returns how many entries lost a price.
+        """
+        cleared = 0
+        with self._lock:
+            for row_id, (card_id, finish) in entries.items():
+                cleared += self.conn.execute(
+                    "UPDATE inventory SET price_usd = NULL WHERE id = ? AND COALESCE(card_id, '') = COALESCE(?, '') "
+                    "AND finish = ? AND price_usd IS NOT NULL", (row_id, card_id, finish)).rowcount
+            self._commit()
+        return cleared
+
+    def exclusive(self):
+        """This inventory's lock, as a context manager: every change of it holds the lock for its whole run. A repricing
+        holds it from reading the entries to writing their prices (server/card_data.py: reprice_collections) - an edit in
+        between (copies split off to another location) made a row the repricing never saw, which kept the old currency
+        (a Codex review of 2026-10-24)"""
+        return self._lock
+
+    @_writes
+    def apply_prices(self, prices, cleared):
+        """reprice(prices) and clear_prices(cleared) in ONE transaction: an inventory is repriced whole or not at all - a
+        change of price source counts it as done only then (server/card_data.py). Returns (priced again, cleared)"""
+        return self.reprice(prices), self.clear_prices(cleared) if cleared else 0
 
     @_writes
     def reprice(self, prices):
@@ -1317,19 +1384,21 @@ class InventoryManager(storage.Transactional):
         if station:
             with self._lock:
                 rows = self._station_rows(game, station)
+                withheld = self.prices_withheld()      # with the rows, under the lock a repricing holds
             captures = self.captures_by_entry(game, station)
             # 'shared': another camera (or a manual add) has copies in the same entry - the page
             # then offers no edit / delete, which would act on the whole entry
             batches = self.batches_by_entry(game)
-            return [{**_row_dict(row, batches.get(row['id'], ())), 'quantity': copies, 'entry_quantity': row['quantity'],
+            return [{**_row_dict(row, batches.get(row['id'], ()), withheld), 'quantity': copies, 'entry_quantity': row['quantity'],
                      'shared': copies != row['quantity'], 'captures': captures.get(row['id'], [])}
                     for row, copies in rows]
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
         with self._lock:
             rows = self.conn.execute(f'SELECT * FROM inventory {where} ORDER BY timestamp DESC, id DESC', params).fetchall()
+            withheld = self.prices_withheld()          # with the rows, under the lock a repricing holds
         captures = self.captures_by_entry(game)
         batches = self.batches_by_entry(game)
-        return [{**_row_dict(row, batches.get(row['id'], ())), 'captures': captures.get(row['id'], [])} for row in rows]
+        return [{**_row_dict(row, batches.get(row['id'], ()), withheld), 'captures': captures.get(row['id'], [])} for row in rows]
 
     def owned_by_name(self, game):
         """{search_key(card name): copies owned} over every printing, finish and location"""
@@ -1373,11 +1442,13 @@ class InventoryManager(storage.Transactional):
         if station:
             with self._lock:
                 rows = self._station_rows(game, station)
+                withheld = self.prices_withheld()      # with the rows, under the lock a repricing holds
             finishes = {}
             for row, copies in rows:
                 finishes[row['finish']] = finishes.get(row['finish'], 0) + copies
             return {'total_cards': sum(copies for _, copies in rows), 'unique_cards': len(rows),
-                    'total_value': sum((row['price_usd'] or 0) * copies for row, copies in rows), 'finishes': finishes}
+                    'total_value': 0 if withheld else sum((row['price_usd'] or 0) * copies for row, copies in rows),
+                    'finishes': finishes, 'prices_pending': withheld}
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
         with self._lock:
             row = self.conn.execute(f'''
@@ -1386,8 +1457,12 @@ class InventoryManager(storage.Transactional):
                 FROM inventory {where}''', params).fetchone()
             finishes = {r['finish']: r['count'] for r in self.conn.execute(
                 f'SELECT finish, SUM(quantity) AS count FROM inventory {where} GROUP BY finish', params)}
+            # Asked with the total, under the same lock: a repricing marks this inventory done while it holds it (card_data:
+            # reprice_collections), so the total and "withheld" are of one moment - never an old total as current (a Codex
+            # review of 2026-10-24)
+            withheld = self.prices_withheld()
         return {'total_cards': row['total_cards'], 'unique_cards': row['unique_cards'],
-                'total_value': row['total_value'], 'finishes': finishes}
+                'total_value': 0 if withheld else row['total_value'], 'finishes': finishes, 'prices_pending': withheld}
 
     def _get_row(self, row_id):
         return self.conn.execute('SELECT * FROM inventory WHERE id = ?', (row_id,)).fetchone()
@@ -1438,7 +1513,9 @@ class InventoryManager(storage.Transactional):
         if price is not None:
             values['price_usd'] = price
         values.pop('id')
-        self.conn.execute(UPSERT, values)
+        # The same printing in the same finish (another location or condition): copies moving as they are (_priced)
+        same = finish == row['finish'] and (printing or {}).get('card_id', row['card_id']) == row['card_id']
+        self.conn.execute(UPSERT, self._priced(values, moving=same))
         target = self.conn.execute(
             f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
             [values[c] for c in KEY_COLUMNS]).fetchone()['id']
@@ -1478,6 +1555,12 @@ class InventoryManager(storage.Transactional):
                     printing = None  # the printing it already is
             new_price = finish_price if finish_price is not None and (new_finish != row['finish'] or printing) \
                 else row['price_usd']
+            card_id = (printing or {}).get('card_id') or row['card_id']
+            if (new_finish != row['finish'] or printing) and card_id:
+                # The caller's finish_price was read before this lock: the card data's price now, when it has one (_priced)
+                now_price = self.current_price(row['game'], card_id, new_finish)
+                if now_price is not None:
+                    new_price = float(now_price)
             if new_quantity < 1:
                 return {'success': False, 'split': False, 'message': 'Quantity must be at least 1'}
 
@@ -1615,7 +1698,14 @@ class InventoryManager(storage.Transactional):
                     values['added_at'] = added_at
                     if location:
                         values['location'] = location
-                    self.conn.execute(UPSERT, values)
+                    # Moving as they are - except out of an inventory whose prices are withheld (a change of currency
+                    # half-done there): its numbers may be of the old currency, so none is carried over - the price is the
+                    # card data's quote now, or none at all (also for a card without its printing, or one the card data
+                    # lacks: a Codex review of 2026-10-24)
+                    withheld = source.prices_withheld()
+                    if withheld:
+                        values['price_usd'] = None
+                    self.conn.execute(UPSERT, self._priced(values, moving=not withheld))
                     target = self.conn.execute(
                         f"SELECT id FROM inventory WHERE {' AND '.join(c + ' = ?' for c in KEY_COLUMNS)}",
                         [values[c] for c in KEY_COLUMNS]).fetchone()['id']

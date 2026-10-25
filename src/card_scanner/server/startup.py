@@ -39,7 +39,7 @@ from card_scanner.server.state import (
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
 from card_scanner.server.captures import resume_pending
-from card_scanner.server.card_data import run_update_schedule, start_card_data_update
+from card_scanner.server.card_data import current_card_price, prices_withheld, resume_price_transition, run_update_schedule, start_card_data_update
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
@@ -98,6 +98,13 @@ def initialize_components():
     services.inventory = InventoryManager(log_callback=log_to_client)
     # Scanned cards wait in their own file: clearing them never touches the collection
     services.scan_inventory = InventoryManager(db_file=SCAN_INVENTORY_FILE, log_callback=log_to_client)
+    # The activity log's "Added to inventory: ... - $3.00" says the chosen price source's currency
+    services.inventory.price_symbol = services.scan_inventory.price_symbol = services.database.price_symbol
+    # An inventory a half-done change of price source has not repriced shows no prices (card_data.prices_withheld)
+    services.inventory.prices_withheld = lambda: prices_withheld('collection')
+    services.scan_inventory.prices_withheld = lambda: prices_withheld('scan')
+    # An entry that knows its printing is written with the card data's price at that moment (InventoryManager._priced)
+    services.inventory.current_price = services.scan_inventory.current_price = current_card_price
     services.inventory.finish_interrupted_moves(services.scan_inventory)  # an "Add to collection" cut short by a crash
     # The digital collection (MTG Arena) in its own file: empty until an export is imported.
     # No log_callback: nothing a camera does reaches it, and its imports report themselves
@@ -276,6 +283,7 @@ def main():
     # Start background cleanup
     run_cleanup_background()
     run_update_schedule()
+    resume_price_transition()   # a change of price source a failure or a stop left unfinished
     run_backup_schedule()
 
     game = games.active()
