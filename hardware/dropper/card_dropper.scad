@@ -59,7 +59,8 @@ nut_t = 2.4;           // ... and its thickness
 rod_d = 8;             // the axles: 8 mm smooth steel rod (silver steel) - the one-way bearings run on it
 bearing_od = 22;       // each axle turns in two 608-2RS ball bearings (8 x 22 x 7), one in each side wall
 bearing_w = 7;
-bearing_fit = 22.05;   // their pocket: a light press fit - TO TUNE on your printer
+bearing_fit = 22.05;   // their pocket: a light press fit - tried with part="bearing_test" (2026-10-29: snug,
+                       // in and out by hand); TO TUNE again on another printer
 axle_x = [12, 50, 95]; // axle 1 (idle, at the back), axle 2 (driven, starts the card), axle 3 (driven,
                        // just behind the gate: card 1 covers it until it has nearly left the stack)
 axle_wheel_y = [24, 12, 24];   // each axle's two wheels at +-y; axle 2's sit inside the others' so the

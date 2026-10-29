@@ -319,8 +319,9 @@ Checked on 2026-10-22/23, with OpenSCAD 2021.01 (Flathub), FreeCAD 1.1.4 and Ble
 through a wheel, the grub screw's nut sits in its slot, the ring stays in its groove. The ring went on **without
 stretching** - the printed groove is likely a little under its 45.5 mm, so the ~3% stretch the design counts on to
 hold the tyre may not be there; it held in the hand test, but a tyre that creeps under load points here (`groove_d`).
-The diameter with the ring is **still to measure** (`wheel_d`, `MM_PER_DEG`). Next: `bearing_test`, with the owner's
-608-2RS bearings.
+The diameter with the ring is **still to measure** (`wheel_d`, `MM_PER_DEG`). Then `bearing_test`, with the owner's
+608-2RS bearings: **22.05 mm is snug** - the bearing goes in and comes out by hand - so `bearing_fit` stays at 22.05
+for the block. Still to see in the block: that the outer ring does not turn in its pocket with the rod spinning.
 
 **Never**: the rest printed, the fits (bearings, one-way bearings, O-rings on the grooves) tried, assembled, calibrated, run on
 a Pico, driven by the station, fed a card - so the grip, the slip, the stop's accuracy, the finish by gravity, the
