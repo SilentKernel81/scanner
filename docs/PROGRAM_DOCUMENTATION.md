@@ -3268,6 +3268,20 @@ calls, an error in the tool's own words) with the library's client against the r
 Not tried: a local model as the client. The server has no login: writes (add / remove a card) are for
 later, one at a time, each confirmed.
 
+**MTG Arena** (since 2026-10-29). The collection tools take `collection='paper'|'arena'` (`?area=arena`:
+the digital collection, `/api/arena` for its wildcards, gold, gems and export date). An Arena deck
+(`kind: arena`) is counted by the server against that collection already; the MCP says its cost in
+wildcards and never in money: `get_deck` / `check_deck` drop the paper prices and add the payload's
+`wildcards`, `missing_cards` reads the decks page's Arena check (`/api/decks/<id>/arena`: the cards to
+craft, wildcards needed and had, cards not on Arena), `propose_deck_changes` works out the wildcards the
+deck would need after the change, and every Arena answer's `prices_in` says there are none. An eleventh
+tool, `search_cards`, is the decks page's card search (`/api/cards/search`: rules text, type, colour
+identity, mana value, rarity, legal in a format, owned only, `kind=arena`). `propose_deck_changes` also
+checks the 4-copy limit of a 60-card deck (basic lands and "any number of cards named" excepted), and
+`suggest_for_deck` says plainly that EDHREC has nothing for a deck without a commander. Tried with the
+tools against the real server's Arena deck #22 (reads only); not tried through a client other than
+Claude Code.
+
 ## Configuration and files
 
 **Where a setting comes from, and which wins** (written 2026-10-16 after an outside review found the

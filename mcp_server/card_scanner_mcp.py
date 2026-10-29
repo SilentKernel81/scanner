@@ -35,6 +35,18 @@ scanner) and help them build and improve decks from the cards they own.
 - Every price is in the currency an answer names in 'prices_in' (US dollars or euros: the user's choice); 'unknown' means
   the scanner could not say - then do not name a currency for those prices.
 - You cannot change the collection or the decks.
+MTG Arena: a deck with kind 'arena' is played in MTG Arena, and the user has TWO collections - the paper
+one and the Arena one (imported from an Arena export; collection_summary(collection='arena') says when).
+- For an Arena deck, 'owned' is the Arena collection, and a missing card costs a WILDCARD of its rarity
+  (basic lands are free), never money: talk in wildcards, compare with the wildcards the user has.
+- Pass collection='arena' to search_collection / find_card / collection_summary / search_cards when the
+  question is about Arena.
+- To find cards for a 60-card deck, use search_cards(collection='arena', deck_format=<the deck's format>,
+  owned_only=true, identity=<its colours>, text=<what the card should do>). suggest_for_deck only knows
+  commander decks (EDHREC).
+- A 60-card deck plays at most 4 copies of a card (basic lands excepted); propose_deck_changes checks it.
+- An Arena deck that came from an Arena export (from_arena_export) is replaced by the next import: the user
+  changes it in Arena itself.
 """
 
 
@@ -73,7 +85,7 @@ def build_server(api):
     @server.tool(annotations=read_only)
     @explained
     def get_deck(deck: str, with_card_text: bool = False) -> dict:
-        """A deck's cards by board (main, commander, side): quantity, copies owned, type, mana cost, price, other decks using the card; plus the format's problems and the totals. `deck` is its name (or part of it), its commander, or its id. with_card_text adds each card's rules text (longer)."""
+        """A deck's cards by board (main, commander, side): quantity, copies owned, type, mana cost, rarity, price (not for an Arena deck), other decks using the card; plus the format's problems and the totals. An Arena deck also has its wildcards (needed / have). `deck` is its name (or part of it), its commander, or its id. with_card_text adds each card's rules text (longer)."""
         return tools.get_deck(api, deck, with_card_text)
 
     @server.tool(annotations=read_only)
@@ -85,7 +97,7 @@ def build_server(api):
     @server.tool(annotations=read_only)
     @explained
     def missing_cards(deck: str) -> dict:
-        """The cards of a deck the user does not own enough copies of, with what the missing ones cost."""
+        """The cards of a deck the user does not own enough copies of, with what the missing ones cost: money for a paper deck; for an Arena deck the cards to craft, the wildcards needed beside the ones the user has, and the cards Arena does not have."""
         return tools.missing_cards(api, deck)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True))
@@ -103,27 +115,37 @@ def build_server(api):
     @server.tool(annotations=read_only)
     @explained
     def propose_deck_changes(deck: str, add: list[dict] | None = None, remove: list[dict] | None = None) -> dict:
-        """Work out what adding / removing cards would do to a deck - NOTHING IS CHANGED. add and remove are lists of {"name": "Card Name", "quantity": 1}. For each card added it says if it exists, is legal in the format, fits the commander's colours, how many copies the user owns and which other decks use it; and the deck's size before and after. The user makes the change on the decks page."""
+        """Work out what adding / removing cards would do to a deck - NOTHING IS CHANGED. add and remove are lists of {"name": "Card Name", "quantity": 1}. For each card added it says if it exists, is legal in the format, fits the commander's colours, the 4-copy limit of a 60-card deck, how many copies the user owns and which other decks use it; and the deck's size before and after. For an Arena deck: the wildcards finishing it would take after the change, and whether the user has them. The user makes the change on the decks page (or in Arena)."""
         return tools.propose_deck_changes(api, deck, add, remove)
 
     @server.tool(annotations=read_only)
     @explained
     def search_collection(text: str = '', set_code: str = '', rarity: str = '', card_type: str = '',
-                          tag: str = '', location: str = '', in_a_deck: bool | None = None, limit: int = 25) -> dict:
-        """Search the cards the user owns by part of a name, set code (HOB), rarity, type (Creature), tag, location, and whether a deck uses them (in_a_deck true/false). Returns up to `limit` entries, most valuable first, and how many matched."""
-        return tools.search_collection(api, text, set_code, rarity, card_type, tag, location, in_a_deck, limit)
+                          tag: str = '', location: str = '', in_a_deck: bool | None = None, limit: int = 25,
+                          collection: str = 'paper') -> dict:
+        """Search the cards the user owns by part of a name, set code (HOB), rarity, type (Creature), tag, location, and whether a deck uses them (in_a_deck true/false). collection: 'paper' or 'arena' (MTG Arena). Returns up to `limit` entries, most valuable first (by rarity for Arena), and how many matched. To search by rules text, colours or format, use search_cards."""
+        return tools.search_collection(api, text, set_code, rarity, card_type, tag, location, in_a_deck, limit, collection)
 
     @server.tool(annotations=read_only)
     @explained
-    def find_card(name: str) -> dict:
-        """Everything about one card: how many copies the user owns (each printing, finish, location), which decks use them, and the card's type, cost, colours and rules text."""
-        return tools.find_card(api, name)
+    def search_cards(collection: str = 'paper', deck_format: str = '', owned_only: bool = True, name: str = '',
+                     text: str = '', card_type: str = '', identity: str = '', colors: str = '', cmc: float | None = None,
+                     rarity: str = '', offset: int = 0, limit: int = 50, with_card_text: bool = False) -> dict:
+        """Search every card of the card database, like the decks page: by part of the name, rules text (text='lifelink'), type line (card_type='Creature'), colour identity within letters (identity='GW'), colours it must include (colors='R'; 'C' = colourless), mana value (cmc), rarity, legal in a format (deck_format='standard'); owned_only=true (the default) keeps the cards the user owns - in the paper collection or, collection='arena', in MTG Arena. 'owned' is the copies. Pages of results: offset, and 'more' when there is another page. The tool to find candidates for a deck."""
+        return tools.search_cards(api, collection, deck_format, owned_only, name, text, card_type, identity, colors, cmc,
+                                  rarity, offset, limit, with_card_text)
 
     @server.tool(annotations=read_only)
     @explained
-    def collection_summary() -> dict:
-        """How big the collection is and what it is made of: card count, value, the biggest sets, rarities, card types, locations, and how many cards are in a deck."""
-        return tools.collection_summary(api)
+    def find_card(name: str, collection: str = 'paper') -> dict:
+        """Everything about one card: how many copies the user owns (each printing, finish, location), which decks use them, and the card's type, cost, colours and rules text. collection: 'paper' or 'arena' (MTG Arena)."""
+        return tools.find_card(api, name, collection)
+
+    @server.tool(annotations=read_only)
+    @explained
+    def collection_summary(collection: str = 'paper') -> dict:
+        """How big the collection is and what it is made of: card count, value, the biggest sets, rarities, card types, locations, and how many cards are in a deck. collection='arena': the MTG Arena collection - also its wildcards, gold and gems, and when it was exported from Arena."""
+        return tools.collection_summary(api, collection=collection)
 
     return server
 

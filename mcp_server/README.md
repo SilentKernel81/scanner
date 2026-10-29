@@ -13,21 +13,30 @@ nothing there.
 | Tool | What it answers |
 |---|---|
 | `list_decks` | every deck: id, name, format, commander, cards, how much of it you own |
-| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, price, other decks using each card; problems and totals |
+| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, rarity, price, other decks using each card; problems and totals (an Arena deck: no prices, its wildcards) |
 | `check_deck(deck)` | the format's problems (legality, copies, colours) and totals |
-| `missing_cards(deck)` | what you don't own enough copies of, with the cost |
+| `missing_cards(deck)` | what you don't own enough copies of, with the cost (an Arena deck: the cards to craft, the wildcards needed beside the ones you have, the cards Arena does not have) |
 | `suggest_for_deck(deck, per_category=8, only_owned=false)` | popular cards for the deck's commander (EDHREC) with inclusion %, synergy, copies you own, whether another deck uses it |
 | `what_can_i_build(kind='commanders'\|'precons')` | decks your collection could make (asks other sites: can take minutes, returns what it has) |
-| `propose_deck_changes(deck, add, remove)` | what adding / removing cards would do: legal? in colours? owned? used by other decks? - **changes nothing** |
-| `search_collection(text, set_code, rarity, card_type, tag, location, in_a_deck, limit)` | the cards you own |
-| `find_card(name)` | copies owned (printing, finish, location), decks using them, the card's text |
-| `collection_summary()` | cards, value (and its currency), biggest sets, rarities, types, locations |
+| `propose_deck_changes(deck, add, remove)` | what adding / removing cards would do: legal? in colours? at most 4 copies? owned? used by other decks? the wildcards it would take (Arena) - **changes nothing** |
+| `search_collection(text, set_code, rarity, card_type, tag, location, in_a_deck, limit, collection)` | the cards you own |
+| `search_cards(collection, deck_format, owned_only, name, text, card_type, identity, colors, cmc, rarity, offset, limit)` | the card data, like the decks page's search: by rules text, colours, mana value, rarity, legal in a format; only what you own by default |
+| `find_card(name, collection)` | copies owned (printing, finish, location), decks using them, the card's text |
+| `collection_summary(collection)` | cards, value (and its currency), biggest sets, rarities, types, locations; Arena: wildcards, gold, gems, the export's date |
 
 Every answer says the currency of its prices (`prices_in`: `USD` or `EUR`, the price source chosen in the scanner's
 Settings; `USD` for a scanner from before that choice existed - one that answers 404 for it; `unknown` when the question
 failed otherwise, a time-out or an error: never a guess).
 
 `deck` is a name (or part of it), a commander, or an id. If it matches several decks the tool says which.
+
+**MTG Arena.** `collection` is `paper` (the default) or `arena`: the digital collection, the last
+import of an Arena export (Collection page > Arena). An Arena deck (`kind: arena`) is counted
+against it, and a card it lacks costs a **wildcard** of its rarity (basic lands are free) - so its
+answers say wildcards, not money. `suggest_for_deck` only knows commander decks (EDHREC); for a
+60-card deck, `search_cards(collection='arena', deck_format='standard', identity='GW', text='lifelink')`
+finds the candidates you own. A deck that came from an Arena export is replaced by the next import:
+change it in Arena itself.
 
 ## Install (once)
 
@@ -68,7 +77,8 @@ The server's address can also be the environment's `CARD_SCANNER_URL`.
 
 Ask: *"List my decks."*, *"Which of my commander decks is the least complete?"*,
 *"Suggest cards for Calling All Angels that I already own"*, *"What would it do to add Lightning
-Bolt and Swords to Plowshares to Calling All Angels?"*, *"What are my most valuable rares?"*
+Bolt and Swords to Plowshares to Calling All Angels?"*, *"What are my most valuable rares?"*,
+*"Improve my Green/White Arena deck with cards I own on Arena - how many wildcards would it take?"*
 
 ## A local model
 

@@ -15,9 +15,9 @@ import tools  # noqa: E402
 from scanner_api import ScannerError  # noqa: E402
 
 
-def card(name, identity=(), type_line='Creature', price=1.0, owned=1, cost='{1}', cmc=1.0, text=''):
+def card(name, identity=(), type_line='Creature', price=1.0, owned=1, cost='{1}', cmc=1.0, text='', rarity='rare'):
     return {'id': name, 'name': name, 'type_line': type_line, 'mana_cost': cost, 'cmc': cmc, 'colors': list(identity),
-            'identity': list(identity), 'rarity': 'rare', 'oracle_text': text, 'price': price, 'owned': owned}
+            'identity': list(identity), 'rarity': rarity, 'oracle_text': text, 'price': price, 'owned': owned}
 
 
 def entry(name, quantity=1, board='main', owned=1, elsewhere=(), **kwargs):
@@ -35,7 +35,22 @@ DECKS = [{'id': 7, 'name': 'Calling All Angels', 'format': 'commander', 'kind': 
           'cards': 4, 'owned': 3, 'owned_percent': 75},
          {'id': 8, 'name': 'Wretched Ranks', 'format': 'commander', 'kind': 'paper', 'commanders': ['Ghoulcaller Gisa'],
           'cards': 100, 'owned': 100, 'owned_percent': 100},
-         {'id': 9, 'name': 'Angels', 'format': 'standard', 'kind': 'paper', 'commanders': [], 'cards': 60, 'owned': 60, 'owned_percent': 100}]
+         {'id': 9, 'name': 'Angels', 'format': 'standard', 'kind': 'paper', 'commanders': [], 'cards': 60, 'owned': 60, 'owned_percent': 100},
+         {'id': 12, 'name': 'Elves on Arena', 'format': 'standard', 'kind': 'arena', 'commanders': [], 'cards': 7, 'owned': 6,
+          'owned_percent': 86}]
+# An Arena deck: 'owned' is the Arena collection's, a missing card costs a wildcard of its rarity
+ARENA_DECK = {'id': 12, 'name': 'Elves on Arena', 'format': 'standard', 'kind': 'arena', 'notes': '', 'issues': [],
+              'from_arena': True, 'totals': {'cards': 7, 'side': 0, 'price': 5.0, 'missing': 1, 'missing_price': 2.0},
+              'wildcards': {'needed': {'common': 0, 'uncommon': 0, 'rare': 1, 'mythic': 0},
+                            'have': {'common': 5, 'uncommon': 2, 'rare': 1, 'mythic': 0}},
+              'cards': [entry('Forest', quantity=2, owned=40, type_line='Basic Land — Forest', rarity='common'),
+                        entry('Llanowar Elves', quantity=4, owned=5, identity='G', rarity='common'),
+                        entry('Bejeweled Warg', quantity=1, owned=0, identity='G', rarity='rare')]}
+ARENA_INVENTORY = [
+    {'name': 'Llanowar Elves', 'set_code': 'fdn', 'number': '227', 'quantity': 5, 'rarity': 'common', 'price': 0.15,
+     'type_line': 'Creature — Elf Druid', 'set_name': 'Foundations', 'decks': ['Elves on Arena', 'Other Arena deck']},
+    {'name': 'Sheoldred, the Apocalypse', 'set_code': 'dmu', 'number': '107', 'quantity': 1, 'rarity': 'mythic', 'price': 80.0,
+     'type_line': 'Legendary Creature', 'set_name': 'Dominaria United', 'decks': []}]
 INVENTORY = [
     {'name': 'Sol Ring', 'set_code': 'cmm', 'number': '1', 'finish': 'regular', 'quantity': 3, 'condition': 'Near Mint',
      'location': 'Box 1', 'tags': [], 'price': 1.0, 'rarity': 'uncommon', 'type_line': 'Artifact', 'decks': ['Calling All Angels', 'Wretched Ranks']},
@@ -46,7 +61,9 @@ INVENTORY = [
 CARDS = {c['name'].lower(): c for c in (
     card('Sol Ring', type_line='Artifact', owned=3), card('Lightning Bolt', identity='R', type_line='Instant', owned=1),
     card('Resplendent Angel', identity='W', owned=0), card('Swords to Plowshares', identity='W', owned=2),
-    card('Illegal Card', identity='W'))}
+    card('Illegal Card', identity='W'), card('Llanowar Elves', identity='G', owned=5, rarity='common'),
+    card('Bejeweled Warg', identity='G', owned=0), card('Elvish Mystic', identity='G', owned=3, rarity='common'),
+    card('Relentless Rats', identity='B', text='A deck can have any number of cards named Relentless Rats.'))}
 
 
 class FakeApi:
@@ -54,6 +71,7 @@ class FakeApi:
 
     def __init__(self, currency='EUR'):
         self.posts = []
+        self.searches = []        # the parameters of each card search, to see what the tools asked for
         self.currency = currency
 
     def get(self, path, **params):
@@ -62,7 +80,16 @@ class FakeApi:
         if path == '/api/decks/7':
             return {'deck': DECK}
         if path == '/api/inventory':
-            return {'cards': INVENTORY}
+            return {'cards': ARENA_INVENTORY if params.get('area') == 'arena' else INVENTORY}
+        if path == '/api/decks/12':
+            return {'deck': ARENA_DECK}
+        if path == '/api/decks/12/arena':
+            return {'text': '', 'left_out': ['Paper Only Card'], 'cards': 7, 'check': {
+                'imported': '2026-10-29T18:42', 'have': 6, 'craft': [{'name': 'Bejeweled Warg', 'rarity': 'rare', 'copies': 1}],
+                'not_on_arena': 1, 'wildcards': ARENA_DECK['wildcards']}}
+        if path == '/api/arena':
+            return {'arena': {'cards': 6, 'entries': 2, 'exported': '2026-10-29T18:42',
+                              'wildcards': {'common': 5, 'uncommon': 2, 'rare': 1, 'mythic': 0}, 'gold': 125, 'gems': 130}}
         if path == '/api/stats':
             return {'collection': {'total_cards': 4, 'unique_cards': 3, 'total_value': 12.0}}
         if path == '/api/prices/source':
@@ -78,7 +105,10 @@ class FakeApi:
             found = [c for key, c in CARDS.items() if name in key]
             if params.get('format'):   # only what is legal in the format
                 found = [c for c in found if c['name'] != 'Illegal Card']
-            return {'cards': found}
+            if params.get('owned'):
+                found = [c for c in found if c['owned']]
+            self.searches.append(params)
+            return {'cards': found, 'more': False}
         if path == '/api/decks/7/suggestions':
             return {'url': 'https://edhrec.example', 'decks': 100, 'categories': [
                 {'title': 'Top Cards', 'cards': [
@@ -114,7 +144,7 @@ class Tools(unittest.TestCase):
 
     def test_list_decks_is_short(self):
         decks = tools.list_decks(self.api)
-        self.assertEqual([d['name'] for d in decks], ['Calling All Angels', 'Wretched Ranks', 'Angels'])
+        self.assertEqual([d['name'] for d in decks], ['Calling All Angels', 'Wretched Ranks', 'Angels', 'Elves on Arena'])
         self.assertEqual(set(decks[0]), {'id', 'name', 'format', 'kind', 'commanders', 'cards', 'owned', 'owned_percent'})
 
     def test_get_deck_groups_by_board_and_leaves_out_the_noise_of_basic_lands(self):
@@ -183,6 +213,10 @@ class Tools(unittest.TestCase):
         # Any other failure of the question: unknown - euros never labelled dollars (a Codex review of 2026-10-24)
         self.assertEqual(tools.with_currency(FakeApi(currency='away'), {'decks': []})['prices_in'], 'unknown')
         self.assertEqual(tools.with_currency(FakeApi(currency=500), {'decks': []})['prices_in'], 'unknown')
+        # An Arena answer has no money in it: no currency that would read as "this costs dollars"
+        arena = tools.with_currency(self.api, tools.missing_cards(self.api, 'Elves on Arena'))
+        self.assertIn('wildcards', arena['prices_in'])
+        self.assertNotIn('price', tools.find_card(self.api, 'Llanowar Elves', 'arena')['card'])
 
     def test_what_can_i_build_starts_a_search_and_returns_what_it_has(self):
         api = self.api
@@ -193,6 +227,77 @@ class Tools(unittest.TestCase):
         self.assertEqual(len(answer['best']), 1)
         with self.assertRaises(ScannerError):
             tools.what_can_i_build(api, 'cards')
+
+
+
+class ArenaDecks(unittest.TestCase):
+    """An Arena deck is counted against the Arena collection and costs wildcards, not money"""
+
+    def setUp(self):
+        self.api = FakeApi()
+
+    def test_an_arena_deck_says_rarity_and_wildcards_and_no_paper_price(self):
+        deck = tools.get_deck(self.api, 'Elves on Arena')
+        elves = next(c for c in deck['boards']['main'] if c['name'] == 'Llanowar Elves')
+        self.assertEqual(elves['rarity'], 'common')
+        self.assertNotIn('price', elves)
+        self.assertNotIn('price', deck['totals'])
+        self.assertEqual(deck['wildcards']['needed']['rare'], 1)
+        self.assertIn('MTG Arena', deck['how_to_change'])               # it came from an Arena export
+        # a paper deck keeps its prices
+        self.assertIn('price', tools.get_deck(self.api, 'Giada')['boards']['main'][0])
+
+    def test_missing_cards_of_an_arena_deck_are_wildcards(self):
+        missing = tools.missing_cards(self.api, 'Elves on Arena')
+        self.assertEqual(missing['to_craft'], [{'name': 'Bejeweled Warg', 'rarity': 'rare', 'copies': 1}])
+        self.assertTrue(missing['can_craft_all_now'])                    # 1 rare needed, 1 had
+        self.assertEqual(missing['cards_not_on_arena'], ['Paper Only Card'])
+        self.assertNotIn('cost_of_the_missing', missing)
+
+    def test_a_proposal_for_an_arena_deck_checks_four_copies_and_counts_wildcards(self):
+        answer = tools.propose_deck_changes(self.api, 'Elves on Arena', add=[
+            {'name': 'Llanowar Elves'}, {'name': 'Elvish Mystic', 'quantity': 4}, {'name': 'Bejeweled Warg', 'quantity': 1},
+            {'name': 'Relentless Rats', 'quantity': 9}])
+        by_name = {c['name']: c for c in answer['add']}
+        self.assertIn('at most 4', by_name['Llanowar Elves']['problem'])      # 4 + 1
+        self.assertNotIn('problem', by_name['Elvish Mystic'])                 # exactly 4
+        self.assertNotIn('problem', by_name['Relentless Rats'])               # its text allows any number
+        self.assertNotIn('price', by_name['Elvish Mystic'])
+        # 2 Bejeweled Warg owned 0, 4 Elvish Mystic owned 3 (Relentless Rats: 'owned' 1 of 9)
+        self.assertEqual(answer['wildcards_after']['needed'], {'common': 1, 'uncommon': 0, 'rare': 10, 'mythic': 0})
+        self.assertFalse(answer['wildcards_after']['enough'])
+        self.assertEqual(self.api.searches[0]['kind'], 'arena')               # owned = the Arena collection's
+        self.assertEqual(self.api.posts, [])
+
+    def test_the_other_arena_decks_using_a_card_come_from_the_arena_collection(self):
+        answer = tools.propose_deck_changes(self.api, 'Elves on Arena', remove=[{'name': 'Forest'}],
+                                            add=[{'name': 'Llanowar Elves'}])
+        self.assertEqual(answer['add'][0]['also_used_by'], ['Other Arena deck'])
+
+    def test_suggestions_say_why_there_are_none_for_a_deck_without_a_commander(self):
+        answer = tools.suggest_for_deck(self.api, 'Elves on Arena')
+        self.assertIn('search_cards', answer['message'])
+
+    def test_the_arena_collection_is_searched_and_summed_up(self):
+        found = tools.search_collection(self.api, which='arena')
+        self.assertEqual([c['name'] for c in found['cards']], ['Sheoldred, the Apocalypse', 'Llanowar Elves'])   # by rarity
+        self.assertNotIn('price', found['cards'][0])
+        self.assertEqual(tools.find_card(self.api, 'llanowar elves', 'arena')['copies_owned'], 5)
+        self.assertEqual(tools.find_card(self.api, 'llanowar elves')['copies_owned'], 0)   # none on paper
+        summary = tools.collection_summary(self.api, which='arena')
+        self.assertEqual((summary['cards'], summary['wildcards']['rare'], summary['gems']), (6, 1, 130))
+        with self.assertRaises(ScannerError):
+            tools.search_collection(self.api, which='mtgo')
+
+    def test_search_cards_passes_the_filters_to_the_server(self):
+        answer = tools.search_cards(self.api, 'arena', 'Standard', True, text='trample', identity='gw', rarity='Rare')
+        asked = self.api.searches[-1]
+        self.assertEqual((asked['kind'], asked['format'], asked['owned'], asked['identity'], asked['rarity'], asked['text']),
+                         ('arena', 'standard', 1, 'GW', 'rare', 'trample'))
+        self.assertEqual(answer['collection'], 'arena')
+        self.assertTrue(all('price' not in c for c in answer['cards']))
+        tools.search_cards(self.api, owned_only=False, name='bolt')
+        self.assertEqual((self.api.searches[-1]['kind'], self.api.searches[-1]['owned']), ('', ''))   # the paper one, everything
 
 
 if __name__ == '__main__':

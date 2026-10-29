@@ -304,6 +304,12 @@ This one was sent back from the collection.*
   (nothing from a CDN) so a network without internet still works.
 - **An MCP server** lets an AI assistant read your decks and collection, check a deck, find what
   is missing, and propose changes. It is read-only: it changes nothing.
+- **The MCP server knows MTG Arena** (since 2026-10-29): an Arena deck's missing cards are said
+  in wildcards (beside the ones the account has), never in money; the collection tools take
+  `collection='arena'`; `search_cards` searches the card data like the decks page (rules text,
+  colours, mana value, rarity, legal in a format, owned on paper or in Arena); a proposed change
+  checks the 4-copy limit of a 60-card deck. Tried against the real server's two Arena decks;
+  not tried with a local model.
 - **Tools for the detector and the speed:** a debug trace of slow or doubtful captures,
   scripts to label frames, train and score the corner network, and to benchmark the database
   and the station.
