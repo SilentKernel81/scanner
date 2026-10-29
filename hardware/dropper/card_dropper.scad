@@ -15,7 +15,7 @@
 //     printed to size); it leaves on a short table, tips onto a chute and slides, on its back,
 //     into a tray under the camera. The face of a card touches only the back of the card above it.
 //
-// Never printed, never run. Checked in OpenSCAD (collisions, a card's path) and converted to
+// Only the wheels printed (2026-10-29), never assembled, never run. Checked in OpenSCAD (collisions, a card's path) and converted to
 // FreeCAD (freecad/to_freecad.sh) - see the plan.
 //
 // Axes: x = the direction the card travels (toward the tray), y = across, z = up from the table.
@@ -24,7 +24,7 @@
 // Use: open in OpenSCAD, choose `part` (Customizer), F6, export STL. Or from a shell:
 //   openscad -D 'part="wheel"' -o wheel.stl card_dropper.scad
 
-part = "assembly"; // [assembly, wheel_block, wheel_plate, wheel, clutch_hub, servo_bracket, magazine_sleeved, magazine_unsleeved, gate, chute, tray, landing_base, camera_post, camera_arm, pi_mount]
+part = "assembly"; // [assembly, bearing_test, wheel_block, wheel_plate, wheel, clutch_hub, servo_bracket, magazine_sleeved, magazine_unsleeved, gate, chute, tray, landing_base, camera_post, camera_arm, pi_mount]
 
 /* [Cards - measure yours with calipers] */
 sleeved_l = 92;        // a sleeved card's length (standard sleeves: 91-92)
@@ -225,6 +225,40 @@ module clutch_hub() {
     }
 }
 
+// What is cut out of a side wall for one 608 bearing, along +z: z = 0 is the wall's inner face,
+// z = housing_t its outer face. The pocket goes in from outside, bearing_w deep; the 2 mm left
+// is the lip that holds the bearing, with a hole wider than its inner ring. One module for the
+// block and for its test coupon, so the coupon tries exactly the block's pocket.
+module bearing_pocket(fit) {
+    translate([0, 0, housing_t - bearing_w]) cylinder(d = fit, h = bearing_w + 1);   // the bearing
+    translate([0, 0, -1]) cylinder(d = 16, h = block_wall + 2);                      // the lip's hole
+}
+
+// A test coupon for the bearings' fit, before the block's long print: a piece of side wall with
+// one pocket per tried size, standing as the block stands (the pockets' axes level, so their
+// tops are the same overhang as in the block - a hole printed lying down would come out rounder
+// and give the wrong size). Each 30 mm piece is one housing rib's width; the size is written on
+// top. Press a 608 into each: the one that goes in by hand pressure and does not turn in its
+// pocket is the bearing_fit for the block.
+bearing_test_fits = [22.05, 22.20, 22.35];
+module bearing_test() {
+    pitch = 30;                        // one housing rib's width
+    h = 30;                            // the pocket's centre 15 mm up: ~4 mm of wall above and below
+    n = len(bearing_test_fits);
+    difference() {
+        union() {
+            cube([n * pitch, housing_t, h]);
+            translate([0, -6, 0]) cube([n * pitch, housing_t + 12, 2]);   // a foot: it stands 9 mm thin
+        }
+        for (i = [0 : n - 1]) {
+            // the pocket from the +y face (outside), the lip toward -y (inside), as in the block
+            translate([(i + 0.5) * pitch, 0, h / 2]) rotate([-90, 0, 0]) bearing_pocket(bearing_test_fits[i]);
+            translate([(i + 0.5) * pitch, housing_t / 2, h - 0.6])
+                linear_extrude(1) text(str(bearing_test_fits[i]), size = 3.5, halign = "center", valign = "center");
+        }
+    }
+}
+
 // The wheel block: walls only, open at the bottom. Each rod turns in two 608 bearings pressed
 // into housings on the side walls from outside (a 2 mm lip inside holds them; its hole is wider
 // than the bearing's inner ring, so only the outer ring touches it). Print upright.
@@ -243,10 +277,8 @@ module wheel_block() {
                 translate([x - 15, s > 0 ? block_half_w - eps : -block_half_w - housing_out, 0])
                     cube([30, housing_out + eps, axle_z + 15]);
         }
-        for (x = axle_x) for (s = [-1, 1]) translate([x, 0, axle_z]) rotate([s > 0 ? -90 : 90, 0, 0]) {
-            translate([0, 0, block_half_w + housing_out - bearing_w]) cylinder(d = bearing_fit, h = bearing_w + 1);   // the bearing
-            translate([0, 0, block_half_w - block_wall - 1]) cylinder(d = 16, h = block_wall + 2);     // the lip's hole
-        }
+        for (x = axle_x) for (s = [-1, 1]) translate([x, 0, axle_z]) rotate([s > 0 ? -90 : 90, 0, 0])
+            translate([0, 0, block_half_w - block_wall]) bearing_pocket(bearing_fit);
         for (b = block_bosses) translate([b[0], b[1], block_top - 15]) cylinder(d = 2.8, h = 16);
         // the servo bracket's screws (M3 from inside, into its legs)
         for (x = bracket_legs) for (z = [axle_z - 14, axle_z + 14])
@@ -566,7 +598,8 @@ module assembly(at = 40) {
 }
 
 module printable() {
-    if (part == "wheel_block") translate([-block_x0, block_half_w, 0]) wheel_block();
+    if (part == "bearing_test") bearing_test();
+    else if (part == "wheel_block") translate([-block_x0, block_half_w, 0]) wheel_block();
     else if (part == "wheel_plate") translate([-block_x0, plate_half_w, -block_top]) wheel_plate();
     else if (part == "wheel") wheel();
     else if (part == "clutch_hub") clutch_hub();

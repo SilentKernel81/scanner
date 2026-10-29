@@ -13,14 +13,8 @@ scad="$top/card_dropper.scad"
 work=$(mktemp -d)
 trap '[ -n "$KEEP" ] || rm -rf "$work"' EXIT
 
-# OpenSCAD: the installed program, or the Flatpak through a small wrapper (FreeCAD calls it too)
-if command -v openscad >/dev/null 2>&1; then
-    osc=$(command -v openscad)
-else
-    osc="$work/openscad"
-    printf '#!/bin/sh\nexec flatpak run --filesystem=%s --filesystem=%s org.openscad.OpenSCAD "$@"\n' "$work" "$top" > "$osc"
-    chmod +x "$osc"
-fi
+# OpenSCAD: the installed program (FreeCAD calls it too)
+osc=$(command -v openscad) || { echo "OpenSCAD is not installed (the openscad package)" >&2; exit 1; }
 
 # Every object of the document: its name | where it sits (OpenSCAD: the placements of assembly() in
 # the .scad) | the part printed for its STEP file (- for a bought part: none). The six wheels are one

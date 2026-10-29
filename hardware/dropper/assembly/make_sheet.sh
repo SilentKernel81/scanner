@@ -12,11 +12,8 @@ work=$(mktemp -d)
 trap '[ -n "$KEEP" ] || rm -rf "$work"' EXIT
 mkdir -p "$work/stl"
 
-if command -v openscad >/dev/null 2>&1; then
-    osc() { openscad "$@"; }
-else
-    osc() { flatpak run --filesystem="$work" --filesystem="$top" org.openscad.OpenSCAD "$@"; }
-fi
+command -v openscad >/dev/null 2>&1 || { echo "OpenSCAD is not installed (the openscad package)" >&2; exit 1; }
+osc() { openscad "$@"; }
 
 for p in 1 2 3 4 5 6 7; do
     # the step's items: drive.scad echoes each item's name (ITEM:<name>) as it draws it
