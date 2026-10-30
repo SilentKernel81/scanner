@@ -9,8 +9,8 @@ under an adjustable gate; it tips onto a chute and slides on its back into the t
 The station's Raspberry Pi 4/5 (the camera's computer) and the Pico that drives the servos stand on a
 plate behind the camera post, low down, the Pico right under the Pi.
 
-**Designed and checked in CAD; only the wheels printed (2026-10-29: rod, nut and O-ring fit by hand), never
-assembled, never run, no card has gone through it.** Its
+**Designed and checked in CAD; only the wheels and the wheel block printed (2026-10-29: rod, nut,
+O-ring and bearings fit by hand), never assembled, never run, no card has gone through it.** Its
 finish - the card's last millimetres under the next one, then down the ramp by gravity - is the open
 question. The design, every number behind it, what to print and buy, how to set it up and how to
 test it for card damage before trusting it with valuable cards:

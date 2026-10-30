@@ -15,7 +15,7 @@
 //     printed to size); it leaves on a short table, tips onto a chute and slides, on its back,
 //     into a tray under the camera. The face of a card touches only the back of the card above it.
 //
-// Only the wheels printed (2026-10-29), never assembled, never run. Checked in OpenSCAD (collisions, a card's path) and converted to
+// Only the wheels and the wheel block printed (2026-10-29), never assembled, never run. Checked in OpenSCAD (collisions, a card's path) and converted to
 // FreeCAD (freecad/to_freecad.sh) - see the plan.
 //
 // Axes: x = the direction the card travels (toward the tray), y = across, z = up from the table.

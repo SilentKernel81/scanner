@@ -1,9 +1,9 @@
 # The card dropper's mechanism
 
-*Plan and design, 2026-10-22/23; the first parts printed 2026-10-29. The station's side was written on 2026-10-22 (`station/dropper.py`,
+*Plan and design, 2026-10-22/23; the wheels and the wheel block printed 2026-10-29. The station's side was written on 2026-10-22 (`station/dropper.py`,
 PROGRAM_DOCUMENTATION.md, "The card dropper"). The mechanism is drawn in `hardware/dropper/card_dropper.scad` (also
 as FreeCAD and STEP files, `hardware/dropper/freecad/`), its controller is `hardware/dropper/firmware/main.py`.
-**Checked in CAD and the controller on a simulated Pico; only the wheels printed (2026-10-29), never assembled, never
+**Checked in CAD and the controller on a simulated Pico; only the wheels and the wheel block printed (2026-10-29), never assembled, never
 run; no card has gone through it.** Every size marked *to measure* is a guess until it has been measured.*
 
 ## What it is for
@@ -321,9 +321,11 @@ stretching** - the printed groove is likely a little under its 45.5 mm, so the ~
 hold the tyre may not be there; it held in the hand test, but a tyre that creeps under load points here (`groove_d`).
 The diameter with the ring is **still to measure** (`wheel_d`, `MM_PER_DEG`). Then `bearing_test`, with the owner's
 608-2RS bearings: **22.05 mm is snug** - the bearing goes in and comes out by hand - so `bearing_fit` stays at 22.05
-for the block. Still to see in the block: that the outer ring does not turn in its pocket with the rod spinning.
+for the block. The `wheel_block` printed the same day (upright, as in the file): the six 608s press into its
+housings and fit well. Still to see once the rods are in: that an outer ring does not turn in its pocket with the rod
+spinning.
 
-**Never**: the rest printed, the fits (bearings, one-way bearings, O-rings on the grooves) tried, assembled, calibrated, run on
+**Never**: the other parts printed, the fits (bearings, one-way bearings, O-rings on the grooves) tried, assembled, calibrated, run on
 a Pico, driven by the station, fed a card - so the grip, the slip, the stop's accuracy, the finish by gravity, the
 timing, the landing and every row of the contact table are unmeasured. The servo's sizes (MG90S tabs, shaft height,
 horn) are typical values: **measure the servo before printing the bracket and the hubs** (parameters at the top of
