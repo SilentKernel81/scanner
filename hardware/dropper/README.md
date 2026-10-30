@@ -9,7 +9,8 @@ under an adjustable gate; it tips onto a chute and slides on its back into the t
 The station's Raspberry Pi 4/5 (the camera's computer) and the Pico that drives the servos stand on a
 plate behind the camera post, low down, the Pico right under the Pi.
 
-**Designed and checked in CAD only: never printed, never run, no card has gone through it.** Its
+**Designed and checked in CAD; only the wheels and the wheel block printed (2026-10-29: rod, nut,
+O-ring and bearings fit by hand), never assembled, never run, no card has gone through it.** Its
 finish - the card's last millimetres under the next one, then down the ramp by gravity - is the open
 question. The design, every number behind it, what to print and buy, how to set it up and how to
 test it for card damage before trusting it with valuable cards:
@@ -41,14 +42,17 @@ and run `freecad/to_freecad.sh` again; a change made only in FreeCAD is lost at 
 Exporting the parts as STL:
 
 ```bash
-# OpenSCAD from Flathub, no root needed: flatpak install --user flathub org.openscad.OpenSCAD
+# OpenSCAD 2021.01 or newer, the distribution's package (openscad)
 for p in wheel_block wheel_plate wheel clutch_hub servo_bracket magazine_sleeved magazine_unsleeved \
          gate chute tray landing_base camera_post camera_arm pi_mount; do
-  flatpak run --filesystem=$PWD org.openscad.OpenSCAD -D "part=\"$p\"" -o "stl/$p.stl" card_dropper.scad
+  openscad -D "part=\"$p\"" -o "stl/$p.stl" card_dropper.scad
 done
 ```
 
-Print six `wheel` and two `clutch_hub`. `part = "assembly"` shows everything in place, a card on
+Print six `wheel` and two `clutch_hub`. Before the `wheel_block`, print `bearing_test` (`stl/bearing_test.stl`,
+90 x 21 x 30, standing as in the file): three pieces of its side wall with the 608's pocket at 22.05,
+22.20 and 22.35 mm, the size written on top. The pocket that takes a bearing by hand pressure and holds it still is
+`bearing_fit` for the block - set it, then export the block. `part = "assembly"` shows everything in place, a card on
 its way out.
 
 Own design. Ideas taken from the Card Slinger 3.0 (a funnel that centres the card under the

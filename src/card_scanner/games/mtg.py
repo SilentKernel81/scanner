@@ -22,6 +22,11 @@ def color_identity(colors):
     return 'Multicolor'
 
 
+# The conditions Card Kingdom's listed buylist prices are for: it states they assume Near Mint and are graded lower for
+# a worn copy (cardkingdom.com/sellcart). A Mint copy is no worse; Excellent (lightly played) and below get less than the
+# list - how much less the shop decides when it grades the card, and MTGJSON publishes no number for it
+BUYLIST_CONDITIONS = ('Mint', 'Near Mint')
+
 # Moxfield's condition names (and the short forms its import takes) -> the conditions used here
 MOXFIELD_CONDITIONS = {
     'mint': 'Mint', 'm': 'Mint', 'near mint': 'Near Mint', 'nm': 'Near Mint',
@@ -179,6 +184,29 @@ class Magic(Game):
             'color_identity': color_identity(colors),
             'price': next((float(p) for p in prices if p), 0.0),
         }
+
+    def buylist_prices(self, entries):
+        # Card Kingdom's buylist (prices.BUYLIST). A foil or surge foil copy takes the foil buy price, or the etched one
+        # of an etched-only printing (an etched foil is a 'foil' copy - see inventory_fields); a regular copy only the
+        # regular one. Never the other finish's, unlike the value's fallback: a shop pays very differently for a foil and
+        # a regular copy, and a borrowed number would be an offer nobody made. No price: not in the answer (never 0,
+        # which would read as "worthless")
+        buylists = self.db.buylist_by_ids(entry['card_id'] for entry in entries)
+        result = {}
+        for entry in entries:
+            regular, foil, etched = buylists.get(entry['card_id'], (None, None, None))
+            price = (foil or etched) if entry['finish'] in ('foil', 'surge') else regular
+            if price:
+                result[entry['id']] = float(price)
+        return result
+
+    def buylist_as_listed(self, entry):
+        return entry['condition'] in BUYLIST_CONDITIONS
+
+    def buylist_date(self):
+        # MTGJSON's date of the shops' prices in use, recorded by each price update (core/shop_prices.py: INFO_KEY)
+        from card_scanner.core.shop_prices import INFO_KEY
+        return (self.db.get_data_info(INFO_KEY) or {}).get('source_updated')
 
     def price_currency(self):
         return self.db.price_currency()

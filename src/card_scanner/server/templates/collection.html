@@ -10,7 +10,7 @@
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=31">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=33">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -199,6 +199,42 @@
 
     {% include '_value_dialog.html' %}
 
+    <!-- A picture of a trade's cards for a sale post: 3 x 3 scans with their names, drawn in the
+         browser (collection.js: openSalePicture) -->
+    <div id="sale-modal" class="modal">
+        <div class="modal-content sale-modal">
+            <div class="modal-header">
+                <h2 id="sale-title">Picture for a sale</h2>
+                <span class="close" onclick="closeSalePicture()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="hint">Tick the scans to show - nine cards a picture, more make several pictures. A <strong>click on a card in the picture turns it upside down</strong> (some scans are). A card without a scan shows Scryfall's picture of its printing; <span class="sale-small-badge">low res</span> marks a scan kept only as a small copy.</p>
+                <div class="filter-row">
+                    <select id="sale-background" class="select" title="The colour around the cards">
+                        <option value="dark">Dark background</option>
+                        <option value="light">White background</option>
+                        <option value="grey">Grey background</option>
+                    </select>
+                    <select id="sale-size" class="select" title="How large the picture is">
+                        <option value="facebook">2048 px (what Facebook keeps)</option>
+                        <option value="full">Full size (about 2770 × 4240 px)</option>
+                    </select>
+                    <span class="summary" id="sale-summary"></span>
+                    <span class="spacer"></span>
+                    <button class="btn btn-small" id="sale-previous" title="Previous picture">&#8249;</button>
+                    <span class="summary" id="sale-page"></span>
+                    <button class="btn btn-small" id="sale-next" title="Next picture">&#8250;</button>
+                    <button class="btn btn-small btn-primary" id="sale-download">Download</button>
+                    <button class="btn btn-small" id="sale-download-all" title="Every picture, one file each">Download all</button>
+                </div>
+                <div class="sale-layout">
+                    <div class="sale-tiles" id="sale-tiles"></div>
+                    <div class="sale-preview"><canvas id="sale-canvas" title="A click on a card turns it upside down"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Card image beside the row under the mouse -->
     <img id="card-preview" class="card-preview" alt="" hidden>
 
@@ -206,6 +242,6 @@
 
     <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}?v=8"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=73"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=85"></script>
 </body>
 </html>

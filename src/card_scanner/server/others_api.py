@@ -17,6 +17,7 @@ from card_scanner.core.others import CARD_COLUMNS, OthersError, card_key
 
 from card_scanner.server.state import app, others, trade_store
 from card_scanner.server.logs import logger
+from card_scanner.server.trades_api import collection_changed
 
 
 @app.errorhandler(OthersError)
@@ -155,6 +156,7 @@ def receive_from_other_collection(collection_id):
          'key': card_key({'card_id': card['card_id'], 'card_name': card['name'], 'set_name': card['set_name'],
                           'card_number': card['number'], 'condition': card['condition'], 'finish': card['finish']})}
         for card, copies in chosen])
+    collection_changed()   # other pages show the trade (a new one, or more it receives); the collection itself is untouched
     return jsonify({'success': True, **result, 'seller': seller})
 
 

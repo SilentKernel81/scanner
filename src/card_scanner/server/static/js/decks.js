@@ -772,7 +772,7 @@ function renderDeck() {
         ${digital ? '' : `<span><strong>${money(totals.price)}</strong> value</span>`}
         <span title="${totals.missing ? `${plural(totals.missing, 'card')} missing` : digital ? 'Every card is in your Arena collection' : 'You own every card'}"><strong>${owned}%</strong> ${digital ? 'in Arena' : 'owned'}${
             totals.missing ? ` <small>${totals.missing} missing${digital ? '' : ', ' + money(totals.missing_price)}</small>` : ''}</span>
-        ${wild ? `<span title="One wildcard of a card's rarity crafts one copy. The rarity is the printed card's, which Arena shares for nearly every card">to craft: ${wild}</span>` : ''}`;
+        ${wild ? `<span title="One wildcard of a card's rarity crafts one copy. The rarity is that of the card's Arena printing (the lowest, when there are several)">to craft: ${wild}</span>` : ''}`;
     // The problems themselves, under the banner (a legal deck has its chip above and nothing here)
     $('deck-issues').innerHTML = deck.issues.map(issue => `
         <div class="issue ${issue.level}">${issue.level === 'error' ? '✕' : '!'} ${escapeHtml(issue.message)}${issue.cards.length

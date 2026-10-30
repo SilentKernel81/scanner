@@ -94,6 +94,12 @@ game sits behind one interface (`games/`), so another could be added.
   survive a card data download. A card the chosen source has no price for is left without one, never with another
   shop's. Tried on copied data in a trial server (import 5.6 s, a round trip back to the cent); never the schedule's own
   run, never with the settings password set, no price compared with a shop's own page.
+- **What Card Kingdom would pay** (since 2026-10-24): its buylist offer for each card, beside the value - under each list
+  row, a Statistics tile saying how many cards it covers, and in a trade's summary; in US dollars, never counted in the
+  value, the foil offer only for a foil copy, as Card Kingdom's Near Mint price (worn copies say they are graded lower
+  and are left out of the totals), always with the day of the offers (and how old, when the shops' prices
+  have not been updated for more than two days). Shown once *Update the shops' prices* has run. Tried on copied data with that
+  day's prices; never compared with Card Kingdom's own page.
 - **AI assistants see the currency** (MCP server, since 2026-10-24): every answer says what its prices are in
   (`prices_in`). Tested with a stand-in server only.
 - **The exact printing** from set code + collector number, checked against the name, in a
@@ -239,6 +245,13 @@ This one was sent back from the collection.*
 - **Trades:** set cards aside for a named trade (they stay in your collection, marked, until
   you confirm it), change the copies, rename, cancel, or confirm (the copies leave); a history of
   confirmed trades; each trade can be exported.
+- **A sale picture:** an open trade's **Sale picture…** makes a 3 × 3 grid of your own scans of
+  its cards, each card once with its name, set / number / finish and copies under it, to post on Facebook
+  Marketplace or another site (2048 px - what Facebook keeps - or full size, about 2770 × 4240
+  px; dark, white or grey background); more than nine cards ticked make several pictures. A
+  click on a card turns it upside down; a card without a scan shows Scryfall's picture, marked "stock picture" under it.
+  Tried on copied data in a headless browser; never actually posted to Facebook Marketplace or
+  any other site.
 - **Other people's collections:** import a collection file (the app's CSV, Moxfield or ManaBox)
   under a person's name into a database of its own, browse and search it, and delete it when you
   are done. It never touches your collection or its backups.
@@ -291,6 +304,17 @@ This one was sent back from the collection.*
   (nothing from a CDN) so a network without internet still works.
 - **An MCP server** lets an AI assistant read your decks and collection, check a deck, find what
   is missing, and propose changes. It is read-only: it changes nothing.
+- **The MCP server knows MTG Arena** (since 2026-10-29): an Arena deck's missing cards are said
+  in wildcards (beside the ones the account has), never in money; the collection tools take
+  `collection='arena'`; `search_cards` searches the card data like the decks page (rules text,
+  colours, mana value, rarity, legal in a format, owned on paper or in Arena); a proposed change
+  checks the 4-copy limit of a 60-card deck. Tried against the real server's two Arena decks;
+  not tried with a local model.
+- **The MCP server can change decks when allowed** (`--allow-deck-writes`, off by default; since
+  2026-10-29): create a deck, change its cards, rename it - never delete, never anything outside
+  the decks. Each change is checked whole first and refused on a problem; decks from an Arena
+  export are refused. Tried on a throwaway server with copied test data; not yet used on the
+  real server.
 - **Tools for the detector and the speed:** a debug trace of slow or doubtful captures,
   scripts to label frames, train and score the corner network, and to benchmark the database
   and the station.

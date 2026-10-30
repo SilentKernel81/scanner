@@ -36,6 +36,12 @@ def with_currency(api, answer):
     """A tool's answer with the currency of its prices beside them ('prices_in'): a bare number in euros would be read as
     dollars. card_scanner_mcp.py adds it to every answer"""
     if isinstance(answer, dict):
+        # An Arena answer: said at its top, or - the deck tools' answers - in the deck it reports ('now')
+        now = answer.get('now') if isinstance(answer.get('now'), dict) else {}
+        if answer.get('kind') == 'arena' or answer.get('collection') == 'arena' or now.get('kind') == 'arena':
+            # An Arena answer has no prices (find_card's card price aside, which is paper's): a currency there would
+            # read as "this costs dollars", and a card in Arena costs a wildcard
+            return {**answer, 'prices_in': 'none: MTG Arena cards cost wildcards'}
         return {**answer, 'prices_in': currency(api)}
     return answer
 
@@ -53,6 +59,35 @@ def normal(text):
 def front(name):
     """The front face of a double-faced card's name ("Delver of Secrets // Insectile Aberration")"""
     return normal((name or '').split(' // ')[0])
+
+
+# The two collections a question can be about: the paper one (what the scanner scanned) and the
+# digital one (what the user has in MTG Arena, the last import of an Arena export). The server
+# picks with ?area=arena; an Arena deck's 'owned' is already counted against the digital one.
+COLLECTIONS = ('paper', 'arena')
+
+# Formats played with a commander: one copy of each card, and the side board is not played
+COMMANDER_FORMATS = ('commander', 'brawl', 'standardbrawl', 'oathbreaker', 'duel', 'paupercommander')
+
+
+def area_of(which):
+    """'paper' / 'arena' -> the server's ?area= value (None: the paper collection, the default)"""
+    which = (which or 'paper').strip().lower()
+    if which not in COLLECTIONS:
+        raise ScannerError("collection must be 'paper' or 'arena'")
+    return 'arena' if which == 'arena' else None
+
+
+def copy_limit(card):
+    """
+    How many copies of a card a 60-card deck may play: 4, but any number of a basic land, and of
+    a card whose own text says so (Relentless Rats: "A deck can have any number of cards named ...")
+    """
+    if 'Basic' in (card.get('type_line') or ''):
+        return None
+    if 'any number of cards named' in (card.get('oracle_text') or ''):
+        return None
+    return 4
 
 
 def deck_list(api):
@@ -90,12 +125,15 @@ def load_deck(api, deck):
     return api.get(f"/api/decks/{item['id']}")['deck']
 
 
-def card_line(entry, text=False):
-    """One card of a deck, as short as it can be said"""
+def card_line(entry, text=False, arena=False):
+    """One card of a deck, as short as it can be said. arena: the deck is an Arena deck - its cards
+    are crafted with wildcards of their rarity, so the rarity is said and a paper price is not"""
     card = entry.get('card') or {}
     line = {'name': entry['name'], 'quantity': entry['quantity'], 'owned': entry['owned'],
             'type': card.get('type_line'), 'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'),
-            'price': card.get('price')}
+            'rarity': card.get('rarity')}
+    if not arena:
+        line['price'] = card.get('price')
     # Another deck wanting a basic land is no news (every deck does): left out; a long list is cut
     if entry.get('elsewhere') and 'Basic' not in (card.get('type_line') or ''):
         names = [other['deck'] for other in entry['elsewhere']]
@@ -120,28 +158,58 @@ def list_decks(api):
 def get_deck(api, deck, with_card_text=False):
     """A deck's cards, by board (main / commander / side), with the copies you own, what it costs and its problems"""
     data = load_deck(api, deck)
+    arena = data.get('kind') == 'arena'
     boards = {}
     for entry in data['cards']:
-        boards.setdefault(entry['board'], []).append(card_line(entry, with_card_text))
+        boards.setdefault(entry['board'], []).append(card_line(entry, with_card_text, arena))
     for cards in boards.values():
         cards.sort(key=lambda card: (card.get('cmc') or 0, card['name']))
-    return {'id': data['id'], 'name': data['name'], 'format': data['format'], 'kind': data['kind'],
-            'notes': data.get('notes') or '', 'totals': data['totals'], 'issues': data['issues'], 'boards': boards}
+    answer = {'id': data['id'], 'name': data['name'], 'format': data['format'], 'kind': data['kind'],
+              'notes': data.get('notes') or '', 'totals': arena_totals(data) if arena else data['totals'],
+              'issues': data['issues'], 'boards': boards}
+    if arena:
+        answer.update(arena_facts(data))
+    return answer
+
+
+def arena_totals(data):
+    """An Arena deck's totals without the paper prices (a card there costs a wildcard, not money)"""
+    return {key: value for key, value in (data.get('totals') or {}).items() if 'price' not in key}
+
+
+def arena_facts(data):
+    """
+    What an Arena deck's answer adds: the wildcards its missing cards would take beside the ones the
+    account had at the last import (the deck payload's 'wildcards'), and whether the deck came with
+    an Arena export - such a deck is replaced by the next import, so a change is made in Arena itself
+    """
+    return {'owned_means': 'copies in the MTG Arena collection (the last import)',
+            'wildcards': data.get('wildcards') or {},
+            'from_arena_export': bool(data.get('from_arena')),
+            'how_to_change': ('make the change in MTG Arena (this deck came from an Arena export: the next import replaces it)'
+                              if data.get('from_arena') else 'make the change on the decks page, then export the deck to Arena')}
 
 
 def check_deck(api, deck):
     """The format's problems with a deck (legality, copies, colours), and what is missing from your collection for it"""
     data = load_deck(api, deck)
-    return {'name': data['name'], 'format': data['format'], 'issues': data['issues'] or 'No problems found',
-            'totals': data['totals']}
+    arena = data.get('kind') == 'arena'
+    answer = {'name': data['name'], 'format': data['format'], 'kind': data['kind'],
+              'issues': data['issues'] or 'No problems found',
+              'totals': arena_totals(data) if arena else data['totals']}
+    if arena:
+        answer['wildcards'] = data.get('wildcards') or {}
+    return answer
 
 
 def missing_cards(api, deck):
     """The cards of a deck you do not own (enough copies of), with what they cost"""
     data = load_deck(api, deck)
+    if data.get('kind') == 'arena':
+        return missing_on_arena(api, data)
     wanted = {}
     for entry in data['cards']:
-        if entry['board'] == 'side' and data['format'] in ('commander', 'brawl', 'oathbreaker', 'duel', 'paupercommander'):
+        if entry['board'] == 'side' and data['format'] in COMMANDER_FORMATS:
             continue   # the side board of a commander deck is not played
         slot = wanted.setdefault(entry['name'], {'quantity': 0, 'owned': entry['owned'], 'price': (entry.get('card') or {}).get('price') or 0})
         slot['quantity'] += entry['quantity']
@@ -151,6 +219,26 @@ def missing_cards(api, deck):
             'cost_of_the_missing': round(sum(card['missing'] * (card['price_each'] or 0) for card in missing), 2)}
 
 
+def missing_on_arena(api, data):
+    """
+    An Arena deck's missing cards, as the decks page's Arena window counts them
+    (GET /api/decks/<id>/arena -> 'check'): what would be crafted, the wildcards that takes
+    beside the ones the account had, and the cards Arena does not have at all
+    """
+    window = api.get(f"/api/decks/{data['id']}/arena")
+    check = window.get('check') or {}
+    wildcards = check.get('wildcards') or {}
+    needed, have = wildcards.get('needed') or {}, wildcards.get('have') or {}
+    short = {rarity: count - (have.get(rarity) or 0) for rarity, count in needed.items() if count > (have.get(rarity) or 0)}
+    return {'deck': data['name'], 'kind': 'arena',
+            'collection_imported': check.get('imported') or 'never: import an Arena export first',
+            'to_craft': check.get('craft') or [],
+            'wildcards_needed': needed, 'wildcards_have': have,
+            'can_craft_all_now': not short, 'wildcards_short': short,
+            'copies_not_on_arena': check.get('not_on_arena') or 0,
+            'cards_not_on_arena': window.get('left_out') or []}
+
+
 def suggest_for_deck(api, deck, per_category=8, only_owned=False):
     """
     Cards players put in a deck with the same commander (EDHREC), with how often (inclusion %) and
@@ -158,6 +246,10 @@ def suggest_for_deck(api, deck, per_category=8, only_owned=False):
     of your decks uses them. Needs the internet on the server; slow the first time (a few seconds).
     """
     item = find_deck(api, deck)
+    if not item.get('commanders'):
+        # EDHREC's lists are by commander: a 60-card deck has none to ask about. search_cards is the way there
+        return {'deck': item['name'], 'message': ('No suggestions: they come from EDHREC, which knows commander decks only. '
+                                                  'Use search_cards (owned_only, the deck\'s format and colours) to find candidates.')}
     answer = api.get(f"/api/decks/{item['id']}/suggestions")
     if not answer.get('categories'):
         return {'deck': item['name'], 'message': answer.get('message') or 'No suggestions for this deck'}
@@ -202,23 +294,42 @@ def what_can_i_build(api, kind='commanders', wait_seconds=40, limit=10):
 def propose_deck_changes(api, deck, add=None, remove=None):
     """
     Work out what a change to a deck WOULD do - nothing is changed. add / remove: lists of
-    {'name': ..., 'quantity': 1}. Says, for each card added: whether it exists, whether it is legal in
-    the deck's format, within the commander's colours, how many copies you own, and which other decks
-    of yours use it; and the deck's size before and after. The person makes the change on the decks page.
+    {'name': ..., 'quantity': 1, 'board': 'main' | 'side'}. Says, for each card added: whether it exists,
+    whether it is legal in the deck's format, within the commander's colours, how many copies you own,
+    and which other decks of yours use it; and the deck's size before and after. The person makes the
+    change on the decks page (or, with deck writes on, change_deck makes it).
     """
-    data = load_deck(api, deck)
+    answer, _plan = _plan_changes(api, load_deck(api, deck), add, remove)
+    return answer
+
+
+def _plan_changes(api, data, add=None, remove=None):
+    """
+    The work of propose_deck_changes on a deck already loaded: (its answer, the plan) - the plan is
+    what change_deck would send, {'add': [...], 'remove': [...]}, each item a /api/decks/<id>/cards
+    change ({name as the card data spells it, board, change: +n / -n, card_id}). Only read here.
+    """
+    arena = data.get('kind') == 'arena'
+    plan = {'add': [], 'remove': []}
     commander_cards = [entry for entry in data['cards'] if entry['board'] == 'commander']
-    commander_format = bool(commander_cards)
+    commander_format = bool(commander_cards) or data['format'] in COMMANDER_FORMATS
     commander_identity = set()
     for entry in commander_cards:
         commander_identity |= set((entry.get('card') or {}).get('identity') or [])
     # What the deck plays (the side board of a commander deck is not played)
-    playing = {front(entry['name']): {'name': entry['name'], 'quantity': entry['quantity'], 'owned': entry['owned']}
-               for entry in data['cards'] if not (commander_format and entry['board'] == 'side')}
+    # (two boards can hold the same card - main and side of a 60-card deck: their copies add up)
+    playing = {}
+    for entry in data['cards']:
+        if commander_format and entry['board'] == 'side':
+            continue
+        slot = playing.setdefault(front(entry['name']), {'name': entry['name'], 'quantity': 0, 'owned': entry['owned'],
+                                                         'card': entry.get('card') or {}})
+        slot['quantity'] += entry['quantity']
     cards_before = sum(card['quantity'] for card in playing.values())
-    # Which decks use each card you own, by name (the collection entries say)
+    # Which decks use each card you own, by name (the collection entries say) - the Arena
+    # collection's entries for an Arena deck: only other Arena decks share its copies
     users = {}
-    for entry in collection(api):
+    for entry in collection(api, 'arena' if arena else 'paper'):
         for deck_name in entry.get('decks') or []:
             users.setdefault(front(entry['name']), set()).add(deck_name)
 
@@ -226,6 +337,14 @@ def propose_deck_changes(api, deck, add=None, remove=None):
     for item in (add or []):
         name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
         report = {'name': name, 'quantity': quantity}
+        board = str(item.get('board') or 'main').lower()
+        if board not in ('main', 'side'):
+            report['problem'] = "board must be 'main' or 'side'"
+            problems += 1
+            added.append(report)
+            continue
+        if board == 'side':
+            report['board'] = 'side'
         found = api.get('/api/cards/search', q=name, format=data['format'], kind=data['kind'])['cards']
         match = next((card for card in found if front(card['name']) == front(name)), None)
         if match is None:
@@ -237,7 +356,17 @@ def propose_deck_changes(api, deck, add=None, remove=None):
             problems += 1
             added.append(report)
             continue
-        report.update(name=match['name'], copies_owned=match.get('owned', 0), price=match.get('price'))
+        report.update(name=match['name'], copies_owned=match.get('owned', 0), rarity=match.get('rarity'))
+        if not arena:
+            report['price'] = match.get('price')
+        # What change_deck sends: the card data's spelling of the name, and the printing the search
+        # picked (the one owned, when one is - the deck page then shows the user's own art)
+        plan['add'].append({'name': match['name'], 'board': board, 'change': quantity, 'card_id': match.get('id')})
+        if commander_format and board == 'side':
+            # A commander deck's side board is cards being considered: not played, so no rule applies
+            report['note'] = 'side board of a commander deck: considered, not played'
+            added.append(report)
+            continue
         identity = set(match.get('identity') or [])
         if commander_format and not identity <= commander_identity:
             report['problem'] = ("outside the commander's colours: the card is "
@@ -251,32 +380,232 @@ def propose_deck_changes(api, deck, add=None, remove=None):
                 report['problem'] = report.get('problem', '') + ('; ' if report.get('problem') else '') \
                     + 'already in the deck (a commander deck plays one copy of a card)'
                 problems += 1
+        if not commander_format:
+            # A 60-card deck: at most 4 copies of a card (basic lands, and cards that say so, excepted)
+            limit = copy_limit(match)
+            total = (existing['quantity'] if existing else 0) + quantity
+            if limit and total > limit:
+                report['problem'] = report.get('problem', '') + ('; ' if report.get('problem') else '') \
+                    + f'{total} copies: a {data["format"]} deck plays at most {limit}'
+                problems += 1
         others = sorted(users.get(front(match['name']), set()) - {data['name']})
         if others:
             report['also_used_by'] = others[:4] + ([f'and {len(others) - 4} more'] if len(others) > 4 else [])
-        playing[front(match['name'])] = {'name': match['name'], 'owned': match.get('owned', 0),
+        playing[front(match['name'])] = {'name': match['name'], 'owned': match.get('owned', 0), 'card': match,
                                          'quantity': (existing['quantity'] if existing else 0) + quantity}
         added.append(report)
     for item in (remove or []):
         name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
-        existing = playing.get(front(name))
-        if not existing:
-            removed.append({'name': name, 'problem': 'not in the deck'})
+        wanted_board = str(item['board']).lower() if item.get('board') else None
+        # The deck's entry it is taken from: on the board asked for, else the main deck before the side board
+        entries = [entry for entry in data['cards'] if front(entry['name']) == front(name)
+                   and (wanted_board is None or entry['board'] == wanted_board)]
+        entries.sort(key=lambda entry: {'main': 0, 'commander': 1, 'side': 2}.get(entry['board'], 3))
+        if not entries:
+            removed.append({'name': name, 'problem': 'not in the deck' + (f' ({wanted_board} board)' if wanted_board else '')})
             problems += 1
             continue
-        new_quantity = max(0, existing['quantity'] - quantity)
-        removed.append({'name': existing['name'], 'copies_removed': existing['quantity'] - new_quantity})
-        if new_quantity:
-            playing[front(name)] = {**existing, 'quantity': new_quantity}
-        else:
-            del playing[front(name)]
+        entry = entries[0]
+        taken = min(quantity, entry['quantity'])
+        removed.append({'name': entry['name'], 'copies_removed': taken,
+                        **({'board': entry['board']} if entry['board'] != 'main' else {})})
+        plan['remove'].append({'name': entry['name'], 'board': entry['board'], 'change': -taken})
+        # The copies played after it (a commander deck's side board is not played: nothing to count)
+        existing = playing.get(front(name))
+        if existing and not (commander_format and entry['board'] == 'side'):
+            new_quantity = existing['quantity'] - taken
+            if new_quantity > 0:
+                playing[front(name)] = {**existing, 'quantity': new_quantity}
+            else:
+                del playing[front(name)]
     cards_after = sum(card['quantity'] for card in playing.values())
     # Copies the deck would need beyond what you own, after the change
     missing_after = sum(max(0, card['quantity'] - card['owned']) for card in playing.values())
-    return {'deck': data['name'], 'format': data['format'], 'nothing_was_changed': True,
-            'add': added, 'remove': removed, 'problems': problems,
-            'cards_before': cards_before, 'cards_after': cards_after, 'copies_missing_after': missing_after,
-            'note': 'Nothing was changed: make the change on the decks page.'}
+    answer = {'deck': data['name'], 'format': data['format'], 'kind': data['kind'], 'nothing_was_changed': True,
+              'add': added, 'remove': removed, 'problems': problems,
+              'cards_before': cards_before, 'cards_after': cards_after,
+              # a 60-card deck's side board counts too (its copies share the 4-copy limit); a commander deck's is not played
+              'cards_counted': 'main deck and commander' if commander_format else 'main and side boards together',
+              'copies_missing_after': missing_after,
+              'note': 'Nothing was changed: make the change on the decks page.'}
+    if arena:
+        # What the deck would cost to finish in Arena after the change: one wildcard of a card's
+        # rarity per copy not owned (basic lands are free), beside what the account had
+        needed = {'common': 0, 'uncommon': 0, 'rare': 0, 'mythic': 0}
+        for card in playing.values():
+            short = max(0, card['quantity'] - card['owned'])
+            rarity = (card.get('card') or {}).get('rarity')
+            if short and rarity in needed and 'Basic' not in ((card.get('card') or {}).get('type_line') or ''):
+                needed[rarity] += short
+        have = (data.get('wildcards') or {}).get('have') or {}
+        answer['wildcards_after'] = {'needed': needed, 'have': have,
+                                     'enough': all(count <= (have.get(rarity) or 0) for rarity, count in needed.items())}
+        answer['note'] = 'Nothing was changed: ' + arena_facts(data)['how_to_change'] + '.'
+    return answer, plan
+
+
+# ----------------------------------------------------------------------------
+# Changing decks - only when the MCP server is started with --allow-deck-writes
+# ----------------------------------------------------------------------------
+# Three tools, and they reach nothing but the deck routes (ScannerApi.write refuses any other path):
+# create a deck, change its cards, rename it / change its notes. No delete - that stays on the
+# decks page. Each change is worked out by the same checks as propose_deck_changes first, and is
+# refused when they find a problem (unless allow_problems): the server applies a deck's card changes
+# one card at a time, so a list is checked whole BEFORE any of it is sent.
+
+
+def refuse_imported(data):
+    """A deck that came with an MTG Arena export is replaced by the next import: a change made to it here would be lost"""
+    if data.get('from_arena'):
+        raise ScannerError(f"'{data['name']}' came from an MTG Arena export: the next import replaces it, so a change "
+                           "made here would be lost. Change it in Arena itself, or make a new deck here (create_deck) "
+                           "from its list and change that one.")
+
+
+def deck_summary(data):
+    """A deck as it is after a change: what to tell the user (an Arena deck in wildcards, a paper one in money)"""
+    arena = data.get('kind') == 'arena'
+    summary = {'id': data['id'], 'name': data['name'], 'format': data['format'], 'kind': data['kind'],
+               'totals': arena_totals(data) if arena else data['totals'], 'issues': data.get('issues') or []}
+    if arena:
+        summary['wildcards'] = data.get('wildcards') or {}
+    return summary
+
+
+def change_deck(api, deck, add=None, remove=None, allow_problems=False):
+    """
+    Change a deck's cards - this WRITES. add / remove: lists of {'name', 'quantity', 'board': 'main' |
+    'side'}; a card is moved between boards by removing it from one and adding it to the other. Checked
+    first exactly as propose_deck_changes; any problem (not legal, colours, copies, not a card, not in
+    the deck) refuses the whole change unless allow_problems=true - then only the cards that could be
+    found are changed.
+    """
+    data = load_deck(api, deck)
+    refuse_imported(data)
+    answer, plan = _plan_changes(api, data, add, remove)
+    if answer['problems'] and not allow_problems:
+        return {**answer, 'changed': False,
+                'note': f"Refused, nothing was changed: {answer['problems']} problem(s) above. Fix the list, or ask the "
+                        "user whether to make the change anyway (allow_problems=true)."}
+    # Removals first: a card moved from the main deck to the side board ends with its copies where they belong
+    items = plan['remove'] + plan['add']
+    if not items:
+        raise ScannerError('Nothing to change: no card of the list could be found in the deck or the card data')
+    api.write('POST', f"/api/decks/{data['id']}/cards", {'cards': items})
+    return {'changed': True, 'deck': data['name'], 'add': answer['add'], 'remove': answer['remove'],
+            'problems': answer['problems'], 'now': deck_summary(load_deck(api, data['id']))}
+
+
+def create_deck(api, name, deck_format, kind='paper', cards=None, commander='', allow_problems=False):
+    """
+    Make a new deck - this WRITES. deck_format: 'standard', 'commander', 'historic' ...; kind: 'paper' or
+    'arena' (planned against the MTG Arena collection); cards: [{'name', 'quantity', 'board': 'main' |
+    'side'}]; commander: the commander's name for a commander format. Checked first like
+    propose_deck_changes (legal, colours, copies); a problem refuses it unless allow_problems=true.
+    A deck made here has no Arena id: an Arena import never replaces it.
+    """
+    name, deck_format, kind = str(name or '').strip(), str(deck_format or '').strip().lower(), str(kind or 'paper').lower()
+    if not name:
+        raise ScannerError('A deck needs a name')
+    if not deck_format:
+        raise ScannerError("A deck needs a format ('standard', 'commander', 'historic' ...)")
+    if kind not in COLLECTIONS:
+        raise ScannerError("kind must be 'paper' or 'arena'")
+    # An empty deck of that format for the checks to work on (and the commander, for its colours)
+    draft = {'id': None, 'name': name, 'format': deck_format, 'kind': kind, 'cards': [], 'from_arena': False}
+    # A commander only where the format has one: Standard, Historic, Pioneer ... have none (and the checks
+    # would otherwise treat the deck as a commander deck - one copy of each card, the commander's colours)
+    if commander and deck_format not in COMMANDER_FORMATS:
+        raise ScannerError(f"{deck_format} has no commander: leave commander empty "
+                           f"(commander formats: {', '.join(COMMANDER_FORMATS)})")
+    if commander:
+        found = api.get('/api/cards/search', q=commander, format=deck_format, kind=kind, commander=1)['cards']
+        # The name as written, else the one commander whose name begins with it ("Giada" -> Giada, Font of Hope)
+        leader = next((card for card in found if front(card['name']) == front(commander)), None)
+        if leader is None:
+            starting = [card for card in found if front(card['name']).startswith(front(commander))]
+            if len(starting) > 1:
+                raise ScannerError(f"Several commanders match '{commander}': "
+                                   + ', '.join(card['name'] for card in starting[:8]) + '. Say which one.')
+            leader = starting[0] if starting else None
+        if leader is None:
+            raise ScannerError(f"'{commander}' is no commander legal in {deck_format}")
+        draft['cards'].append({'name': leader['name'], 'quantity': 1, 'board': 'commander',
+                               'owned': leader.get('owned', 0), 'card': leader})
+    if kind == 'arena':
+        draft['wildcards'] = {'have': (api.get('/api/arena').get('arena') or {}).get('wildcards') or {}}
+    answer, plan = _plan_changes(api, draft, cards, None)
+    if answer['problems'] and not allow_problems:
+        return {**answer, 'deck': name, 'created': False,
+                'note': f"Refused, no deck was made: {answer['problems']} problem(s) above. Fix the list, or ask the "
+                        "user whether to make it anyway (allow_problems=true)."}
+    # The list as the decks page's "paste a list" reads it (parse_decklist): Commander / Deck / Sideboard,
+    # the same card twice on one board added up
+    boards = {'commander': {}, 'main': {}, 'side': {}}
+    for entry in draft['cards']:
+        boards['commander'][entry['name']] = 1
+    for item in plan['add']:
+        boards[item['board']][item['name']] = boards[item['board']].get(item['name'], 0) + item['change']
+    sections = [(title, boards[board]) for title, board in (('Commander', 'commander'), ('Deck', 'main'), ('Sideboard', 'side'))
+                if boards[board]]
+    text = '\n\n'.join(title + '\n' + '\n'.join(f'{count} {card}' for card, count in cards_on.items())
+                       for title, cards_on in sections)
+    created = api.write('POST', '/api/decks', {'name': name, 'format': deck_format, 'kind': kind, 'text': text})
+    return {'created': True, 'unknown_cards': created.get('unknown') or [], 'add': answer['add'],
+            'problems': answer['problems'], 'now': deck_summary(created['deck'])}
+
+
+def rename_deck(api, deck, name='', notes=None):
+    """Change a deck's name and / or its notes - this WRITES. notes: the whole new text ('' empties them)"""
+    data = load_deck(api, deck)
+    refuse_imported(data)
+    body = {}
+    if str(name or '').strip():
+        body['name'] = str(name).strip()
+    if notes is not None:
+        body['notes'] = str(notes)
+    if not body:
+        raise ScannerError('Nothing to change: give a new name or notes')
+    changed = api.write('PUT', f"/api/decks/{data['id']}", body)
+    return {'changed': True, 'was': data['name'], 'now': deck_summary(changed['deck'])}
+
+
+# ----------------------------------------------------------------------------
+# The card database (the decks page's card search)
+# ----------------------------------------------------------------------------
+
+
+def search_cards(api, which='paper', deck_format='', owned_only=True, name='', text='', card_type='', identity='',
+                 colors='', cmc=None, rarity='', offset=0, limit=50, with_card_text=False):
+    """
+    The decks page's card search (GET /api/cards/search): every card of the card database, one per
+    name, with the copies owned - in the paper collection or, which='arena', in the MTG Arena one.
+      deck_format  only cards legal in it ('standard', 'historic', 'commander' ...)
+      owned_only   only cards the user owns (in that collection)
+      name / text / card_type  part of the name / of the rules text ('lifelink') / of the type line ('Creature')
+      identity     the colour identity must fit within these letters ('GW': green, white, both or colourless)
+      colors       the identity must include these letters ('C' = colourless only)
+      cmc          mana value exactly; rarity: common / uncommon / rare / mythic
+    The server answers a page at a time: offset pages through, 'more' says another page is there.
+    """
+    arena = area_of(which) == 'arena'
+    params = {'q': name, 'text': text, 'type': card_type, 'identity': identity.upper() if identity else '',
+              'colors': colors.upper() if colors else '', 'cmc': cmc, 'rarity': rarity.lower() if rarity else '',
+              'format': deck_format.lower() if deck_format else '', 'owned': 1 if owned_only else '',
+              'kind': 'arena' if arena else '', 'offset': max(0, int(offset or 0))}
+    answer = api.get('/api/cards/search', **params)
+    cards = []
+    for card in (answer.get('cards') or [])[:max(1, int(limit))]:
+        line = {'name': card['name'], 'owned': card.get('owned', 0), 'type': card.get('type_line'),
+                'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'), 'identity': ''.join(card.get('identity') or []),
+                'rarity': card.get('rarity')}
+        if not arena:
+            line['price'] = card.get('price')
+        if with_card_text:
+            line['text'] = card.get('oracle_text') or ''
+        cards.append(line)
+    return {'collection': 'arena' if arena else 'paper', 'format': deck_format or 'any', 'owned_only': bool(owned_only),
+            'offset': params['offset'], 'shown': len(cards), 'more': bool(answer.get('more')), 'cards': cards}
 
 
 # ----------------------------------------------------------------------------
@@ -284,28 +613,39 @@ def propose_deck_changes(api, deck, add=None, remove=None):
 # ----------------------------------------------------------------------------
 
 
-def collection(api):
-    return api.get('/api/inventory')['cards']
+def collection(api, which='paper'):
+    """The entries of the paper collection, or of the Arena one (which='arena')"""
+    area = area_of(which)
+    return api.get('/api/inventory', area=area)['cards'] if area else api.get('/api/inventory')['cards']
 
 
-def short_entry(card):
-    """A collection entry as the assistant needs it"""
-    return {'name': card['name'], 'set': (card.get('set_code') or '').upper(), 'number': card.get('number'),
-            'finish': card.get('finish'), 'copies': card.get('quantity'), 'condition': card.get('condition'),
-            'location': card.get('location') or '', 'tags': card.get('tags') or [], 'price': card.get('price'),
-            'rarity': card.get('rarity'), 'type': card.get('type_line'), 'used_by_decks': card.get('decks') or []}
+RARITY_ORDER = {'common': 0, 'uncommon': 1, 'rare': 2, 'mythic': 3}
 
 
-def search_collection(api, text='', set_code='', rarity='', card_type='', tag='', location='', in_a_deck=None, limit=25):
+def short_entry(card, arena=False):
+    """A collection entry as the assistant needs it (an Arena one has no condition, place, tags or price)"""
+    line = {'name': card['name'], 'set': (card.get('set_code') or '').upper(), 'number': card.get('number'),
+            'copies': card.get('quantity'), 'rarity': card.get('rarity'), 'type': card.get('type_line'),
+            'used_by_decks': card.get('decks') or []}
+    if not arena:
+        line.update(finish=card.get('finish'), condition=card.get('condition'), location=card.get('location') or '',
+                    tags=card.get('tags') or [], price=card.get('price'))
+    return line
+
+
+def search_collection(api, text='', set_code='', rarity='', card_type='', tag='', location='', in_a_deck=None, limit=25,
+                      which='paper'):
     """
     Search the cards you own. text: part of a name (or oracle text is not searched here - use the
     decks page for that); set_code: e.g. 'HOB'; rarity: common/uncommon/rare/mythic; card_type: e.g.
     'Creature'; tag, location: as saved on the entry; in_a_deck: true = only cards a deck uses, false =
-    only cards no deck uses. Returns up to `limit` entries and how many matched.
+    only cards no deck uses. Returns up to `limit` entries and how many matched. which: 'paper' (the
+    scanned collection) or 'arena' (the MTG Arena one - sorted by rarity there, as nothing costs money).
+    To search by rules text, colours or format, use search_cards.
     """
     wanted = normal(text)
     found = []
-    for card in collection(api):
+    for card in collection(api, which):
         if wanted and wanted not in normal(card['name']):
             continue
         if set_code and (card.get('set_code') or '').lower() != set_code.lower():
@@ -321,16 +661,23 @@ def search_collection(api, text='', set_code='', rarity='', card_type='', tag=''
         if in_a_deck is not None and bool(card.get('decks')) != bool(in_a_deck):
             continue
         found.append(card)
-    found.sort(key=lambda card: (-(card.get('price') or 0) * (card.get('quantity') or 1)))
-    return {'matches': len(found), 'copies': sum(card.get('quantity') or 0 for card in found),
-            'shown': min(len(found), int(limit)), 'sorted_by': 'total value, highest first',
-            'cards': [short_entry(card) for card in found[:max(1, int(limit))]]}
+    arena = area_of(which) == 'arena'
+    if arena:
+        found.sort(key=lambda card: (-RARITY_ORDER.get((card.get('rarity') or '').lower(), -1), card['name']))
+    else:
+        found.sort(key=lambda card: (-(card.get('price') or 0) * (card.get('quantity') or 1)))
+    return {'collection': 'arena' if arena else 'paper', 'matches': len(found),
+            'copies': sum(card.get('quantity') or 0 for card in found),
+            'shown': min(len(found), int(limit)), 'sorted_by': 'rarity, highest first' if arena else 'total value, highest first',
+            'cards': [short_entry(card, arena) for card in found[:max(1, int(limit))]]}
 
 
-def find_card(api, name):
-    """Everything about one card: the copies you own (printing, finish, where they are), the decks using them, and the card's text"""
+def find_card(api, name, which='paper'):
+    """Everything about one card: the copies you own (printing, finish, where they are), the decks using them, and the card's
+    text. which: 'paper' or 'arena' (the copies in MTG Arena, and the Arena decks using them)"""
     key = front(name)
-    owned = [card for card in collection(api) if front(card['name']) == key]
+    arena = area_of(which) == 'arena'
+    owned = [card for card in collection(api, which) if front(card['name']) == key]
     details = None
     try:
         found = api.get('/api/cards/search', q=name)['cards']
@@ -338,18 +685,21 @@ def find_card(api, name):
     except ScannerError:
         pass   # the collection part is still an answer
     return {'name': (details or (owned[0] if owned else {})).get('name', name),
+            'collection': 'arena' if arena else 'paper',
             'copies_owned': sum(card.get('quantity') or 0 for card in owned),
-            'entries': [short_entry(card) for card in owned],
+            'entries': [short_entry(card, arena) for card in owned],
             'card': None if not details else {'type': details.get('type_line'), 'cost': details.get('mana_cost'),
                                               'colours': details.get('colors'), 'identity': details.get('identity'),
-                                              'rarity': details.get('rarity'), 'price': details.get('price'),
+                                              'rarity': details.get('rarity'),
+                                              **({} if arena else {'price': details.get('price')}),
                                               'text': details.get('oracle_text')}}
 
 
-def collection_summary(api, top=8):
-    """How big the collection is and what it is made of: cards, value, the biggest sets, rarities, types, locations"""
-    cards = collection(api)
-    stats = api.get('/api/stats')['collection']
+def collection_summary(api, top=8, which='paper'):
+    """How big the collection is and what it is made of: cards, value, the biggest sets, rarities, types, locations.
+    which='arena': the MTG Arena collection - its size, the wildcards, gold and gems at the last import, and when that was"""
+    arena = area_of(which) == 'arena'
+    cards = collection(api, which)
 
     def tally(key, weight=lambda card: card.get('quantity') or 0):
         counts = {}
@@ -363,7 +713,17 @@ def collection_summary(api, top=8):
             if kind in line:
                 return kind
         return 'Other'
-    return {'cards': stats.get('total_cards'), 'different_entries': stats.get('unique_cards'),
+    if arena:
+        account = api.get('/api/arena').get('arena') or {}
+        return {'collection': 'arena', 'cards': account.get('cards'), 'different_entries': account.get('entries'),
+                'exported_from_arena': account.get('exported') or 'never imported',
+                'wildcards': account.get('wildcards') or {}, 'gold': account.get('gold'), 'gems': account.get('gems'),
+                'by_set': tally(lambda card: card.get('set_name') or '?')[:top],
+                'by_rarity': tally(lambda card: card.get('rarity') or '?'),
+                'by_type': tally(main_type),
+                'in_a_deck': sum(card.get('quantity') or 0 for card in cards if card.get('decks'))}
+    stats = api.get('/api/stats')['collection']
+    return {'collection': 'paper', 'cards': stats.get('total_cards'), 'different_entries': stats.get('unique_cards'),
             'value': stats.get('total_value'), 'currency': currency(api),
             'by_set': tally(lambda card: card.get('set_name') or '?')[:top],
             'by_rarity': tally(lambda card: card.get('rarity') or '?'),

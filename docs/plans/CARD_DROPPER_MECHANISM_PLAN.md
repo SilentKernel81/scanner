@@ -1,10 +1,10 @@
 # The card dropper's mechanism
 
-*Plan and design, 2026-10-22/23. The station's side was written on 2026-10-22 (`station/dropper.py`,
+*Plan and design, 2026-10-22/23; the wheels and the wheel block printed 2026-10-29. The station's side was written on 2026-10-22 (`station/dropper.py`,
 PROGRAM_DOCUMENTATION.md, "The card dropper"). The mechanism is drawn in `hardware/dropper/card_dropper.scad` (also
 as FreeCAD and STEP files, `hardware/dropper/freecad/`), its controller is `hardware/dropper/firmware/main.py`.
-**Checked in CAD and the controller on a simulated Pico; never printed, never assembled, never run; no card has gone
-through it.** Every size marked *to measure* is a guess until it has been measured.*
+**Checked in CAD and the controller on a simulated Pico; only the wheels and the wheel block printed (2026-10-29), never assembled, never
+run; no card has gone through it.** Every size marked *to measure* is a guess until it has been measured.*
 
 ## What it is for
 
@@ -121,6 +121,7 @@ All fit a 256 x 256 bed. `part = "..."` in the .scad, or the STEP file of the sa
 
 | Part | How many | Size, mm | Print | Notes |
 |---|---|---|---|---|
+| `bearing_test` | 1 | 90 x 21 x 30 | upright, as in the file | **before the block**: three pieces of its side wall, the 608's pocket at 22.05 / 22.20 / 22.35 mm (written on top), printed standing as the block is, so the pockets' tops are the same overhang. The size that takes a bearing by hand pressure and holds it still becomes `bearing_fit` |
 | `wheel_block` | 1 | 150 x 90 x 86 | upright | walls only, open at the bottom; the bearing housings are ribs from the table up, no overhang |
 | `wheel_plate` | 1 | 150 x 92 x 5 | flat, rails up | ironing on; PTFE tape on the rails |
 | `wheel` | 6 | Ø 48 x 15 | flat, boss up | an O-ring on each |
@@ -214,7 +215,7 @@ What the firmware does, and why:
 How a servo drives its axle, step by step, drawn from the .scad: `hardware/dropper/assembly/dropper_drive_assembly.png`
 (steps 1, 2 and 4 below, for one driven axle, and the drive cut along its axle).
 
-1. Press the 608 bearings into the block's housings (from outside), the HF0812s into the hubs (arrow: gripping when
+1. Print `bearing_test` first and set `bearing_fit` from it (above). Press the 608 bearings into the block's housings (from outside), the HF0812s into the hubs (arrow: gripping when
    the card goes forward - check by hand first: a piece of rod in it turns freely one way and locks the other). Trim
    both servo horns to 26 mm; lay each in its hub's pocket and drive two small horn screws through its holes into the
    hub. **The horn's centre screw stays out**: once the horn is in the hub nothing can reach it (the hub's recess for
@@ -314,7 +315,17 @@ Checked on 2026-10-22/23, with OpenSCAD 2021.01 (Flathub), FreeCAD 1.1.4 and Ble
 - the controller on a simulated Pico (`tests/test_dropper_firmware.py`): one feed per pulse, a pulse during a feed
   carried out once after it, a long pulse once, noise ignored.
 
-**Never**: printed, the fits (bearings, one-way bearings, O-rings on the grooves) tried, assembled, calibrated, run on
+**Printed, 2026-10-29** (the owner): the six `wheel`s with their O-rings. Checked by hand: the 8 mm rod slides
+through a wheel, the grub screw's nut sits in its slot, the ring stays in its groove. The ring went on **without
+stretching** - the printed groove is likely a little under its 45.5 mm, so the ~3% stretch the design counts on to
+hold the tyre may not be there; it held in the hand test, but a tyre that creeps under load points here (`groove_d`).
+The diameter with the ring is **still to measure** (`wheel_d`, `MM_PER_DEG`). Then `bearing_test`, with the owner's
+608-2RS bearings: **22.05 mm is snug** - the bearing goes in and comes out by hand - so `bearing_fit` stays at 22.05
+for the block. The `wheel_block` printed the same day (upright, as in the file): the six 608s press into its
+housings and fit well. Still to see once the rods are in: that an outer ring does not turn in its pocket with the rod
+spinning.
+
+**Never**: the other parts printed, the fits (bearings, one-way bearings, O-rings on the grooves) tried, assembled, calibrated, run on
 a Pico, driven by the station, fed a card - so the grip, the slip, the stop's accuracy, the finish by gravity, the
 timing, the landing and every row of the contact table are unmeasured. The servo's sizes (MG90S tabs, shaft height,
 horn) are typical values: **measure the servo before printing the bracket and the hubs** (parameters at the top of

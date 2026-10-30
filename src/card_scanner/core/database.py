@@ -68,6 +68,10 @@ CARD_COLUMNS = [
     ('price', 'REAL'),
     ('price_foil', 'REAL'),
     ('price_etched', 'REAL'),
+    # Where the printing can be played, as Scryfall says (JSON: ["paper", "arena", "mtgo"]; since 2026-10-29, empty until
+    # the card data is downloaded again; at the end, as ALTER TABLE appends). A card's rarity is its Arena printing's when
+    # it has one (_CARD_RARITY): the wildcard that crafts it - Bloom Tender is rare on paper, mythic in Arena
+    ('games', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -528,6 +532,7 @@ class CardDatabase:
                     price('eur_foil'),
                     # The shown prices: filled for the whole table by prices.apply_sql before the swap (_populate)
                     None, None, None,
+                    json.dumps(card.get('games', [])),
                 ))
                 
                 inserted += 1
@@ -905,6 +910,25 @@ class CardDatabase:
         with self._lock:
             return self.conn.execute(f'SELECT COUNT(*) FROM {prices.SHOP_TABLE}').fetchone()[0]
 
+    def buylist_by_ids(self, card_ids):
+        """
+        {printing id: (regular, foil, etched)} - what Card Kingdom pays for one copy (prices.BUYLIST, MTGJSON's buylist kept
+        by the shops' price update; None: no such price), for the printings that have a row. Read when a page asks - the
+        collection page's /api/inventory, beside card_details - and never written into an inventory: it is not the value the
+        collection is counted at, so no repricing, price change or lock of theirs concerns it. Under self._lock like
+        cards_by_ids: never called from inside an inventory's write (card_for_pricing says why that would wait forever)
+        """
+        result = {}
+        ids = [card_id for card_id in dict.fromkeys(card_ids) if card_id]
+        columns = ', '.join(prices.BUYLIST['columns'])
+        with self._lock:
+            for start in range(0, len(ids), 500):  # SQLite's parameter limit
+                chunk = ids[start:start + 500]
+                for row in self.conn.execute(
+                        f"SELECT id, {columns} FROM {prices.SHOP_TABLE} WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                    result[row['id']] = tuple(row[column] for column in prices.BUYLIST['columns'])
+        return result
+
     def priced_printings(self, source_id):
         """How many printings have a price in that source (prices.priced_sql)"""
         with self._lock:
@@ -969,18 +993,35 @@ class CardDatabase:
     # that has it - the newest ordinary printing: one with an image, then one that exists
     # non-foil (foil-only inserts and collector editions are rarely the copy meant), then the
     # latest release. cheapest: lowest price of any printing
+    # A card's rarity, as a deck needs it: the lowest of the four rarities among its printings
+    # (common < uncommon < rare < mythic) - a basic land or a common reprinted as a "rare" promo
+    # (Forest: g17, pal99, Secret Lair; Banishing Light: f14) is still a common. 'special' and
+    # 'bonus' count only for a card that has nothing else. Like 'cheapest': the least it takes to
+    # have the card. The printings on MTG Arena come first ('games'), so that a card on Arena has the
+    # rarity of the wildcard that crafts it there (decks_api.arena_check): Bloom Tender is rare in its
+    # paper sets and mythic in Lorwyn Eclipsed, its only Arena printing. Card data from before the
+    # 'games' column has it empty: the lowest of all printings then.
+    _CARD_RARITY = """
+        (SELECT p.rarity FROM cards p WHERE p.name_search = c.name_search
+         ORDER BY COALESCE(p.games, '') LIKE '%"arena"%' DESC,
+                  CASE p.rarity WHEN 'common' THEN 0 WHEN 'uncommon' THEN 1 WHEN 'rare' THEN 2
+                                WHEN 'mythic' THEN 3 ELSE 4 END LIMIT 1)"""
+
     _ONE_PER_NAME = """
         SELECT c.*, MAX((CASE WHEN image_uri != '' THEN '1' ELSE '0' END)
                         || (CASE WHEN finishes LIKE '%"nonfoil"%' THEN '1' ELSE '0' END)
                         || COALESCE(released_at, '')) AS _pick,
                (SELECT MIN(COALESCE(p.price, p.price_foil, p.price_etched)) FROM cards p
-                WHERE p.name_search = c.name_search) AS cheapest
+                WHERE p.name_search = c.name_search) AS cheapest,
+               """ + _CARD_RARITY + """ AS card_rarity
         FROM cards c WHERE {where} GROUP BY c.name
     """
 
     def _named_card(self, row):
         card = self._format_card_result(row)
         card['cheapest'] = row['cheapest'] or 0.0
+        # The card's rarity, not the representative printing's (which may be a promo's)
+        card['rarity'] = row['card_rarity'] or card.get('rarity')
         return card
 
     def cards_by_names(self, names):
@@ -1054,9 +1095,12 @@ class CardDatabase:
         if cmc is not None:
             where.append('cmc >= ?' if cmc >= 7 else 'cmc = ?')
             params.append(cmc)
+        # The rarity is the CARD's (card_rarity, after the grouping): a filter on the printings
+        # ("WHERE rarity = ?") kept any card with one printing of that rarity, and showed that
+        # printing - a Forest was a "rare" for its promos, Llanowar Elves a "mythic"
+        having, having_params = '', []
         if rarity:
-            where.append('rarity = ?')
-            params.append(rarity)
+            having, having_params = ' HAVING card_rarity = ?', [rarity]
         if commander:
             front = "CASE WHEN instr(type_line, ' // ') > 0 THEN substr(type_line, 1, instr(type_line, ' // ') - 1) ELSE type_line END"
             where.append(f"(({front} LIKE '%Legendary%' AND {front} LIKE '%Creature%') "
@@ -1077,8 +1121,8 @@ class CardDatabase:
             params += keys
         with self._lock:
             rows = self.conn.execute(
-                self._ONE_PER_NAME.format(where=' AND '.join(where)) + f' ORDER BY {order} LIMIT ? OFFSET ?',
-                (*params, *order_params, limit + 1, offset)).fetchall()
+                self._ONE_PER_NAME.format(where=' AND '.join(where)) + having + f' ORDER BY {order} LIMIT ? OFFSET ?',
+                (*params, *having_params, *order_params, limit + 1, offset)).fetchall()
         return [self._named_card(row) for row in rows[:limit]], len(rows) > limit
 
     def find_printings(self, card_name, treatment=None, limit=200):

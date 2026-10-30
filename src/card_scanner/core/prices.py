@@ -38,6 +38,13 @@ SOURCES = {
 }
 
 
+# What a shop would PAY for a copy (phase 4 of the plan): Card Kingdom's buylist, kept in the shops' table by each price
+# update (core/shop_prices.py) - regular, foil, etched. Never a price source: it is not what a card is worth but what one
+# shop offers for it, shown beside the value (Game.buylist_prices), always in its own currency
+BUYLIST = {'label': 'Card Kingdom', 'currency': 'USD', 'symbol': '$',
+           'columns': ('cardkingdom_buy', 'cardkingdom_buy_foil', 'cardkingdom_buy_etched')}
+
+
 def source(source_id):
     """The source of that id, or the default one (a setting written by another version, or edited by hand)"""
     return SOURCES.get(source_id) or SOURCES[DEFAULT_SOURCE]

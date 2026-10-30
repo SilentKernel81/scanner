@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))  # the code is in src/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # app.py, for the routes' tests
 
 from card_scanner.core import inventory as inv  # noqa: E402
 from card_scanner.games.base import write_collection_csv  # noqa: E402
@@ -203,6 +204,164 @@ class ClosingATrade(TradeData):
         self.assertEqual((self.trade()['status'], self.trade()['quantity']), ('open', 3))
         self.assertEqual(self.collection.conn.execute('SELECT COUNT(*) FROM inventory_captures').fetchone()[0], 2)
         self.assertEqual(len(list(inv.CAPTURES_DIR.glob('*'))), 2)
+
+
+class StaleRequests(ClosingATrade):
+    """docs/plans/TRADES_REVIEW_PLAN.md, part 1: a page still showing a trade as it was (another tab, the phone) must not
+    do what the person did not mean - a Cancel once deleted the record of a trade confirmed meanwhile"""
+
+    def test_a_confirmed_trade_is_not_cancelled_and_keeps_its_record(self):
+        self.trades.confirm(self.id)
+        with self.assertRaisesRegex(TradeError, 'confirmed meanwhile'):
+            self.trades.cancel(self.id)
+        self.assertEqual(self.trade()['status'], 'done')
+
+    def test_an_open_trade_is_not_deleted_from_the_history(self):
+        with self.assertRaisesRegex(TradeError, 'cancel it instead'):
+            self.trades.delete(self.id)
+        self.assertEqual((self.trade()['status'], self.trade()['quantity']), ('open', 3))
+
+    def test_an_unknown_trade_is_not_found(self):
+        for change in (lambda: self.trades.cancel(999), lambda: self.trades.delete(999)):
+            with self.assertRaisesRegex(TradeError, 'not found'):
+                change()
+
+    def test_a_confirm_of_other_numbers_than_shown_is_refused(self):
+        # The page showed 3 copies; another tab took one out meanwhile
+        shown = {'fingerprint': self.trade()['fingerprint']}
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+        self.assertEqual(self.owned(), {'Test Card': 3, 'Other Card': 1})      # nothing left
+        self.assertEqual(self.trades.confirm(self.id, {'fingerprint': self.trade()['fingerprint']})['cards'], 2)
+
+    def shown(self):
+        # What a page has when its dialog asks: the trade's fingerprint from the listing
+        return {'fingerprint': self.trade()['fingerprint']}
+
+    def test_a_swap_that_keeps_the_totals_is_refused(self):
+        # Another tab takes a copy of one card out and puts a copy of another in: still 3 copies (a Codex finding)
+        shown = self.shown()
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        third = self.collection.add_card(OTHER, GAME, 'regular', quiet=True, location='Box 9')
+        self.trades.add(GAME, 'Jo', [third])
+        self.assertEqual(self.trade()['quantity'], 3)
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+        self.assertEqual(self.collection.get_stats(GAME)['total_cards'], 5)   # nothing left (3 + 1 + the new 1)
+        self.assertEqual(self.trade()['status'], 'open')
+
+    def test_an_edit_of_a_held_card_is_refused(self):
+        # The card itself changed (a single card is edited where it is and stays in its trade): not the one agreed to
+        shown = self.shown()
+        self.collection.conn.execute("UPDATE inventory SET finish = 'foil' WHERE id = ?", (self.other,))
+        self.collection.conn.commit()
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+
+    def test_a_new_price_is_not_a_change(self):
+        # A repricing changes the value every day, never which cards are given
+        shown = self.shown()
+        self.collection.conn.execute('UPDATE inventory SET price_usd = price_usd + 1')
+        self.collection.conn.commit()
+        self.assertEqual(self.trades.confirm(self.id, shown)['cards'], 3)
+
+    def test_what_a_trade_receives_is_in_the_fingerprint(self):
+        shown = self.shown()
+        self.trades.receive(GAME, 'Jo', 'Sam', [{'card': {**CARD, 'game': GAME}, 'key': 'k', 'quantity': 1, 'most': 2}])
+        with self.assertRaisesRegex(TradeError, 'changed since it was shown'):
+            self.trades.confirm(self.id, shown)
+
+
+class TradeRoutes(TradeData):
+    """The same through the routes and Flask's test client, as the page sends them (temporary data behind the server)"""
+
+    def setUp(self):
+        super().setUp()
+        # The trade of ClosingATrade (not inherited from it: its tests would run a second time here)
+        self.id = self.trades.add(GAME, 'Jo', [self.card, self.other])['trade']
+        self.trades.set_quantity(self.id, next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card'), 2)
+        import app as launcher
+        from card_scanner.server import state
+        self.state = state
+        # Not self.saved: TemporaryData keeps its folders there
+        self.saved_services = {name: getattr(state.services, name) for name in ('inventory', 'trade_store')}
+        # The routes ask which game is active (GET /api/trades lists its trades): this test's
+        from types import SimpleNamespace
+        from unittest import mock
+        from card_scanner.server import trades_api
+        patch = mock.patch.object(trades_api.games, 'active', return_value=SimpleNamespace(id=GAME))
+        patch.start()
+        self.addCleanup(patch.stop)
+        state.services.inventory, state.services.trade_store = self.collection, self.trades
+        self.client = launcher.app.test_client()
+
+    def tearDown(self):
+        for name, value in self.saved_services.items():
+            setattr(self.state.services, name, value)
+        super().tearDown()
+
+    def test_cancel_from_a_stale_page_keeps_the_confirmed_record(self):
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': self.trade()['fingerprint']}).status_code, 200)
+        answer = self.client.delete(f'/api/trades/{self.id}?action=cancel')
+        self.assertEqual(answer.status_code, 400)
+        self.assertIn('confirmed meanwhile', answer.get_json()['error'])
+        self.assertEqual(self.trade()['status'], 'done')
+        # A page from before ?action asked for both with nothing: that is a cancel now, refused the same way
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}').status_code, 400)
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=forget').status_code, 200)
+        self.assertEqual(self.trades.list(GAME), [])
+
+    def test_forget_does_not_cancel_an_open_trade(self):
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=forget').status_code, 400)
+        self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=cancel').status_code, 200)
+        self.assertEqual(self.trades.list(GAME), [])
+
+    def test_a_stale_confirm_is_refused(self):
+        # The page sends the fingerprint of the trade it showed
+        listed = self.client.get('/api/trades').get_json()['trades'][0]
+        self.assertEqual(listed['fingerprint'], self.trades.fingerprint(self.id))
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': 'something else'}).status_code, 400)
+        self.assertEqual(self.trade()['status'], 'open')
+        self.assertEqual(self.client.post(f'/api/trades/{self.id}/confirm', json={'fingerprint': listed['fingerprint']}).status_code, 200)
+
+
+class OldPagesCannotConfirm(TradeRoutes):
+    """A page from before the fingerprint sends nothing (before 2026-10-24's fixes) or only its totals: it cannot say what
+    the person saw, so its confirm is refused whatever the trade holds - and a swap made meanwhile leaves nothing (a Codex
+    finding: the old paths skipped the check, or missed a swap)"""
+
+    def swap(self):
+        # Another tab: one copy of Test Card out, one copy of a new entry in - still 3 copies
+        row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Test Card')
+        self.trades.set_quantity(self.id, row, 1)
+        self.trades.add(GAME, 'Jo', [self.collection.add_card(OTHER, GAME, 'regular', quiet=True, location='Box 9')])
+
+    def assert_refused(self, **request):
+        before = self.collection.get_stats(GAME)['total_cards']
+        answer = self.client.post(f'/api/trades/{self.id}/confirm', **request)
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn('reload', answer.get_json()['error'])
+        self.assertEqual((self.trade()['status'], self.collection.get_stats(GAME)['total_cards']), ('open', before))
+
+    def test_a_confirm_without_a_body(self):
+        self.swap()
+        self.assert_refused()
+
+    def test_a_confirm_with_only_totals(self):
+        self.swap()
+        self.assert_refused(json={'quantity': 3, 'receive_quantity': 0})
+
+    def test_an_empty_or_odd_fingerprint(self):
+        for body in ({'fingerprint': ''}, {'fingerprint': None}, {'fingerprint': 12}):
+            self.assert_refused(json=body)
+
+    # TradeRoutes' own tests are run there, not a second time here
+    test_cancel_from_a_stale_page_keeps_the_confirmed_record = None
+    test_forget_does_not_cancel_an_open_trade = None
+    test_a_stale_confirm_is_refused = None
 
 
 class TradesInBackups(TradeData):

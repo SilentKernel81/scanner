@@ -26,6 +26,50 @@ function inArena() {
     return inventoryArea === 'arena';
 }
 
+// What Card Kingdom offered (/api/inventory's `buylist`: one copy, None without an offer - core/prices.py BUYLIST).
+// Always in US dollars, whatever price source the values are in: never through money(), which follows that source
+const BUYLIST_SHOP = 'Card Kingdom';
+// The offers are of one day - /api/inventory's `buylist_date`, MTGJSON's date of the shops' prices in use - and are kept
+// until the next price update: a failed or switched-off update leaves them as they were. So they are always said with
+// their date, never as "today", and older than this many days they are called old (MTGJSON publishes every day)
+const BUYLIST_OLD_AFTER_DAYS = 2;
+let buylistDate = null;
+
+function buylistAge() {
+    // {date ('2026-10-24'), days (how old, whole days), old} of the offers shown, or null without a date
+    if (!buylistDate) return null;
+    const [year, month, day] = buylistDate.split('-').map(Number);
+    const now = new Date();
+    const days = Math.max(0, Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(year, month - 1, day)) / 86400000));
+    return {date: buylistDate, days, old: days > BUYLIST_OLD_AFTER_DAYS};
+}
+
+function buylistWhen() {
+    // How the offers' day is said: "on 2026-10-24", and how old when the prices have not been updated for a while
+    const age = buylistAge();
+    if (!age) return '';
+    return `on ${age.date}` + (age.old ? ` (${age.days} days ago - update the shops' prices in Settings > Card data)` : '');
+}
+function buylistMoney(amount) {
+    return '$' + Number(amount || 0).toFixed(2);
+}
+
+function buylistTotal(entries) {
+    // {value, copies (those it offers for), all (every copy)} of [{buylist, buylist_as_listed, quantity}] - quantity: the
+    // copies counted. Only copies in a condition the listed price is for (Mint, Near Mint: /api/inventory's
+    // `buylist_as_listed`): Card Kingdom grades a worn copy lower, by an amount nobody publishes, so it is left out of
+    // a total rather than counted at Near Mint's price
+    let value = 0, copies = 0, all = 0;
+    for (const entry of entries) {
+        all += entry.quantity;
+        if (entry.buylist && entry.buylist_as_listed) {
+            value += entry.buylist * entry.quantity;
+            copies += entry.quantity;
+        }
+    }
+    return {value, copies, all};
+}
+
 function priceText(amount) {
     // A card in Arena has no price: what the paper printing costs says nothing about it
     return inArena() ? '–' : money(amount);
@@ -259,6 +303,7 @@ async function loadInventory() {
         return;
     }
     inventory = data.cards;
+    buylistDate = data.buylist_date || null;
     selected = new Set([...selected].filter(id => inventory.some(card => card.id === id)));
     fillFilterOptions();
     if (savedFilters) restoreFilters();
@@ -653,6 +698,7 @@ function listRowHtml(card) {
             <div class="inventory-card-price">
                 <div class="inventory-price-value">${priceText(card.price * card.quantity)}</div>
                 ${card.quantity > 1 && !digital ? `<div class="inventory-price-each">${money(card.price)} each</div>` : ''}
+                ${card.buylist && !digital ? `<div class="inventory-price-each${(buylistAge() || {}).old || !card.buylist_as_listed ? ' is-old' : ''}" title="What ${BUYLIST_SHOP}'s buylist offered for one Near Mint copy in this finish ${escapeHtml(buylistWhen())} (MTGJSON's prices, in US dollars) - not counted in the value${card.buylist_as_listed ? '' : `. This copy is ${escapeHtml(card.condition)}: ${BUYLIST_SHOP} grades it lower, by an amount it decides, so it is not counted in the totals`}">${BUYLIST_SHOP} offered ${buylistMoney(card.buylist)}${card.quantity > 1 ? ' each' : ''} for Near Mint${card.buylist_as_listed ? '' : ` - yours is ${escapeHtml(card.condition)}, graded lower`}</div>` : ''}
                 <div class="inventory-timestamp" title="Scanned ${escapeHtml(card.timestamp)}">Added ${card.added_quantity ? '' : 'before '}${escapeHtml(card.added_at.slice(0, 16))}${card.added_quantity && card.added_quantity < card.quantity ? ` (+${card.added_quantity})` : ''}</div>
             </div>
             <div class="inventory-card-actions">
@@ -1037,6 +1083,13 @@ function renderStats() {
     $('stats-tiles').innerHTML = tile(cards.toLocaleString(), 'Cards') + tile(inventory.length.toLocaleString(), 'Entries')
         + tile(new Set(inventory.map(card => card.name)).size.toLocaleString(), 'Different cards')
         + (inArena() ? '' : tile(money(value), 'Total value') + tile(money(cards ? value / cards : 0), 'Average per card'));
+    // What Card Kingdom offered: only once its buylist is downloaded (Settings > Card data > Prices) and offers for
+    // something - with the offers' day, and how old they are when the prices have not been updated for a while
+    const buylist = inArena() ? null : buylistTotal(inventory);
+    if (buylist && buylist.copies) {
+        $('stats-tiles').innerHTML += tile(buylistMoney(buylist.value),
+            `${BUYLIST_SHOP} offered, for ${buylist.copies.toLocaleString()} of ${buylist.all.toLocaleString()} cards (Near Mint copies it buys), ${escapeHtml(buylistWhen())}`);
+    }
     // Arena cards have no price: the bars count cards there, and the choice is not offered
     const measure = inArena() ? 'cards' : statsMeasure;
     $('stats-measure').closest('.stats-controls').hidden = inArena();
@@ -1103,7 +1156,13 @@ function receiveCardHtml(card, open) {
 function tradeHtml(trade) {
     const open = trade.status === 'open';
     const receives = trade.receives || [];
+    // The cards' offers from their entries (`inventory`: the paper collection unless Arena is shown, whose ids are other cards)
+    const offer = open && !inArena() ? buylistTotal(trade.cards.map(card => {
+        const entry = inventory.find(item => item.id === card.id) || {};
+        return {buylist: entry.buylist, buylist_as_listed: entry.buylist_as_listed, quantity: card.quantity};
+    })) : null;
     const summary = `${plural(trade.quantity, 'card')} · <strong>${money(trade.value)}</strong>`
+        + (offer && offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for the Near Mint copies among these cards ${escapeHtml(buylistWhen())} (US dollars) - worn copies are graded lower and not counted">${BUYLIST_SHOP} offered ${buylistMoney(offer.value)}${offer.copies < offer.all ? ` for ${offer.copies} of ${offer.all}` : ''}${(buylistAge() || {}).old ? ` (${buylistAge().days} days ago)` : ''}</span>` : '')
         + (receives.length ? ` · receives ${plural(trade.receive_quantity, 'card')} · <strong>${money(trade.receive_value)}</strong>` : '') + ' · '
         + (open ? `since ${escapeHtml(trade.created_at.slice(0, 10))}` : `confirmed ${escapeHtml((trade.closed_at || '').slice(0, 10))}`);
     const exports = (trade.cards.length || !receives.length ? `<select class="select trade-export" title="Download the cards you give as a file for another site or app">
@@ -1135,6 +1194,7 @@ function tradeHtml(trade) {
                 <span class="summary">${summary}</span>
                 <span class="spacer"></span>
                 ${exports}
+                <button class="btn btn-small" data-trade-action="picture" title="A picture of these cards - your scans, 3 × 3 with their names - to post on Facebook Marketplace or another site" ${trade.cards.length ? '' : 'disabled'}>Sale picture…</button>
                 <button class="btn btn-small" data-trade-action="rename">Rename</button>
                 <button class="btn btn-small" data-trade-action="cancel" title="The trade is off: its cards simply stay in your collection">Cancel trade</button>
                 <button class="btn btn-small btn-primary" data-trade-action="confirm" title="The trade happened: remove the cards you give from your collection (what you receive is only a record)" ${trade.cards.length || receives.length ? '' : 'disabled'}>Confirm trade</button>
@@ -1291,22 +1351,38 @@ async function setAsideForTrade(card = null, chosen = null) {
 
 async function tradeAction(trade, action) {
     let request = null;
+    if (action === 'picture') return openSalePicture(trade);   // only draws: nothing to reload after it
     if (action === 'confirm') {
+        // What is confirmed is the trade the person looked at: the one on the screen when Confirm was pressed, by its
+        // fingerprint (exactly its cards and copies). If it changed since (another tab, the phone), the new list is shown
+        // and nothing is asked - the dialog shows only totals, and a card swapped for another would pass unseen under them
+        // (a Codex finding): the person looks again and presses Confirm again. The server gets the fingerprint that was
+        // SEEN, never one read behind the person's back, and refuses it if the trade holds anything else by then
+        const seen = trade.fingerprint;
+        await loadTrades();   // draws the trades as they are now
+        trade = trades.find(item => item.id === trade.id);
+        if (!trade || trade.status !== 'open') return notify('This trade is not open any more', 'warning');
+        if (trade.fingerprint !== seen) {
+            return notify('This trade changed since it was shown (in another tab or on another device): look at its cards again, then confirm', 'warning');
+        }
         const ok = await confirmDialog({title: `Confirm the trade "${trade.name}"?`, confirmText: 'Confirm trade', danger: true,
             message: (trade.quantity ? `Its ${plural(trade.quantity, 'card')} (${money(trade.value)}) are removed from your collection. This can't be undone.`
                                      : 'None of your cards are in it, so nothing leaves your collection.')
                 + (trade.receives.length ? ` What you receive (${plural(trade.receive_quantity, 'card')}, ${money(trade.receive_value)}) is only kept in the record: add those cards to your collection yourself.` : '')});
-        if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST'});
+        if (ok) request = api(`/api/trades/${trade.id}/confirm`, {method: 'POST',
+                                  body: {fingerprint: seen}});
     } else if (action === 'cancel') {
         // Not confirmDialog: its "Cancel" beside "Cancel trade" says nothing
         const ok = await choiceDialog({title: `Cancel the trade "${trade.name}"?`,
-            message: `Its ${plural(trade.quantity, 'card')} stay in your collection and are free again.`,
+            message: trade.quantity ? `Its ${plural(trade.quantity, 'card')} stay in your collection and are free again.`
+                                    : 'None of your cards are in it: nothing of your collection changes.',
             choices: [{label: 'Keep the trade', value: false}, {label: 'Cancel the trade', value: true, style: 'danger'}]});
-        if (ok === true) request = api(`/api/trades/${trade.id}`, {method: 'DELETE'});
+        // Says which: the server refuses to cancel a trade confirmed meanwhile, instead of deleting its record
+        if (ok === true) request = api(`/api/trades/${trade.id}?action=cancel`, {method: 'DELETE'});
     } else if (action === 'forget') {
         const ok = await confirmDialog({title: `Delete "${trade.name}" from the history?`, confirmText: 'Delete', danger: true,
             message: 'Only the record of the trade goes; your collection is not changed.'});
-        if (ok) request = api(`/api/trades/${trade.id}`, {method: 'DELETE'});
+        if (ok) request = api(`/api/trades/${trade.id}?action=forget`, {method: 'DELETE'});
     } else if (action === 'rename') {
         const name = await valueDialog({title: 'Rename the trade', label: 'Name', value: trade.name});
         if (name) request = api(`/api/trades/${trade.id}`, {method: 'PUT', body: {name}});
@@ -1316,6 +1392,319 @@ async function tradeAction(trade, action) {
     if (data && action === 'confirm') notify(`${plural(data.cards, 'card')} left your collection`, 'success');
     loadTrades();
     loadInventory();
+}
+
+// -- A picture of a trade's cards, for a sale post (Facebook Marketplace and the like) ------------
+// Drawn here in the browser, on a canvas, from the large copies of the scans the server keeps
+// (/captures/<file>?size=full, up to 1200 px tall): nothing on the server changes for it. Nine
+// cards a picture, 3 x 3, each with its name under it; more cards ticked make more pictures.
+
+const SALE_PER_PICTURE = 9, SALE_COLUMNS = 3;
+const SALE_CARD_HEIGHT = 1200;                                   // px of one card as drawn: the large copy's height
+const SALE_CARD_WIDTH = Math.round(SALE_CARD_HEIGHT * 63 / 88);  // a card is 63 x 88 mm
+const SALE_GAP = 48;                                             // px around and between the cards
+const SALE_CAPTION = 150;                                        // px under each card: its name, then set / number / finish
+const SALE_SMALL_BELOW = 700;   // px: a picture shorter than this is only the thumbnail (no large copy kept)
+// The longest side of the file: Facebook shrinks anything larger to 2048 px, so that is the
+// default; 0 keeps the picture as drawn
+const SALE_SIZES = {facebook: 2048, full: 0};
+// [background, name, second line] for each choice of background
+const SALE_COLOURS = {dark: ['#17171a', '#f4f4f5', '#a1a1aa'], light: ['#ffffff', '#111113', '#5b5b63'],
+                      grey: ['#d4d4d8', '#111113', '#3f3f46']};
+
+// The open dialog: {trade, tiles, page, layout (of the picture shown, for the clicks), drawing
+// (a counter: a slower, older drawing must not paint over a newer one)}. A tile is one picture
+// of one card: {card (the trade's), url, thumb, scryfall, ticked, flipped, image (a promise of
+// the loaded Image, or null when it could not be loaded), small}
+let sale = null;
+const SALE_SMALL_BADGE = '<span class="sale-small-badge" title="Only the small copy of this scan was kept: it looks blurry at this size">low res</span>';
+
+function loadSaleImage(url, fromElsewhere) {
+    // A picture for the canvas. One from another site (Scryfall) must be asked for with CORS,
+    // or the canvas counts as "tainted" and refuses to be saved; the scans come from this server
+    return new Promise(resolve => {
+        if (!url) return resolve(null);
+        const image = new Image();
+        if (fromElsewhere) image.crossOrigin = 'anonymous';
+        image.onload = () => resolve(image);
+        image.onerror = () => resolve(null);   // drawn as a frame with the name, the rest still works
+        image.src = url;
+    });
+}
+
+async function openSalePicture(trade) {
+    // The trade's cards hold neither their scans nor their picture: those are on the collection's
+    // entries. While the Arena collection is shown, `inventory` is that one - ask for the paper one
+    const entries = inArena() ? ((await api('/api/inventory')) || {cards: []}).cards : inventory;
+    const tiles = [];
+    for (const card of trade.cards) {
+        const entry = entries.find(item => item.id === card.id);
+        const captures = (entry && entry.captures) || [];
+        if (captures.length) {
+            // One tile per scan of the entry, only the newest ticked: a sale picture shows each card
+            // once (its caption says how many copies), and an entry scanned 16 times would fill
+            // two pictures with the same card. The other scans are there to pick a better one
+            captures.forEach((capture, index) => tiles.push({
+                card, url: `${capture.url}?size=full`, thumb: capture.url, scryfall: false, ticked: index === 0}));
+        } else {
+            // No scan (an entry imported from a file, say): Scryfall's picture of the printing,
+            // its "large" size (936 px tall) rather than the "normal" one the card data keeps
+            const picture = (entry && entry.details && entry.details.image_uri) || '';
+            tiles.push({card, url: picture.replace('/normal/', '/large/'), thumb: picture, scryfall: true, ticked: true});
+        }
+    }
+    for (const tile of tiles) {
+        tile.flipped = false;
+        tile.small = false;
+        tile.image = null;   // the large picture: loaded only when the card is drawn (saleImage)
+    }
+    sale = {trade, tiles, page: 0, layout: null, drawing: 0};
+    $('sale-title').textContent = `Picture for a sale: ${trade.name}`;
+    $('sale-modal').classList.add('show');
+    renderSaleTiles();
+    drawSalePreview();
+}
+
+function saleImage(tile) {
+    // A tile's large picture, loaded the first time the tile is drawn - never when the dialog
+    // opens: a trade of a few hundred scans would load them all (some 4 MB each once decoded),
+    // most of them never drawn. A copy made for a download (saleSnapshot: `source`) uses its
+    // tile's picture when that one is loaded, else loads its own, kept only by the copy
+    const owner = tile.source || tile;
+    if (owner.image) return owner.image;
+    if (tile.image) return tile.image;
+    const loading = loadSaleImage(owner.url, owner.scryfall).then(image => {
+        // ?size=full answers the 400 px thumbnail when no large copy was kept: say so on its tile
+        owner.small = !!image && !owner.scryfall && image.naturalHeight < SALE_SMALL_BELOW;
+        // Marked on its row in place: rebuilding the list per picture would reset its scroll
+        if (owner.small && sale && sale.tiles.includes(owner)) {
+            const row = document.querySelector(`#sale-tiles [data-tile="${sale.tiles.indexOf(owner)}"]`);
+            if (row && !row.querySelector('.sale-small-badge')) row.insertAdjacentHTML('beforeend', SALE_SMALL_BADGE);
+        }
+        return image;
+    });
+    tile.image = loading;
+    return loading;
+}
+
+function closeSalePicture() {
+    $('sale-modal').classList.remove('show');
+    sale = null;   // the loaded pictures go with it
+}
+
+function salePages() {
+    // The ticked tiles, nine to a picture
+    const ticked = sale.tiles.filter(tile => tile.ticked), pages = [];
+    for (let start = 0; start < ticked.length; start += SALE_PER_PICTURE) pages.push(ticked.slice(start, start + SALE_PER_PICTURE));
+    return pages;
+}
+
+function saleSecondLine(card, stock = false) {
+    // Under the name: what tells this printing from the others - set, number, a finish other than
+    // the usual - and how many copies the trade holds when it is more than one
+    return [`${(card.set_code || card.set_name || '').toUpperCase()}${card.number ? ' #' + card.number : ''}`,
+            card.finish !== defaultFinish() ? finishLabel(card.finish) : '',
+            card.quantity > 1 ? `×${card.quantity}` : '', stock ? 'stock picture' : ''].filter(Boolean).join(' · ');
+}
+
+function renderSaleTiles() {
+    // The list to tick from: one small picture per scan, with its name
+    $('sale-tiles').innerHTML = sale.tiles.map((tile, index) => `
+        <label class="sale-tile ${tile.ticked ? 'is-ticked' : ''}" data-tile="${index}">
+            <input type="checkbox" ${tile.ticked ? 'checked' : ''}>
+            ${tile.thumb ? `<img src="${escapeHtml(tile.thumb)}" alt="" loading="lazy">` : '<span class="sale-no-picture">No picture</span>'}
+            <span class="sale-tile-name">${escapeHtml(tile.card.name)}</span>
+            <span class="result-sub">${escapeHtml(saleSecondLine(tile.card))}${tile.scryfall ? ' · Scryfall' : ''}</span>
+            ${tile.small ? SALE_SMALL_BADGE : ''}
+        </label>`).join('');
+    const pages = salePages(), ticked = pages.reduce((sum, page) => sum + page.length, 0);
+    $('sale-summary').textContent = ticked ? `${plural(ticked, 'card')} · ${plural(pages.length, 'picture')}` : 'Nothing ticked';
+}
+
+function fitText(context, text, maxWidth, size, weight) {
+    // The font shrunk until the text fits (down to 60%), then cut with an ellipsis
+    let fontSize = size;
+    context.font = `${weight} ${fontSize}px Roboto, sans-serif`;
+    while (context.measureText(text).width > maxWidth && fontSize > size * 0.6) {
+        fontSize -= 2;
+        context.font = `${weight} ${fontSize}px Roboto, sans-serif`;
+    }
+    if (context.measureText(text).width <= maxWidth) return text;
+    while (text.length > 1 && context.measureText(text + '…').width > maxWidth) text = text.slice(0, -1);
+    return text + '…';
+}
+
+function saleOptions() {
+    // The dialog's choices as they are now - taken once per drawing, so a download is drawn with
+    // what was chosen when it was asked for, whatever is changed while its pictures load
+    return {longest: SALE_SIZES[$('sale-size').value] || 0,
+            colours: SALE_COLOURS[$('sale-background').value] || SALE_COLOURS.dark};
+}
+
+function saleSnapshot(tiles) {
+    // Copies of the tiles (the loaded picture is shared, it does not change): a card turned in
+    // the preview while a download is being drawn does not turn in that download
+    return tiles.map(tile => ({...tile, source: tile}));
+}
+
+async function drawSalePicture(canvas, tiles, options, isCurrent = () => true) {
+    // One picture: the tiles in rows of three, each card fitted into a card-shaped cell with its
+    // name and printing under it. Returns the layout (to find the card under a click) or null
+    // when a newer drawing took over while the pictures loaded
+    const images = await Promise.all(tiles.map(saleImage));
+    // The font is the page's own Roboto; the canvas only uses it once the browser has loaded it
+    await document.fonts.load('700 56px Roboto').catch(() => {});
+    if (!isCurrent()) return null;
+    const columns = Math.min(SALE_COLUMNS, tiles.length), rows = Math.ceil(tiles.length / SALE_COLUMNS);
+    const cellHeight = SALE_CARD_HEIGHT + SALE_CAPTION;
+    const width = SALE_GAP + columns * (SALE_CARD_WIDTH + SALE_GAP);
+    const height = SALE_GAP + rows * (cellHeight + SALE_GAP);
+    const {longest, colours} = options;
+    const scale = longest ? Math.min(1, longest / Math.max(width, height)) : 1;   // never made larger than drawn
+    const [background, nameColour, lineColour] = colours;
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const context = canvas.getContext('2d');
+    // Everything below is drawn in full-size pixels; the transform does the scaling
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.fillStyle = background;
+    context.fillRect(0, 0, width, height);
+    const cells = [];
+    tiles.forEach((tile, index) => {
+        const x = SALE_GAP + (index % SALE_COLUMNS) * (SALE_CARD_WIDTH + SALE_GAP);
+        const y = SALE_GAP + Math.floor(index / SALE_COLUMNS) * (cellHeight + SALE_GAP);
+        cells.push({x, y, width: SALE_CARD_WIDTH, height: SALE_CARD_HEIGHT, tile});
+        const image = images[index];
+        if (image) {
+            // Fitted whole into the cell (a scan is not exactly 63:88), centred, turned when asked
+            const fit = Math.min(SALE_CARD_WIDTH / image.naturalWidth, SALE_CARD_HEIGHT / image.naturalHeight);
+            const drawnWidth = image.naturalWidth * fit, drawnHeight = image.naturalHeight * fit;
+            context.save();
+            context.translate(x + SALE_CARD_WIDTH / 2, y + SALE_CARD_HEIGHT / 2);
+            if (tile.flipped) context.rotate(Math.PI);
+            context.drawImage(image, -drawnWidth / 2, -drawnHeight / 2, drawnWidth, drawnHeight);
+            context.restore();
+        } else {
+            // No picture to be had: a frame, so the card still has its place and its name
+            context.strokeStyle = lineColour;
+            context.lineWidth = 6;
+            context.strokeRect(x + 3, y + 3, SALE_CARD_WIDTH - 6, SALE_CARD_HEIGHT - 6);
+        }
+        // The caption: the name large, the printing smaller below it
+        context.textAlign = 'center';
+        context.textBaseline = 'alphabetic';
+        context.fillStyle = nameColour;
+        const name = fitText(context, tile.card.name, SALE_CARD_WIDTH, 60, 700);
+        context.fillText(name, x + SALE_CARD_WIDTH / 2, y + SALE_CARD_HEIGHT + 72);
+        context.fillStyle = lineColour;
+        // A picture that is not the person's scan says so: a buyer must not take it for the card on offer
+        const line = fitText(context, saleSecondLine(tile.card, tile.scryfall), SALE_CARD_WIDTH, 40, 400);
+        context.fillText(line, x + SALE_CARD_WIDTH / 2, y + SALE_CARD_HEIGHT + 128);
+    });
+    return {scale, cells};
+}
+
+async function drawSalePreview() {
+    // The picture of the current page, shown shrunk by CSS (the canvas holds the real pixels)
+    const pages = salePages();
+    sale.page = Math.max(0, Math.min(sale.page, pages.length - 1));
+    $('sale-page').textContent = pages.length ? `${sale.page + 1} / ${pages.length}` : '';
+    $('sale-previous').disabled = sale.page <= 0;
+    $('sale-next').disabled = sale.page >= pages.length - 1;
+    $('sale-download').disabled = $('sale-download-all').disabled = !pages.length;
+    $('sale-download-all').hidden = pages.length < 2;
+    const canvas = $('sale-canvas');
+    canvas.hidden = !pages.length;
+    if (!pages.length) return;
+    const drawing = ++sale.drawing, current = sale;
+    const layout = await drawSalePicture(canvas, pages[sale.page], saleOptions(), () => sale === current && current.drawing === drawing);
+    if (!layout) return;
+    sale.layout = layout;
+    // Only the pictures of the page shown are kept: the others are let go (the browser frees
+    // them) and loaded again if their page comes back - at most nine large pictures held, plus
+    // those of a download being drawn, which its copies keep
+    const shown = new Set(pages[sale.page]);
+    sale.tiles.forEach(tile => { if (!shown.has(tile)) tile.image = null; });
+}
+
+function saveSalePicture(canvas, tradeName, number, count) {
+    // The canvas as a JPEG file: the trade's name, and the picture's number when there are several
+    return new Promise(resolve => canvas.toBlob(blob => {
+        if (!blob) {
+            notify('The picture could not be made', 'error');
+            return resolve();
+        }
+        const name = tradeName.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'cards';
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${name}${count > 1 ? '_' + number : ''}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+        resolve();
+    }, 'image/jpeg', 0.92));
+}
+
+async function exportSalePicture(current, tiles, options, number, count) {
+    // One picture drawn and saved; false when the dialog was closed (or opened on another trade)
+    // while its pictures loaded - nothing is saved then
+    const stillOpen = () => sale === current;
+    const canvas = document.createElement('canvas');
+    if (!await drawSalePicture(canvas, tiles, options, stillOpen)) return false;
+    await saveSalePicture(canvas, current.trade.name, number, count);
+    return stillOpen();
+}
+
+function bindSaleEvents() {
+    $('sale-tiles').addEventListener('change', event => {
+        const label = event.target.closest('[data-tile]');
+        if (!label || !sale) return;
+        sale.tiles[parseInt(label.dataset.tile)].ticked = event.target.checked;
+        renderSaleTiles();
+        drawSalePreview();
+    });
+    // A click on a card in the picture turns it upside down (the scan is kept as the camera saw it)
+    $('sale-canvas').addEventListener('click', event => {
+        if (!sale || !sale.layout) return;
+        const canvas = event.currentTarget;
+        // From the shrunk picture on screen to the canvas's full-size pixels
+        const x = event.offsetX * canvas.width / canvas.clientWidth / sale.layout.scale;
+        const y = event.offsetY * canvas.height / canvas.clientHeight / sale.layout.scale;
+        const cell = sale.layout.cells.find(item => x >= item.x && x <= item.x + item.width && y >= item.y && y <= item.y + item.height);
+        if (!cell) return;
+        cell.tile.flipped = !cell.tile.flipped;
+        drawSalePreview();
+    });
+    ['sale-background', 'sale-size'].forEach(id => $(id).addEventListener('change', () => sale && drawSalePreview()));
+    $('sale-previous').addEventListener('click', () => { sale.page--; drawSalePreview(); });
+    $('sale-next').addEventListener('click', () => { sale.page++; drawSalePreview(); });
+    // A download never saves the preview's canvas: that one is redrawn whenever the page, a
+    // choice or a card's turn changes, and a drawing still waiting for its pictures can be
+    // overtaken - the file would then hold another page's cards under this page's number. So
+    // everything is taken when the button is pressed (the cards, their turns, the page's number,
+    // the choices, the trade's name) and drawn on a canvas of the download's own
+    $('sale-download').addEventListener('click', async () => {
+        const current = sale, pages = salePages();
+        if (!current || !pages.length) return;
+        const number = current.page + 1;
+        await exportSalePicture(current, saleSnapshot(pages[current.page]), saleOptions(), number, pages.length);
+    });
+    $('sale-download-all').addEventListener('click', async () => {
+        // Each picture drawn on a canvas of its own, one file after the other
+        const current = sale, pages = salePages().map(saleSnapshot), options = saleOptions();
+        for (let index = 0; index < pages.length; index++) {
+            const saved = await exportSalePicture(current, pages[index], options, index + 1, pages.length);
+            // A saved page lets go of its pictures (some 4 MB each once decoded): the pages still
+            // to come keep only their cards and turns, so the pictures held stay those of one page
+            // however many pictures the download makes
+            pages[index].forEach(tile => { tile.image = null; });
+            pages[index] = null;
+            if (!saved) return;
+        }
+    });
 }
 
 // -- Other people's collections and the buy list ---------------------------------------------------
@@ -1721,6 +2110,7 @@ const OVERLAYS = [
     ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['edit-card-modal', closeEditCard],
+    ['sale-modal', closeSalePicture],
 ];
 
 function bindEvents() {
@@ -1735,6 +2125,7 @@ function bindEvents() {
         renderStats();
     });
     bindTradeEvents();
+    bindSaleEvents();
     bindOthersEvents();
     bindSwitch('collection-kind', button => showCollection(button.dataset.collection));
     $('arena-import').addEventListener('click', () => $('arena-file-input').click());

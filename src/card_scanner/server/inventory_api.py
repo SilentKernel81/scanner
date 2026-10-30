@@ -101,14 +101,24 @@ def get_inventory():
             placed = copies_by_location(cards)
             # The open trades that hold copies of each entry (the collection only)
             in_trades = trade_store.by_entry(game.id) if inventory_area() is inventory else {}
+            # What Card Kingdom would pay for one copy (the collection only; None: no offer). Read now from the shops'
+            # table, never stored with the entry, and not withheld during a change of price source: it is not the value
+            buylist = game.buylist_prices(cards) if inventory_area() is inventory else {}
             for card in cards:
                 card['details'] = details.get(card['card_id'], {})
+                card['buylist'] = buylist.get(card['id'])
+                # The quote is Near Mint's: a worn copy is graded lower, so it is shown as Near Mint's and never counted
+                # in what Card Kingdom would pay for the collection or a trade (games/mtg.py: BUYLIST_CONDITIONS)
+                card['buylist_as_listed'] = bool(card['buylist']) and game.buylist_as_listed(card)
                 card['decks'] = decks_using(card, in_decks, placed)
                 card['trades'] = in_trades.get(card['id'], [])
 
             return jsonify({
                 'success': True,
                 'cards': cards,
+                # The date of the `buylist` offers (None before the first shops' price update): kept until the next
+                # update, so the page says what day they are of, never "today"
+                'buylist_date': game.buylist_date() if buylist else None,
                 'total': len(cards)
             })
         except Exception as e:

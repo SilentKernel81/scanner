@@ -1779,7 +1779,7 @@ swap (`replace_table`) does not happen: the old cards stay.
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
-| Deck building | `oracle_id` (the same for every printing of a card), `cmc`, `color_identity` (JSON), `legalities` (JSON: format → `legal` / `restricted` / `banned`; formats a card is not legal in are left out), `keywords` (JSON) |
+| Deck building | `oracle_id` (the same for every printing of a card), `cmc`, `color_identity` (JSON), `legalities` (JSON: format → `legal` / `restricted` / `banned`; formats a card is not legal in are left out), `keywords` (JSON); `games` (JSON: `paper` / `arena` / `mtgo`, where the printing can be played - since 2026-10-29, at the end of `CARD_COLUMNS`, empty until the next download) |
 
 Indexes: name, flavor name, search names, (set code, collector number), rarity, type, oracle id.
 Missing columns are added on startup (search names are filled in automatically; treatment and
@@ -1938,10 +1938,41 @@ One more row, `mtgjson_prices` (`shop_prices.INFO_KEY`): MTGJSON's date of the s
 
 **`shop_prices`** (since 2026-10-24; `core/shop_prices.py`, `CardDatabase.replace_shop_prices`) - the shops' prices from
 MTGJSON, one row per printing: `id` (as `cards.id`, the primary key) and a REAL column per shop, kind and finish -
-`cardkingdom`, `cardkingdom_foil`, `cardkingdom_etched`, the same three for `cardkingdom_buy` (Card Kingdom's buylist: kept, not
-shown yet) and for `manapool`. A table of its own, beside `cards`, because a card data download replaces `cards` whole: the
+`cardkingdom`, `cardkingdom_foil`, `cardkingdom_etched`, the same three for `cardkingdom_buy` (Card Kingdom's buylist: never a price source, shown
+beside the value since 2026-10-24 - *What Card Kingdom would pay* below) and for `manapool`. A table of its own, beside `cards`, because a card data download replaces `cards` whole: the
 shops' prices survive it, and new printings of the download are priced at once when the shops know them (the join).
 Created empty at start; replaced whole by each price update (`replace_table`, like `cards`).
+
+**What Card Kingdom would pay** (since 2026-10-24, phase 4 of `docs/plans/PRICE_SOURCES_PLAN.md`; `core/prices.py`: `BUYLIST`;
+`CardDatabase.buylist_by_ids`; `Game.buylist_prices` - `games/mtg.py` beside `inventory_fields`; `server/inventory_api.py`;
+`collection.js`: `buylistMoney`, `buylistTotal`). Card Kingdom's buylist - what the shop offers for a copy, not what it is
+worth - shown beside the value, never counted in it. `/api/inventory` gives each entry of the collection (not the scanned
+cards, not Arena's) `buylist`: the offer for one copy, `null` without one. It is **read when the page asks, from the shops'
+table, and never written into an inventory**: no repricing, price change, `pricing_lock` or transition concerns it, and it is
+not withheld while a change of currency is half done (keep it that way - stored in the entries it would need all of
+them). The finish picks the column, with no fallback to the other finish (unlike the value's): a foil or surge foil copy
+the foil offer, or the etched one of an etched-only printing; a regular copy the regular one - a shop pays very differently
+for each, and a borrowed number would be an offer nobody made. Always in US dollars (`buylistMoney`, never `money()`),
+whatever the price source. **Always with its day, never as "today"** (a Codex finding): the offers are those of the last
+price update and stay until the next one replaces them - one that fails or is switched off leaves them as they were - so
+`/api/inventory` also gives `buylist_date` (MTGJSON's date of the prices in use, `Game.buylist_date`, from
+`shop_prices.INFO_KEY`), every place says "offered ... on 2026-10-24", and offers more than two days old
+(`BUYLIST_OLD_AFTER_DAYS`: MTGJSON publishes daily) say how old they are and where to update them (`collection.js`:
+`buylistAge`, `buylistWhen`; a list row's line in the warning colour, `.is-old`). **Near Mint's, and only Near Mint
+copies counted** (a Codex finding): Card Kingdom states its listed buylist prices assume Near Mint and are graded lower for
+a worn copy, by an amount it decides and MTGJSON does not publish. So every offer is said as Near Mint's ("for Near
+Mint"), `/api/inventory` gives each entry `buylist_as_listed` (`Game.buylist_as_listed`: its condition is one of
+`games/mtg.py` `BUYLIST_CONDITIONS`, Mint and Near Mint), the totals (the tile, a trade) count only those copies, and a
+worn copy's row keeps the quote with "yours is Played, graded lower" in the warning colour - never a guessed discount. Shown: under a list row's value ("Card
+Kingdom offered $8.50 each for Near Mint"), a Statistics tile with the copies it covers ("$2378.07 - Card Kingdom offered,
+for 1,243 of 3,953 cards (Near Mint copies it buys), on 2026-10-24": a partial total must not read as the collection's), and in an open trade's summary (from the
+entries; a confirmed trade's cards have none). Nothing shows before
+the first *Update the shops' prices*. **Tried 2026-10-24** on a copy of this checkout's data with that day's MTGJSON prices
+(102,652 printings; offers for 46,542 regular, 35,764 foil, 890 etched): 784 of 1,604 entries with an offer, 74 of them
+foils; on the dearest cards the offer was 55-76% of TCGplayer's value (The One Ring HOC: $131.05 / $100.00). Never compared
+with Card Kingdom's own page. The date's wording tried the same day on the copy with its prices' date set to 9 days
+earlier ("9 days ago - update the shops' prices"), and with its dearest offered card set to Played: out of the total
+($2378.07 -> $2278.07, 1,243 -> 1,242 cards), its row "offered $100.00 for Near Mint - yours is Played, graded lower". `tests/test_prices.py` (`TheBuylist`).
 
 **The price source** (since 2026-10-24; `core/prices.py`, `CardDatabase.set_price_source` / `priced_printings` /
 `price_currency`, `server/card_data.py`: `GET` / guarded `POST /api/prices/source`; Settings > Card data > Prices;
@@ -2571,14 +2602,63 @@ change how many copies the trade holds, **×** takes the card out
 (`PUT /api/trades/<id>/cards/<row>`, JSON `quantity`, 0 = out). Per trade: **Export…**
 downloads its cards in one of the game's export formats (`GET /api/trades/<id>/export/<format>`
 - Moxfield's collection CSV for Magic, or the app's own; `quantity` is the copies in the
-trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>`: the
+trade), **Rename** (`PUT /api/trades/<id>`), **Cancel trade** (`DELETE /api/trades/<id>?action=cancel`: the
 trade and its rows go, the cards are simply free again) and **Confirm trade**
-(`POST /api/trades/<id>/confirm`, `Trades.confirm`): in one transaction each row keeps the
+(`POST /api/trades/<id>/confirm`, `Trades.confirm`; what is confirmed is the trade the person looked at: the page keeps
+the `fingerprint` of the trade on the screen when Confirm was pressed, reads the trades again, and if that trade changed
+meanwhile it shows the new list with a warning and asks nothing - the dialog shows only totals, under which a swapped card
+would pass unseen (a second Codex finding) - so the person looks again and presses Confirm again; the server gets the
+fingerprint that was seen - `Trades.fingerprint`, in `GET /api/trades` for each open trade: a digest of every
+card given (row, entry, copies, the entry's printing / finish / condition / location) and received (row, seller, card,
+copies), never the price, which a repricing changes daily - compared inside the confirm's transaction and refused when the
+trade holds anything else by then; totals alone missed a card swapped for another, a Codex finding. The fingerprint is
+required: a confirm without one - a page from before it, which sent nothing or only its totals - is refused with 409
+"reload it" before anything is looked at, so no old tab can skip the check (a third Codex finding)): in one transaction each row keeps the
 card as it was and lets go of its entry, the copies leave the collection - the entry is
 deleted or lowered, with the newest photos and the cameras' counts as for any lowered quantity
 (`_take_copies`, `_trim_sources`, `_trim_captures`) - and the trade becomes `done`. It stays
 under **Confirmed trades** as a record (cards, value, date; it can still be exported) until
-**Delete from history** (`DELETE` again).
+**Delete from history** (`DELETE ...?action=forget`). The two never stand in for each other (since 2026-10-24,
+`docs/plans/TRADES_REVIEW_PLAN.md` part 1): a cancel of a trade confirmed meanwhile is refused ("confirmed meanwhile: it
+stays in the history"), a forget of an open one too ("cancel it instead") - before, the route fell back from cancel to
+delete, so a tab still showing a confirmed trade as open removed its record when Cancel was pressed. A `DELETE` without
+`action` (a page from before) is a cancel. Receiving cards (`others_api`) and changing their copies tell the other pages
+(`collection_updated`), and an answer says the copies that went in, not those asked (they are cut at what the other
+person has).
+
+**Sale picture…** (open trades only - a confirmed trade's cards have no entry, so no scans;
+added 2026-10-24; `collection.js`: `openSalePicture`, `drawSalePicture`, `drawSalePreview`,
+`saveSalePicture`, the dialog `#sale-modal` in `collection.html`) draws a picture for a sale post
+in the browser, on a canvas: nothing on the server is involved but the pictures it already
+serves. The trade's cards are looked up among the collection's entries (`/api/inventory`'s
+`captures` and `details.image_uri` - fetched again while the Arena collection is shown, whose
+entries are other cards). Each scan of an entry is a tile to tick, only the newest ticked: a
+picture shows each card once, its caption saying how many copies the trade holds (`×16`) - an
+entry scanned 16 times would otherwise fill two pictures with one card; an entry with
+no scan gets Scryfall's picture of its printing in the `large` size, asked for with CORS
+(`crossOrigin = 'anonymous'`: without it the canvas is "tainted" and cannot be saved). Scans are
+loaded as their large copy (`/captures/<file>?size=full`); one answered with the 400 px
+thumbnail (no large copy kept) is marked **low res** once it has been drawn. A large copy is loaded
+only when its card is drawn (`saleImage`) - the page shown or a page being downloaded - never when
+the dialog opens, and those of the cards not on the page shown are let go after each drawing: at
+most nine held, plus a download's own (a Codex finding: a trade of a few hundred scans loaded them
+all, ~4 MB each decoded). Measured on a trade of 155 scans: 9 large copies loaded on opening,
+8 more per page turned, never more than 9 held. "Download all" lets go of each page's pictures
+once its file is saved (the pages to come keep only their cards and turns): on the same trade
+all ticked, 18 files, never more than 9 pictures held by the download, none at its end. Nine ticked tiles make one picture, 3 per
+row: each card fitted into a 859 × 1200 px cell (63:88) with its name (bold, shrunk or cut to
+fit) and set / number / a finish other than the usual / the copies under it, 48 px between cells. Saved as
+JPEG (quality 0.92), shrunk to 2048 px on its longest side (what Facebook keeps) or at full size
+(about 2770 × 4240 px for nine cards); "Download all" saves each picture as its own file. A download never saves the preview's canvas
+(redrawn on every change of page, choice or turn - a drawing still waiting for its pictures can be
+overtaken, and the file would hold another page's cards under this page's number, a Codex finding):
+the cards, their turns, the page's number, the choices and the trade's name are taken when the
+button is pressed and drawn on a canvas of the download's own (`exportSalePicture`,
+`saleSnapshot`, `saleOptions`); a dialog closed meanwhile saves nothing. A
+click on a card in the preview turns it 180° (scans are kept as the camera saw them, some
+upside down) - only in the picture, the scan is not changed. Checked on copied data in headless
+Chromium (two pictures from twelve scans, a Scryfall fallback saved without a tainted-canvas
+error, a thumbnail-only scan marked; a trade of nine entries of 14-20 real scans each: one picture, every name under its own scan); never posted to Facebook Marketplace.
 
 While a trade holds copies, the database refuses everything that would take them: deleting the
 entry, lowering its quantity below what is held, moving a whole stack of several copies to
@@ -2885,8 +2965,11 @@ from before) or `arena`, and `decks.arena_id` is Arena's id of a deck an import 
 card search (`?kind=arena`), EDHREC's suggestions. An Arena deck's basic lands count as
 owned (`is_basic_land`: Arena gives them freely); what it lacks is counted in wildcards
 (`wildcards`: `needed` by rarity from `arena.wildcards_needed`, `have` from the account) -
-the rarity is the card data's, i.e. of a printed card, so the count is close and not
-checked against Arena; and a card Arena does not have is a problem of the deck ("Not on
+the rarity is the CARD's (`CardDatabase._CARD_RARITY`, since 2026-10-29): the lowest of
+common / uncommon / rare / mythic among its Arena printings (`games`), or among all its
+printings while the card data has no `games` yet or the card has no Arena printing - before,
+it was the rarity of whichever printing stood for the card (a Commander reprint made
+Banishing Light, a Foundations common, an "uncommon"); still not checked against Arena itself; and a card Arena does not have is a problem of the deck ("Not on
 Arena"), not a wildcard. `DeckManager.replace_arena_decks` replaces, in one transaction,
 the decks the last import brought by the ones this one brings (a deck still there keeps
 its cover); decks made here, also Arena ones, have no `arena_id` and stay. So a change
@@ -2958,7 +3041,11 @@ page shows:
 
 Card search for the builder is `CardDatabase.search_cards`: one row per card name, filtered by
 name, type, rules text, mana value, rarity, color identity (within the commander's / including
-chosen colors), legality in the deck's format and "owned"; the exact name sorts first. Text
+chosen colors), legality in the deck's format and "owned"; the exact name sorts first. The
+rarity filter and the rarity shown are the card's (`card_rarity`, above: the Arena printings'
+lowest, else all printings' lowest - a `HAVING` after the grouping); until 2026-10-29 the
+filter was on the printings, so a card with one promo of that rarity matched and showed that
+printing (a Forest was a "rare", Llanowar Elves a "mythic"). Text
 decklists (`1 Sol Ring`, `4x Lightning Bolt (2X2) 117`, `Commander` / `Deck` / `Sideboard`
 sections, a blank line before the sideboard of a 60-card list) are read and written by
 `parse_decklist` / `format_decklist`.
@@ -3187,6 +3274,34 @@ changed**), `search_collection`, `find_card`, `collection_summary`. Answers are 
 calls, an error in the tool's own words) with the library's client against the real server, 2026-10-15.
 Not tried: a local model as the client. The server has no login: writes (add / remove a card) are for
 later, one at a time, each confirmed.
+
+**MTG Arena** (since 2026-10-29). The collection tools take `collection='paper'|'arena'` (`?area=arena`:
+the digital collection, `/api/arena` for its wildcards, gold, gems and export date). An Arena deck
+(`kind: arena`) is counted by the server against that collection already; the MCP says its cost in
+wildcards and never in money: `get_deck` / `check_deck` drop the paper prices and add the payload's
+`wildcards`, `missing_cards` reads the decks page's Arena check (`/api/decks/<id>/arena`: the cards to
+craft, wildcards needed and had, cards not on Arena), `propose_deck_changes` works out the wildcards the
+deck would need after the change, and every Arena answer's `prices_in` says there are none. An eleventh
+tool, `search_cards`, is the decks page's card search (`/api/cards/search`: rules text, type, colour
+identity, mana value, rarity, legal in a format, owned only, `kind=arena`). `propose_deck_changes` also
+checks the 4-copy limit of a 60-card deck (basic lands and "any number of cards named" excepted), and
+`suggest_for_deck` says plainly that EDHREC has nothing for a deck without a commander. Tried with the
+tools against the real server's Arena deck #22 (reads only); not tried through a client other than
+Claude Code.
+
+**Deck writes** (since 2026-10-29, only with `--allow-deck-writes` / `CARD_SCANNER_DECK_WRITES=1`; off,
+the tools are not even registered). `create_deck` (`POST /api/decks` with the list as text: Commander /
+Deck / Sideboard), `change_deck` (`POST /api/decks/<id>/cards`, removals first, the card data's spelling
+and the printing the search picked), `rename_deck` (`PUT /api/decks/<id>`: name, notes). Every write goes
+through `ScannerApi.write`, which refuses any method and path outside `DECK_WRITE_ROUTES` before the
+network, and forgets the client's 20-second cache afterwards. A change is first worked out by
+`_plan_changes` (what `propose_deck_changes` answers) and refused whole on any problem unless
+`allow_problems` - because the cards route applies its items one by one, each in its own transaction, a
+problem found half-way would leave the deck half-changed. A deck with `from_arena` is refused (the next
+import replaces it). No delete. Tested: `tests/test_mcp_tools.py` (`DeckWrites`); end to end through the
+MCP server against a throwaway server (`MTG_SCANNER_HOME` in the scratch folder, a copy of test data,
+port 5011): create, a 4-copy refusal, a move between boards, rename, a DELETE refused, the commander's
+colours.
 
 ## Configuration and files
 

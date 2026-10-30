@@ -193,6 +193,24 @@ class Game:
         """
         return {}
 
+    def buylist_prices(self, entries):
+        """
+        {entry id: what a shop pays for one copy} for inventory rows (dicts with 'id', 'card_id', 'finish') - only the
+        entries it has a price for. Shown beside the value, never counted in it; a game without a buylist has none
+        """
+        return {}
+
+    def buylist_as_listed(self, entry):
+        """Whether a shop's listed buylist price is what it offers for this entry's copies: listed prices are for a copy in
+        the best condition, and a worn one is graded lower - its quote is shown as the best condition's, never counted
+        in a total of what the shop would pay"""
+        return False
+
+    def buylist_date(self):
+        """The date of the offers buylist_prices gives ('2026-10-24'), or None: they are kept until the next price update
+        replaces them - one that fails or is switched off leaves them as they were, so a page must say how old they are"""
+        return None
+
     # -- Decks (games with deck_formats) --------------------------------------
 
     def has_deck_data(self):
