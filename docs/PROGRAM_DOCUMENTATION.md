@@ -1779,7 +1779,7 @@ swap (`replace_table`) does not happen: the old cards stay.
 | Card text | `type_line`, `mana_cost`, `oracle_text`, `colors` (JSON), `image_uri` (front face for double-faced cards) |
 | Treatment | `border_color`, `frame`, `frame_effects` (JSON), `full_art`, `promo_types` (JSON), `finishes` (JSON) |
 | Search | `name_search`, `flavor_search` |
-| Deck building | `oracle_id` (the same for every printing of a card), `cmc`, `color_identity` (JSON), `legalities` (JSON: format → `legal` / `restricted` / `banned`; formats a card is not legal in are left out), `keywords` (JSON) |
+| Deck building | `oracle_id` (the same for every printing of a card), `cmc`, `color_identity` (JSON), `legalities` (JSON: format → `legal` / `restricted` / `banned`; formats a card is not legal in are left out), `keywords` (JSON); `games` (JSON: `paper` / `arena` / `mtgo`, where the printing can be played - since 2026-10-29, at the end of `CARD_COLUMNS`, empty until the next download) |
 
 Indexes: name, flavor name, search names, (set code, collector number), rarity, type, oracle id.
 Missing columns are added on startup (search names are filled in automatically; treatment and
@@ -2965,8 +2965,11 @@ from before) or `arena`, and `decks.arena_id` is Arena's id of a deck an import 
 card search (`?kind=arena`), EDHREC's suggestions. An Arena deck's basic lands count as
 owned (`is_basic_land`: Arena gives them freely); what it lacks is counted in wildcards
 (`wildcards`: `needed` by rarity from `arena.wildcards_needed`, `have` from the account) -
-the rarity is the card data's, i.e. of a printed card, so the count is close and not
-checked against Arena; and a card Arena does not have is a problem of the deck ("Not on
+the rarity is the CARD's (`CardDatabase._CARD_RARITY`, since 2026-10-29): the lowest of
+common / uncommon / rare / mythic among its Arena printings (`games`), or among all its
+printings while the card data has no `games` yet or the card has no Arena printing - before,
+it was the rarity of whichever printing stood for the card (a Commander reprint made
+Banishing Light, a Foundations common, an "uncommon"); still not checked against Arena itself; and a card Arena does not have is a problem of the deck ("Not on
 Arena"), not a wildcard. `DeckManager.replace_arena_decks` replaces, in one transaction,
 the decks the last import brought by the ones this one brings (a deck still there keeps
 its cover); decks made here, also Arena ones, have no `arena_id` and stay. So a change
@@ -3038,7 +3041,11 @@ page shows:
 
 Card search for the builder is `CardDatabase.search_cards`: one row per card name, filtered by
 name, type, rules text, mana value, rarity, color identity (within the commander's / including
-chosen colors), legality in the deck's format and "owned"; the exact name sorts first. Text
+chosen colors), legality in the deck's format and "owned"; the exact name sorts first. The
+rarity filter and the rarity shown are the card's (`card_rarity`, above: the Arena printings'
+lowest, else all printings' lowest - a `HAVING` after the grouping); until 2026-10-29 the
+filter was on the printings, so a card with one promo of that rarity matched and showed that
+printing (a Forest was a "rare", Llanowar Elves a "mythic"). Text
 decklists (`1 Sol Ring`, `4x Lightning Bolt (2X2) 117`, `Commander` / `Deck` / `Sideboard`
 sections, a blank line before the sideboard of a 60-card list) are read and written by
 `parse_decklist` / `format_decklist`.

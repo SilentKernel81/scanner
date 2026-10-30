@@ -658,6 +658,39 @@ class CardDataImport(TemporaryData):
         finally:
             cards.conn.close()
 
+    def test_a_card_has_the_lowest_rarity_of_its_printings(self):
+        # A common with a newer "rare" promo printing (a Forest of g17 / a Secret Lair; Llanowar Elves' "mythic" one) is a
+        # common - for the deck builder's rarity filter, the label it shows, and the wildcard that crafts it in Arena.
+        # The filter used to keep any card with one printing of that rarity, and showed that printing.
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            common = {**self.card(1), 'id': 'elf-m19', 'name': 'Elf', 'rarity': 'common', 'released_at': '2018-07-13',
+                      'legalities': {'standard': 'legal'}}
+            promo = {**common, 'id': 'elf-sld', 'set': 'sld', 'collector_number': '900', 'rarity': 'mythic', 'released_at': '2026-09-28'}
+            rare = {**self.card(2), 'id': 'warg', 'name': 'Warg', 'rarity': 'rare', 'legalities': {'standard': 'legal'}}
+            special = {**self.card(3), 'id': 'odd', 'name': 'Odd', 'rarity': 'special'}   # nothing else: special it stays
+            # Bloom Tender: rare in its paper sets, mythic in its only Arena printing - Arena's wildcard is a mythic one
+            tender_paper = {**self.card(4), 'id': 'bt-eve', 'name': 'Tender', 'rarity': 'rare', 'games': ['paper']}
+            tender_arena = {**tender_paper, 'id': 'bt-ecl', 'set': 'ecl', 'collector_number': '5', 'rarity': 'mythic',
+                            'games': ['paper', 'arena']}
+            cards.populate_database([self.card(n) for n in range(100, 140)]
+                                    + [common, promo, rare, special, tender_paper, tender_arena])
+            self.assertEqual(cards.conn.execute("SELECT games FROM cards WHERE id = 'bt-ecl'").fetchone()[0], '["paper", "arena"]')
+            self.assertEqual(cards.cards_by_names(['Tender'])['tender']['rarity'], 'mythic')
+            self.assertEqual([card['name'] for card in cards.search_cards(text='tender', rarity='mythic')[0]], ['Tender'])
+            self.assertEqual(cards.search_cards(text='tender', rarity='rare')[0], [])
+            names = lambda **filters: [card['name'] for card in cards.search_cards(**filters)[0]]
+            self.assertEqual(names(text='elf', rarity='common'), ['Elf'])
+            self.assertEqual(names(text='elf', rarity='mythic'), [])
+            self.assertEqual(names(rarity='rare'), ['Warg'])
+            self.assertEqual(names(rarity='rare', legal_in='standard'), ['Warg'])      # with another filter's parameters
+            self.assertEqual(cards.search_cards(text='elf')[0][0]['rarity'], 'common')  # the label too, without a filter
+            by_name = cards.cards_by_names(['Elf', 'Warg', 'Odd'])                       # what arena_check counts wildcards by
+            self.assertEqual({key: card['rarity'] for key, card in by_name.items()},
+                             {'elf': 'common', 'warg': 'rare', 'odd': 'special'})
+        finally:
+            cards.conn.close()
+
     def test_an_import_on_its_own_connection(self):
         cards = CardDatabase(db_file=self.tmp / 'cards.db')
         try:
