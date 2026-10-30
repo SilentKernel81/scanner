@@ -1,12 +1,12 @@
 # Card Scanner MCP server
 
 Lets an AI assistant look at your **decks and collection** (kept by the scanner server) and help
-you build and improve decks from the cards you own. Version 1 **only reads**: it asks the scanner
-server's web API, and `propose_deck_changes` works out what a change would do without making it -
-you make the change on the decks page.
+you build and improve decks from the cards you own. By default it **only reads**: it asks the
+scanner server's web API, and `propose_deck_changes` works out what a change would do without
+making it - you make the change on the decks page. Started with **`--allow-deck-writes`** it can
+also change **decks** (and nothing else): see *Changing decks* below.
 
-It runs on the machine of the AI client (your laptop), not on the scanner server, and changes
-nothing there.
+It runs on the machine of the AI client (your laptop), not on the scanner server.
 
 ## Tools
 
@@ -86,13 +86,36 @@ Any MCP client works, also one in front of a local model (Ollama): the model nee
 calling** (try Qwen 3 / Llama 3.1 class models), and fewer tools help small models. The facts
 (what you own, what is legal) come from the server, so they are right whichever model reads them.
 
-## What it does not do
+## Changing decks (`--allow-deck-writes`)
 
-It cannot add, remove, move or delete anything: not in the collection, not in a deck. The server
-has no login, so keep it that way until there is a reason to add writes - then one at a time, each
-with a confirmation.
+Off by default. Add the flag (or `CARD_SCANNER_DECK_WRITES=1`) to the command the client starts, and three
+more tools appear:
+
+| Tool | What it changes |
+|---|---|
+| `create_deck(name, deck_format, kind, cards, commander, allow_problems)` | a new deck (paper or `arena`) from a list of `{name, quantity, board}` |
+| `change_deck(deck, add, remove, allow_problems)` | a deck's cards: add, remove, move between `main` and `side` (remove from one board, add to the other) |
+| `rename_deck(deck, name, notes)` | its name and notes |
+
+- **Decks only.** `ScannerApi.write` sends nothing but `POST /api/decks`, `POST /api/decks/<id>/cards` and
+  `PUT /api/decks/<id>` (`DECK_WRITE_ROUTES`); anything else is refused before it reaches the network. No
+  delete: that stays on the decks page.
+- **Checked whole, first.** A change goes through the checks of `propose_deck_changes` (exists, legal,
+  colours, the 4-copy limit, a commander deck's one copy) and is refused - nothing sent - when one fails,
+  unless `allow_problems=true`; the server applies a deck's card changes one card at a time, so the list is
+  checked before any of it goes.
+- **Not a deck from an Arena export:** the next import replaces it, so a change there would be lost; the
+  tools refuse it (make a new deck from its list instead).
+- The tools are marked as writes (`readOnlyHint: false`): a client asks before each call, and the
+  instructions tell the assistant to show the change and get a yes first.
+
+What it cannot do, with or without the flag: change the collection, the scanned cards, the Arena collection,
+trades or settings. The scanner server itself has no login: this restriction is the MCP server's, not the
+network's.
 
 ## Tests
 
 `tests/test_mcp_tools.py` tests `tools.py` against a stand-in for the server (no network, no MCP
-library). The protocol itself was tried with the library's own client against the real server.
+library) - also that the write tools reach only the deck routes and send nothing when a check fails.
+The protocol itself was tried with the library's own client against the real server; the deck tools
+(2026-10-29) against a throwaway server on a copy of test data, never the real one.

@@ -3289,6 +3289,20 @@ checks the 4-copy limit of a 60-card deck (basic lands and "any number of cards 
 tools against the real server's Arena deck #22 (reads only); not tried through a client other than
 Claude Code.
 
+**Deck writes** (since 2026-10-29, only with `--allow-deck-writes` / `CARD_SCANNER_DECK_WRITES=1`; off,
+the tools are not even registered). `create_deck` (`POST /api/decks` with the list as text: Commander /
+Deck / Sideboard), `change_deck` (`POST /api/decks/<id>/cards`, removals first, the card data's spelling
+and the printing the search picked), `rename_deck` (`PUT /api/decks/<id>`: name, notes). Every write goes
+through `ScannerApi.write`, which refuses any method and path outside `DECK_WRITE_ROUTES` before the
+network, and forgets the client's 20-second cache afterwards. A change is first worked out by
+`_plan_changes` (what `propose_deck_changes` answers) and refused whole on any problem unless
+`allow_problems` - because the cards route applies its items one by one, each in its own transaction, a
+problem found half-way would leave the deck half-changed. A deck with `from_arena` is refused (the next
+import replaces it). No delete. Tested: `tests/test_mcp_tools.py` (`DeckWrites`); end to end through the
+MCP server against a throwaway server (`MTG_SCANNER_HOME` in the scratch folder, a copy of test data,
+port 5011): create, a 4-copy refusal, a move between boards, rename, a DELETE refused, the commander's
+colours.
+
 ## Configuration and files
 
 **Where a setting comes from, and which wins** (written 2026-10-16 after an outside review found the

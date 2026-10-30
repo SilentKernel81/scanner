@@ -12,7 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'mcp_server'))
 
 import tools  # noqa: E402
-from scanner_api import ScannerError  # noqa: E402
+import scanner_api  # noqa: E402
+from scanner_api import ScannerError, deck_write_allowed  # noqa: E402
 
 
 def card(name, identity=(), type_line='Creature', price=1.0, owned=1, cost='{1}', cmc=1.0, text='', rarity='rare'):
@@ -62,6 +63,8 @@ CARDS = {c['name'].lower(): c for c in (
     card('Sol Ring', type_line='Artifact', owned=3), card('Lightning Bolt', identity='R', type_line='Instant', owned=1),
     card('Resplendent Angel', identity='W', owned=0), card('Swords to Plowshares', identity='W', owned=2),
     card('Illegal Card', identity='W'), card('Llanowar Elves', identity='G', owned=5, rarity='common'),
+    card('Giada, Font of Hope', identity='W', type_line='Legendary Creature', owned=1),
+    card('Plains', identity='W', type_line='Basic Land — Plains', owned=50, rarity='common'),
     card('Bejeweled Warg', identity='G', owned=0), card('Elvish Mystic', identity='G', owned=3, rarity='common'),
     card('Relentless Rats', identity='B', text='A deck can have any number of cards named Relentless Rats.'))}
 
@@ -72,6 +75,7 @@ class FakeApi:
     def __init__(self, currency='EUR'):
         self.posts = []
         self.searches = []        # the parameters of each card search, to see what the tools asked for
+        self.writes = []          # (method, path, body) of each change to a deck
         self.currency = currency
 
     def get(self, path, **params):
@@ -115,6 +119,19 @@ class FakeApi:
                     {'name': 'Sol Ring', 'type_line': 'Artifact', 'mana_cost': '{1}', 'inclusion': 90, 'synergy': 1, 'owned': 3, 'elsewhere': True, 'price': 1.0},
                     {'name': 'Swords to Plowshares', 'type_line': 'Instant', 'mana_cost': '{W}', 'inclusion': 80, 'synergy': 5, 'owned': 0, 'elsewhere': False, 'price': 2.0}]}]}
         raise AssertionError(f'unexpected GET {path}')
+
+    def write(self, method, path, body):
+        """A change to a deck, as ScannerApi.write: only a deck route, else refused before anything is sent"""
+        if not deck_write_allowed(method, path):
+            raise ScannerError(f'Refused: {method} {path} is not a change to a deck')
+        self.writes.append((method, path, body))
+        if path == '/api/decks':
+            made = {'id': 50, 'name': body['name'], 'format': body['format'], 'kind': body['kind'], 'issues': [],
+                    'totals': {'cards': 1, 'side': 0, 'price': 1.0, 'missing': 0, 'missing_price': 0.0}}
+            return {'deck': made, 'unknown': []}
+        if method == 'PUT':
+            return {'deck': {**DECK, 'name': body.get('name', DECK['name'])}}
+        return {'deck': DECK}
 
     def post(self, path, body):
         self.posts.append(path)
@@ -298,6 +315,112 @@ class ArenaDecks(unittest.TestCase):
         self.assertTrue(all('price' not in c for c in answer['cards']))
         tools.search_cards(self.api, owned_only=False, name='bolt')
         self.assertEqual((self.api.searches[-1]['kind'], self.api.searches[-1]['owned']), ('', ''))   # the paper one, everything
+
+
+
+class DeckWrites(unittest.TestCase):
+    """The tools that change decks (--allow-deck-writes): deck routes only, checked whole before anything is sent"""
+
+    def setUp(self):
+        self.api = FakeApi()
+
+    def test_only_the_deck_routes_can_be_written(self):
+        for allowed in (('POST', '/api/decks'), ('POST', '/api/decks/7/cards'), ('PUT', '/api/decks/7')):
+            self.assertTrue(deck_write_allowed(*allowed), allowed)
+        for refused in (('DELETE', '/api/decks/7'), ('POST', '/api/inventory'), ('PUT', '/api/inventory/3'),
+                        ('POST', '/api/decks/7/import'), ('POST', '/api/decks/7/duplicate'), ('POST', '/api/trades'),
+                        ('POST', '/api/decks/7/cards/../../inventory'), ('GET', '/api/decks'), ('POST', '/api/decks?area=arena')):
+            self.assertFalse(deck_write_allowed(*refused), refused)
+
+    def test_the_client_refuses_another_route_before_the_network_and_forgets_its_cache(self):
+        api = scanner_api.ScannerApi('http://scanner.invalid')
+        sent = []
+        api._request = lambda path, params=None, body=None, method=None: (sent.append((method, path)) or ('', {'success': True}))
+        with self.assertRaises(ScannerError):
+            api.write('DELETE', '/api/decks/7', {})
+        with self.assertRaises(ScannerError):
+            api.write('POST', '/api/inventory', {})
+        self.assertEqual(sent, [])                                            # never reached the server
+        api._cache['/api/decks/7?'] = (9e99, {'old': True})
+        api.write('POST', '/api/decks/7/cards', {'cards': []})
+        self.assertEqual((sent, api._cache), ([('POST', '/api/decks/7/cards')], {}))   # the next read is fresh
+
+    def test_a_change_is_checked_whole_and_refused_with_its_problems(self):
+        answer = tools.change_deck(self.api, 'Giada', add=[{'name': 'Swords to Plowshares'}, {'name': 'Lightning Bolt'}])
+        self.assertFalse(answer['changed'])
+        self.assertIn("outside the commander's colours", answer['add'][1]['problem'])
+        self.assertEqual(self.api.writes, [])                                 # nothing sent, not even the good card
+
+    def test_a_change_sends_the_card_datas_names_removals_first(self):
+        answer = tools.change_deck(self.api, 'Giada', add=[{'name': 'swords to plowshares', 'board': 'side'}],
+                                   remove=[{'name': 'Plains', 'quantity': 1}])
+        self.assertTrue(answer['changed'])
+        method, path, body = self.api.writes[0]
+        self.assertEqual((method, path), ('POST', '/api/decks/7/cards'))
+        self.assertEqual(body['cards'], [{'name': 'Plains', 'board': 'main', 'change': -1},
+                                         {'name': 'Swords to Plowshares', 'board': 'side', 'change': 1,
+                                          'card_id': 'Swords to Plowshares'}])
+        self.assertEqual(answer['now']['name'], 'Calling All Angels')
+
+    def test_allow_problems_sends_only_the_cards_that_were_found(self):
+        tools.change_deck(self.api, 'Giada', add=[{'name': 'Swords to Plowshares'}, {'name': 'Not A Card'}], allow_problems=True)
+        self.assertEqual([item['name'] for item in self.api.writes[0][2]['cards']], ['Swords to Plowshares'])
+
+    def test_a_deck_from_an_arena_export_is_never_changed(self):
+        for write in (lambda: tools.change_deck(self.api, 'Elves on Arena', add=[{'name': 'Llanowar Elves'}]),
+                      lambda: tools.rename_deck(self.api, 'Elves on Arena', name='Mine')):
+            with self.assertRaises(ScannerError) as raised:
+                write()
+            self.assertIn('next import replaces it', str(raised.exception))
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_new_deck_is_one_list_with_its_sections(self):
+        answer = tools.create_deck(self.api, 'Angels', 'commander', cards=[
+            {'name': 'Swords to Plowshares'}, {'name': 'Plains', 'quantity': 30}, {'name': 'Plains', 'quantity': 5},
+            {'name': 'Resplendent Angel', 'board': 'side'}], commander='giada')
+        self.assertTrue(answer['created'])
+        method, path, body = self.api.writes[0]
+        self.assertEqual((method, path, body['kind'], body['format']), ('POST', '/api/decks', 'paper', 'commander'))
+        self.assertEqual(body['text'], 'Commander\n1 Giada, Font of Hope\n\nDeck\n1 Swords to Plowshares\n35 Plains'
+                                       '\n\nSideboard\n1 Resplendent Angel')
+
+    def test_a_new_deck_is_checked_first(self):
+        refused = tools.create_deck(self.api, 'Angels', 'commander', cards=[{'name': 'Lightning Bolt'}], commander='Giada')
+        self.assertFalse(refused['created'])
+        too_many = tools.create_deck(self.api, 'Elves', 'standard', kind='arena', cards=[{'name': 'Llanowar Elves', 'quantity': 5}])
+        self.assertIn('at most 4', too_many['add'][0]['problem'])
+        self.assertEqual(too_many['wildcards_after']['have']['rare'], 1)       # the Arena account's, for an Arena deck
+        self.assertEqual(self.api.writes, [])
+        for bad in (dict(name='', deck_format='standard'), dict(name='X', deck_format=''),
+                    dict(name='X', deck_format='standard', kind='mtgo')):
+            with self.assertRaises(ScannerError):
+                tools.create_deck(self.api, **bad)
+        with self.assertRaises(ScannerError):
+            tools.create_deck(self.api, 'X', 'commander', commander='Nobody At All')
+        with self.assertRaises(ScannerError) as raised:                        # Standard has no commander
+            tools.create_deck(self.api, 'X', 'standard', commander='Giada')
+        self.assertIn('has no commander', str(raised.exception))
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_standard_deck_needs_no_commander(self):
+        answer = tools.create_deck(self.api, 'Elves', 'standard', kind='arena', cards=[
+            {'name': 'Llanowar Elves', 'quantity': 4}, {'name': 'Plains', 'quantity': 20}])
+        self.assertTrue(answer['created'])
+        self.assertEqual(self.api.writes[0][2]['text'], 'Deck\n4 Llanowar Elves\n20 Plains')   # no Commander section
+
+    def test_rename(self):
+        answer = tools.rename_deck(self.api, 'Giada', name='Angels Forever', notes='')
+        self.assertEqual(self.api.writes, [('PUT', '/api/decks/7', {'name': 'Angels Forever', 'notes': ''})])
+        self.assertEqual((answer['was'], answer['now']['name']), ('Calling All Angels', 'Angels Forever'))
+        with self.assertRaises(ScannerError):
+            tools.rename_deck(self.api, 'Giada')
+
+    def test_the_read_only_tools_never_write(self):
+        tools.propose_deck_changes(self.api, 'Giada', add=[{'name': 'Swords to Plowshares'}])
+        tools.get_deck(self.api, 'Giada')
+        tools.missing_cards(self.api, 'Elves on Arena')
+        tools.search_cards(self.api, 'arena', 'standard')
+        self.assertEqual((self.api.writes, self.api.posts), ([], []))
 
 
 if __name__ == '__main__':

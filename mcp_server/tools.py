@@ -292,12 +292,23 @@ def what_can_i_build(api, kind='commanders', wait_seconds=40, limit=10):
 def propose_deck_changes(api, deck, add=None, remove=None):
     """
     Work out what a change to a deck WOULD do - nothing is changed. add / remove: lists of
-    {'name': ..., 'quantity': 1}. Says, for each card added: whether it exists, whether it is legal in
-    the deck's format, within the commander's colours, how many copies you own, and which other decks
-    of yours use it; and the deck's size before and after. The person makes the change on the decks page.
+    {'name': ..., 'quantity': 1, 'board': 'main' | 'side'}. Says, for each card added: whether it exists,
+    whether it is legal in the deck's format, within the commander's colours, how many copies you own,
+    and which other decks of yours use it; and the deck's size before and after. The person makes the
+    change on the decks page (or, with deck writes on, change_deck makes it).
     """
-    data = load_deck(api, deck)
+    answer, _plan = _plan_changes(api, load_deck(api, deck), add, remove)
+    return answer
+
+
+def _plan_changes(api, data, add=None, remove=None):
+    """
+    The work of propose_deck_changes on a deck already loaded: (its answer, the plan) - the plan is
+    what change_deck would send, {'add': [...], 'remove': [...]}, each item a /api/decks/<id>/cards
+    change ({name as the card data spells it, board, change: +n / -n, card_id}). Only read here.
+    """
     arena = data.get('kind') == 'arena'
+    plan = {'add': [], 'remove': []}
     commander_cards = [entry for entry in data['cards'] if entry['board'] == 'commander']
     commander_format = bool(commander_cards) or data['format'] in COMMANDER_FORMATS
     commander_identity = set()
@@ -324,6 +335,14 @@ def propose_deck_changes(api, deck, add=None, remove=None):
     for item in (add or []):
         name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
         report = {'name': name, 'quantity': quantity}
+        board = str(item.get('board') or 'main').lower()
+        if board not in ('main', 'side'):
+            report['problem'] = "board must be 'main' or 'side'"
+            problems += 1
+            added.append(report)
+            continue
+        if board == 'side':
+            report['board'] = 'side'
         found = api.get('/api/cards/search', q=name, format=data['format'], kind=data['kind'])['cards']
         match = next((card for card in found if front(card['name']) == front(name)), None)
         if match is None:
@@ -338,6 +357,14 @@ def propose_deck_changes(api, deck, add=None, remove=None):
         report.update(name=match['name'], copies_owned=match.get('owned', 0), rarity=match.get('rarity'))
         if not arena:
             report['price'] = match.get('price')
+        # What change_deck sends: the card data's spelling of the name, and the printing the search
+        # picked (the one owned, when one is - the deck page then shows the user's own art)
+        plan['add'].append({'name': match['name'], 'board': board, 'change': quantity, 'card_id': match.get('id')})
+        if commander_format and board == 'side':
+            # A commander deck's side board is cards being considered: not played, so no rule applies
+            report['note'] = 'side board of a commander deck: considered, not played'
+            added.append(report)
+            continue
         identity = set(match.get('identity') or [])
         if commander_format and not identity <= commander_identity:
             report['problem'] = ("outside the commander's colours: the card is "
@@ -367,17 +394,28 @@ def propose_deck_changes(api, deck, add=None, remove=None):
         added.append(report)
     for item in (remove or []):
         name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
-        existing = playing.get(front(name))
-        if not existing:
-            removed.append({'name': name, 'problem': 'not in the deck'})
+        wanted_board = str(item['board']).lower() if item.get('board') else None
+        # The deck's entry it is taken from: on the board asked for, else the main deck before the side board
+        entries = [entry for entry in data['cards'] if front(entry['name']) == front(name)
+                   and (wanted_board is None or entry['board'] == wanted_board)]
+        entries.sort(key=lambda entry: {'main': 0, 'commander': 1, 'side': 2}.get(entry['board'], 3))
+        if not entries:
+            removed.append({'name': name, 'problem': 'not in the deck' + (f' ({wanted_board} board)' if wanted_board else '')})
             problems += 1
             continue
-        new_quantity = max(0, existing['quantity'] - quantity)
-        removed.append({'name': existing['name'], 'copies_removed': existing['quantity'] - new_quantity})
-        if new_quantity:
-            playing[front(name)] = {**existing, 'quantity': new_quantity}
-        else:
-            del playing[front(name)]
+        entry = entries[0]
+        taken = min(quantity, entry['quantity'])
+        removed.append({'name': entry['name'], 'copies_removed': taken,
+                        **({'board': entry['board']} if entry['board'] != 'main' else {})})
+        plan['remove'].append({'name': entry['name'], 'board': entry['board'], 'change': -taken})
+        # The copies played after it (a commander deck's side board is not played: nothing to count)
+        existing = playing.get(front(name))
+        if existing and not (commander_format and entry['board'] == 'side'):
+            new_quantity = existing['quantity'] - taken
+            if new_quantity > 0:
+                playing[front(name)] = {**existing, 'quantity': new_quantity}
+            else:
+                del playing[front(name)]
     cards_after = sum(card['quantity'] for card in playing.values())
     # Copies the deck would need beyond what you own, after the change
     missing_after = sum(max(0, card['quantity'] - card['owned']) for card in playing.values())
@@ -401,7 +439,133 @@ def propose_deck_changes(api, deck, add=None, remove=None):
         answer['wildcards_after'] = {'needed': needed, 'have': have,
                                      'enough': all(count <= (have.get(rarity) or 0) for rarity, count in needed.items())}
         answer['note'] = 'Nothing was changed: ' + arena_facts(data)['how_to_change'] + '.'
-    return answer
+    return answer, plan
+
+
+# ----------------------------------------------------------------------------
+# Changing decks - only when the MCP server is started with --allow-deck-writes
+# ----------------------------------------------------------------------------
+# Three tools, and they reach nothing but the deck routes (ScannerApi.write refuses any other path):
+# create a deck, change its cards, rename it / change its notes. No delete - that stays on the
+# decks page. Each change is worked out by the same checks as propose_deck_changes first, and is
+# refused when they find a problem (unless allow_problems): the server applies a deck's card changes
+# one card at a time, so a list is checked whole BEFORE any of it is sent.
+
+
+def refuse_imported(data):
+    """A deck that came with an MTG Arena export is replaced by the next import: a change made to it here would be lost"""
+    if data.get('from_arena'):
+        raise ScannerError(f"'{data['name']}' came from an MTG Arena export: the next import replaces it, so a change "
+                           "made here would be lost. Change it in Arena itself, or make a new deck here (create_deck) "
+                           "from its list and change that one.")
+
+
+def deck_summary(data):
+    """A deck as it is after a change: what to tell the user (an Arena deck in wildcards, a paper one in money)"""
+    arena = data.get('kind') == 'arena'
+    summary = {'id': data['id'], 'name': data['name'], 'format': data['format'], 'kind': data['kind'],
+               'totals': arena_totals(data) if arena else data['totals'], 'issues': data.get('issues') or []}
+    if arena:
+        summary['wildcards'] = data.get('wildcards') or {}
+    return summary
+
+
+def change_deck(api, deck, add=None, remove=None, allow_problems=False):
+    """
+    Change a deck's cards - this WRITES. add / remove: lists of {'name', 'quantity', 'board': 'main' |
+    'side'}; a card is moved between boards by removing it from one and adding it to the other. Checked
+    first exactly as propose_deck_changes; any problem (not legal, colours, copies, not a card, not in
+    the deck) refuses the whole change unless allow_problems=true - then only the cards that could be
+    found are changed.
+    """
+    data = load_deck(api, deck)
+    refuse_imported(data)
+    answer, plan = _plan_changes(api, data, add, remove)
+    if answer['problems'] and not allow_problems:
+        return {**answer, 'changed': False,
+                'note': f"Refused, nothing was changed: {answer['problems']} problem(s) above. Fix the list, or ask the "
+                        "user whether to make the change anyway (allow_problems=true)."}
+    # Removals first: a card moved from the main deck to the side board ends with its copies where they belong
+    items = plan['remove'] + plan['add']
+    if not items:
+        raise ScannerError('Nothing to change: no card of the list could be found in the deck or the card data')
+    api.write('POST', f"/api/decks/{data['id']}/cards", {'cards': items})
+    return {'changed': True, 'deck': data['name'], 'add': answer['add'], 'remove': answer['remove'],
+            'problems': answer['problems'], 'now': deck_summary(load_deck(api, data['id']))}
+
+
+def create_deck(api, name, deck_format, kind='paper', cards=None, commander='', allow_problems=False):
+    """
+    Make a new deck - this WRITES. deck_format: 'standard', 'commander', 'historic' ...; kind: 'paper' or
+    'arena' (planned against the MTG Arena collection); cards: [{'name', 'quantity', 'board': 'main' |
+    'side'}]; commander: the commander's name for a commander format. Checked first like
+    propose_deck_changes (legal, colours, copies); a problem refuses it unless allow_problems=true.
+    A deck made here has no Arena id: an Arena import never replaces it.
+    """
+    name, deck_format, kind = str(name or '').strip(), str(deck_format or '').strip().lower(), str(kind or 'paper').lower()
+    if not name:
+        raise ScannerError('A deck needs a name')
+    if not deck_format:
+        raise ScannerError("A deck needs a format ('standard', 'commander', 'historic' ...)")
+    if kind not in COLLECTIONS:
+        raise ScannerError("kind must be 'paper' or 'arena'")
+    # An empty deck of that format for the checks to work on (and the commander, for its colours)
+    draft = {'id': None, 'name': name, 'format': deck_format, 'kind': kind, 'cards': [], 'from_arena': False}
+    # A commander only where the format has one: Standard, Historic, Pioneer ... have none (and the checks
+    # would otherwise treat the deck as a commander deck - one copy of each card, the commander's colours)
+    if commander and deck_format not in COMMANDER_FORMATS:
+        raise ScannerError(f"{deck_format} has no commander: leave commander empty "
+                           f"(commander formats: {', '.join(COMMANDER_FORMATS)})")
+    if commander:
+        found = api.get('/api/cards/search', q=commander, format=deck_format, kind=kind, commander=1)['cards']
+        # The name as written, else the one commander whose name begins with it ("Giada" -> Giada, Font of Hope)
+        leader = next((card for card in found if front(card['name']) == front(commander)), None)
+        if leader is None:
+            starting = [card for card in found if front(card['name']).startswith(front(commander))]
+            if len(starting) > 1:
+                raise ScannerError(f"Several commanders match '{commander}': "
+                                   + ', '.join(card['name'] for card in starting[:8]) + '. Say which one.')
+            leader = starting[0] if starting else None
+        if leader is None:
+            raise ScannerError(f"'{commander}' is no commander legal in {deck_format}")
+        draft['cards'].append({'name': leader['name'], 'quantity': 1, 'board': 'commander',
+                               'owned': leader.get('owned', 0), 'card': leader})
+    if kind == 'arena':
+        draft['wildcards'] = {'have': (api.get('/api/arena').get('arena') or {}).get('wildcards') or {}}
+    answer, plan = _plan_changes(api, draft, cards, None)
+    if answer['problems'] and not allow_problems:
+        return {**answer, 'deck': name, 'created': False,
+                'note': f"Refused, no deck was made: {answer['problems']} problem(s) above. Fix the list, or ask the "
+                        "user whether to make it anyway (allow_problems=true)."}
+    # The list as the decks page's "paste a list" reads it (parse_decklist): Commander / Deck / Sideboard,
+    # the same card twice on one board added up
+    boards = {'commander': {}, 'main': {}, 'side': {}}
+    for entry in draft['cards']:
+        boards['commander'][entry['name']] = 1
+    for item in plan['add']:
+        boards[item['board']][item['name']] = boards[item['board']].get(item['name'], 0) + item['change']
+    sections = [(title, boards[board]) for title, board in (('Commander', 'commander'), ('Deck', 'main'), ('Sideboard', 'side'))
+                if boards[board]]
+    text = '\n\n'.join(title + '\n' + '\n'.join(f'{count} {card}' for card, count in cards_on.items())
+                       for title, cards_on in sections)
+    created = api.write('POST', '/api/decks', {'name': name, 'format': deck_format, 'kind': kind, 'text': text})
+    return {'created': True, 'unknown_cards': created.get('unknown') or [], 'add': answer['add'],
+            'problems': answer['problems'], 'now': deck_summary(created['deck'])}
+
+
+def rename_deck(api, deck, name='', notes=None):
+    """Change a deck's name and / or its notes - this WRITES. notes: the whole new text ('' empties them)"""
+    data = load_deck(api, deck)
+    refuse_imported(data)
+    body = {}
+    if str(name or '').strip():
+        body['name'] = str(name).strip()
+    if notes is not None:
+        body['notes'] = str(notes)
+    if not body:
+        raise ScannerError('Nothing to change: give a new name or notes')
+    changed = api.write('PUT', f"/api/decks/{data['id']}", body)
+    return {'changed': True, 'was': data['name'], 'now': deck_summary(changed['deck'])}
 
 
 # ----------------------------------------------------------------------------

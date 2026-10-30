@@ -310,6 +310,11 @@ This one was sent back from the collection.*
   colours, mana value, rarity, legal in a format, owned on paper or in Arena); a proposed change
   checks the 4-copy limit of a 60-card deck. Tried against the real server's two Arena decks;
   not tried with a local model.
+- **The MCP server can change decks when allowed** (`--allow-deck-writes`, off by default; since
+  2026-10-29): create a deck, change its cards, rename it - never delete, never anything outside
+  the decks. Each change is checked whole first and refused on a problem; decks from an Arena
+  export are refused. Tried on a throwaway server with copied test data; not yet used on the
+  real server.
 - **Tools for the detector and the speed:** a debug trace of slow or doubtful captures,
   scripts to label frames, train and score the corner network, and to benchmark the database
   and the station.
