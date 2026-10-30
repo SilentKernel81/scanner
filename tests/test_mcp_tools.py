@@ -408,6 +408,14 @@ class DeckWrites(unittest.TestCase):
         self.assertTrue(answer['created'])
         self.assertEqual(self.api.writes[0][2]['text'], 'Deck\n4 Llanowar Elves\n20 Plains')   # no Commander section
 
+    def test_the_currency_label_of_a_write_follows_the_deck_it_reports(self):
+        # create_deck's answer says the deck's kind only in 'now': an Arena deck was labelled 'USD' (2026-10-29)
+        arena = tools.with_currency(self.api, tools.create_deck(self.api, 'Elves', 'standard', kind='arena',
+                                                                cards=[{'name': 'Llanowar Elves', 'quantity': 4}]))
+        self.assertIn('wildcards', arena['prices_in'])
+        paper = tools.with_currency(self.api, tools.change_deck(self.api, 'Giada', add=[{'name': 'Swords to Plowshares'}]))
+        self.assertEqual(paper['prices_in'], 'EUR')                            # a paper deck keeps its currency
+
     def test_rename(self):
         answer = tools.rename_deck(self.api, 'Giada', name='Angels Forever', notes='')
         self.assertEqual(self.api.writes, [('PUT', '/api/decks/7', {'name': 'Angels Forever', 'notes': ''})])

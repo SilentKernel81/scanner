@@ -36,7 +36,9 @@ def with_currency(api, answer):
     """A tool's answer with the currency of its prices beside them ('prices_in'): a bare number in euros would be read as
     dollars. card_scanner_mcp.py adds it to every answer"""
     if isinstance(answer, dict):
-        if answer.get('kind') == 'arena' or answer.get('collection') == 'arena':
+        # An Arena answer: said at its top, or - the deck tools' answers - in the deck it reports ('now')
+        now = answer.get('now') if isinstance(answer.get('now'), dict) else {}
+        if answer.get('kind') == 'arena' or answer.get('collection') == 'arena' or now.get('kind') == 'arena':
             # An Arena answer has no prices (find_card's card price aside, which is paper's): a currency there would
             # read as "this costs dollars", and a card in Arena costs a wildcard
             return {**answer, 'prices_in': 'none: MTG Arena cards cost wildcards'}
