@@ -431,5 +431,23 @@ class DeckWrites(unittest.TestCase):
         self.assertEqual((self.api.writes, self.api.posts), ([], []))
 
 
+class ServerWrappers(unittest.TestCase):
+    """card_scanner_mcp.py's tools call tools.py: each call's arguments must fit the function it calls
+    (read from the source, so the MCP library is not needed)"""
+
+    def test_every_call_into_tools_fits_its_signature(self):
+        import ast
+        import inspect
+        source = (Path(__file__).resolve().parent.parent / 'mcp_server' / 'card_scanner_mcp.py').read_text()
+        calls = [node for node in ast.walk(ast.parse(source))
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and isinstance(node.func.value, ast.Name) and node.func.value.id == 'tools']
+        self.assertTrue(calls)
+        for call in calls:
+            with self.subTest(tool=call.func.attr, line=call.lineno):
+                signature = inspect.signature(getattr(tools, call.func.attr))
+                signature.bind(*[None] * len(call.args), **{kw.arg: None for kw in call.keywords if kw.arg})
+
+
 if __name__ == '__main__':
     unittest.main()
