@@ -161,7 +161,7 @@ def build_server(api, deck_writes=False):
     @explained
     def collection_summary(collection: str = 'paper') -> dict:
         """How big the collection is and what it is made of: card count, value, the biggest sets, rarities, card types, locations, and how many cards are in a deck. collection='arena': the MTG Arena collection - also its wildcards, gold and gems, and when it was exported from Arena."""
-        return tools.collection_summary(api, collection=collection)
+        return tools.collection_summary(api, which=collection)
 
     if deck_writes:
         register_deck_writes(server, api, explained, ToolAnnotations)
