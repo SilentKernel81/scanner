@@ -168,8 +168,14 @@ def get_deck(api, deck, with_card_text=False):
               'notes': data.get('notes') or '', 'totals': arena_totals(data) if arena else data['totals'],
               'issues': data['issues'], 'boards': boards}
     if arena:
-        answer.update(arena_facts(data))
+        answer.update(arena_facts(data), collection_imported=arena_imported(api))
     return answer
+
+
+def arena_imported(api):
+    """When the Arena collection the answer counts against was exported from Arena (the last import) - said in every
+    Arena deck answer, so two answers from either side of an import are not read as disagreeing"""
+    return (api.get('/api/arena').get('arena') or {}).get('exported') or 'never: import an Arena export first'
 
 
 def arena_totals(data):
@@ -199,6 +205,7 @@ def check_deck(api, deck):
               'totals': arena_totals(data) if arena else data['totals']}
     if arena:
         answer['wildcards'] = data.get('wildcards') or {}
+        answer['collection_imported'] = arena_imported(api)
     return answer
 
 
@@ -440,6 +447,7 @@ def _plan_changes(api, data, add=None, remove=None):
         have = (data.get('wildcards') or {}).get('have') or {}
         answer['wildcards_after'] = {'needed': needed, 'have': have,
                                      'enough': all(count <= (have.get(rarity) or 0) for rarity, count in needed.items())}
+        answer['collection_imported'] = arena_imported(api)
         answer['note'] = 'Nothing was changed: ' + arena_facts(data)['how_to_change'] + '.'
     return answer, plan
 

@@ -431,6 +431,18 @@ class DeckWrites(unittest.TestCase):
         self.assertEqual((self.api.writes, self.api.posts), ([], []))
 
 
+class ArenaImportDate(unittest.TestCase):
+    """Every Arena deck answer says which import its owned copies and wildcards come from"""
+
+    def test_arena_deck_answers_say_when_the_collection_was_exported(self):
+        api = FakeApi()
+        self.assertEqual(tools.get_deck(api, 'Elves on Arena')['collection_imported'], '2026-10-29T18:42')
+        self.assertEqual(tools.check_deck(api, 'Elves on Arena')['collection_imported'], '2026-10-29T18:42')
+        self.assertEqual(tools.missing_cards(api, 'Elves on Arena')['collection_imported'], '2026-10-29T18:42')
+        proposal = tools.propose_deck_changes(api, 'Elves on Arena', add=[{'name': 'Llanowar Elves', 'quantity': 0}])
+        self.assertEqual(proposal['collection_imported'], '2026-10-29T18:42')
+
+
 class ServerWrappers(unittest.TestCase):
     """card_scanner_mcp.py's tools call tools.py: each call's arguments must fit the function it calls
     (read from the source, so the MCP library is not needed)"""
