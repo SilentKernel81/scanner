@@ -264,6 +264,11 @@ class Magic(Game):
             'oracle_text': card['oracle_text'] or '',
             'power': card.get('power'),
             'toughness': card.get('toughness'),
+            'loyalty': card.get('loyalty'),
+            'defense': card.get('defense'),
+            'produced_mana': card.get('produced_mana') or [],
+            'edhrec_rank': card.get('edhrec_rank'),
+            'game_changer': bool(card.get('game_changer')),
             'image_uri': card['image_uri'],
             # The cheapest printing: what completing a deck costs at least
             'price': card.get('cheapest') or card['price'] or card['price_foil'] or card.get('price_etched'),

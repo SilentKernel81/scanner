@@ -503,7 +503,8 @@ def search_cards():
             text=args.get('q'), type_text=args.get('type'), oracle_text=args.get('text'),
             identity=args.get('identity'), colors=args.get('colors'), cmc=cmc, rarity=args.get('rarity'),
             legal_in=args.get('format') or None, names=list(owned) if args.get('owned') else None,
-            exclude_names=taken, commander=bool(args.get('commander')), playable_in=kind, offset=offset)
+            exclude_names=taken, commander=bool(args.get('commander')), playable_in=kind,
+            produces=args.get('produces') or None, sort=args.get('sort') or None, offset=offset)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     # A card that is owned is shown in the printing owned (the search picks one printing per

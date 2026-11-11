@@ -821,6 +821,83 @@ class CardDataImport(TemporaryData):
         finally:
             cards.conn.close()
 
+    def test_more_of_scryfalls_card_is_kept_and_searched(self):
+        # Loyalty (on the faces of a reversible card), the mana a card makes, EDHREC's rank, the layout, Game Changer, Arena id
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            elves = {**self.card(1), 'id': 'elves', 'name': 'Llanowar Elves', 'produced_mana': ['G'], 'edhrec_rank': 120,
+                     'arena_id': 68526, 'power': '1', 'toughness': '1'}
+            tender = {**self.card(2), 'id': 'tender', 'name': 'Bloom Tender', 'produced_mana': ['B', 'G', 'R', 'U', 'W'],
+                      'edhrec_rank': 900}
+            rhystic = {**self.card(3), 'id': 'rhystic', 'name': 'Rhystic Study', 'game_changer': True, 'edhrec_rank': 7}
+            face = {'name': 'Ajani Goldmane', 'mana_cost': '{2}{W}{W}', 'cmc': 4.0, 'type_line': 'Legendary Planeswalker',
+                    'oracle_text': '+1: You gain 2 life.', 'colors': ['W'], 'loyalty': '4'}
+            ajani = {**self.card(4), 'id': 'ajani', 'name': 'Ajani Goldmane // Ajani Goldmane', 'layout': 'reversible_card',
+                     'card_faces': [face, {**face}]}
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [elves, tender, rhystic, ajani])
+            row = lambda card_id: tuple(cards.conn.execute(
+                'SELECT loyalty, produced_mana, edhrec_rank, layout, game_changer, arena_id, face_name_search FROM cards '
+                'WHERE id = ?', (card_id,)).fetchone())
+            self.assertEqual(row('elves'), (None, '["G"]', 120, 'normal', 0, 68526, 'llanowar elves'))
+            self.assertEqual(row('rhystic')[2:5], (7, 'normal', 1))
+            self.assertEqual(row('ajani')[0], '4')                               # from the face
+            self.assertEqual(row('id-100')[1], None)                              # a card that makes no mana
+            card = cards.cards_by_names(['Rhystic Study'])['rhystic study']
+            self.assertEqual((card['game_changer'], card['edhrec_rank']), (True, 7))
+            names = lambda **filters: [c['name'] for c in cards.search_cards(**filters)[0] if not c['name'].startswith('Card ')]
+            self.assertEqual(names(produces='G'), ['Bloom Tender', 'Llanowar Elves'])
+            self.assertEqual(names(produces='U'), ['Bloom Tender'])
+            self.assertEqual(names(produces='GU'), ['Bloom Tender'])
+            # By EDHREC's rank (cards no Commander deck plays last); after the exact name when there is a text
+            self.assertEqual(names(sort='popularity')[:4], ['Rhystic Study', 'Llanowar Elves', 'Bloom Tender', 'Ajani Goldmane'])
+            self.assertEqual(names(text='llanowar elves', sort='popularity'), ['Llanowar Elves'])
+            with self.assertRaises(ValueError):
+                cards.search_cards(sort='price')
+        finally:
+            cards.conn.close()
+
+    def test_a_double_faced_card_is_found_by_its_front_by_an_index(self):
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            delver = {**self.card(1), 'id': 'delver', 'name': 'Delver of Secrets // Insectile Aberration', 'layout': 'transform'}
+            # One front, two cards: a token (legal nowhere) and a legal card - the legal one, whatever the table's order
+            token = {**self.card(2), 'id': 'tok', 'name': 'Angel // Demon', 'layout': 'token', 'legalities': {},
+                     'released_at': '2030-01-01'}
+            legal = {**self.card(3), 'id': 'legal', 'name': 'Angel // Angel Reborn', 'released_at': '2020-01-01'}
+            older = {**self.card(4), 'id': 'old', 'name': 'Old Front // Back', 'released_at': '2001-01-01'}
+            newer = {**self.card(5), 'id': 'new', 'name': 'Old Front // Other Back', 'released_at': '2024-01-01'}
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [delver, token, legal, older, newer])
+            found = cards.cards_by_names(['Delver of Secrets', 'Angel', 'Old Front', 'Nothing Like It'])
+            self.assertEqual({key: card['name'] for key, card in found.items()},
+                             {'delver of secrets': 'Delver of Secrets // Insectile Aberration', 'angel': 'Angel // Angel Reborn',
+                              'old front': 'Old Front // Other Back'})
+            # By the index: a name not found no longer reads every row
+            query = cards._ONE_PER_NAME.format(where="face_name_search IN (?) AND face_name_search != name_search")
+            plan = ' '.join(row[3] for row in cards.conn.execute('EXPLAIN QUERY PLAN ' + query, ('x',)))
+            self.assertIn('idx_card_face_name_search', plan)
+        finally:
+            cards.conn.close()
+
+    def test_an_older_file_gets_the_front_names_and_loses_the_unused_indexes(self):
+        # A file from before face_name_search: filled from the names at the start, no download needed
+        path = self.tmp / 'old_cards.db'
+        old = sqlite3.connect(path)
+        old.execute('CREATE TABLE cards (id TEXT PRIMARY KEY, name TEXT NOT NULL, rarity TEXT, type_line TEXT)')
+        old.execute("INSERT INTO cards (id, name) VALUES ('d', 'Delver of Secrets // Insectile Aberration'), ('s', 'Shock')")
+        old.execute('CREATE INDEX idx_card_rarity ON cards(rarity)')
+        old.execute('CREATE INDEX idx_card_type ON cards(type_line)')
+        old.commit()
+        old.close()
+        cards = CardDatabase(db_file=path)
+        try:
+            self.assertEqual(dict(cards.conn.execute('SELECT id, face_name_search FROM cards').fetchall()),
+                             {'d': 'delver of secrets', 's': 'shock'})
+            indexes = {row[0] for row in cards.conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+            self.assertIn('idx_card_face_name_search', indexes)
+            self.assertFalse({'idx_card_rarity', 'idx_card_type'} & indexes)
+        finally:
+            cards.conn.close()
+
     def test_an_import_on_its_own_connection(self):
         cards = CardDatabase(db_file=self.tmp / 'cards.db')
         try:
