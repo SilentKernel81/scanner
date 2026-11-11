@@ -194,13 +194,19 @@ def get_deck(api, deck, with_card_text=False):
               'notes': data.get('notes') or '', 'totals': arena_totals(data) if arena else data['totals'],
               'issues': data['issues'], 'boards': boards}
     if arena:
-        answer.update(arena_facts(data), collection_imported=arena_imported(api))
+        answer.update(arena_facts(data), collection_imported=arena_imported(api, data))
     return answer
 
 
-def arena_imported(api):
-    """When the Arena collection the answer counts against was exported from Arena (the last import) - said in every
-    Arena deck answer, so two answers from either side of an import are not read as disagreeing"""
+def arena_imported(api, data=None):
+    """
+    When the Arena collection the answer counts against was exported from Arena (the last import) - said in every Arena
+    deck answer, so two answers from either side of an import are not read as disagreeing. data: the deck as the server
+    sent it, whose 'collection_imported' was read with its copies and wildcards (one snapshot, since 2026-11-11). Only a
+    server from before that, which does not send it, is asked separately - and an import can land between the two asks
+    """
+    if data is not None and data.get('collection_imported') is not None:
+        return data['collection_imported'] or 'never: import an Arena export first'
     return (api.get('/api/arena').get('arena') or {}).get('exported') or 'never: import an Arena export first'
 
 
@@ -231,7 +237,7 @@ def check_deck(api, deck):
               'totals': arena_totals(data) if arena else data['totals']}
     if arena:
         answer['wildcards'] = data.get('wildcards') or {}
-        answer['collection_imported'] = arena_imported(api)
+        answer['collection_imported'] = arena_imported(api, data)
     return answer
 
 
@@ -479,7 +485,7 @@ def _plan_changes(api, data, add=None, remove=None):
         have = (data.get('wildcards') or {}).get('have') or {}
         answer['wildcards_after'] = {'needed': needed, 'have': have,
                                      'enough': all(count <= (have.get(rarity) or 0) for rarity, count in needed.items())}
-        answer['collection_imported'] = arena_imported(api)
+        answer['collection_imported'] = arena_imported(api, data)
         answer['note'] = 'Nothing was changed: ' + arena_facts(data)['how_to_change'] + '.'
     return answer, plan
 
@@ -573,7 +579,10 @@ def create_deck(api, name, deck_format, kind='paper', cards=None, commander='', 
         draft['cards'].append({'name': leader['name'], 'quantity': 1, 'board': 'commander',
                                'owned': leader.get('owned', 0), 'card': leader})
     if kind == 'arena':
-        draft['wildcards'] = {'have': (api.get('/api/arena').get('arena') or {}).get('wildcards') or {}}
+        # The wildcards and the date from one answer of the server's
+        account = api.get('/api/arena').get('arena') or {}
+        draft['wildcards'] = {'have': account.get('wildcards') or {}}
+        draft['collection_imported'] = account.get('exported') or ''
     answer, plan = _plan_changes(api, draft, cards, None)
     if answer['problems'] and not allow_problems:
         return {**answer, 'deck': name, 'created': False,

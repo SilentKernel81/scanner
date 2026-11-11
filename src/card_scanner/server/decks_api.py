@@ -122,7 +122,7 @@ def deck_payload(deck):
     considering = deck['format'] in commander_formats(game)  # its 'side' board isn't played
     by_name = game.cards_by_names([card['name'] for card in deck['cards']])
     # Owned: in the collection the deck is of. And only decks of that kind want the same copies
-    owned = collection_of(kind).owned_by_name(game.id)
+    owned, account = arena.snapshot(arena_inventory, game.id) if kind == 'arena' else (collection_of(kind).owned_by_name(game.id), None)
     needed = deck_store.needed_by_name(game.id, commander_formats(game), kind)
     # The image is the printing the deck entry was added with (a precon's own printing, the
     # search result clicked); the rest is the card's data, the same for every printing
@@ -174,7 +174,7 @@ def deck_payload(deck):
         wildcards = {'needed': arena.wildcards_needed(
                          [((first[name]['card'] or {}).get('rarity'), count)
                           for name, count in missing.items() if count and name not in absent]),
-                     'have': arena.account(arena_inventory).get('wildcards') or {}}
+                     'have': account.get('wildcards') or {}}
     return {
         'id': deck['id'], 'name': deck['name'], 'format': deck['format'], 'notes': deck['notes'],
         'updated_at': deck['updated_at'], 'cards': cards,
@@ -182,6 +182,9 @@ def deck_payload(deck):
         # deck came with an Arena export (the next import replaces it); wildcards: an Arena
         # deck's missing cards as what crafting them costs
         'kind': kind, 'from_arena': bool(deck.get('arena_id')), 'wildcards': wildcards,
+        # An Arena deck: when the collection its copies and wildcards were counted in was exported from Arena (read with
+        # them, arena.snapshot: never an import's date beside the copies of the one before); '' before the first import
+        'collection_imported': (account.get('exported') or '') if kind == 'arena' else None,
         # cover: the card chosen to stand for the deck ('' when none is, or it left the deck);
         # covers: what is shown - that card, or what stands in for it (deck_covers)
         'cover': deck.get('cover') if any(card['name'] == deck.get('cover') for card in cards) else '',
@@ -455,8 +458,7 @@ def arena_check(game, deck, left_out):
     A Commander deck's considered cards are not part of the deck and not counted; basic
     lands are free in Arena.
     """
-    account = arena.account(arena_inventory)
-    owned = arena_inventory.owned_by_name(game.id)
+    owned, account = arena.snapshot(arena_inventory, game.id)
     by_name = game.cards_by_names([entry['name'] for entry in deck['cards']])
     considering = deck['format'] in commander_formats(game)
     wanted = {}

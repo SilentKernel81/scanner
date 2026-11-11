@@ -499,7 +499,24 @@ class ArenaImportDate(unittest.TestCase):
         self.assertEqual(tools.check_deck(api, 'Elves on Arena')['collection_imported'], '2026-10-29T18:42')
         self.assertEqual(tools.missing_cards(api, 'Elves on Arena')['collection_imported'], '2026-10-29T18:42')
         proposal = tools.propose_deck_changes(api, 'Elves on Arena', add=[{'name': 'Llanowar Elves', 'quantity': 0}])
-        self.assertEqual(proposal['collection_imported'], '2026-10-29T18:42')
+        self.assertEqual(proposal['collection_imported'], '2026-10-29T18:42')   # a server from before: asked apart
+
+    def test_the_date_read_with_the_copies_is_the_one_said(self):
+        # The server sends the date with the deck, read with its copies (one snapshot): that one is said, and /api/arena
+        # - which an import may have changed since - is not asked; '' (nothing imported yet) is said as such
+        api = FakeApi()
+        asked = []
+        real_get = api.get
+        api.get = lambda path, **params: asked.append(path) or real_get(path, **params)
+        ARENA_DECK['collection_imported'] = '2026-11-11T11:52'
+        self.addCleanup(ARENA_DECK.pop, 'collection_imported')
+        self.assertEqual(tools.get_deck(api, 'Elves on Arena')['collection_imported'], '2026-11-11T11:52')
+        self.assertEqual(tools.check_deck(api, 'Elves on Arena')['collection_imported'], '2026-11-11T11:52')
+        proposal = tools.propose_deck_changes(api, 'Elves on Arena', add=[{'name': 'Llanowar Elves', 'quantity': 0}])
+        self.assertEqual(proposal['collection_imported'], '2026-11-11T11:52')
+        self.assertNotIn('/api/arena', asked)
+        ARENA_DECK['collection_imported'] = ''
+        self.assertEqual(tools.get_deck(api, 'Elves on Arena')['collection_imported'], 'never: import an Arena export first')
 
 
 class ServerWrappers(unittest.TestCase):
