@@ -39,7 +39,8 @@ from card_scanner.server.state import (
 from card_scanner.server.logs import enable_request_log, logger
 from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, scanner
 from card_scanner.server.captures import resume_pending
-from card_scanner.server.card_data import current_card_price, prices_withheld, resume_price_transition, run_update_schedule, start_card_data_update
+from card_scanner.server.card_data import (adopt_card_names, current_card_price, prices_withheld, resume_price_transition,
+                                          run_update_schedule, start_card_data_update)
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
@@ -284,6 +285,7 @@ def main():
     run_cleanup_background()
     run_update_schedule()
     resume_price_transition()   # a change of price source a failure or a stop left unfinished
+    threading.Thread(target=adopt_card_names, daemon=True, name='card-names').start()   # names the card data changed before
     run_backup_schedule()
 
     game = games.active()

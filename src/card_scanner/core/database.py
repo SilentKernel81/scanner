@@ -927,6 +927,16 @@ class CardDatabase:
         with self._lock:
             return [(row['id'], row['image_uri']) for row in self.conn.execute('SELECT id, image_uri FROM cards ORDER BY id')]
 
+    def renamed_printings(self):
+        """
+        {card_id: name} of the printings the import names otherwise than Scryfall does - the reversible ones
+        (_reversible_as_its_card: "Ajani Goldmane", not "Ajani Goldmane // Ajani Goldmane"): what was kept by their old name
+        takes this one (core/card_names.adopt). Empty for a card data from before layout was stored
+        """
+        with self._lock:
+            return {row['id']: row['name'] for row in self.conn.execute(
+                "SELECT id, name FROM cards WHERE layout = 'reversible_card'")}
+
     def printing_facts(self):
         """
         {Scryfall id: (name, set code, collector number, oracle id, finishes as 'nonfoil,foil', released_at, frame)} of every printing: the little table that goes
