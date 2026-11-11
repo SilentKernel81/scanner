@@ -1123,8 +1123,9 @@ class CardDatabase:
             exclude_names: not these card names (cards other decks already use)
             commander: only cards that can be a commander (as games.mtg_decks.can_be_commander:
                 a legendary creature on the front face, or "can be your commander")
-            playable_in: 'paper' or 'arena' - only printings played there (Scryfall's games): an Arena deck is not
-                offered Black Lotus, a paper deck no card that exists only in Alchemy
+            playable_in: 'paper' or 'arena' - only printings played there (Scryfall's games), and for Arena only cards
+                with a say in one of its formats: an Arena deck is not offered Black Lotus (not even Alchemy: Dominaria's,
+                which Scryfall lists on Arena), a paper deck no card that exists only in Alchemy
         Cards legal in no format are never offered (tokens, emblems, Un-cards, Planes, Dungeons, playtest cards:
         the card data keeps them for the scanner, which reads them). A card data from before legalities or games
         were stored is not filtered by them.
@@ -1137,14 +1138,15 @@ class CardDatabase:
         if playable_in:
             if playable_in not in ('paper', 'arena'):
                 raise ValueError(f"Unknown place to play: {playable_in}")
-            # games '[]' or NULL: a card data from before it was stored (2026-10-29), or a record without it. Then an
-            # Arena card is told by its legalities (as on_arena does), and with no legalities either nothing is left out
-            unknown = "COALESCE(games, '[]') = '[]'"
-            if playable_in == 'arena':
-                unknown += (" AND (legalities IS NULL OR " + ' OR '.join(f"json_extract(legalities, '$.{name}') IN ('legal', 'restricted', 'banned')"
-                                                   for name in ARENA_FORMATS) + ')')
-            where.append(f"(({unknown}) OR games LIKE ?)")
+            # games '[]' or NULL: a card data from before it was stored (2026-10-29), or a record without it - not left out
+            where.append("(COALESCE(games, '[]') = '[]' OR games LIKE ?)")
             params.append(f'%"{playable_in}"%')
+            if playable_in == 'arena':
+                # And it has a say in one of Arena's formats (as on_arena): Scryfall's games also lists Arena printings no
+                # deck can play - Alchemy: Dominaria's Black Lotus, Time Walk and Ancestral Recall (an event's), legal in
+                # no Arena format. NULL legalities: a card data from before they were stored - not left out
+                where.append("(legalities IS NULL OR " + ' OR '.join(
+                    f"json_extract(legalities, '$.{name}') IN ('legal', 'restricted', 'banned')" for name in ARENA_FORMATS) + ')')
         order, order_params = 'name', []
         if text and search_key(text):
             # The card with exactly this name first, then names starting with it
