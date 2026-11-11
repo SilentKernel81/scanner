@@ -5,6 +5,8 @@ Moxfield / Archidekt / Arena write them).
 """
 import re
 
+from card_scanner.core.database import ARENA_FORMATS
+
 # Format id (also Scryfall's legality key) -> rules. size: main deck (exact: neither more nor
 # less - Commander counts the commander); copies: of one card, over main deck and sideboard
 DECK_FORMATS = {
@@ -230,11 +232,10 @@ def format_decklist(entries, format_id=None):
 # deck, choosing the printings itself. Not tried: the Commander and Sideboard sections, a
 # split card, a card Arena does not have.
 
-# A card exists on Arena when it has a say in one of the formats only Arena has. Scryfall's
-# data has no simpler sign that our card table keeps (its "games" list is not stored), and
-# "timeless" alone covers nearly all of it: every card on Arena is legal, restricted or
-# banned there. The others are a safety net for a card data from before timeless existed.
-ARENA_FORMATS = ('timeless', 'historic', 'brawl', 'standardbrawl', 'alchemy', 'explorer')
+# A card exists on Arena when it has a say in one of the formats only Arena has (ARENA_FORMATS,
+# in core/database.py: the deck search falls back on them for a card data without "games"). The
+# card table keeps Scryfall's "games" list since 2026-10-29, but the cards handed here carry
+# legalities only - and they also work on a card data from before games.
 
 
 def on_arena(card):

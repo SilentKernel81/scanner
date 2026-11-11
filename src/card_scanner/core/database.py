@@ -72,8 +72,63 @@ CARD_COLUMNS = [
     # the card data is downloaded again; at the end, as ALTER TABLE appends). A card's rarity is its Arena printing's when
     # it has one (_CARD_RARITY): the wildcard that crafts it - Bloom Tender is rare on paper, mythic in Arena
     ('games', 'TEXT'),
+    # A creature's (or Vehicle's) power and toughness, as Scryfall writes them: text, since they can be "*", "1+*" or "X"
+    # (since 2026-11-11, empty until the card data is downloaded again; at the end, as ALTER TABLE appends). A card with
+    # faces has them on its front face (_face_fields)
+    ('power', 'TEXT'),
+    ('toughness', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
+
+# The formats only MTG Arena has: a card legal, restricted or banned in one of them exists on Arena. "timeless" alone covers
+# nearly all of it; the others are a safety net for a card data from before timeless existed. What games.mtg_decks.on_arena
+# goes by, and the deck search's sign of an Arena card in a card data from before Scryfall's "games" was stored
+ARENA_FORMATS = ('timeless', 'historic', 'brawl', 'standardbrawl', 'alchemy', 'explorer')
+
+REVERSIBLE_FIELDS = ('type_line', 'cmc', 'mana_cost', 'colors', 'oracle_text', 'power', 'toughness', 'oracle_id')
+
+
+def _reversible_as_its_card(card):
+    """
+    A reversible card (Secret Lair's two-sided printings: the same card on both sides, other art) as the card it is.
+    Scryfall names it twice over ("Ajani Goldmane // Ajani Goldmane"; an omen's "Bloomvine Regent // Claim Territory //
+    Bloomvine Regent") and keeps its type, mana value, cost, colours and text only on the faces - stored as they came,
+    107 printings were "cards" of their own beside the real one, with no type, mana value or text (two "Ajani
+    Goldmane" in a search). The name: its parts up to where the first comes again; the rest: the front face's.
+    Any other card is returned as it is.
+    """
+    faces = card.get('card_faces') or []
+    if card.get('layout') != 'reversible_card' or not faces:
+        return card
+    parts = (card.get('name') or '').split(' // ')
+    repeat = parts.index(parts[0], 1) if parts[0] in parts[1:] else None
+    name = ' // '.join(parts[:repeat]) if repeat else faces[0].get('name') or card.get('name')
+    front = faces[0]
+    return {**card, 'name': name, **{key: front[key] for key in REVERSIBLE_FIELDS if key in front and key not in card}}
+
+
+def _face_fields(card):
+    """
+    A card's rules text, mana cost, colours, power and toughness, also when Scryfall keeps them on its faces.
+    Scryfall leaves a field out at the top of a card with faces (adventure, split, flip, transform, modal double-faced ...)
+    when it differs between them: the text always, and for two-sided cards the cost and colours too - stored as they
+    came, each one of those 2,500 printings had no text and many no cost or colour (Gandalf, Goblins' Bane // Flameshape).
+    Then: the faces' texts and costs joined with " // " (as their names are), and the front face's colours, power and
+    toughness - what the card is in the hand, the library and the deck (Ajani, Nacatl Pariah is white; only his back is
+    also red). A field at the top is always taken as it is.
+    """
+    faces = card.get('card_faces') or []
+
+    def joined(key):
+        if card.get(key) is not None:
+            return card[key]
+        parts = [face[key] for face in faces if face.get(key)]
+        return ' // '.join(parts) if parts else None
+
+    front = faces[0] if faces else {}
+    colors = card['colors'] if 'colors' in card else front.get('colors')
+    return {'oracle_text': joined('oracle_text'), 'mana_cost': joined('mana_cost'), 'colors': colors or [],
+            'power': card.get('power', front.get('power')), 'toughness': card.get('toughness', front.get('toughness'))}
 
 # Manual-search treatment filters: key -> SQL condition on the cards table
 TREATMENT_FILTERS = {
@@ -484,7 +539,8 @@ class CardDatabase:
                 # could not find a single one before (a collection scanned in one session had four, none matched)
                 if card.get('layout') == 'art_series':
                     continue
-                
+                card = _reversible_as_its_card(card)
+
                 # Scryfall sends prices as strings ("0.25") or null
                 prices = card.get('prices') or {}
                 price = lambda key: float(prices[key]) if prices.get(key) else None
@@ -492,6 +548,7 @@ class CardDatabase:
                 # Double-faced cards keep their images on each face
                 image_uris = card.get('image_uris') or (card.get('card_faces') or [{}])[0].get('image_uris', {})
                 image_uri = image_uris.get('normal', '')
+                faces = _face_fields(card)
 
                 cursor.execute(f'''
                     INSERT OR REPLACE INTO cards_import ({', '.join(CARD_COLUMN_NAMES)})
@@ -507,10 +564,10 @@ class CardDatabase:
                     price('usd'),
                     price('usd_foil'),
                     image_uri,
-                    card.get('oracle_text'),
+                    faces['oracle_text'],
                     card.get('type_line'),
-                    json.dumps(card.get('colors', [])),
-                    card.get('mana_cost'),
+                    json.dumps(faces['colors']),
+                    faces['mana_cost'],
                     card.get('border_color'),
                     card.get('frame'),
                     json.dumps(card.get('frame_effects', [])),
@@ -533,6 +590,8 @@ class CardDatabase:
                     # The shown prices: filled for the whole table by prices.apply_sql before the swap (_populate)
                     None, None, None,
                     json.dumps(card.get('games', [])),
+                    faces['power'],
+                    faces['toughness'],
                 ))
                 
                 inserted += 1
@@ -785,6 +844,8 @@ class CardDatabase:
             'cmc': row['cmc'] or 0.0,
             'color_identity': _json_list(row['color_identity']),
             'legalities': _json_dict(row['legalities']),
+            'power': row['power'],
+            'toughness': row['toughness'],
         }
         card['treatments'] = self._treatment_labels(card)
         return card
@@ -1048,7 +1109,7 @@ class CardDatabase:
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
                      cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, commander=False,
-                     limit=60, offset=0):
+                     playable_in=None, limit=60, offset=0):
         """
         Cards (one per name) for the deck builder, by name.
 
@@ -1062,10 +1123,28 @@ class CardDatabase:
             exclude_names: not these card names (cards other decks already use)
             commander: only cards that can be a commander (as games.mtg_decks.can_be_commander:
                 a legendary creature on the front face, or "can be your commander")
+            playable_in: 'paper' or 'arena' - only printings played there (Scryfall's games): an Arena deck is not
+                offered Black Lotus, a paper deck no card that exists only in Alchemy
+        Cards legal in no format are never offered (tokens, emblems, Un-cards, Planes, Dungeons, playtest cards:
+        the card data keeps them for the scanner, which reads them). A card data from before legalities or games
+        were stored is not filtered by them.
         Returns:
             (cards, whether there are more)
         """
-        where, params = ["COALESCE(name, '') != ''"], []
+        # Legal nowhere: '{}' (the import keeps only a card's formats that are not "not_legal"); NULL is a card data
+        # from before legalities were stored
+        where, params = ["COALESCE(name, '') != ''", "COALESCE(legalities, '') != '{}'"], []
+        if playable_in:
+            if playable_in not in ('paper', 'arena'):
+                raise ValueError(f"Unknown place to play: {playable_in}")
+            # games '[]' or NULL: a card data from before it was stored (2026-10-29), or a record without it. Then an
+            # Arena card is told by its legalities (as on_arena does), and with no legalities either nothing is left out
+            unknown = "COALESCE(games, '[]') = '[]'"
+            if playable_in == 'arena':
+                unknown += (" AND (legalities IS NULL OR " + ' OR '.join(f"json_extract(legalities, '$.{name}') IN ('legal', 'restricted', 'banned')"
+                                                   for name in ARENA_FORMATS) + ')')
+            where.append(f"(({unknown}) OR games LIKE ?)")
+            params.append(f'%"{playable_in}"%')
         order, order_params = 'name', []
         if text and search_key(text):
             # The card with exactly this name first, then names starting with it

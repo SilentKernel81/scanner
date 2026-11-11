@@ -486,7 +486,8 @@ def search_cards():
         return jsonify({'success': False, 'error': f'No deck builder for {game.label}'}), 400
     args = request.args
     # kind=arena: the search is for an Arena deck - "owned" is what the digital collection has,
-    # and only other Arena decks can be using a card
+    # only other Arena decks can be using a card, and only cards on Arena are offered (a paper
+    # deck: only cards printed on paper)
     kind = 'arena' if args.get('kind') == 'arena' else 'paper'
     owned = collection_of(kind).owned_by_name(game.id)
     # free=1: leave out the cards other decks use (deck_id: the deck being built, which doesn't count)
@@ -502,7 +503,7 @@ def search_cards():
             text=args.get('q'), type_text=args.get('type'), oracle_text=args.get('text'),
             identity=args.get('identity'), colors=args.get('colors'), cmc=cmc, rarity=args.get('rarity'),
             legal_in=args.get('format') or None, names=list(owned) if args.get('owned') else None,
-            exclude_names=taken, commander=bool(args.get('commander')), offset=offset)
+            exclude_names=taken, commander=bool(args.get('commander')), playable_in=kind, offset=offset)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     # A card that is owned is shown in the printing owned (the search picks one printing per

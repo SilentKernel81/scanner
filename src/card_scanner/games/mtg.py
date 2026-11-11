@@ -262,6 +262,8 @@ class Magic(Game):
             'identity': card['color_identity'],
             'rarity': card['rarity'],
             'oracle_text': card['oracle_text'] or '',
+            'power': card.get('power'),
+            'toughness': card.get('toughness'),
             'image_uri': card['image_uri'],
             # The cheapest printing: what completing a deck costs at least
             'price': card.get('cheapest') or card['price'] or card['price_foil'] or card.get('price_etched'),
