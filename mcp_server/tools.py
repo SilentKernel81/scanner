@@ -330,6 +330,32 @@ def what_can_i_build(api, kind='commanders', wait_seconds=40, limit=10):
                      for item in items[:max(1, int(limit))]]}
 
 
+ARENA_PLAN_TRIES = 3
+
+
+def _on_one_arena_import(api, kind, compute):
+    """
+    compute() for a deck of this kind - for an Arena deck, against one import of the Arena collection. A plan reads
+    several answers of the server's (the deck, a search for each card added, the collection): an import landing between
+    them mixed two collections' copies, with one import's wildcards and date beside them. So the reads are bracketed by
+    the account's import time, read fresh before and after (never a kept answer: an answer kept from before the import
+    would pass the check). The same time on both sides: no import landed. Each try starts with nothing kept, so every
+    read in it is of the server as it then is. compute gets the account read before; tried ARENA_PLAN_TRIES times.
+    The import time is to the second (arena_api writes it so): two imports within one second would look like one.
+    """
+    if kind != 'arena':
+        return compute(None)
+    for _try in range(ARENA_PLAN_TRIES):
+        api.forget()
+        before = api.get_fresh('/api/arena').get('arena') or {}
+        result = compute(before)
+        after = api.get_fresh('/api/arena').get('arena') or {}
+        if after.get('imported') == before.get('imported'):
+            return result
+    raise ScannerError(f'The Arena collection was imported again while the change was worked out, {ARENA_PLAN_TRIES} '
+                       'times in a row: ask again once the import is done')
+
+
 def propose_deck_changes(api, deck, add=None, remove=None):
     """
     Work out what a change to a deck WOULD do - nothing is changed. add / remove: lists of
@@ -338,7 +364,8 @@ def propose_deck_changes(api, deck, add=None, remove=None):
     and which other decks of yours use it; and the deck's size before and after. The person makes the
     change on the decks page (or, with deck writes on, change_deck makes it).
     """
-    answer, _plan = _plan_changes(api, load_deck(api, deck), add, remove)
+    answer, _plan = _on_one_arena_import(api, find_deck(api, deck).get('kind'),
+                                         lambda _account: _plan_changes(api, load_deck(api, deck), add, remove))
     return answer
 
 
@@ -526,9 +553,11 @@ def change_deck(api, deck, add=None, remove=None, allow_problems=False):
     the deck) refuses the whole change unless allow_problems=true - then only the cards that could be
     found are changed.
     """
-    data = load_deck(api, deck)
-    refuse_imported(data)
-    answer, plan = _plan_changes(api, data, add, remove)
+    def planned(_account):
+        data = load_deck(api, deck)
+        refuse_imported(data)
+        return data, *_plan_changes(api, data, add, remove)
+    data, answer, plan = _on_one_arena_import(api, find_deck(api, deck).get('kind'), planned)
     if answer['problems'] and not allow_problems:
         return {**answer, 'changed': False,
                 'note': f"Refused, nothing was changed: {answer['problems']} problem(s) above. Fix the list, or ask the "
@@ -558,32 +587,34 @@ def create_deck(api, name, deck_format, kind='paper', cards=None, commander='', 
     if kind not in COLLECTIONS:
         raise ScannerError("kind must be 'paper' or 'arena'")
     # An empty deck of that format for the checks to work on (and the commander, for its colours)
-    draft = {'id': None, 'name': name, 'format': deck_format, 'kind': kind, 'cards': [], 'from_arena': False}
-    # A commander only where the format has one: Standard, Historic, Pioneer ... have none (and the checks
-    # would otherwise treat the deck as a commander deck - one copy of each card, the commander's colours)
-    if commander and deck_format not in COMMANDER_FORMATS:
-        raise ScannerError(f"{deck_format} has no commander: leave commander empty "
-                           f"(commander formats: {', '.join(COMMANDER_FORMATS)})")
-    if commander:
-        found = api.get('/api/cards/search', q=commander, format=deck_format, kind=kind, commander=1)['cards']
-        # The name as written, else the one commander whose name begins with it ("Giada" -> Giada, Font of Hope)
-        leader = next((card for card in found if front(card['name']) == front(commander)), None)
-        if leader is None:
-            starting = [card for card in found if front(card['name']).startswith(front(commander))]
-            if len(starting) > 1:
-                raise ScannerError(f"Several commanders match '{commander}': "
-                                   + ', '.join(card['name'] for card in starting[:8]) + '. Say which one.')
-            leader = starting[0] if starting else None
-        if leader is None:
-            raise ScannerError(f"'{commander}' is no commander legal in {deck_format}")
-        draft['cards'].append({'name': leader['name'], 'quantity': 1, 'board': 'commander',
-                               'owned': leader.get('owned', 0), 'card': leader})
-    if kind == 'arena':
-        # The wildcards and the date from one answer of the server's
-        account = api.get('/api/arena').get('arena') or {}
-        draft['wildcards'] = {'have': account.get('wildcards') or {}}
-        draft['collection_imported'] = account.get('exported') or ''
-    answer, plan = _plan_changes(api, draft, cards, None)
+    def planned(account):
+        # The draft is made inside the try too: the commander's copies owned are read from the search, like the cards'
+        draft = {'id': None, 'name': name, 'format': deck_format, 'kind': kind, 'cards': [], 'from_arena': False}
+        # A commander only where the format has one: Standard, Historic, Pioneer ... have none (and the checks
+        # would otherwise treat the deck as a commander deck - one copy of each card, the commander's colours)
+        if commander and deck_format not in COMMANDER_FORMATS:
+            raise ScannerError(f"{deck_format} has no commander: leave commander empty "
+                               f"(commander formats: {', '.join(COMMANDER_FORMATS)})")
+        if commander:
+            found = api.get('/api/cards/search', q=commander, format=deck_format, kind=kind, commander=1)['cards']
+            # The name as written, else the one commander whose name begins with it ("Giada" -> Giada, Font of Hope)
+            leader = next((card for card in found if front(card['name']) == front(commander)), None)
+            if leader is None:
+                starting = [card for card in found if front(card['name']).startswith(front(commander))]
+                if len(starting) > 1:
+                    raise ScannerError(f"Several commanders match '{commander}': "
+                                       + ', '.join(card['name'] for card in starting[:8]) + '. Say which one.')
+                leader = starting[0] if starting else None
+            if leader is None:
+                raise ScannerError(f"'{commander}' is no commander legal in {deck_format}")
+            draft['cards'].append({'name': leader['name'], 'quantity': 1, 'board': 'commander',
+                                   'owned': leader.get('owned', 0), 'card': leader})
+        if account is not None:
+            # The wildcards and the date of the import the whole plan is read against (_on_one_arena_import)
+            draft['wildcards'] = {'have': account.get('wildcards') or {}}
+            draft['collection_imported'] = account.get('exported') or ''
+        return (draft, *_plan_changes(api, draft, cards, None))
+    draft, answer, plan = _on_one_arena_import(api, kind, planned)
     if answer['problems'] and not allow_problems:
         return {**answer, 'deck': name, 'created': False,
                 'note': f"Refused, no deck was made: {answer['problems']} problem(s) above. Fix the list, or ask the "
