@@ -981,6 +981,36 @@ class FullBackup(TemporaryData):
                     ('scanned_cards', self.tmp, self.tmp / 'pending.db', 'SELECT image FROM pending_captures')] + optional,
             copied=[self.tmp / 'settings.json', self.tmp / 'not-there.json'], **kwargs)
 
+    def test_a_snapshot_leaves_the_free_pages_out(self):
+        # A file half free (as the card data's after an update replaced its table): the backup is its rows, not its size
+        self.add('desk-a', copies=2)
+        filler = sqlite3.connect(self.tmp / 'scan.db')
+        filler.execute('CREATE TABLE filler (blob BLOB)')
+        filler.executemany('INSERT INTO filler VALUES (?)', [(b'x' * 4000,) for _ in range(500)])
+        filler.commit()
+        filler.execute('DROP TABLE filler')
+        filler.commit()
+        filler.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        free = filler.execute('PRAGMA freelist_count').fetchone()[0]
+        filler.close()
+        self.assertGreater(free, 400)
+        made = self.full()
+        self.assertTrue(made['verified'], made['missing'])
+        copy = Path(made['folder']) / 'scan.db'
+        self.assertLess(copy.stat().st_size, (self.tmp / 'scan.db').stat().st_size / 2)
+        check = sqlite3.connect(copy)
+        try:
+            self.assertEqual(check.execute('PRAGMA freelist_count').fetchone()[0], 0)
+            self.assertEqual(check.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
+            original = sqlite3.connect(self.tmp / 'scan.db')
+            try:
+                self.assertEqual(check.execute('SELECT COUNT(*) FROM inventory').fetchone(),
+                                 original.execute('SELECT COUNT(*) FROM inventory').fetchone())
+            finally:
+                original.close()
+        finally:
+            check.close()
+
     def test_large_copies_that_some_captures_lack_are_not_missing(self):
         self.add('desk-a', copies=2)
         self.collection.add_card(CARD, GAME, 'regular', capture=self.photo, quiet=True)

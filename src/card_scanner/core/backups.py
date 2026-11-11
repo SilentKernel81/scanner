@@ -468,13 +468,14 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
                 held.enter_context(manager._lock)
             # Held as shortly as the copying takes: nothing is archived or compressed in here
             for database in databases:
+                # VACUUM INTO (since 2026-11-11; SQLite's backup before): the same consistent snapshot, WAL included, but
+                # without the free pages - the card data's file is half free after an update replaced its table (272 MB
+                # on disk, 141 MB of it written this way, measured on the server's on 2026-11-11). It writes a new file
                 source = sqlite3.connect(f'file:{database}?mode=ro', uri=True, timeout=30.0)
-                target = sqlite3.connect(str(work / Path(database).name))
                 try:
-                    source.backup(target)
+                    source.execute('VACUUM INTO ?', (str(work / Path(database).name),))
                 finally:
                     source.close()
-                    target.close()
             for name, source_dir, database, sql, *_ in linked:
                 (work / name).mkdir(exist_ok=True)
                 snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
