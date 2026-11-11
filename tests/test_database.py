@@ -691,6 +691,97 @@ class CardDataImport(TemporaryData):
         finally:
             cards.conn.close()
 
+    def test_cards_with_faces_keep_their_text_cost_colours_and_stats(self):
+        # As Scryfall writes them: an adventure has its cost and colours at the top but its text only on the faces; a
+        # transform or modal double-faced card has none of them at the top. Stored as they came, the 2,500 such printings
+        # had no text, and the two-sided ones no cost and no colour. Power and toughness are text ("*", "1+*")
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            gandalf = {**self.card(1), 'id': 'gandalf', 'name': "Gandalf, Goblins' Bane // Flameshape", 'layout': 'adventure',
+                       'mana_cost': '{2}{R} // {1}{R}', 'colors': ['R'],
+                       'type_line': 'Legendary Creature \u2014 Avatar Wizard // Sorcery \u2014 Adventure',
+                       'card_faces': [{'name': "Gandalf, Goblins' Bane", 'mana_cost': '{2}{R}', 'power': '2', 'toughness': '3',
+                                       'oracle_text': 'Whenever you cast a noncreature spell, Gandalf gets +1/+1 until end of turn.'},
+                                      {'name': 'Flameshape', 'mana_cost': '{1}{R}',
+                                       'oracle_text': 'Look at the top two cards of your library.'}]}
+            delver = {**self.card(2), 'id': 'delver', 'name': 'Delver of Secrets // Insectile Aberration', 'layout': 'transform',
+                      'type_line': 'Creature \u2014 Human Wizard // Creature \u2014 Human Insect',
+                      'card_faces': [{'name': 'Delver of Secrets', 'mana_cost': '{U}', 'colors': ['U'], 'power': '1', 'toughness': '1',
+                                      'oracle_text': 'At the beginning of your upkeep, look at the top card of your library.'},
+                                     {'name': 'Insectile Aberration', 'mana_cost': '', 'colors': ['U'], 'power': '3',
+                                      'toughness': '2', 'oracle_text': 'Flying'}]}
+            mdfc = {**self.card(3), 'id': 'mdfc', 'name': 'Bala Ged Recovery // Bala Ged Sanctuary', 'layout': 'modal_dfc',
+                    'type_line': 'Sorcery // Land',
+                    'card_faces': [{'name': 'Bala Ged Recovery', 'mana_cost': '{2}{G}', 'colors': ['G'],
+                                    'oracle_text': 'Return target card from your graveyard to your hand.'},
+                                   {'name': 'Bala Ged Sanctuary', 'mana_cost': '', 'colors': [], 'oracle_text': '{T}: Add {G}.'}]}
+            ajani = {**self.card(6), 'id': 'ajani', 'name': 'Ajani, Nacatl Pariah // Ajani, Nacatl Avenger', 'layout': 'transform',
+                     'card_faces': [{'name': 'Ajani, Nacatl Pariah', 'mana_cost': '{1}{W}', 'colors': ['W'], 'power': '1',
+                                     'toughness': '2', 'oracle_text': 'When Ajani enters, create a 2/1 white Cat Warrior.'},
+                                    {'name': 'Ajani, Nacatl Avenger', 'mana_cost': '', 'colors': ['R', 'W'], 'loyalty': '3',
+                                     'oracle_text': '+2: Put a +1/+1 counter on each Cat you control.'}]}
+            goyf = {**self.card(4), 'id': 'goyf', 'name': 'Tarmogoyf', 'mana_cost': '{1}{G}', 'colors': ['G'], 'power': '*',
+                    'toughness': '1+*', 'oracle_text': "Tarmogoyf's power is equal to the number of card types in all graveyards."}
+            plain = {**self.card(5), 'id': 'land', 'name': 'Plain Land', 'colors': [], 'oracle_text': ''}
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [gandalf, delver, mdfc, goyf, plain, ajani])
+            row = lambda card_id: tuple(cards.conn.execute(
+                'SELECT oracle_text, mana_cost, colors, power, toughness FROM cards WHERE id = ?', (card_id,)).fetchone())
+            self.assertEqual(row('gandalf'), (
+                'Whenever you cast a noncreature spell, Gandalf gets +1/+1 until end of turn. // '
+                'Look at the top two cards of your library.', '{2}{R} // {1}{R}', '["R"]', '2', '3'))   # the cost at the top kept
+            self.assertEqual(row('delver'), (
+                'At the beginning of your upkeep, look at the top card of your library. // Flying', '{U}', '["U"]', '1', '1'))
+            self.assertEqual(row('mdfc'), (
+                'Return target card from your graveyard to your hand. // {T}: Add {G}.', '{2}{G}', '["G"]', None, None))
+            self.assertEqual(row('goyf')[3:], ('*', '1+*'))
+            self.assertEqual(row('ajani')[1:], ('{1}{W}', '["W"]', '1', '2'))   # the front's colour: white in the hand and deck
+            self.assertEqual(row('land'), ('', None, '[]', None, None))       # an empty text at the top is not replaced
+            # What the deck builder (and the MCP's search_cards) reads: found by its rules text now, with its colours and stats
+            # (the search's colour filters read color_identity, which Scryfall always writes at the top)
+            found = cards.search_cards(oracle_text='noncreature spell')[0]
+            self.assertEqual([(card['name'], card['colors'], card['power'], card['toughness']) for card in found],
+                             [("Gandalf, Goblins' Bane // Flameshape", ['R'], '2', '3')])
+            self.assertEqual([card['name'] for card in cards.search_cards(oracle_text='Flying')[0]],
+                             ['Delver of Secrets // Insectile Aberration'])        # a back face's text is found too
+        finally:
+            cards.conn.close()
+
+    def test_a_reversible_card_is_the_card_it_is(self):
+        # Scryfall's records of two Secret Lair reversible printings: named twice over, with type, mana value, cost and
+        # text only on the faces. They were cards of their own ("Ajani Goldmane // Ajani Goldmane", no type, mana value 0)
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            face = {'oracle_id': 'oracle-ajani', 'layout': 'normal', 'name': 'Ajani Goldmane', 'mana_cost': '{2}{W}{W}', 'cmc': 4.0,
+                    'type_line': 'Legendary Planeswalker \u2014 Ajani', 'oracle_text': '+1: You gain 2 life.', 'colors': ['W'],
+                    'loyalty': '4', 'image_uris': {'normal': 'https://img/ajani-front.jpg'}}
+            ajani_sld = {**self.card(1), 'id': 'ajani-sld', 'name': 'Ajani Goldmane // Ajani Goldmane', 'layout': 'reversible_card',
+                         'set': 'sld', 'color_identity': ['W'], 'image_uris': None, 'card_faces': [face, {**face}]}
+            del ajani_sld['image_uris']
+            ajani = {**self.card(2), 'id': 'ajani-lrw', 'name': 'Ajani Goldmane', 'set': 'lrw', 'oracle_id': 'oracle-ajani',
+                     'mana_cost': '{2}{W}{W}', 'cmc': 4.0, 'type_line': 'Legendary Planeswalker \u2014 Ajani', 'colors': ['W'],
+                     'color_identity': ['W'], 'oracle_text': '+1: You gain 2 life.'}
+            regent = {'oracle_id': 'oracle-regent', 'layout': 'adventure', 'name': 'Bloomvine Regent', 'mana_cost': '{3}{G}{G}',
+                      'cmc': 5.0, 'type_line': 'Creature \u2014 Dragon', 'oracle_text': 'Flying', 'colors': ['G'],
+                      'power': '4', 'toughness': '5'}
+            bloomvine = {**self.card(3), 'id': 'bloomvine-sld', 'name': 'Bloomvine Regent // Claim Territory // Bloomvine Regent',
+                         'layout': 'reversible_card', 'set': 'sld', 'color_identity': ['G'],
+                         'card_faces': [regent, {**regent, 'name': 'Claim Territory', 'type_line': 'Sorcery \u2014 Omen'}]}
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [ajani_sld, ajani, bloomvine])
+            row = lambda card_id: tuple(cards.conn.execute(
+                'SELECT name, name_search, type_line, cmc, mana_cost, colors, oracle_text, oracle_id, image_uri, power, toughness '
+                'FROM cards WHERE id = ?', (card_id,)).fetchone())
+            self.assertEqual(row('ajani-sld'), ('Ajani Goldmane', 'ajani goldmane', 'Legendary Planeswalker \u2014 Ajani', 4.0,
+                                                '{2}{W}{W}', '["W"]', '+1: You gain 2 life.', 'oracle-ajani',
+                                                'https://img/ajani-front.jpg', None, None))
+            self.assertEqual(row('bloomvine-sld')[:4], ('Bloomvine Regent // Claim Territory', 'bloomvine regent // claim territory',
+                                                        'Creature \u2014 Dragon', 5.0))
+            self.assertEqual(row('bloomvine-sld')[9:], ('4', '5'))
+            # One Ajani in the deck search, not two - the Secret Lair printing is one of its printings
+            self.assertEqual([card['name'] for card in cards.search_cards(text='ajani')[0]], ['Ajani Goldmane'])
+            self.assertEqual({card['id'] for card in cards.find_printings('Ajani Goldmane')[1]}, {'ajani-sld', 'ajani-lrw'})
+        finally:
+            cards.conn.close()
+
     def test_an_import_on_its_own_connection(self):
         cards = CardDatabase(db_file=self.tmp / 'cards.db')
         try:

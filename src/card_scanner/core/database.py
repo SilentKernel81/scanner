@@ -72,8 +72,58 @@ CARD_COLUMNS = [
     # the card data is downloaded again; at the end, as ALTER TABLE appends). A card's rarity is its Arena printing's when
     # it has one (_CARD_RARITY): the wildcard that crafts it - Bloom Tender is rare on paper, mythic in Arena
     ('games', 'TEXT'),
+    # A creature's (or Vehicle's) power and toughness, as Scryfall writes them: text, since they can be "*", "1+*" or "X"
+    # (since 2026-11-11, empty until the card data is downloaded again; at the end, as ALTER TABLE appends). A card with
+    # faces has them on its front face (_face_fields)
+    ('power', 'TEXT'),
+    ('toughness', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
+
+REVERSIBLE_FIELDS = ('type_line', 'cmc', 'mana_cost', 'colors', 'oracle_text', 'power', 'toughness', 'oracle_id')
+
+
+def _reversible_as_its_card(card):
+    """
+    A reversible card (Secret Lair's two-sided printings: the same card on both sides, other art) as the card it is.
+    Scryfall names it twice over ("Ajani Goldmane // Ajani Goldmane"; an omen's "Bloomvine Regent // Claim Territory //
+    Bloomvine Regent") and keeps its type, mana value, cost, colours and text only on the faces - stored as they came,
+    107 printings were "cards" of their own beside the real one, with no type, mana value or text (two "Ajani
+    Goldmane" in a search). The name: its parts up to where the first comes again; the rest: the front face's.
+    Any other card is returned as it is.
+    """
+    faces = card.get('card_faces') or []
+    if card.get('layout') != 'reversible_card' or not faces:
+        return card
+    parts = (card.get('name') or '').split(' // ')
+    repeat = parts.index(parts[0], 1) if parts[0] in parts[1:] else None
+    name = ' // '.join(parts[:repeat]) if repeat else faces[0].get('name') or card.get('name')
+    front = faces[0]
+    return {**card, 'name': name, **{key: front[key] for key in REVERSIBLE_FIELDS if key in front and key not in card}}
+
+
+def _face_fields(card):
+    """
+    A card's rules text, mana cost, colours, power and toughness, also when Scryfall keeps them on its faces.
+    Scryfall leaves a field out at the top of a card with faces (adventure, split, flip, transform, modal double-faced ...)
+    when it differs between them: the text always, and for two-sided cards the cost and colours too - stored as they
+    came, each one of those 2,500 printings had no text and many no cost or colour (Gandalf, Goblins' Bane // Flameshape).
+    Then: the faces' texts and costs joined with " // " (as their names are), and the front face's colours, power and
+    toughness - what the card is in the hand, the library and the deck (Ajani, Nacatl Pariah is white; only his back is
+    also red). A field at the top is always taken as it is.
+    """
+    faces = card.get('card_faces') or []
+
+    def joined(key):
+        if card.get(key) is not None:
+            return card[key]
+        parts = [face[key] for face in faces if face.get(key)]
+        return ' // '.join(parts) if parts else None
+
+    front = faces[0] if faces else {}
+    colors = card['colors'] if 'colors' in card else front.get('colors')
+    return {'oracle_text': joined('oracle_text'), 'mana_cost': joined('mana_cost'), 'colors': colors or [],
+            'power': card.get('power', front.get('power')), 'toughness': card.get('toughness', front.get('toughness'))}
 
 # Manual-search treatment filters: key -> SQL condition on the cards table
 TREATMENT_FILTERS = {
@@ -484,7 +534,8 @@ class CardDatabase:
                 # could not find a single one before (a collection scanned in one session had four, none matched)
                 if card.get('layout') == 'art_series':
                     continue
-                
+                card = _reversible_as_its_card(card)
+
                 # Scryfall sends prices as strings ("0.25") or null
                 prices = card.get('prices') or {}
                 price = lambda key: float(prices[key]) if prices.get(key) else None
@@ -492,6 +543,7 @@ class CardDatabase:
                 # Double-faced cards keep their images on each face
                 image_uris = card.get('image_uris') or (card.get('card_faces') or [{}])[0].get('image_uris', {})
                 image_uri = image_uris.get('normal', '')
+                faces = _face_fields(card)
 
                 cursor.execute(f'''
                     INSERT OR REPLACE INTO cards_import ({', '.join(CARD_COLUMN_NAMES)})
@@ -507,10 +559,10 @@ class CardDatabase:
                     price('usd'),
                     price('usd_foil'),
                     image_uri,
-                    card.get('oracle_text'),
+                    faces['oracle_text'],
                     card.get('type_line'),
-                    json.dumps(card.get('colors', [])),
-                    card.get('mana_cost'),
+                    json.dumps(faces['colors']),
+                    faces['mana_cost'],
                     card.get('border_color'),
                     card.get('frame'),
                     json.dumps(card.get('frame_effects', [])),
@@ -533,6 +585,8 @@ class CardDatabase:
                     # The shown prices: filled for the whole table by prices.apply_sql before the swap (_populate)
                     None, None, None,
                     json.dumps(card.get('games', [])),
+                    faces['power'],
+                    faces['toughness'],
                 ))
                 
                 inserted += 1
@@ -785,6 +839,8 @@ class CardDatabase:
             'cmc': row['cmc'] or 0.0,
             'color_identity': _json_list(row['color_identity']),
             'legalities': _json_dict(row['legalities']),
+            'power': row['power'],
+            'toughness': row['toughness'],
         }
         card['treatments'] = self._treatment_labels(card)
         return card
