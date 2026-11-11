@@ -83,6 +83,19 @@ class FakeApi:
         self.searches = []        # the parameters of each card search, to see what the tools asked for
         self.writes = []          # (method, path, body) of each change to a deck
         self.currency = currency
+        # The Arena account's import time at each fresh read of /api/arena: a test lets an import land between two
+        # reads by giving several (the last one repeats); forgets: how often the kept answers were dropped
+        self.imports = ['2026-10-29 18:45:00']
+        self.arena_reads = 0
+        self.forgets = 0
+
+    def get_fresh(self, path, **params):
+        if path == '/api/arena':
+            self.arena_reads += 1
+        return self.get(path, **params)
+
+    def forget(self):
+        self.forgets += 1
 
     def get(self, path, **params):
         if path == '/api/decks':
@@ -98,7 +111,8 @@ class FakeApi:
                 'imported': '2026-10-29T18:42', 'have': 6, 'craft': [{'name': 'Bejeweled Warg', 'rarity': 'rare', 'copies': 1}],
                 'not_on_arena': 1, 'wildcards': ARENA_DECK['wildcards']}}
         if path == '/api/arena':
-            return {'arena': {'cards': 6, 'entries': 2, 'exported': '2026-10-29T18:42',
+            imported = self.imports[min(self.arena_reads, len(self.imports)) - 1] if self.arena_reads else self.imports[0]
+            return {'arena': {'cards': 6, 'entries': 2, 'exported': '2026-10-29T18:42', 'imported': imported,
                               'wildcards': {'common': 5, 'uncommon': 2, 'rare': 1, 'mythic': 0}, 'gold': 125, 'gems': 130}}
         if path == '/api/stats':
             return {'collection': {'total_cards': 4, 'unique_cards': 3, 'total_value': 12.0}}
@@ -144,8 +158,6 @@ class FakeApi:
     def post(self, path, body):
         self.posts.append(path)
         return {'success': True}
-
-    get_fresh = get
 
 
 class Tools(unittest.TestCase):
@@ -512,11 +524,43 @@ class ArenaImportDate(unittest.TestCase):
         self.addCleanup(ARENA_DECK.pop, 'collection_imported')
         self.assertEqual(tools.get_deck(api, 'Elves on Arena')['collection_imported'], '2026-11-11T11:52')
         self.assertEqual(tools.check_deck(api, 'Elves on Arena')['collection_imported'], '2026-11-11T11:52')
+        self.assertNotIn('/api/arena', asked)               # one answer of the server's: nothing to bracket
+        # A plan reads several answers: it asks /api/arena around them (OneArenaImport), the date is still the deck's
         proposal = tools.propose_deck_changes(api, 'Elves on Arena', add=[{'name': 'Llanowar Elves', 'quantity': 0}])
         self.assertEqual(proposal['collection_imported'], '2026-11-11T11:52')
-        self.assertNotIn('/api/arena', asked)
         ARENA_DECK['collection_imported'] = ''
         self.assertEqual(tools.get_deck(api, 'Elves on Arena')['collection_imported'], 'never: import an Arena export first')
+
+
+class OneArenaImport(unittest.TestCase):
+    """An Arena deck's plan is worked out against one import: an import landing between its reads is noticed, the plan
+    worked out again with nothing kept; a paper deck's plan never asks"""
+
+    def setUp(self):
+        self.api = FakeApi()
+
+    def test_an_import_between_the_reads_makes_the_plan_be_worked_out_again(self):
+        # Before / after of the first try differ (an import landed), the second try's are the same
+        self.api.imports = ['2026-11-11 11:53:10', '2026-11-11 12:05:00', '2026-11-11 12:05:00', '2026-11-11 12:05:00']
+        answer = tools.propose_deck_changes(self.api, 'Elves on Arena', add=[{'name': 'Llanowar Elves'}])
+        self.assertEqual(answer['add'][0]['name'], 'Llanowar Elves')
+        self.assertEqual((self.api.arena_reads, self.api.forgets), (4, 2))        # two tries, each from nothing kept
+
+    def test_imports_that_keep_landing_are_said_rather_than_guessed(self):
+        self.api.imports = [f'2026-11-11 12:0{n}:00' for n in range(9)]
+        with self.assertRaises(ScannerError) as told:
+            tools.propose_deck_changes(self.api, 'Elves on Arena', add=[{'name': 'Llanowar Elves'}])
+        self.assertIn('imported again', str(told.exception))
+        self.assertEqual(self.api.arena_reads, 2 * tools.ARENA_PLAN_TRIES)
+
+    def test_a_new_arena_deck_takes_the_wildcards_and_date_of_the_import_it_was_planned_against(self):
+        made = tools.create_deck(self.api, 'Elves Two', 'standard', kind='arena', cards=[{'name': 'Llanowar Elves', 'quantity': 4}])
+        self.assertTrue(made['created'])
+        self.assertEqual((self.api.arena_reads, self.api.forgets), (2, 1))
+
+    def test_a_paper_deck_does_not_ask(self):
+        tools.propose_deck_changes(self.api, 'Calling All Angels', add=[{'name': 'Sol Ring'}])
+        self.assertEqual((self.api.arena_reads, self.api.forgets), (0, 0))
 
 
 class ServerWrappers(unittest.TestCase):

@@ -86,6 +86,10 @@ class ScannerApi:
             raise ScannerError(answer.get('error') or 'The scanner server refused the request')
         return answer
 
+    def forget(self):
+        """Drop every kept answer: what is read next comes from the server as it is now"""
+        self._cache.clear()
+
     def post(self, path, body):
         """A POST (not kept): only used to start a search that changes nothing"""
         _url, answer = self._request(path, body=body)
