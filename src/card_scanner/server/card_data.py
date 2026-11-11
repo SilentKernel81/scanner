@@ -12,8 +12,9 @@ import uuid
 from card_scanner import games
 from card_scanner.config import Config
 
-from card_scanner.core import image_index, prices, shop_prices
-from card_scanner.server.state import app, app_settings, database, inventory, maintenance_barrier, printing_check, scan_inventory, socketio
+from card_scanner.core import card_names, image_index, prices, shop_prices
+from card_scanner.server.state import (app, app_settings, arena_inventory, database, deck_store, inventory, maintenance_barrier, others,
+                                      printing_check, scan_inventory, socketio)
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded
 
@@ -73,6 +74,7 @@ def start_card_data_update(game, retry=False, on_done=None):
                     logger.info(f"{game.label} card data updated: {total} cards")
                     finished(True, f"{total:,} cards")
                     reprice_collections(game)   # an entry without a price today keeps its own (unless a change of source is unfinished)
+                    adopt_card_names()          # what is kept by a name the import changed takes the new one
                     extend_index_after_update()
                     return
                 except Exception as e:
@@ -274,6 +276,25 @@ def reprice_collections(game, strict=False):
             if strict:
                 raise
             return 0, 0
+
+
+def adopt_card_names():
+    """
+    After a card data update, and once at start (for card data renamed before this ran): the entries, Arena cards, other
+    people's cards and deck entries kept under a printing's old name take the one the card data now gives it
+    (core/card_names.adopt). A failure is logged: the names stay as they were, and the next run tries again
+    """
+    if not database:
+        return None   # no card data (yet): nothing it could rename
+    try:
+        counts = card_names.adopt(database.renamed_printings(), inventories=(inventory, scan_inventory, arena_inventory),
+                                  decks=deck_store, others=others)
+        if any(counts.values()):
+            logger.info(f"Card names adopted from the card data: {counts}")
+        return counts
+    except Exception as e:
+        logger.exception(f"The card data's new names could not be given to what is kept by name: {e}")
+        return None
 
 
 def resume_price_transition():
