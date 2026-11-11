@@ -439,6 +439,25 @@ class DeckWrites(unittest.TestCase):
         self.assertEqual((self.api.writes, self.api.posts), ([], []))
 
 
+class CardFacts(unittest.TestCase):
+    """Loyalty, the mana a card makes, Game Changer: said only by the cards that have them; produces and sort sent"""
+
+    def setUp(self):
+        self.api = FakeApi()
+
+    def test_said_only_when_the_card_has_them(self):
+        self.assertEqual(tools.card_facts({'power': '1', 'toughness': '1', 'produced_mana': ['G']}),
+                         {'power_toughness': '1/1', 'produces': 'G'})
+        self.assertEqual(tools.card_facts({'loyalty': '4', 'game_changer': True, 'produced_mana': []}),
+                         {'loyalty': '4', 'game_changer': True})
+        self.assertEqual(tools.card_facts({'game_changer': False, 'loyalty': None}), {})
+
+    def test_produces_and_sort_are_sent_to_the_search(self):
+        tools.search_cards(self.api, 'paper', '', False, produces='g', sort='Popularity')
+        asked = self.api.searches[-1]
+        self.assertEqual((asked['produces'], asked['sort']), ('G', 'popularity'))
+
+
 class PowerToughness(unittest.TestCase):
     """A creature's power and toughness, as printed ("*/1+*"); nothing for a card without them"""
 

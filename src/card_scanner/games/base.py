@@ -81,6 +81,13 @@ class Game:
         """
         return None
 
+    def source_unchanged(self):
+        """
+        Whether the source has published nothing since the card data in use was downloaded (a
+        network request): the schedule then downloads nothing. False when it cannot tell
+        """
+        return False
+
     # -- Matching and search -------------------------------------------------
 
     def identify(self, name, number=None, set_code=None, ai_model=None):

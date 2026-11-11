@@ -90,6 +90,16 @@ class Magic(Game):
             return f"Scryfall has card data from {remote[:10]}; yours is from {local[:10]}"
         return None
 
+    def source_unchanged(self):
+        # Scryfall's own date of its bulk file, the same one the data in use was downloaded from: nothing to download (the
+        # schedule re-downloaded the whole file every N hours before, new or not). Unknown on either side: not unchanged
+        try:
+            remote = self.db.fetch_scryfall_info().get('updated_at')
+        except Exception:
+            return False
+        local = (self.db.get_data_info(self.id) or {}).get('source_updated')
+        return bool(remote and local and remote == local)
+
     def identify(self, name, number=None, set_code=None, ai_model=None):
         return self.searcher.search_by_name(name, number, ai_model=ai_model, set_code=set_code)
 
@@ -264,6 +274,11 @@ class Magic(Game):
             'oracle_text': card['oracle_text'] or '',
             'power': card.get('power'),
             'toughness': card.get('toughness'),
+            'loyalty': card.get('loyalty'),
+            'defense': card.get('defense'),
+            'produced_mana': card.get('produced_mana') or [],
+            'edhrec_rank': card.get('edhrec_rank'),
+            'game_changer': bool(card.get('game_changer')),
             'image_uri': card['image_uri'],
             # The cheapest printing: what completing a deck costs at least
             'price': card.get('cheapest') or card['price'] or card['price_foil'] or card.get('price_etched'),

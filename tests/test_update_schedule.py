@@ -114,6 +114,7 @@ class CardDataAttemptWhenTheButtonWasFirst(unittest.TestCase):
         settings[card_data.AUTO_LAST_KEY] = {'mtg': dict(before)}
         game = mock.Mock(id='mtg', label='Magic')
         game.card_count.return_value = 100
+        game.source_unchanged.return_value = False
         database = mock.Mock()
         database.get_data_info.return_value = {'downloaded_at': (NOW - timedelta(days=2)).isoformat()}
         with mock.patch.object(card_data, 'app_settings', settings), mock.patch.object(card_data, 'database', database), \
@@ -220,7 +221,26 @@ def a_game(game_id, cards=100):
     """A game as the schedule sees it: an id, a label and a number of cards (0: no card data yet)"""
     game = mock.Mock(id=game_id, label=game_id.upper())
     game.card_count.return_value = cards
+    game.source_unchanged.return_value = False            # the source has something newer, unless a test says not
     return game
+
+
+class SourceUnchanged(unittest.TestCase):
+    """Magic.source_unchanged: Scryfall's date of its bulk file against the one the data in use came from"""
+
+    def magic(self, remote, local, fails=False):
+        from card_scanner.games.mtg import Magic
+        database = mock.Mock()
+        database.fetch_scryfall_info.side_effect = OSError('offline') if fails else (lambda: {'updated_at': remote})
+        database.get_data_info.return_value = {'source_updated': local} if local is not None else None
+        return Magic(database)
+
+    def test_only_the_same_date_on_both_sides_is_unchanged(self):
+        self.assertTrue(self.magic('2026-11-11T09:00:00+00:00', '2026-11-11T09:00:00+00:00').source_unchanged())
+        self.assertFalse(self.magic('2026-11-12T09:00:00+00:00', '2026-11-11T09:00:00+00:00').source_unchanged())
+        self.assertFalse(self.magic('2026-11-11T09:00:00+00:00', None).source_unchanged())      # not recorded: download
+        self.assertFalse(self.magic(None, '2026-11-11T09:00:00+00:00').source_unchanged())
+        self.assertFalse(self.magic('x', 'x', fails=True).source_unchanged())                  # offline: try the download
 
 
 class CardDataSchedule(unittest.TestCase):
@@ -288,6 +308,18 @@ class CardDataSchedule(unittest.TestCase):
         self.downloaded_ago('other', hours=1)                       # fresh: not due
         self.downloaded['empty'] = None                              # the first download is startup's, never the schedule's
         self.assertEqual(card_data.scheduled_card_data_updates(NOW), ['mtg'])
+
+    def test_nothing_is_downloaded_when_the_source_has_nothing_newer(self):
+        self.downloaded_ago('mtg', days=2)
+        self.games[0].source_unchanged.return_value = True
+        self.assertEqual(card_data.scheduled_card_data_updates(NOW), [])
+        self.assertEqual(self.started, [])
+        self.assertEqual(card_data.last_auto_attempt('mtg'),
+                         {'at': NOW.isoformat(timespec='seconds'), 'ok': True, 'message': 'nothing newer at the source'})
+        # Asked again after the back-off, not at every tick; then there is something newer
+        self.assertEqual(card_data.scheduled_card_data_updates(NOW + timedelta(minutes=30)), [])
+        self.games[0].source_unchanged.return_value = False
+        self.assertEqual(card_data.scheduled_card_data_updates(NOW + timedelta(minutes=60)), ['mtg'])
 
     def test_a_running_download_is_left_alone(self):
         self.downloaded_ago('mtg', days=2)

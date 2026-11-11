@@ -77,6 +77,22 @@ CARD_COLUMNS = [
     # faces has them on its front face (_face_fields)
     ('power', 'TEXT'),
     ('toughness', 'TEXT'),
+    # More of Scryfall's card (since 2026-11-11, empty until the card data is downloaded again; at the end, as ALTER TABLE
+    # appends): a planeswalker's loyalty and a battle's defense (text, like power: "X"; the front face's on a card with
+    # faces), the mana it can make (JSON: ["G"], ["B", "G", "R", "U", "W"] - a mana creature, a rock, a land), its rank by
+    # how many EDHREC decks play it (1 = the most; NULL for a card no Commander deck plays), Scryfall's layout ("normal",
+    # "transform", "adventure", "token" ...), whether it is a Commander Game Changer (the brackets), and its MTG Arena id
+    ('loyalty', 'TEXT'),
+    ('defense', 'TEXT'),
+    ('produced_mana', 'TEXT'),
+    ('edhrec_rank', 'INTEGER'),
+    ('layout', 'TEXT'),
+    ('game_changer', 'INTEGER DEFAULT 0'),
+    ('arena_id', 'INTEGER'),
+    # The front face's search name ("delver of secrets" for Delver of Secrets // Insectile Aberration; name_search for a
+    # card with one face): a deck list names a double-faced card by its front, and this finds it by an index (since
+    # 2026-11-11, filled from the names by the start's migration - no download needed)
+    ('face_name_search', 'TEXT'),
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
@@ -85,7 +101,13 @@ CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 # goes by, and the deck search's sign of an Arena card in a card data from before Scryfall's "games" was stored
 ARENA_FORMATS = ('timeless', 'historic', 'brawl', 'standardbrawl', 'alchemy', 'explorer')
 
-REVERSIBLE_FIELDS = ('type_line', 'cmc', 'mana_cost', 'colors', 'oracle_text', 'power', 'toughness', 'oracle_id')
+REVERSIBLE_FIELDS = ('type_line', 'cmc', 'mana_cost', 'colors', 'oracle_text', 'power', 'toughness', 'loyalty', 'defense',
+                     'oracle_id')
+
+
+def front_name_key(name):
+    """The search key of a name's front face ("Delver of Secrets // Insectile Aberration": "delver of secrets")"""
+    return search_key((name or '').split(' // ')[0])
 
 
 def _reversible_as_its_card(card):
@@ -107,14 +129,20 @@ def _reversible_as_its_card(card):
     return {**card, 'name': name, **{key: front[key] for key in REVERSIBLE_FIELDS if key in front and key not in card}}
 
 
+def _legal_somewhere(legalities):
+    """1 for a card legal (restricted, banned) somewhere, 0 for one legal nowhere ('{}': a token) - NULL, a card data from
+    before legalities were stored, counts as legal"""
+    return 0 if legalities == '{}' else 1
+
+
 def _face_fields(card):
     """
     A card's rules text, mana cost, colours, power and toughness, also when Scryfall keeps them on its faces.
     Scryfall leaves a field out at the top of a card with faces (adventure, split, flip, transform, modal double-faced ...)
     when it differs between them: the text always, and for two-sided cards the cost and colours too - stored as they
     came, each one of those 2,500 printings had no text and many no cost or colour (Gandalf, Goblins' Bane // Flameshape).
-    Then: the faces' texts and costs joined with " // " (as their names are), and the front face's colours, power and
-    toughness - what the card is in the hand, the library and the deck (Ajani, Nacatl Pariah is white; only his back is
+    Then: the faces' texts and costs joined with " // " (as their names are), and the front face's colours, power,
+    toughness, loyalty and defense - what the card is in the hand, the library and the deck (Ajani, Nacatl Pariah is white; only his back is
     also red). A field at the top is always taken as it is.
     """
     faces = card.get('card_faces') or []
@@ -128,7 +156,7 @@ def _face_fields(card):
     front = faces[0] if faces else {}
     colors = card['colors'] if 'colors' in card else front.get('colors')
     return {'oracle_text': joined('oracle_text'), 'mana_cost': joined('mana_cost'), 'colors': colors or [],
-            'power': card.get('power', front.get('power')), 'toughness': card.get('toughness', front.get('toughness'))}
+            **{key: card.get(key, front.get(key)) for key in ('power', 'toughness', 'loyalty', 'defense')}}
 
 # Manual-search treatment filters: key -> SQL condition on the cards table
 TREATMENT_FILTERS = {
@@ -302,6 +330,12 @@ class CardDatabase:
             self.conn.create_function('search_key', 1, search_key, deterministic=True)
             cursor.execute("UPDATE cards SET name_search = search_key(name), flavor_search = search_key(flavor_name)")
 
+        if 'face_name_search' not in existing_columns:
+            # From the names alone: an older file finds double-faced cards by their front at once, before any download
+            logger.info("Filling the front faces' search names")
+            self.conn.create_function('front_name_key', 1, front_name_key, deterministic=True)
+            cursor.execute("UPDATE cards SET face_name_search = front_name_key(name)")
+
         self._create_card_indexes(cursor)
 
         # The shops' prices (core/shop_prices.py), empty until the first price update: a shop's source counts 0 priced
@@ -351,9 +385,12 @@ class CardDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_flavor_search ON cards(flavor_search)')
         # Composite index for exact version lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_set_number ON cards(set_code, collector_number)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_rarity ON cards(rarity)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_type ON cards(type_line)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_oracle ON cards(oracle_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_card_face_name_search ON cards(face_name_search)')
+        # No index on rarity or type_line (until 2026-11-11): no query could use them - the type is searched with
+        # LIKE '%word%', the rarity is the card's (_CARD_RARITY, by name_search) - and an older file loses them
+        cursor.execute('DROP INDEX IF EXISTS idx_card_rarity')
+        cursor.execute('DROP INDEX IF EXISTS idx_card_type')
 
     def get_data_info(self, game):
         """{'source_updated', 'downloaded_at', 'card_count'} of a game's card data, or None"""
@@ -592,6 +629,14 @@ class CardDatabase:
                     json.dumps(card.get('games', [])),
                     faces['power'],
                     faces['toughness'],
+                    faces['loyalty'],
+                    faces['defense'],
+                    json.dumps(card['produced_mana']) if card.get('produced_mana') else None,
+                    card.get('edhrec_rank'),
+                    card.get('layout'),
+                    1 if card.get('game_changer') else 0,
+                    card.get('arena_id'),
+                    front_name_key(card.get('name')),
                 ))
                 
                 inserted += 1
@@ -846,6 +891,13 @@ class CardDatabase:
             'legalities': _json_dict(row['legalities']),
             'power': row['power'],
             'toughness': row['toughness'],
+            'loyalty': row['loyalty'],
+            'defense': row['defense'],
+            'produced_mana': _json_list(row['produced_mana']),
+            'edhrec_rank': row['edhrec_rank'],
+            'layout': row['layout'],
+            'game_changer': bool(row['game_changer']),
+            'arena_id': row['arena_id'],
         }
         card['treatments'] = self._treatment_labels(card)
         return card
@@ -1099,17 +1151,25 @@ class CardDatabase:
                 for row in self.conn.execute(self._ONE_PER_NAME.format(
                         where=f"name_search IN ({', '.join('?' * len(chunk))})"), chunk):
                     result[row['name_search']] = self._named_card(row)
-            for key in keys:
-                if key not in result:
-                    row = self.conn.execute(self._ONE_PER_NAME.format(where='name_search LIKE ?')
-                                            + ' LIMIT 1', (key + ' // %',)).fetchone()
-                    if row:
-                        result[key] = self._named_card(row)
+            # A double-faced card by its front face (face_name_search, indexed - it was a LIKE over every row for each name
+            # not found). A front that is several cards' (13 of them: the tokens "Angel // Angel" and "Angel // Demon") is the
+            # one legal somewhere first, then the newest printing - not whichever the table gave first
+            missing = [key for key in keys if key not in result]
+            best = {}
+            for start in range(0, len(missing), 500):
+                chunk = missing[start:start + 500]
+                for row in self.conn.execute(self._ONE_PER_NAME.format(
+                        where=f"face_name_search IN ({', '.join('?' * len(chunk))}) AND face_name_search != name_search"), chunk):
+                    rank = (_legal_somewhere(row['legalities']), row['_pick'] or '')
+                    if row['face_name_search'] not in best or rank > best[row['face_name_search']][0]:
+                        best[row['face_name_search']] = (rank, row)
+            for key, (_rank, row) in best.items():
+                result[key] = self._named_card(row)
         return result
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
                      cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, commander=False,
-                     playable_in=None, limit=60, offset=0):
+                     playable_in=None, produces=None, sort=None, limit=60, offset=0):
         """
         Cards (one per name) for the deck builder, by name.
 
@@ -1126,6 +1186,8 @@ class CardDatabase:
             playable_in: 'paper' or 'arena' - only printings played there (Scryfall's games), and for Arena only cards
                 with a say in one of its formats: an Arena deck is not offered Black Lotus (not even Alchemy: Dominaria's,
                 which Scryfall lists on Arena), a paper deck no card that exists only in Alchemy
+            produces: mana letters ("G", "WU"; "C" colourless) the card must be able to make - mana creatures, rocks, lands
+            sort: 'popularity' - by EDHREC's rank (the most played first, cards no Commander deck plays last), else by name
         Cards legal in no format are never offered (tokens, emblems, Un-cards, Planes, Dungeons, playtest cards:
         the card data keeps them for the scanner, which reads them). A card data from before legalities or games
         were stored is not filtered by them.
@@ -1176,6 +1238,16 @@ class CardDatabase:
         if cmc is not None:
             where.append('cmc >= ?' if cmc >= 7 else 'cmc = ?')
             params.append(cmc)
+        if produces:
+            for color in produces.upper():
+                if color in 'WUBRGC':
+                    where.append('produced_mana LIKE ?')
+                    params.append(f'%"{color}"%')
+        if sort not in (None, '', 'name', 'popularity'):
+            raise ValueError(f"Unknown sort: {sort}")
+        if sort == 'popularity':
+            # After the exactly named card and the names starting with the text, when there is one
+            order = order[:-len('name')] + 'edhrec_rank IS NULL, edhrec_rank, name'
         # The rarity is the CARD's (card_rarity, after the grouping): a filter on the printings
         # ("WHERE rarity = ?") kept any card with one printing of that rarity, and showed that
         # printing - a Forest was a "rare" for its promos, Llanowar Elves a "mythic"
