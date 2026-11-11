@@ -791,13 +791,16 @@ class CardDataImport(TemporaryData):
             both = {**self.card(1), 'id': 'shock', 'name': 'Shock', 'games': ['paper', 'arena', 'mtgo'],
                     'legalities': {'standard': 'legal', 'timeless': 'legal'}}
             lotus = {**self.card(2), 'id': 'lotus', 'name': 'Black Lotus', 'games': ['paper'], 'legalities': {'vintage': 'restricted'}}
+            # Scryfall's Alchemy: Dominaria printing of it: on Arena by its games, legal in no Arena format (an event's)
+            lotus_ydmu = {**lotus, 'id': 'lotus-ydmu', 'set': 'ydmu', 'collector_number': '35', 'games': ['arena']}
             alchemy = {**self.card(3), 'id': 'cygnet', 'name': 'Awestruck Cygnet', 'games': ['arena'], 'legalities': {'alchemy': 'legal'}}
+            # (the self.card ones are legal in vintage only: no Arena format)
             token = {**self.card(4), 'id': 'tok', 'name': 'Treasure', 'layout': 'token', 'games': ['paper', 'arena'], 'legalities': {}}
             plane = {**self.card(5), 'id': 'plane', 'name': 'City Hall', 'type_line': 'Plane \u2014 Chicago', 'games': ['paper'],
                      'legalities': {}}
             unknown = {**self.card(6), 'id': 'old', 'name': 'Old Record'}             # no games: a record from before it existed
             older = {**self.card(7), 'id': 'older', 'name': 'Older File'}
-            cards.populate_database([self.card(n) for n in range(100, 140)] + [both, lotus, alchemy, token, plane, unknown, older])
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [both, lotus, lotus_ydmu, alchemy, token, plane, unknown, older])
             # A card data from before legalities were stored: the column added by ALTER TABLE, NULL
             cards.conn.execute("UPDATE cards SET legalities = NULL, games = NULL WHERE id = 'older'")
             cards.conn.commit()
@@ -805,7 +808,7 @@ class CardDataImport(TemporaryData):
                                              if not card['name'].startswith('Card '))
             self.assertEqual(names(), ['Awestruck Cygnet', 'Black Lotus', 'Old Record', 'Older File', 'Shock'])   # no token, no Plane
             self.assertEqual(names(playable_in='paper'), ['Black Lotus', 'Old Record', 'Older File', 'Shock'])
-            # A card without games on Arena only by its legalities (the self.card ones are legal in vintage only)
+            # A card without games on Arena only by its legalities; Black Lotus not even by its Alchemy printing
             self.assertEqual(names(playable_in='arena'), ['Awestruck Cygnet', 'Older File', 'Shock'])
             cards.conn.execute("UPDATE cards SET legalities = '{\"timeless\": \"legal\"}' WHERE id = 'old'")
             cards.conn.commit()
