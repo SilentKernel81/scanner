@@ -101,7 +101,7 @@ def build_server(api, deck_writes=False):
     @server.tool(annotations=read_only)
     @explained
     def get_deck(deck: str, with_card_text: bool = False) -> dict:
-        """A deck's cards by board (main, commander, side): quantity, copies owned, type, mana cost, rarity, price (not for an Arena deck), other decks using the card; plus the format's problems and the totals. An Arena deck also has its wildcards (needed / have). `deck` is its name (or part of it), its commander, or its id. with_card_text adds each card's rules text (longer)."""
+        """A deck's cards by board (main, commander, side): quantity, copies owned, type, mana cost, power/toughness (a creature's), rarity, price (not for an Arena deck), other decks using the card; plus the format's problems and the totals. An Arena deck also has its wildcards (needed / have). `deck` is its name (or part of it), its commander, or its id. with_card_text adds each card's rules text (longer)."""
         return tools.get_deck(api, deck, with_card_text)
 
     @server.tool(annotations=read_only)
@@ -147,14 +147,14 @@ def build_server(api, deck_writes=False):
     def search_cards(collection: str = 'paper', deck_format: str = '', owned_only: bool = True, name: str = '',
                      text: str = '', card_type: str = '', identity: str = '', colors: str = '', cmc: float | None = None,
                      rarity: str = '', offset: int = 0, limit: int = 50, with_card_text: bool = False) -> dict:
-        """Search every card of the card database, like the decks page: by part of the name, rules text (text='lifelink'), type line (card_type='Creature'), colour identity within letters (identity='GW'), colours it must include (colors='R'; 'C' = colourless), mana value (cmc), rarity, legal in a format (deck_format='standard'); owned_only=true (the default) keeps the cards the user owns - in the paper collection or, collection='arena', in MTG Arena. 'owned' is the copies. Pages of results: offset, and 'more' when there is another page. The tool to find candidates for a deck."""
+        """Search every card of the card database, like the decks page: by part of the name, rules text (text='lifelink'), type line (card_type='Creature'), colour identity within letters (identity='GW'), colours it must include (colors='R'; 'C' = colourless), mana value (cmc), rarity, legal in a format (deck_format='standard'); owned_only=true (the default) keeps the cards the user owns - in the paper collection or, collection='arena', in MTG Arena. 'owned' is the copies; 'power_toughness' a creature's ("4/3"). Only cards that can be played are offered, and only where the collection is: collection='arena' finds no paper-only card (Black Lotus), the paper one no Alchemy-only card. Pages of results: offset, and 'more' when there is another page. The tool to find candidates for a deck."""
         return tools.search_cards(api, collection, deck_format, owned_only, name, text, card_type, identity, colors, cmc,
                                   rarity, offset, limit, with_card_text)
 
     @server.tool(annotations=read_only)
     @explained
     def find_card(name: str, collection: str = 'paper') -> dict:
-        """Everything about one card: how many copies the user owns (each printing, finish, location), which decks use them, and the card's type, cost, colours and rules text. collection: 'paper' or 'arena' (MTG Arena)."""
+        """Everything about one card: how many copies the user owns (each printing, finish, location), which decks use them, and the card's type, cost, power/toughness, colours and rules text. collection: 'paper' or 'arena' (MTG Arena)."""
         return tools.find_card(api, name, collection)
 
     @server.tool(annotations=read_only)

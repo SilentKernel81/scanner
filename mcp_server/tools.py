@@ -125,13 +125,21 @@ def load_deck(api, deck):
     return api.get(f"/api/decks/{item['id']}")['deck']
 
 
+def power_toughness(card):
+    """{'power_toughness': '4/3'} for a card with them (a creature, a Vehicle; '*/1+*' as printed), else {} - so a
+    sorcery's line says nothing about them. A card with faces: its front face's. A server from before 2026-11-11, or a
+    card data not downloaded again since, has none: then nothing is said either"""
+    power, toughness = card.get('power'), card.get('toughness')
+    return {'power_toughness': f'{power}/{toughness}'} if power is not None and toughness is not None else {}
+
+
 def card_line(entry, text=False, arena=False):
     """One card of a deck, as short as it can be said. arena: the deck is an Arena deck - its cards
     are crafted with wildcards of their rarity, so the rarity is said and a paper price is not"""
     card = entry.get('card') or {}
     line = {'name': entry['name'], 'quantity': entry['quantity'], 'owned': entry['owned'],
             'type': card.get('type_line'), 'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'),
-            'rarity': card.get('rarity')}
+            **power_toughness(card), 'rarity': card.get('rarity')}
     if not arena:
         line['price'] = card.get('price')
     # Another deck wanting a basic land is no news (every deck does): left out; a long list is cut
@@ -355,11 +363,17 @@ def _plan_changes(api, data, add=None, remove=None):
         found = api.get('/api/cards/search', q=name, format=data['format'], kind=data['kind'])['cards']
         match = next((card for card in found if front(card['name']) == front(name)), None)
         if match is None:
-            # Not among the cards legal in the format: is it a card at all?
-            anywhere = api.get('/api/cards/search', q=name, kind=data['kind'])['cards']
-            real = next((card for card in anywhere if front(card['name']) == front(name)), None)
-            report['name'] = real['name'] if real else name
-            report['problem'] = f"not legal in {data['format']}" if real else 'no card with this name in the card database'
+            # Not among the cards legal in the format: is it a card at all - one played where the deck is (the server's
+            # search offers an Arena deck only Arena's cards and a paper deck only paper's), or one of the other place?
+            def named(kind):
+                anywhere = api.get('/api/cards/search', q=name, kind=kind)['cards']
+                return next((card for card in anywhere if front(card['name']) == front(name)), None)
+            real = named(data['kind'])
+            other = None if real else named('paper' if arena else 'arena')
+            report['name'] = (real or other or {}).get('name') or name
+            report['problem'] = (f"not legal in {data['format']}" if real
+                                 else ('not on MTG Arena' if arena else 'only on MTG Arena, not on paper') if other
+                                 else 'no card with this name in the card database')
             problems += 1
             added.append(report)
             continue
@@ -605,8 +619,8 @@ def search_cards(api, which='paper', deck_format='', owned_only=True, name='', t
     cards = []
     for card in (answer.get('cards') or [])[:max(1, int(limit))]:
         line = {'name': card['name'], 'owned': card.get('owned', 0), 'type': card.get('type_line'),
-                'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'), 'identity': ''.join(card.get('identity') or []),
-                'rarity': card.get('rarity')}
+                'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'), **power_toughness(card),
+                'identity': ''.join(card.get('identity') or []), 'rarity': card.get('rarity')}
         if not arena:
             line['price'] = card.get('price')
         if with_card_text:
@@ -688,7 +702,9 @@ def find_card(api, name, which='paper'):
     owned = [card for card in collection(api, which) if front(card['name']) == key]
     details = None
     try:
-        found = api.get('/api/cards/search', q=name)['cards']
+        # The server's search offers an Arena search Arena's cards and a paper one paper's (since 2026-11-11): an
+        # Alchemy-only card is found only by an Arena search, Black Lotus only by a paper one
+        found = api.get('/api/cards/search', q=name, **({'kind': 'arena'} if arena else {}))['cards']
         details = next((card for card in found if front(card['name']) == key), None)
     except ScannerError:
         pass   # the collection part is still an answer
@@ -697,6 +713,7 @@ def find_card(api, name, which='paper'):
             'copies_owned': sum(card.get('quantity') or 0 for card in owned),
             'entries': [short_entry(card, arena) for card in owned],
             'card': None if not details else {'type': details.get('type_line'), 'cost': details.get('mana_cost'),
+                                              **power_toughness(details),
                                               'colours': details.get('colors'), 'identity': details.get('identity'),
                                               'rarity': details.get('rarity'),
                                               **({} if arena else {'price': details.get('price')}),

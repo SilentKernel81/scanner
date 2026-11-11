@@ -13,7 +13,7 @@ It runs on the machine of the AI client (your laptop), not on the scanner server
 | Tool | What it answers |
 |---|---|
 | `list_decks` | every deck: id, name, format, commander, cards, how much of it you own |
-| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, rarity, price, other decks using each card; problems and totals (an Arena deck: no prices, its wildcards) |
+| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, power/toughness, rarity, price, other decks using each card; problems and totals (an Arena deck: no prices, its wildcards) |
 | `check_deck(deck)` | the format's problems (legality, copies, colours) and totals |
 | `missing_cards(deck)` | what you don't own enough copies of, with the cost (an Arena deck: the cards to craft, the wildcards needed beside the ones you have, the cards Arena does not have) |
 | `suggest_for_deck(deck, per_category=8, only_owned=false)` | popular cards for the deck's commander (EDHREC) with inclusion %, synergy, copies you own, whether another deck uses it |
