@@ -621,8 +621,9 @@ class Batches(TemporaryData):
 
 class CardDataImport(TemporaryData):
     def card(self, number):
+        # Legal somewhere, as every real card is (the deck search leaves out a card legal nowhere: a token, an Un-card)
         return {'id': f'id-{number}', 'name': f'Card {number}', 'set': 'tst', 'set_name': 'Test', 'collector_number': str(number),
-                'layout': 'normal', 'prices': {}, 'image_uris': {'normal': ''}}
+                'layout': 'normal', 'prices': {}, 'image_uris': {'normal': ''}, 'legalities': {'vintage': 'legal'}}
 
     def test_tokens_and_emblems_are_kept_and_art_cards_are_not(self):
         # Scryfall's own records: the Cadet of Fallout (set 'tfra', number 1; its strip prints "T 0001" over "FRA")
@@ -779,6 +780,41 @@ class CardDataImport(TemporaryData):
             # One Ajani in the deck search, not two - the Secret Lair printing is one of its printings
             self.assertEqual([card['name'] for card in cards.search_cards(text='ajani')[0]], ['Ajani Goldmane'])
             self.assertEqual({card['id'] for card in cards.find_printings('Ajani Goldmane')[1]}, {'ajani-sld', 'ajani-lrw'})
+        finally:
+            cards.conn.close()
+
+    def test_the_deck_search_offers_only_cards_that_can_be_played_where_the_deck_is(self):
+        # What the live search offered: a Dungeon, an Attraction and a Plane for "Treasure", an Alchemy-only card to a
+        # paper deck, Black Lotus to an Arena deck. Scryfall's legalities and games, as the import stores them
+        cards = CardDatabase(db_file=self.tmp / 'cards.db')
+        try:
+            both = {**self.card(1), 'id': 'shock', 'name': 'Shock', 'games': ['paper', 'arena', 'mtgo'],
+                    'legalities': {'standard': 'legal', 'timeless': 'legal'}}
+            lotus = {**self.card(2), 'id': 'lotus', 'name': 'Black Lotus', 'games': ['paper'], 'legalities': {'vintage': 'restricted'}}
+            alchemy = {**self.card(3), 'id': 'cygnet', 'name': 'Awestruck Cygnet', 'games': ['arena'], 'legalities': {'alchemy': 'legal'}}
+            token = {**self.card(4), 'id': 'tok', 'name': 'Treasure', 'layout': 'token', 'games': ['paper', 'arena'], 'legalities': {}}
+            plane = {**self.card(5), 'id': 'plane', 'name': 'City Hall', 'type_line': 'Plane \u2014 Chicago', 'games': ['paper'],
+                     'legalities': {}}
+            unknown = {**self.card(6), 'id': 'old', 'name': 'Old Record'}             # no games: a record from before it existed
+            older = {**self.card(7), 'id': 'older', 'name': 'Older File'}
+            cards.populate_database([self.card(n) for n in range(100, 140)] + [both, lotus, alchemy, token, plane, unknown, older])
+            # A card data from before legalities were stored: the column added by ALTER TABLE, NULL
+            cards.conn.execute("UPDATE cards SET legalities = NULL, games = NULL WHERE id = 'older'")
+            cards.conn.commit()
+            names = lambda **filters: sorted(card['name'] for card in cards.search_cards(limit=200, **filters)[0]
+                                             if not card['name'].startswith('Card '))
+            self.assertEqual(names(), ['Awestruck Cygnet', 'Black Lotus', 'Old Record', 'Older File', 'Shock'])   # no token, no Plane
+            self.assertEqual(names(playable_in='paper'), ['Black Lotus', 'Old Record', 'Older File', 'Shock'])
+            # A card without games on Arena only by its legalities (the self.card ones are legal in vintage only)
+            self.assertEqual(names(playable_in='arena'), ['Awestruck Cygnet', 'Older File', 'Shock'])
+            cards.conn.execute("UPDATE cards SET legalities = '{\"timeless\": \"legal\"}' WHERE id = 'old'")
+            cards.conn.commit()
+            self.assertEqual(names(playable_in='arena'), ['Awestruck Cygnet', 'Old Record', 'Older File', 'Shock'])
+            self.assertEqual(names(text='treasure'), [])
+            # The scanner still finds the token by its printing - it stays in the card data
+            self.assertEqual(cards.search_card_exact('Treasure', '4', 'TST')['name'], 'Treasure')
+            with self.assertRaises(ValueError):
+                cards.search_cards(playable_in='mtgo')
         finally:
             cards.conn.close()
 

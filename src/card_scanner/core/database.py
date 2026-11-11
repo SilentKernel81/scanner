@@ -80,6 +80,11 @@ CARD_COLUMNS = [
 ]
 CARD_COLUMN_NAMES = [name for name, _ in CARD_COLUMNS]
 
+# The formats only MTG Arena has: a card legal, restricted or banned in one of them exists on Arena. "timeless" alone covers
+# nearly all of it; the others are a safety net for a card data from before timeless existed. What games.mtg_decks.on_arena
+# goes by, and the deck search's sign of an Arena card in a card data from before Scryfall's "games" was stored
+ARENA_FORMATS = ('timeless', 'historic', 'brawl', 'standardbrawl', 'alchemy', 'explorer')
+
 REVERSIBLE_FIELDS = ('type_line', 'cmc', 'mana_cost', 'colors', 'oracle_text', 'power', 'toughness', 'oracle_id')
 
 
@@ -1104,7 +1109,7 @@ class CardDatabase:
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,
                      cmc=None, rarity=None, legal_in=None, names=None, exclude_names=None, commander=False,
-                     limit=60, offset=0):
+                     playable_in=None, limit=60, offset=0):
         """
         Cards (one per name) for the deck builder, by name.
 
@@ -1118,10 +1123,28 @@ class CardDatabase:
             exclude_names: not these card names (cards other decks already use)
             commander: only cards that can be a commander (as games.mtg_decks.can_be_commander:
                 a legendary creature on the front face, or "can be your commander")
+            playable_in: 'paper' or 'arena' - only printings played there (Scryfall's games): an Arena deck is not
+                offered Black Lotus, a paper deck no card that exists only in Alchemy
+        Cards legal in no format are never offered (tokens, emblems, Un-cards, Planes, Dungeons, playtest cards:
+        the card data keeps them for the scanner, which reads them). A card data from before legalities or games
+        were stored is not filtered by them.
         Returns:
             (cards, whether there are more)
         """
-        where, params = ["COALESCE(name, '') != ''"], []
+        # Legal nowhere: '{}' (the import keeps only a card's formats that are not "not_legal"); NULL is a card data
+        # from before legalities were stored
+        where, params = ["COALESCE(name, '') != ''", "COALESCE(legalities, '') != '{}'"], []
+        if playable_in:
+            if playable_in not in ('paper', 'arena'):
+                raise ValueError(f"Unknown place to play: {playable_in}")
+            # games '[]' or NULL: a card data from before it was stored (2026-10-29), or a record without it. Then an
+            # Arena card is told by its legalities (as on_arena does), and with no legalities either nothing is left out
+            unknown = "COALESCE(games, '[]') = '[]'"
+            if playable_in == 'arena':
+                unknown += (" AND (legalities IS NULL OR " + ' OR '.join(f"json_extract(legalities, '$.{name}') IN ('legal', 'restricted', 'banned')"
+                                                   for name in ARENA_FORMATS) + ')')
+            where.append(f"(({unknown}) OR games LIKE ?)")
+            params.append(f'%"{playable_in}"%')
         order, order_params = 'name', []
         if text and search_key(text):
             # The card with exactly this name first, then names starting with it
