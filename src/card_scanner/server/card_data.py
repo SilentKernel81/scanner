@@ -405,6 +405,12 @@ def scheduled_card_data_updates(now=None):
             def done(ok, message, game_id=game.id, at=now):
                 note_auto_attempt(game_id, at, ok, message)
 
+            # Scryfall published nothing since: no download (the whole file again, every N hours, until 2026-11-11). Noted as
+            # an attempt, so the source is asked again after AUTO_RETRY_AFTER, not at every tick. The button always downloads
+            if game.source_unchanged():
+                note_auto_attempt(game.id, now, True, 'nothing newer at the source')
+                continue
+
             # The attempt is noted BEFORE the download starts: a server stopped in the middle still counts it for the back-off
             previous = last_auto_attempt(game.id)
             note_auto_attempt(game.id, now)
