@@ -197,6 +197,17 @@ def account(manager):
         return {row['key']: json.loads(row['value']) for row in manager.conn.execute('SELECT key, value FROM arena_account')}
 
 
+def snapshot(manager, game):
+    """
+    ({card name key: copies}, the account) of the digital collection at one moment: read under its lock, which an import
+    holds for its whole transaction (the account and the cards are one edit: arena_api.arena_import) - so the copies and
+    the wildcards and export date said beside them are always one import's. Read one after the other (until 2026-11-11),
+    an import could land between them: an Arena deck's copies of the old collection beside the new one's date
+    """
+    with manager._lock:
+        return manager.owned_by_name(game), account(manager)
+
+
 def wildcards_needed(missing):
     """
     What crafting cards costs: one wildcard of a card's rarity per copy.

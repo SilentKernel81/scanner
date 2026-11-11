@@ -175,6 +175,33 @@ class ReplacingAnInventory(Temporary):
         self.assertEqual(self.contents(), [('Opt', 2)])                       # the old cards are still there ...
         self.assertEqual(arena.account(self.store), {'exported': 'first'})   # ... and so is the date they are from
 
+    def test_the_copies_and_the_date_beside_them_are_one_imports(self):
+        # An import that comes right after the copies were read, and gets half a second to finish before the account is
+        # read: read one after the other, the old copies were said beside the new import's date. arena.snapshot holds the
+        # lock the import needs, so the import waits until both are read
+        import threading
+        from unittest import mock
+
+        def an_import(n):
+            with self.store._transaction():
+                arena.save_account(self.store, {'exported': f'import-{n}'})
+                self.store.replace_all('mtg', [{'fields': fields('Opt'), 'finish': 'regular', 'quantity': n}])
+        an_import(1)
+        read_copies = self.store.owned_by_name
+        writer = []
+
+        def copies_then_an_import(game):
+            owned = read_copies(game)
+            writer.append(threading.Thread(target=an_import, args=(2,)))
+            writer[0].start()
+            writer[0].join(timeout=0.5)               # done by now, unless it waits for the lock
+            return owned
+        with mock.patch.object(self.store, 'owned_by_name', copies_then_an_import):
+            owned, account = arena.snapshot(self.store, 'mtg')
+        writer[0].join()
+        self.assertEqual((owned[search_key('Opt')], account['exported']), (1, 'import-1'))   # one import's, the first
+        self.assertEqual(arena.snapshot(self.store, 'mtg'), ({search_key('Opt'): 2}, {'exported': 'import-2'}))
+
     def test_the_account_is_empty_until_something_was_imported(self):
         self.assertEqual(arena.account(self.store), {})
 
