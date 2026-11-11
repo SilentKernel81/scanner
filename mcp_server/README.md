@@ -13,14 +13,14 @@ It runs on the machine of the AI client (your laptop), not on the scanner server
 | Tool | What it answers |
 |---|---|
 | `list_decks` | every deck: id, name, format, commander, cards, how much of it you own |
-| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, power/toughness, rarity, price, other decks using each card; problems and totals (an Arena deck: no prices, its wildcards) |
+| `get_deck(deck, with_card_text=false)` | a deck's cards by board, with copies owned, type, cost, power/toughness, loyalty, the mana it makes, Game Changer, rarity, price, other decks using each card; problems and totals (an Arena deck: no prices, its wildcards) |
 | `check_deck(deck)` | the format's problems (legality, copies, colours) and totals |
 | `missing_cards(deck)` | what you don't own enough copies of, with the cost (an Arena deck: the cards to craft, the wildcards needed beside the ones you have, the cards Arena does not have) |
 | `suggest_for_deck(deck, per_category=8, only_owned=false)` | popular cards for the deck's commander (EDHREC) with inclusion %, synergy, copies you own, whether another deck uses it |
 | `what_can_i_build(kind='commanders'\|'precons')` | decks your collection could make (asks other sites: can take minutes, returns what it has) |
 | `propose_deck_changes(deck, add, remove)` | what adding / removing cards would do: legal? in colours? at most 4 copies? owned? used by other decks? the wildcards it would take (Arena) - **changes nothing** |
 | `search_collection(text, set_code, rarity, card_type, tag, location, in_a_deck, limit, collection)` | the cards you own |
-| `search_cards(collection, deck_format, owned_only, name, text, card_type, identity, colors, cmc, rarity, offset, limit)` | the card data, like the decks page's search: by rules text, colours, mana value, rarity, legal in a format; only what you own by default |
+| `search_cards(collection, deck_format, owned_only, name, text, card_type, identity, colors, cmc, rarity, offset, limit, with_card_text, produces, sort)` | the card data, like the decks page's search: by rules text, colours, mana value, rarity, legal in a format, the mana a card makes (`produces='G'`), most played first (`sort='popularity'`); only what you own by default, and only cards played where the collection is |
 | `find_card(name, collection)` | copies owned (printing, finish, location), decks using them, the card's text |
 | `collection_summary(collection)` | cards, value (and its currency), biggest sets, rarities, types, locations; Arena: wildcards, gold, gems, the export's date |
 

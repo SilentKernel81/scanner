@@ -2170,6 +2170,11 @@ failing never keeps the others from their turn.
   attempt was made in the last hour (`shop_prices_auto_last`). MTGJSON's file of the day was out by 06:13 UTC on
   2026-10-23 and -24 (its FAQ says 9:00 AM EST): a try before it finds MTGJSON's date unchanged, downloads only
   `Meta.json` and leaves the prices as old as they were, so the next look comes an hour later - never at every tick.
+- **Nothing newer, no download** (since 2026-11-11): when the card data is due, the schedule first asks the source
+  (`Game.source_unchanged`; Magic: Scryfall's `updated_at` of its bulk file against the `source_updated` the data in use
+  came from). The same date: no download, noted as the attempt ("nothing newer at the source"), asked again after the
+  hour's back-off. Not known on either side, or offline: it downloads. The button always downloads. Tested with stand-ins
+  only; not yet seen live.
 - **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720), `prices_every_hours` (0, 24, 72, 168; no `config.yaml` key - off until chosen) and `image_index_every_hours` (0, 6, 24, 168) in
   `data/settings.json`, else `config.yaml`'s `database.auto_update_every_hours` / `reading.index_retry_every_hours` (both
   0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Card data
@@ -2757,7 +2762,9 @@ not stop the app. Backups made by hand are never deleted automatically.
 
 **A full backup** (`POST /api/backups/full`, `backups.create_full`, used by
 `scripts/backup.sh` while the server runs) is everything at one moment: the three database
-files (SQLite's backup), hard links to the pictures their rows name (capture thumbnails, review
+files (`VACUUM INTO` since 2026-11-11, SQLite's backup before: the same snapshot without the free pages - the card data's
+file, half free after an update, 260 MB plus a 213 MB WAL on the server, was 141 MB written this way, measured on a copy
+that day), hard links to the pictures their rows name (capture thumbnails, review
 images, captures waiting to be read) and the settings files, in
 `data/backups/full/<date_time>/` with a `manifest.json` (rows per table, pictures, the ones
 missing, `verified`). It is taken holding every manager's lock (in the order `take_from` uses)
@@ -3075,7 +3082,7 @@ creatures in the inventory by the share (weighted by inclusion) of their EDHREC 
 owned; `precons` ranks the preconstructed decks by the share of their cards owned (only the kind chosen on
 the page, JSON `type`, or all of them; one request per list the first time, then cached - about
 230 Commander and Challenger lists took about a minute, all kinds together were never timed); `card` ("Build around a card": the page lists the owned
-cards legal in a format - `/api/cards/search?owned=1&format=`, with `free=1` for the "Not in a deck" tick and `commander=1` for "Commanders only" (legendary creatures and "can be your commander" cards, offered for formats with a commander). The search has one printing per name; a card that is owned is returned in the printing owned (`InventoryManager.owned_printing_by_name`: the one with most copies), so its image is the card on the shelf. A click shows the card - `chooseAround` - and **Find
+cards legal in a format - `/api/cards/search?owned=1&format=`, with `free=1` for the "Not in a deck" tick, `produces=G` (the mana letters a card can make: mana creatures, rocks, lands; since 2026-11-11), `sort=popularity` (EDHREC's rank; since 2026-11-11) and `commander=1` for "Commanders only" - and, since 2026-11-11, only cards that can be played where the deck is: never one legal in no format (tokens, emblems, Un-cards, Planes, Dungeons - the card data keeps them for the scanner), for a paper deck only printings Scryfall's `games` puts on paper, for `kind=arena` only Arena printings with a say in an Arena format (`ARENA_FORMATS`: Alchemy: Dominaria's Black Lotus is on Arena by `games` and legal in none of them) (legendary creatures and "can be your commander" cards, offered for formats with a commander). The search has one printing per name; a card that is owned is returned in the printing owned (`InventoryManager.owned_printing_by_name`: the one with most copies), so its image is the card on the shelf. A click shows the card - `chooseAround` - and **Find
 decks** starts the run, **Stop** in its place while it runs: `findAround`, `renderAround`) reads the
 ten most viewed Archidekt decks of that format with the card (`?cardName=&deckFormat=`, which
 can take Archidekt half a minute the first time for a much played card: 45 s timeout) and ranks

@@ -133,13 +133,31 @@ def power_toughness(card):
     return {'power_toughness': f'{power}/{toughness}'} if power is not None and toughness is not None else {}
 
 
+def card_facts(card):
+    """
+    What a card's line says of it beside type and cost, each only when it has it - so a sorcery's line stays short:
+    power_toughness ("4/3"), loyalty (a planeswalker's), defense (a battle's), produces (the mana letters it can make:
+    "G" for Llanowar Elves, "WUBRG"), game_changer: true (Commander's Game Changers, the brackets). A server or card
+    data from before 2026-11-11 has none of them: then nothing is said
+    """
+    facts = power_toughness(card)
+    for key in ('loyalty', 'defense'):
+        if card.get(key) is not None:
+            facts[key] = card[key]
+    if card.get('produced_mana'):
+        facts['produces'] = ''.join(card['produced_mana'])
+    if card.get('game_changer'):
+        facts['game_changer'] = True
+    return facts
+
+
 def card_line(entry, text=False, arena=False):
     """One card of a deck, as short as it can be said. arena: the deck is an Arena deck - its cards
     are crafted with wildcards of their rarity, so the rarity is said and a paper price is not"""
     card = entry.get('card') or {}
     line = {'name': entry['name'], 'quantity': entry['quantity'], 'owned': entry['owned'],
             'type': card.get('type_line'), 'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'),
-            **power_toughness(card), 'rarity': card.get('rarity')}
+            **card_facts(card), 'rarity': card.get('rarity')}
     if not arena:
         line['price'] = card.get('price')
     # Another deck wanting a basic land is no news (every deck does): left out; a long list is cut
@@ -598,7 +616,7 @@ def rename_deck(api, deck, name='', notes=None):
 
 
 def search_cards(api, which='paper', deck_format='', owned_only=True, name='', text='', card_type='', identity='',
-                 colors='', cmc=None, rarity='', offset=0, limit=50, with_card_text=False):
+                 colors='', cmc=None, rarity='', offset=0, limit=50, with_card_text=False, produces='', sort=''):
     """
     The decks page's card search (GET /api/cards/search): every card of the card database, one per
     name, with the copies owned - in the paper collection or, which='arena', in the MTG Arena one.
@@ -608,18 +626,21 @@ def search_cards(api, which='paper', deck_format='', owned_only=True, name='', t
       identity     the colour identity must fit within these letters ('GW': green, white, both or colourless)
       colors       the identity must include these letters ('C' = colourless only)
       cmc          mana value exactly; rarity: common / uncommon / rare / mythic
+      produces     mana letters the card must be able to make ('G': mana creatures, rocks, lands; 'C' colourless)
+      sort         'popularity': by EDHREC's rank, the most played first (else by name)
     The server answers a page at a time: offset pages through, 'more' says another page is there.
     """
     arena = area_of(which) == 'arena'
     params = {'q': name, 'text': text, 'type': card_type, 'identity': identity.upper() if identity else '',
               'colors': colors.upper() if colors else '', 'cmc': cmc, 'rarity': rarity.lower() if rarity else '',
               'format': deck_format.lower() if deck_format else '', 'owned': 1 if owned_only else '',
-              'kind': 'arena' if arena else '', 'offset': max(0, int(offset or 0))}
+              'kind': 'arena' if arena else '', 'offset': max(0, int(offset or 0)),
+              'produces': produces.upper() if produces else '', 'sort': sort.lower() if sort else ''}
     answer = api.get('/api/cards/search', **params)
     cards = []
     for card in (answer.get('cards') or [])[:max(1, int(limit))]:
         line = {'name': card['name'], 'owned': card.get('owned', 0), 'type': card.get('type_line'),
-                'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'), **power_toughness(card),
+                'cost': card.get('mana_cost') or '', 'cmc': card.get('cmc'), **card_facts(card),
                 'identity': ''.join(card.get('identity') or []), 'rarity': card.get('rarity')}
         if not arena:
             line['price'] = card.get('price')
@@ -713,7 +734,7 @@ def find_card(api, name, which='paper'):
             'copies_owned': sum(card.get('quantity') or 0 for card in owned),
             'entries': [short_entry(card, arena) for card in owned],
             'card': None if not details else {'type': details.get('type_line'), 'cost': details.get('mana_cost'),
-                                              **power_toughness(details),
+                                              **card_facts(details),
                                               'colours': details.get('colors'), 'identity': details.get('identity'),
                                               'rarity': details.get('rarity'),
                                               **({} if arena else {'price': details.get('price')}),
