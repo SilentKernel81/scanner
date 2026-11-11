@@ -16,9 +16,12 @@ import scanner_api  # noqa: E402
 from scanner_api import ScannerError, deck_write_allowed  # noqa: E402
 
 
-def card(name, identity=(), type_line='Creature', price=1.0, owned=1, cost='{1}', cmc=1.0, text='', rarity='rare'):
+def card(name, identity=(), type_line='Creature', price=1.0, owned=1, cost='{1}', cmc=1.0, text='', rarity='rare',
+         power=None, toughness=None, games=('paper', 'arena')):
+    # games: where the server's search offers it (an Arena search only Arena's cards, a paper one only paper's)
     return {'id': name, 'name': name, 'type_line': type_line, 'mana_cost': cost, 'cmc': cmc, 'colors': list(identity),
-            'identity': list(identity), 'rarity': rarity, 'oracle_text': text, 'price': price, 'owned': owned}
+            'identity': list(identity), 'rarity': rarity, 'oracle_text': text, 'price': price, 'owned': owned,
+            'power': power, 'toughness': toughness, 'games': list(games)}
 
 
 def entry(name, quantity=1, board='main', owned=1, elsewhere=(), **kwargs):
@@ -65,7 +68,10 @@ CARDS = {c['name'].lower(): c for c in (
     card('Illegal Card', identity='W'), card('Llanowar Elves', identity='G', owned=5, rarity='common'),
     card('Giada, Font of Hope', identity='W', type_line='Legendary Creature', owned=1),
     card('Plains', identity='W', type_line='Basic Land — Plains', owned=50, rarity='common'),
-    card('Bejeweled Warg', identity='G', owned=0), card('Elvish Mystic', identity='G', owned=3, rarity='common'),
+    card('Bejeweled Warg', identity='G', owned=0, power='3', toughness='2'),
+    card('Elvish Mystic', identity='G', owned=3, rarity='common'),
+    card('Black Lotus', type_line='Artifact', owned=0, games=('paper',)),
+    card('Awestruck Cygnet', identity='W', owned=0, games=('arena',), power='*', toughness='1+*'),
     card('Relentless Rats', identity='B', text='A deck can have any number of cards named Relentless Rats.'))}
 
 
@@ -111,6 +117,8 @@ class FakeApi:
                 found = [c for c in found if c['name'] != 'Illegal Card']
             if params.get('owned'):
                 found = [c for c in found if c['owned']]
+            # As the server (since 2026-11-11): no kind is a paper search
+            found = [c for c in found if (params.get('kind') or 'paper') in c['games']]
             self.searches.append(params)
             return {'cards': found, 'more': False}
         if path == '/api/decks/7/suggestions':
@@ -429,6 +437,38 @@ class DeckWrites(unittest.TestCase):
         tools.missing_cards(self.api, 'Elves on Arena')
         tools.search_cards(self.api, 'arena', 'standard')
         self.assertEqual((self.api.writes, self.api.posts), ([], []))
+
+
+class PowerToughness(unittest.TestCase):
+    """A creature's power and toughness, as printed ("*/1+*"); nothing for a card without them"""
+
+    def setUp(self):
+        self.api = FakeApi()
+
+    def test_deck_search_and_card_answers_say_them(self):
+        deck = tools.get_deck(self.api, 'Elves on Arena')
+        lines = {line['name']: line for line in deck['boards']['main']}
+        self.assertNotIn('power_toughness', lines['Forest'])
+        self.assertEqual(tools.power_toughness({'power': '4', 'toughness': '3'}), {'power_toughness': '4/3'})
+        self.assertEqual(tools.power_toughness({'power': None, 'toughness': None}), {})
+        found = tools.search_cards(self.api, 'arena', '', False, name='cygnet')['cards']
+        self.assertEqual([(c['name'], c.get('power_toughness')) for c in found], [('Awestruck Cygnet', '*/1+*')])
+        self.assertEqual(tools.find_card(self.api, 'Bejeweled Warg')['card']['power_toughness'], '3/2')
+        self.assertNotIn('power_toughness', tools.find_card(self.api, 'Sol Ring')['card'])
+
+    def test_find_card_asks_where_the_collection_is(self):
+        # An Arena-only card is found only by an Arena search: find_card(collection='arena') asks for one
+        self.assertEqual(tools.find_card(self.api, 'Awestruck Cygnet', 'arena')['card']['power_toughness'], '*/1+*')
+        self.assertEqual(self.api.searches[-1].get('kind'), 'arena')
+        self.assertIsNone(tools.find_card(self.api, 'Awestruck Cygnet')['card'])      # not on paper
+
+    def test_a_card_not_played_where_the_deck_is_says_so(self):
+        arena = tools.propose_deck_changes(self.api, 'Elves on Arena', add=[{'name': 'Black Lotus'}])
+        self.assertEqual(arena['add'][0]['problem'], 'not on MTG Arena')
+        paper = tools.propose_deck_changes(self.api, 'Calling All Angels', add=[{'name': 'Awestruck Cygnet'}])
+        self.assertEqual(paper['add'][0]['problem'], 'only on MTG Arena, not on paper')
+        nothing = tools.propose_deck_changes(self.api, 'Calling All Angels', add=[{'name': 'No Such Card'}])
+        self.assertEqual(nothing['add'][0]['problem'], 'no card with this name in the card database')
 
 
 class ArenaImportDate(unittest.TestCase):
