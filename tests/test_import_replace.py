@@ -168,6 +168,22 @@ class UploadFiles(ImportRoute):
         return ('Card Name,Set,Set Code,Card Number,Quantity,Finish,Condition\n'
                 f'{name},Test Set,tst,1,1,regular,Near Mint\n')
 
+    def test_a_name_the_card_data_changed_is_given_its_new_one_by_the_import(self):
+        # An older export (or the Android app's) names a reversible printing Scryfall's way: after the import the entry
+        # has the name the card data gives that printing now, at once - not at the next card data update or restart
+        from card_scanner.server import card_data
+        database = mock.Mock()
+        database.renamed_printings.return_value = {'ajani-sld': 'Ajani Goldmane'}
+        text = ('Card Name,Set,Set Code,Card Number,Quantity,Finish,Condition,Card ID\n'
+                'Ajani Goldmane // Ajani Goldmane,Secret Lair Drop,sld,745,2,regular,Near Mint,ajani-sld\n')
+        with mock.patch.object(card_data, 'database', database), mock.patch.object(card_data, 'names_waiting', []), \
+                mock.patch.object(card_data, 'names_owed', threading.Event()), \
+                mock.patch.object(card_data, 'arena_inventory', None), mock.patch.object(card_data, 'deck_store', None), \
+                mock.patch.object(card_data, 'others', None):
+            answer = self.post(text, replace=False, name='old_export.csv')
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        self.assertEqual(self.cards_of(self.collection), {**self.before, ('Ajani Goldmane', 'regular'): 2})
+
     def test_two_uploads_in_the_same_second_read_their_own_files(self):
         import datetime as real_datetime
         frozen = real_datetime.datetime(2026, 10, 15, 9, 30, 0)

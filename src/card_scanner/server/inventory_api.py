@@ -12,6 +12,7 @@ import io
 from card_scanner.config import Config
 from card_scanner.core import frames
 from card_scanner.core.database import search_key
+from card_scanner.server.card_data import adopt_card_names
 from card_scanner import games
 
 from card_scanner.server.state import (
@@ -475,6 +476,9 @@ def import_inventory():
                             'error': f"The columns of this file are not those of a {formats} CSV"}), 400
 
         if stats['success']:
+            # The app's own CSV keeps the names written in the file - an older export, or the Android app's, may name a
+            # printing the way the card data no longer does ("Ajani Goldmane // Ajani Goldmane"): given its name now
+            adopt_card_names()
             return jsonify({
                 'success': True,
                 'stats': stats,

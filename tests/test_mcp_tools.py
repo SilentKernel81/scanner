@@ -86,6 +86,7 @@ class FakeApi:
         # The Arena account's import time at each fresh read of /api/arena: a test lets an import land between two
         # reads by giving several (the last one repeats); forgets: how often the kept answers were dropped
         self.imports = ['2026-10-29 18:45:00']
+        self.revisions = ['']     # each read's import revision, as imports (the last one repeats)
         self.arena_reads = 0
         self.forgets = 0
 
@@ -111,8 +112,9 @@ class FakeApi:
                 'imported': '2026-10-29T18:42', 'have': 6, 'craft': [{'name': 'Bejeweled Warg', 'rarity': 'rare', 'copies': 1}],
                 'not_on_arena': 1, 'wildcards': ARENA_DECK['wildcards']}}
         if path == '/api/arena':
-            imported = self.imports[min(self.arena_reads, len(self.imports)) - 1] if self.arena_reads else self.imports[0]
-            return {'arena': {'cards': 6, 'entries': 2, 'exported': '2026-10-29T18:42', 'imported': imported,
+            at = lambda values: values[min(self.arena_reads, len(values)) - 1] if self.arena_reads else values[0]
+            imported, revision = at(self.imports), at(self.revisions)
+            return {'arena': {'cards': 6, 'entries': 2, 'exported': '2026-10-29T18:42', 'imported': imported, 'revision': revision,
                               'wildcards': {'common': 5, 'uncommon': 2, 'rare': 1, 'mythic': 0}, 'gold': 125, 'gems': 130}}
         if path == '/api/stats':
             return {'collection': {'total_cards': 4, 'unique_cards': 3, 'total_value': 12.0}}
@@ -545,6 +547,13 @@ class OneArenaImport(unittest.TestCase):
         answer = tools.propose_deck_changes(self.api, 'Elves on Arena', add=[{'name': 'Llanowar Elves'}])
         self.assertEqual(answer['add'][0]['name'], 'Llanowar Elves')
         self.assertEqual((self.api.arena_reads, self.api.forgets), (4, 2))        # two tries, each from nothing kept
+
+    def test_two_imports_in_one_second_are_told_apart_by_their_revision(self):
+        # The same time to the second before and after - another import's revision: worked out again
+        self.api.imports = ['2026-11-11 12:05:00'] * 4
+        self.api.revisions = ['r1', 'r2', 'r2', 'r2']
+        tools.propose_deck_changes(self.api, 'Elves on Arena', add=[{'name': 'Llanowar Elves'}])
+        self.assertEqual((self.api.arena_reads, self.api.forgets), (4, 2))
 
     def test_imports_that_keep_landing_are_said_rather_than_guessed(self):
         self.api.imports = [f'2026-11-11 12:0{n}:00' for n in range(9)]

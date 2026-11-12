@@ -2170,6 +2170,9 @@ failing never keeps the others from their turn.
   attempt was made in the last hour (`shop_prices_auto_last`). MTGJSON's file of the day was out by 06:13 UTC on
   2026-10-23 and -24 (its FAQ says 9:00 AM EST): a try before it finds MTGJSON's date unchanged, downloads only
   `Meta.json` and leaves the prices as old as they were, so the next look comes an hour later - never at every tick.
+- **An Arena import's revision** (since 2026-11-11): each import of the Arena collection stores a revision of its own
+  beside its time (`arena_account`, in `/api/arena`) - the time is to the second, and the MCP's check that no import
+  landed while it worked out a plan (`_on_one_arena_import`) compares both.
 - **Nothing newer, no download** (since 2026-11-11): when the card data is due, the schedule first asks the source
   (`Game.source_unchanged`; Magic: Scryfall's `updated_at` of its bulk file against the `source_updated` the data in use
   came from). The same date: no download, noted as the attempt ("nothing newer at the source"), asked again after the
@@ -2182,7 +2185,9 @@ failing never keeps the others from their turn.
   An entry is read again and renamed in place under its inventory's lock (its row, cameras, captures and a trade's hold
   stay); only one that would become another entry's twin is merged, which a trade holding its copies refuses - it waits
   (`names_waiting`, counted in `/api/stats`) and is tried again at every tick of the update schedule, as is a pass that
-  failed or was never made (`names_owed`; a restored backup owes one). A name written Scryfall's way in a list from
+  failed or was never made (`names_owed`; a restored backup owes one). An import of the app's own CSV - the collection's
+  (`/api/import_inventory`) or someone else's (`/api/others/import`) - keeps the names written in the file (an older
+  export, the Android app's), so it runs the pass at once; the other imports take their names from the card data. A name written Scryfall's way in a list from
   another site is still found (`unrepeated_name`, in `cards_by_names` and `search_card`). On the server's data that day:
   one entry renamed (Teferi's Ageless Insight). Tested on temporary databases with a real trade; the waiting path was
   never seen live.
