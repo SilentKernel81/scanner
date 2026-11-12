@@ -2175,6 +2175,17 @@ failing never keeps the others from their turn.
   came from). The same date: no download, noted as the attempt ("nothing newer at the source"), asked again after the
   hour's back-off. Not known on either side, or offline: it downloads. The button always downloads. Tested with stand-ins
   only; not yet seen live.
+- **Names the card data changed** (since 2026-11-11, `core/card_names.py`): the import names a reversible printing as the
+  card it is ("Ajani Goldmane", where Scryfall writes "Ajani Goldmane // Ajani Goldmane"), and what is kept by name - the
+  collection's, the scanned cards' and the Arena collection's entries, other people's cards, deck entries and covers -
+  takes the new name by its printing's id (`CardDatabase.renamed_printings`), after every card data update and at start.
+  An entry is read again and renamed in place under its inventory's lock (its row, cameras, captures and a trade's hold
+  stay); only one that would become another entry's twin is merged, which a trade holding its copies refuses - it waits
+  (`names_waiting`, counted in `/api/stats`) and is tried again at every tick of the update schedule, as is a pass that
+  failed or was never made (`names_owed`; a restored backup owes one). A name written Scryfall's way in a list from
+  another site is still found (`unrepeated_name`, in `cards_by_names` and `search_card`). On the server's data that day:
+  one entry renamed (Teferi's Ageless Insight). Tested on temporary databases with a real trade; the waiting path was
+  never seen live.
 - **The settings**: `card_data_every_hours` (0, 24, 72, 168, 720), `prices_every_hours` (0, 24, 72, 168; no `config.yaml` key - off until chosen) and `image_index_every_hours` (0, 6, 24, 168) in
   `data/settings.json`, else `config.yaml`'s `database.auto_update_every_hours` / `reading.index_retry_every_hours` (both
   0). Any other value - a hand-edited `true`, `"24"`, 48 - is off, never a guess. Settings > Card data

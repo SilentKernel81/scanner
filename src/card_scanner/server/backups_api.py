@@ -19,6 +19,7 @@ from card_scanner.server.state import (
     maintenance_barrier,
     pending, review, scan_inventory, socketio,
 )
+from card_scanner.server.card_data import owe_card_names
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import guarded, unlocked, LOCKED_MESSAGE
 from card_scanner.server.desks import log_to_client
@@ -140,6 +141,7 @@ def restore_backup(backup_id):
         logger.error(f"Restoring backup {backup_id} failed: {e}", exc_info=True)
         return jsonify({'success': False, 'error': f'The restore failed: {e}'}), 500
     log_to_client(f"Backup of {result['restored']['created']} restored", level="success")
+    owe_card_names()   # the backup may hold entries under names the card data has changed since
     # Every open page shows the restored cards
     socketio.emit('inventory_updated', {'auto': False, 'stats': scan_inventory.get_stats(games.active().id)}, namespace='/')
     socketio.emit('arena_updated')   # ... and the restored digital collection
