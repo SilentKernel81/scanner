@@ -110,6 +110,20 @@ def front_name_key(name):
     return search_key((name or '').split(' // ')[0])
 
 
+def unrepeated_name(name):
+    """
+    A name whose first part comes again, cut where it does - Scryfall's name of a reversible printing as the card's:
+    "Ajani Goldmane // Ajani Goldmane" -> "Ajani Goldmane", "Bloomvine Regent // Claim Territory // Bloomvine Regent" ->
+    "Bloomvine Regent // Claim Territory". None for any other name. What the import names those printings
+    (_reversible_as_its_card), and what a look-up falls back on for a name written Scryfall's way (a deck list or a
+    collection file from another site) - only when the name as written is no card: "Angel // Angel" is a token's own
+    """
+    parts = (name or '').split(' // ')
+    if parts[0] and parts[0] in parts[1:]:
+        return ' // '.join(parts[:parts.index(parts[0], 1)])
+    return None
+
+
 def _reversible_as_its_card(card):
     """
     A reversible card (Secret Lair's two-sided printings: the same card on both sides, other art) as the card it is.
@@ -122,9 +136,7 @@ def _reversible_as_its_card(card):
     faces = card.get('card_faces') or []
     if card.get('layout') != 'reversible_card' or not faces:
         return card
-    parts = (card.get('name') or '').split(' // ')
-    repeat = parts.index(parts[0], 1) if parts[0] in parts[1:] else None
-    name = ' // '.join(parts[:repeat]) if repeat else faces[0].get('name') or card.get('name')
+    name = unrepeated_name(card.get('name')) or faces[0].get('name') or card.get('name')
     front = faces[0]
     return {**card, 'name': name, **{key: front[key] for key in REVERSIBLE_FIELDS if key in front and key not in card}}
 
@@ -822,6 +834,13 @@ class CardDatabase:
                 logger.info(f"Found card via shortened name: {card_name} -> {result['name']}")
                 return self._tagged(result, 'name')
 
+            # Scryfall's name of a reversible printing ("Ajani Goldmane // Ajani Goldmane"): the card it is
+            shorter = unrepeated_name(key)
+            if shorter:
+                result = cursor.execute('SELECT * FROM cards WHERE name_search = ? LIMIT 1', (shorter,)).fetchone()
+                if result:
+                    return self._tagged(result, 'name')
+
             if not fuzzy:
                 return None
 
@@ -1175,6 +1194,15 @@ class CardDatabase:
                         best[row['face_name_search']] = (rank, row)
             for key, (_rank, row) in best.items():
                 result[key] = self._named_card(row)
+            # A name written Scryfall's way for a reversible printing ("Ajani Goldmane // Ajani Goldmane", in a list from
+            # another site): the card it is - only for a name that is no card as written
+            shorter = {unrepeated_name(key): key for key in keys if key not in result and unrepeated_name(key)}
+            wanted = list(shorter)
+            for start in range(0, len(wanted), 500):
+                chunk = wanted[start:start + 500]
+                for row in self.conn.execute(self._ONE_PER_NAME.format(
+                        where=f"name_search IN ({', '.join('?' * len(chunk))})"), chunk):
+                    result[shorter[row['name_search']]] = self._named_card(row)
         return result
 
     def search_cards(self, text=None, type_text=None, oracle_text=None, identity=None, colors=None,

@@ -779,6 +779,14 @@ class CardDataImport(TemporaryData):
             self.assertEqual(row('bloomvine-sld')[9:], ('4', '5'))
             # One Ajani in the deck search, not two - the Secret Lair printing is one of its printings
             self.assertEqual([card['name'] for card in cards.search_cards(text='ajani')[0]], ['Ajani Goldmane'])
+            # A list from another site names it Scryfall's way: found as the card it is - by the deck builder's look-up
+            # and the collection file's - while a name that is a card as written stays that card ("Angel // Angel")
+            self.assertEqual(cards.cards_by_names(['Ajani Goldmane // Ajani Goldmane', 'Bloomvine Regent // Claim Territory // '
+                                                   'Bloomvine Regent'])['ajani goldmane // ajani goldmane']['name'], 'Ajani Goldmane')
+            self.assertEqual(cards.cards_by_names(['Bloomvine Regent // Claim Territory // Bloomvine Regent'])[
+                'bloomvine regent // claim territory // bloomvine regent']['name'], 'Bloomvine Regent // Claim Territory')
+            self.assertEqual(cards.search_card('Ajani Goldmane // Ajani Goldmane', fuzzy=False)['id'] in ('ajani-sld', 'ajani-lrw'), True)
+            self.assertIsNone(cards.search_card('Nobody // Nobody', fuzzy=False))
             self.assertEqual({card['id'] for card in cards.find_printings('Ajani Goldmane')[1]}, {'ajani-sld', 'ajani-lrw'})
         finally:
             cards.conn.close()

@@ -225,6 +225,77 @@ def a_game(game_id, cards=100):
     return game
 
 
+class CardNamesOwed(unittest.TestCase):
+    """adopt_card_names / retry_waiting_card_names: a pass that failed, had errors or left entries waiting is tried
+    again at the schedule's tick - until it goes through whole"""
+
+    EMPTY = {'entries': 0, 'deck_cards': 0, 'covers': 0, 'others': 0, 'kept': 0, 'waiting': [], 'errors': []}
+    WAITING = {'inventory': 'cards_database.db', 'entry': 7, 'name': 'A // A', 'new_name': 'A', 'why': 'set aside for a trade'}
+
+    def setUp(self):
+        self.answers = []          # what each pass gives: a dict, or an exception to raise
+        self.passes = 0
+
+        def adopt(names, **stores):
+            self.passes += 1
+            answer = self.answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return {**self.EMPTY, **answer}
+        for patch in (mock.patch.object(card_data, 'database', mock.Mock()),
+                      mock.patch.object(card_data.card_names, 'adopt', adopt),
+                      mock.patch.object(card_data, 'names_waiting', []),
+                      mock.patch.object(card_data, 'names_owed', threading.Event()),
+                      mock.patch.object(card_data, '_names_said', {'errors': None}),
+                      mock.patch.object(card_data.logger, 'error'), mock.patch.object(card_data.logger, 'warning')):
+            patch.start()
+            self.addCleanup(patch.stop)
+        card_data.names_owed.set()                     # as at start
+
+    def test_a_pass_that_fails_after_entries_were_waiting_is_tried_again_until_it_goes_through(self):
+        self.answers = [{'waiting': [self.WAITING]}, OSError('database is locked'), {'waiting': [self.WAITING]}, {}]
+        card_data.adopt_card_names()                   # at start: one entry waits
+        self.assertEqual((card_data.names_waiting, card_data.names_owed.is_set()), ([self.WAITING], False))
+        card_data.retry_waiting_card_names()           # the tick: the pass fails - what waited is not forgotten, and it is owed
+        self.assertEqual((card_data.names_waiting, card_data.names_owed.is_set()), ([self.WAITING], True))
+        card_data.retry_waiting_card_names()           # the next tick: through, the entry still waits
+        self.assertEqual((card_data.names_waiting, card_data.names_owed.is_set()), ([self.WAITING], False))
+        card_data.retry_waiting_card_names()           # the trade let go
+        self.assertEqual((card_data.names_waiting, card_data.names_owed.is_set(), self.passes), ([], False, 4))
+        card_data.retry_waiting_card_names()           # nothing owed, nothing waiting: nothing asked
+        self.assertEqual(self.passes, 4)
+
+    def test_the_pass_at_start_failing_is_tried_again_at_the_tick(self):
+        # What the review found: the first pass fails, names_waiting is empty - and nothing tried again
+        self.answers = [OSError('disk I/O error'), {'entries': 1}]
+        card_data.adopt_card_names()
+        self.assertTrue(card_data.names_owed.is_set())
+        card_data.retry_waiting_card_names()
+        self.assertEqual((card_data.names_owed.is_set(), self.passes), (False, 2))
+
+    def test_a_part_that_failed_keeps_the_pass_owed_and_is_said_once(self):
+        self.answers = [{'errors': ['decks: disk I/O error']}, {'errors': ['decks: disk I/O error']}, {}]
+        card_data.adopt_card_names()
+        card_data.retry_waiting_card_names()
+        self.assertTrue(card_data.names_owed.is_set())
+        self.assertEqual(card_data.logger.error.call_count, 1)        # the same errors at the next tick: not said again
+        card_data.retry_waiting_card_names()
+        self.assertFalse(card_data.names_owed.is_set())
+
+    def test_a_restored_backup_owes_a_pass(self):
+        self.answers = [{}, {'entries': 2}]
+        card_data.adopt_card_names()
+        self.assertFalse(card_data.names_owed.is_set())
+        card_data.owe_card_names()
+        card_data.retry_waiting_card_names()
+        self.assertEqual((card_data.names_owed.is_set(), self.passes), (False, 2))
+
+    def test_without_card_data_the_pass_stays_owed(self):
+        with mock.patch.object(card_data, 'database', None):
+            self.assertIsNone(card_data.adopt_card_names())
+        self.assertEqual((card_data.names_owed.is_set(), self.passes), (True, 0))
+
+
 class SourceUnchanged(unittest.TestCase):
     """Magic.source_unchanged: Scryfall's date of its bulk file against the one the data in use came from"""
 
@@ -536,21 +607,22 @@ class ScheduleTick(unittest.TestCase):
                 mock.patch.object(card_data, 'scheduled_index_update', step('index')), \
                 mock.patch.object(card_data, 'scheduled_shop_price_update', step('prices')), \
                 mock.patch.object(card_data, 'finish_unfinished_repricing', step('repricing')), \
+                mock.patch.object(card_data, 'retry_waiting_card_names', step('names')), \
                 mock.patch.object(card_data.logger, 'error'):
             card_data.schedule_tick(check_due, downloads_due)
         return called
 
     def test_in_order_card_data_before_the_index(self):
-        self.assertEqual(self.tick(True, True), ['check', 'card_data', 'index', 'prices', 'repricing'])
+        self.assertEqual(self.tick(True, True), ['check', 'card_data', 'index', 'prices', 'repricing', 'names'])
 
     def test_one_failing_does_not_keep_the_others_from_their_turn(self):
-        self.assertEqual(self.tick(True, True, check=OSError('no network')), ['check', 'card_data', 'index', 'prices', 'repricing'])
-        self.assertEqual(self.tick(True, True, card_data=RuntimeError('bad settings')), ['check', 'card_data', 'index', 'prices', 'repricing'])
-        self.assertEqual(self.tick(True, True, index=RuntimeError('no index')), ['check', 'card_data', 'index', 'prices', 'repricing'])
+        self.assertEqual(self.tick(True, True, check=OSError('no network')), ['check', 'card_data', 'index', 'prices', 'repricing', 'names'])
+        self.assertEqual(self.tick(True, True, card_data=RuntimeError('bad settings')), ['check', 'card_data', 'index', 'prices', 'repricing', 'names'])
+        self.assertEqual(self.tick(True, True, index=RuntimeError('no index')), ['check', 'card_data', 'index', 'prices', 'repricing', 'names'])
 
     def test_no_download_in_the_first_minutes(self):
         self.assertEqual(self.tick(True, False), ['check'])
-        self.assertEqual(self.tick(False, True), ['card_data', 'index', 'prices', 'repricing'])
+        self.assertEqual(self.tick(False, True), ['card_data', 'index', 'prices', 'repricing', 'names'])
 
 
 if __name__ == '__main__':

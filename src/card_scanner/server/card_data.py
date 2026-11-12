@@ -278,23 +278,66 @@ def reprice_collections(game, strict=False):
             return 0, 0
 
 
+# The entries that keep a printing's old name for now (card_names.adopt's 'waiting': a trade holds copies of one that
+# would be merged); their number is in /api/stats. names_owed: a whole pass is still owed - set from the start (the pass
+# at start may fail), by a pass that failed or had errors, and by what can bring old names back (a restored backup:
+# owe_card_names). While either says so, the update schedule's tick tries again (retry_waiting_card_names)
+names_waiting = []
+names_owed = threading.Event()
+names_owed.set()
+_names_said = {'errors': None}     # the errors last logged: said again only when they change, not at every tick
+
+
+def owe_card_names():
+    """Old names may be back (a backup was restored): the next tick of the update schedule gives them their new ones"""
+    names_owed.set()
+
+
 def adopt_card_names():
     """
-    After a card data update, and once at start (for card data renamed before this ran): the entries, Arena cards, other
-    people's cards and deck entries kept under a printing's old name take the one the card data now gives it
-    (core/card_names.adopt). A failure is logged: the names stay as they were, and the next run tries again
+    After a card data update, once at start (for card data renamed before this ran) and, while a pass is owed or entries
+    are waiting, at every tick of the update schedule: the entries, Arena cards, other people's cards and deck entries
+    kept under a printing's old name take the one the card data now gives it (core/card_names.adopt). What cannot change
+    yet is remembered in names_waiting, what failed keeps the pass owed (names_owed) - until 2026-11-11 a pass that failed
+    after finding waiting entries forgot them, and nothing tried again (a Codex review). Both are said in the log when
+    they change, not at every try.
     """
     if not database:
-        return None   # no card data (yet): nothing it could rename
+        return None   # no card data (yet): nothing it could rename - still owed
     try:
         counts = card_names.adopt(database.renamed_printings(), inventories=(inventory, scan_inventory, arena_inventory),
                                   decks=deck_store, others=others)
-        if any(counts.values()):
-            logger.info(f"Card names adopted from the card data: {counts}")
-        return counts
     except Exception as e:
-        logger.exception(f"The card data's new names could not be given to what is kept by name: {e}")
-        return None
+        counts = {'waiting': list(names_waiting), 'errors': [str(e)]}
+    changed = {key: value for key, value in counts.items() if key not in ('kept', 'waiting', 'errors') and value}
+    if changed:
+        logger.info(f"Card names adopted from the card data: {changed}")
+    if counts['waiting'] != names_waiting:
+        for item in counts['waiting']:
+            logger.warning(f"{item['name']} (entry {item['entry']}) keeps its name for now, not {item['new_name']}: "
+                           f"{item['why']} - tried again until it can change")
+        if names_waiting and not counts['waiting']:
+            logger.info("Card names: no entry is waiting for its new name any more")
+        names_waiting[:] = counts['waiting']
+    if counts['errors'] != _names_said['errors']:
+        if counts['errors']:
+            logger.error("The card data's new names could not all be given to what is kept by name - tried again at the "
+                         f"update schedule's next tick: {'; '.join(counts['errors'])}")
+        elif _names_said['errors']:
+            logger.info("Card names: the pass that failed before went through")
+        _names_said['errors'] = counts['errors']
+    if counts['errors']:
+        names_owed.set()
+    else:
+        names_owed.clear()
+    return counts
+
+
+def retry_waiting_card_names():
+    """The update schedule's step: a pass that is owed, or entries still waiting for their new name, are tried again
+    (neither: nothing is asked)"""
+    if names_owed.is_set() or names_waiting:
+        adopt_card_names()
 
 
 def resume_price_transition():
@@ -456,7 +499,8 @@ def schedule_tick(check_due, downloads_due):
     steps = [('update check', check_card_data_updates)] if check_due else []
     if downloads_due:
         steps += [('automatic card data update', scheduled_card_data_updates), ('automatic picture index update', scheduled_index_update),
-                  ('automatic price update', scheduled_shop_price_update), ('unfinished repricing', finish_unfinished_repricing)]
+                  ('automatic price update', scheduled_shop_price_update), ('unfinished repricing', finish_unfinished_repricing),
+                  ('card names waiting', retry_waiting_card_names)]
     for name, step in steps:
         try:
             step()
