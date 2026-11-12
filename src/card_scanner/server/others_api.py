@@ -16,6 +16,7 @@ from card_scanner.core.inventory import now, read_collection_csv
 from card_scanner.core.others import CARD_COLUMNS, OthersError, card_key
 
 from card_scanner.server.state import app, others, trade_store
+from card_scanner.server.card_data import adopt_card_names
 from card_scanner.server.logs import logger
 from card_scanner.server.trades_api import collection_changed
 
@@ -96,6 +97,7 @@ def import_other_collection():
                           + (f' (not found in the {game.label} card data: {", ".join(not_found[:5])})' if not_found else ''))
     result = others.import_collection(game.id, request.form.get('name'), rows, format_name, file.filename,
                                       replace=replace)
+    adopt_card_names()   # a Card Scanner file keeps the names written in it, which the card data may have changed since
     if not_found:
         logger.warning(f"Other collection {result['name']}: {len(not_found)} not found: " + ', '.join(not_found[:50]))
     return jsonify({'success': True, **result, 'format': format_name, 'not_found': not_found[:10],

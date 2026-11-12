@@ -4,6 +4,7 @@
 # files an exporter writes (core/arena.py says what they look like).
 # ============================================================================
 from datetime import datetime
+import uuid
 from flask import jsonify, request
 
 from card_scanner.core import arena
@@ -22,7 +23,7 @@ def arena_summary(game):
     return {'imported': account.get('imported') or '', 'exported': account.get('exported') or '',
             'cards': stats['total_cards'], 'entries': stats['unique_cards'],
             'wildcards': account.get('wildcards') or {}, 'gold': account.get('gold') or 0, 'gems': account.get('gems') or 0,
-            'summary': account.get('summary') or {}}
+            'summary': account.get('summary') or {}, 'revision': account.get('revision') or ''}
 
 
 @app.route('/api/arena')
@@ -97,7 +98,10 @@ def arena_import():
     # being taken between them, with the new collection beside the decks of before
     with maintenance_barrier:
         if collection is not None:
+            # revision: this import's own, never another's - 'imported' is to the second, and two imports in one second
+            # looked the same to a client checking that none came between its reads (mcp_server's _on_one_arena_import)
             account = {'exported': collection['exported'], 'imported': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                       'revision': uuid.uuid4().hex,
                        'wildcards': collection['wildcards'], 'gold': collection['gold'], 'gems': collection['gems'],
                        'summary': {**summary, 'unknown': summary['unknown'][:200]}}
             try:

@@ -333,6 +333,11 @@ def what_can_i_build(api, kind='commanders', wait_seconds=40, limit=10):
 ARENA_PLAN_TRIES = 3
 
 
+def import_of(account):
+    """Which import the Arena account is from: (its revision, its time)"""
+    return account.get('revision') or '', account.get('imported') or ''
+
+
 def _on_one_arena_import(api, kind, compute):
     """
     compute() for a deck of this kind - for an Arena deck, against one import of the Arena collection. A plan reads
@@ -341,7 +346,8 @@ def _on_one_arena_import(api, kind, compute):
     the account's import time, read fresh before and after (never a kept answer: an answer kept from before the import
     would pass the check). The same time on both sides: no import landed. Each try starts with nothing kept, so every
     read in it is of the server as it then is. compute gets the account read before; tried ARENA_PLAN_TRIES times.
-    The import time is to the second (arena_api writes it so): two imports within one second would look like one.
+    An import is told by its revision (one of its own, since 2026-11-11) and its time; a server from before revisions
+    has only the time, to the second - there two imports in one second would look like one.
     """
     if kind != 'arena':
         return compute(None)
@@ -350,7 +356,7 @@ def _on_one_arena_import(api, kind, compute):
         before = api.get_fresh('/api/arena').get('arena') or {}
         result = compute(before)
         after = api.get_fresh('/api/arena').get('arena') or {}
-        if after.get('imported') == before.get('imported'):
+        if import_of(after) == import_of(before):
             return result
     raise ScannerError(f'The Arena collection was imported again while the change was worked out, {ARENA_PLAN_TRIES} '
                        'times in a row: ask again once the import is done')

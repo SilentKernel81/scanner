@@ -206,6 +206,49 @@ class ReplacingAnInventory(Temporary):
         self.assertEqual(arena.account(self.store), {})
 
 
+class ImportRoute(Temporary):
+    """POST /api/arena/import with temporary data behind the server: each import has a revision of its own"""
+
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # app.py: the server's routes
+        import io
+        from unittest import mock
+        import app as launcher
+        from card_scanner.server import arena_api, state
+        self.io = io
+        self.store = InventoryManager(db_file=self.path / 'arena.db')
+        arena.prepare(self.store)
+        self.addCleanup(self.store.conn.close)
+        saved = {name: getattr(state.services, name) for name in ('arena_inventory', 'database')}
+        self.addCleanup(lambda: [setattr(state.services, name, value) for name, value in saved.items()])
+        cards = FakeCards()
+        state.services.arena_inventory, state.services.database = self.store, cards
+        game = mock.Mock(id='mtg', label='Magic', arena_decklist=True, cards_by_names=cards.cards_by_names)
+        game.inventory_fields = lambda card, finish: {**fields(card['name']), 'card_id': card['id']}
+        game.suggested_finish = lambda card, wanted: 'regular'
+        for patch in (mock.patch.object(arena_api.games, 'active', return_value=game),
+                      mock.patch.object(arena_api, 'socketio', mock.Mock())):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.client = launcher.app.test_client()
+
+    def an_import(self, count):
+        text = export([entry('Llanowar Elves', number='227', count=count)], WildCardRares=1)
+        answer = self.client.post('/api/arena/import', data={'files': (self.io.BytesIO(text.encode()), 'mtga_collection.json')},
+                                  content_type='multipart/form-data')
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        return self.client.get('/api/arena').get_json()['arena']
+
+    def test_two_imports_in_one_second_have_their_own_revisions(self):
+        # 'imported' is to the second: the revision is what tells two imports apart (the MCP's plan check)
+        first, second = self.an_import(2), self.an_import(3)
+        self.assertEqual(first['imported'][:16], second['imported'][:16])
+        self.assertTrue(first['revision'] and second['revision'])
+        self.assertNotEqual(first['revision'], second['revision'])
+        self.assertEqual(arena.snapshot(self.store, 'mtg')[1]['revision'], second['revision'])   # stored with its cards
+
+
 class DecksOfTwoKinds(Temporary):
 
     def decks(self):
