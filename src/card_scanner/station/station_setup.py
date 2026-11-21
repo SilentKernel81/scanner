@@ -93,12 +93,18 @@ def save(values):
     """
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     temporary = SETTINGS_FILE.with_suffix('.json.tmp')
-    temporary.write_text(json.dumps({key: values.get(key) for key in DEFAULTS}, indent=2))
-    os.replace(temporary, SETTINGS_FILE)
+    payload = json.dumps({key: values.get(key) for key in DEFAULTS}, indent=2)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(SETTINGS_FILE, 0o600)  # it can hold the server's token: this user only
-    except OSError:
-        pass
+        with os.fdopen(fd, 'w') as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, SETTINGS_FILE)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def resolve(arguments, saved, machine_name):
@@ -432,8 +438,15 @@ class SetupPage:
                     self.send_json({'error': 'Not found'}, 404)
 
             def do_POST(self):
+                if (self.headers.get('Sec-Fetch-Site') or '').lower() == 'cross-site':
+                    return self.send_json({'error': 'Cross-site requests are not allowed'}, 403)
+                ctype = (self.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+                if ctype and ctype != 'application/json':
+                    return self.send_json({'error': 'JSON expected'}, 415)
                 try:
                     length = int(self.headers.get('Content-Length') or 0)
+                    if length < 0:
+                        raise ValueError("Negative Content-Length")
                     if length > 65536:  # a settings form is a few hundred bytes
                         return self.send_json({'error': 'Too large'}, 413)
                     data = json.loads(self.rfile.read(length) or b'{}')
@@ -591,15 +604,18 @@ class SetupPage:
             return {'ok': False, 'message': str(e)}
         if not server:
             return {'ok': False, 'message': "Type the server's address first"}
-        token = str(data.get('token') or '') or self.values.get('token') or ''
+        typed_token = str(data.get('token') or '')
+        saved_server = self.values.get('server') or ''
+        # Only reuse the saved token when testing the same saved server (never exfiltrate it to another host)
+        token = typed_token or (self.values.get('token') or '' if (not saved_server or saved_server == server) else '')
         headers = {'X-Station-Token': token} if token else {}
 
         # Step 1. The request and the reading of its answer are kept apart on purpose: an
         # address that cannot be requested at all raises an error that is both a "request
         # failed" and a ValueError, and treating it as "answered, but not with JSON" went on
-        # to use an answer that was never received.
+        # to use an answer that was never received. Do not send X-Station-Token to /api/stations.
         try:
-            answer = requests.get(f"{server}/api/stations", timeout=5, headers=headers)
+            answer = requests.get(f"{server}/api/stations", timeout=5)
         except (requests.RequestException, ValueError) as e:
             return {'ok': False, 'message': f"No answer from {server} ({type(e).__name__})"}
         try:
@@ -622,6 +638,8 @@ class SetupPage:
             return {'ok': False, 'address': server, 'message': message + f" - but the token could not be checked ({type(e).__name__})"}
         if check.status_code == 401:
             return {'ok': False, 'address': server, 'message': message + " - but it does not accept this station token"}
+        if check.status_code not in (200, 404):
+            return {'ok': False, 'address': server, 'message': message + f" - but the token check returned HTTP {check.status_code}"}
         return {'ok': True, 'address': server, 'message': message + " - the station token is accepted"}
 
     def held(self, action):

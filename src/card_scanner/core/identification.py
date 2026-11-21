@@ -323,7 +323,8 @@ class Identification:
             # the reading log: whether the index covers the card data (None: not asked - the picture alone is off - or it cannot be said)
             reading_record.note(None, index_covers=None if missing is None else missing == 0, index_missing=missing)
             with reading_record.timed('picture'):
-                reading = self.evidence.live_read(image, foil_image, self.card_ocr if self.ocr_enabled else None, self.foil_marker, alone)
+                ocr_on = self.ocr_enabled
+                reading = self.evidence.live_read(image, foil_image, self.card_ocr if ocr_on else None, self.foil_marker, alone)
         except Exception as e:
             self.log(f"Reading by picture failed ({e}) - asking the vision AI", level="warning")
             reading_record.note(None, picture_error=str(e))
@@ -335,12 +336,13 @@ class Identification:
             return None
         card = reading['card']
         # (decide.accept_printing's needs_ocr: the picture alone with OCR on - the second half of the guards, decide.confirm_by_ocr, through ocr_agrees)
-        if reading['path'] == 'image' and self.ocr_enabled:
+        if reading['path'] == 'image' and (ocr_on or reading.get('needs_ocr')):
             # The picture ALONE decided (the collector line did not name the printing it chose): with OCR on, its name must agree before the card is added - whatever the strip
             # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);
             # and a strip naming ANOTHER existing printing is a contradiction the picture alone must not overrule unconfirmed (a fourth). Not agreeing: the card is in doubt,
             # and the OCR path below reads it as any other.
-            if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip'), reading.get('rotated', False)):
+            rotated = bool(reading.get('rotated', False))
+            if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip'), rotated):
                 self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
                 return None
         reading_record.note('decision', accepted=True)

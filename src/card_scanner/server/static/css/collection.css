@@ -11,12 +11,6 @@ a.btn {
     display: block;
 }
 
-
-/* Buttons, chips and panels set their own display, which would win over the hidden attribute */
-[hidden] {
-    display: none !important;
-}
-
 /* Arena view (collection.js: showCollection): the digital collection is a copy of what MTG
    Arena has, so everything that would change it is taken off the page here, in one place -
    ticking, editing, deleting, trades, the paper import - and with it what only cards on a
@@ -70,44 +64,60 @@ body.arena-view .inventory-thumb {
 /* Tabs in the top bar */
 .tabs {
     display: flex;
+    align-items: center;
     gap: 4px;
 }
 
 .tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
+    gap: 7px;
+    padding: 6px 11px;
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--text-muted);
     font: inherit;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s;
 }
 
 .tab .icon {
     width: 16px;
     height: 16px;
-    color: var(--text-muted);
+    color: currentColor;
+    opacity: 0.78;
 }
 
 .tab:hover {
     background: var(--surface-2);
+    color: var(--text);
 }
 
 .tab.is-active {
-    background: var(--surface-3);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.tab.is-active .icon {
+    opacity: 1;
 }
 
 /* Filters */
 .filter-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 16px 18px;
+}
+
+.filter-panel > .filter-row:last-child {
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
 }
 
 .filter-row {
@@ -125,6 +135,10 @@ body.arena-view .inventory-thumb {
 
 .filter-row .select {
     max-width: 190px;
+}
+
+.filter-row #inventory-sort {
+    max-width: 245px;
 }
 
 .filter-row .filter-text {
@@ -227,10 +241,6 @@ body.arena-view .inventory-thumb {
     margin: 4px 0;
 }
 
-.multi-panel [hidden] {
-    display: none !important;
-}
-
 .multi-panel .multi-empty {
     padding: 6px 8px;
     color: var(--text-subtle);
@@ -289,9 +299,11 @@ body.arena-view .inventory-thumb {
 /* List / grid switch and other two-or-three-way choices */
 .segmented {
     display: inline-flex;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
 }
 
 .segmented button {
@@ -299,23 +311,27 @@ body.arena-view .inventory-thumb {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 6px 12px;
+    padding: 4px 11px;
     border: 0;
+    border-radius: calc(var(--radius) - 2px);
     background: transparent;
     color: var(--text-muted);
     font: inherit;
     font-size: 13px;
-    font-weight: 550;
+    font-weight: 500;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
-.segmented button + button {
-    border-left: 1px solid var(--border-strong);
+.segmented button:hover:not(.is-active) {
+    color: var(--text);
 }
 
 .segmented button.is-active {
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
 }
 
 .segmented.wide {
@@ -326,6 +342,19 @@ body.arena-view .inventory-thumb {
 
 .segmented.wide button {
     flex: 1;
+}
+
+.tab:focus-visible,
+.segmented button:focus-visible,
+.color-chip:focus-visible,
+.mini-btn:focus-visible,
+.btn-trade:focus-visible,
+.deck-tile:focus-visible,
+.printing:focus-visible,
+.filter-chip:focus-visible,
+.multi-filter > summary:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
 }
 
 /* Bulk actions */
@@ -447,7 +476,7 @@ body.arena-view .inventory-thumb {
 
 /* The page's main list: the white card the page is about */
 .collection-list {
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-sm), var(--panel-inset);
 }
 
 .collection-list .inventory-card.is-selected {
@@ -497,12 +526,20 @@ body.arena-view .inventory-thumb {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 8px;
+    gap: 7px;
+    padding: 9px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     background: var(--surface);
+    box-shadow: var(--shadow-sm), var(--panel-inset);
     cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.grid-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow);
 }
 
 .grid-card.is-selected {
@@ -532,18 +569,35 @@ body.arena-view .inventory-thumb {
     position: absolute;
     top: 14px;
     left: 14px;
+    opacity: 0;
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.55);
+    border-radius: 3px;
+    transition: opacity 0.15s;
+}
+
+.grid-card:hover .row-check,
+.grid-card:focus-within .row-check,
+.grid-card.is-selected .row-check {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .grid-card .row-check {
+        opacity: 1;
+    }
 }
 
 .grid-qty {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 14px;
+    right: 14px;
     padding: 2px 8px;
     border-radius: 999px;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 23, 42, 0.78);
+    backdrop-filter: blur(6px);
     color: white;
     font-size: 12px;
-    font-weight: 650;
+    font-weight: 600;
 }
 
 .grid-name {
@@ -657,7 +711,7 @@ body.arena-view .inventory-thumb {
 
 .trade-name {
     font-size: 15px;
-    font-weight: 650;
+    font-weight: 600;
 }
 
 .trade > summary {
@@ -704,7 +758,7 @@ body.arena-view .inventory-thumb {
 
 .spare-title {
     cursor: pointer;
-    font-weight: 650;
+    font-weight: 600;
 }
 
 .spare-row {
@@ -782,7 +836,7 @@ details.trade .trade-row {
 }
 
 .sale-tile-name {
-    font-weight: 650;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -796,7 +850,7 @@ details.trade .trade-row {
     background: var(--warning-soft);
     color: var(--warning);
     font-size: 11px;
-    font-weight: 650;
+    font-weight: 600;
 }
 
 .sale-tile .sale-small-badge {
@@ -841,14 +895,7 @@ details.trade .trade-row {
     align-items: center;
     gap: 8px;
     font-size: 16px;
-    font-weight: 650;
-}
-
-.deck-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 12px;
-    margin-bottom: 28px;
+    font-weight: 600;
 }
 
 .deck-tile {
@@ -870,7 +917,7 @@ details.trade .trade-row {
 }
 
 .deck-tile-name {
-    font-weight: 650;
+    font-weight: 600;
 }
 
 .deck-tile-meta {
@@ -1016,48 +1063,12 @@ details.trade .trade-row {
     color: var(--text);
 }
 
-/* Builder */
-.builder-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.builder-head .select {
-    width: auto;
-    padding: 6px 10px;
-}
-
+/* Deck builder search & card rows (shared with decks.css) */
 .deck-name {
     flex: 1 1 220px;
     max-width: 420px;
-    font-weight: 650;
+    font-weight: 600;
     font-size: 15px;
-}
-
-.builder {
-    display: grid;
-    grid-template-columns: minmax(320px, 2fr) minmax(380px, 3fr);
-    gap: 12px;
-    align-items: start;
-}
-
-.builder-side {
-    position: sticky;
-    top: calc(var(--topbar-nav) + 16px);
-    max-height: calc(100vh - var(--topbar-nav) - 32px);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.builder-side > div:not(.segmented) {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-height: 0;
 }
 
 .result-list {
@@ -1121,7 +1132,7 @@ details.trade .trade-row {
 .category-title {
     margin: 10px 0 2px;
     font-size: 11px;
-    font-weight: 650;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
@@ -1231,7 +1242,7 @@ details.trade .trade-row {
 .chart-title {
     margin-bottom: 6px;
     font-size: 11px;
-    font-weight: 650;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
@@ -1369,14 +1380,8 @@ details.trade .trade-row {
 }
 
 @media (max-width: 1024px) {
-    .builder,
     .around {
         grid-template-columns: 1fr;
-    }
-
-    .builder-side {
-        position: static;
-        max-height: 70vh;
     }
 }
 
@@ -1391,13 +1396,19 @@ details.trade .trade-row {
         position: static;
     }
 
-    .filter-row .select {
+    .filter-row .select,
+    .filter-row #inventory-sort {
         max-width: none;
         flex: 1 1 130px;
     }
 
     .collection-list .inventory-card {
         grid-template-columns: 20px 40px 1fr auto;
+        gap: 10px;
+    }
+
+    body.arena-view .collection-list .inventory-card {
+        grid-template-columns: 40px 1fr auto;
         gap: 10px;
     }
 
@@ -1415,6 +1426,24 @@ details.trade .trade-row {
     .collection-list .inventory-thumb {
         width: 40px;
         height: 56px;
+    }
+
+    .trade-row {
+        grid-template-columns: auto 1fr auto;
+        gap: 6px 10px;
+    }
+
+    .trade-row .trade-steps {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .trade-row.others-row {
+        grid-template-columns: auto 1fr auto;
+    }
+
+    .trade-row.others-collection {
+        grid-template-columns: 1fr auto;
     }
 
     .deck-row {
@@ -1494,63 +1523,6 @@ details.trade .trade-row {
     font-size: 11px;
     color: var(--text-muted);
     text-transform: uppercase;
-}
-
-/* Settings drawer: backups */
-.backup-new {
-    margin: 12px 0;
-}
-
-.backup-schedule {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 12px 0 6px;
-    font-size: 13px;
-}
-
-.backup-schedule select {
-    width: auto;
-}
-
-.backup-schedule input {
-    width: 70px;
-}
-
-.backup-new .text-input {
-    flex: 1;
-    min-width: 0;
-}
-
-.backup-upload {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.backup-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.backup-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-}
-
-.backup-auto {
-    font-size: 11px;
-    font-weight: 400;
-    color: var(--text-muted);
 }
 
 .deck-filters {

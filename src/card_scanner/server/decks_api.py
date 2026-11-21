@@ -245,8 +245,11 @@ def decks_collection():
         considering = commander_formats(game)
         listed, entries_of = [], {}   # entries_of: deck id -> its entries, for the tiles' pictures
         for deck in deck_store.list_decks(game.id):
+            got = deck_store.get(deck['id'])
+            if not got:
+                continue  # deleted concurrently
             wanted = {}
-            entries_of[deck['id']] = deck_store.get(deck['id'])['cards']
+            entries_of[deck['id']] = got['cards']
             for card in entries_of[deck['id']]:
                 if not (card['board'] == 'side' and deck['format'] in considering):
                     wanted[card['name']] = wanted.get(card['name'], 0) + card['quantity']
@@ -295,12 +298,15 @@ def decks_collection():
     if entries is None and data.get('commander'):
         entries = [{'name': data['commander'], 'quantity': 1, 'board': 'commander'}]
     unknown = []
-    # kind: 'arena' for a deck planned against the digital collection; anything else is a paper deck
-    deck_id = deck_store.create(game.id, str(data.get('name') or source_name or 'New deck')[:80], deck_format,
-                                kind='arena' if data.get('kind') == 'arena' else 'paper')
+    resolved = []
     if entries:
         resolved, unknown = resolve_entries(game, entries, deck_format)
-        deck_store.import_cards(deck_id, resolved)
+    # kind: 'arena' for a deck planned against the digital collection; anything else is a paper deck
+    with deck_store._transaction():
+        deck_id = deck_store.create(game.id, str(data.get('name') or source_name or 'New deck')[:80], deck_format,
+                                    kind='arena' if data.get('kind') == 'arena' else 'paper')
+        if resolved:
+            deck_store.import_cards(deck_id, resolved)
     logger.info(f"Deck created: {deck_id} ({deck_format})")
     return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_id)), 'unknown': unknown})
 
@@ -352,19 +358,24 @@ def deck_cards(deck_id):
     if error:
         return error
     data = request.get_json(silent=True) or {}
+    items = data.get('cards') or []
     try:
-        for item in data.get('cards') or []:
-            name, board = str(item['name']), item.get('board') or 'main'
-            if item.get('printing'):
-                if not games.get(deck['game']).card_details([item['printing']]):
-                    raise ValueError('Unknown printing')
-                deck_store.set_printing(deck_id, name, board, item['printing'])
-            elif item.get('move_to'):
-                deck_store.move_card(deck_id, name, board, item['move_to'])
-            elif 'quantity' in item:
-                deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
-            else:
-                deck_store.add_card(deck_id, name, board, int(item.get('change', 1)), item.get('card_id'))
+        # Validate any requested printings before taking the deck_store transaction lock
+        game = games.get(deck['game'])
+        for item in items:
+            if item.get('printing') and not game.card_details([item['printing']]):
+                raise ValueError('Unknown printing')
+        with deck_store._transaction():
+            for item in items:
+                name, board = str(item['name']), item.get('board') or 'main'
+                if item.get('printing'):
+                    deck_store.set_printing(deck_id, name, board, item['printing'])
+                elif item.get('move_to'):
+                    deck_store.move_card(deck_id, name, board, item['move_to'])
+                elif 'quantity' in item:
+                    deck_store.set_card(deck_id, name, board, int(item['quantity']), item.get('card_id'))
+                else:
+                    deck_store.add_card(deck_id, name, board, int(item.get('change', 1)), item.get('card_id'))
     except (KeyError, ValueError, TypeError) as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     return jsonify({'success': True, 'deck': deck_payload(deck_store.get(deck_id))})

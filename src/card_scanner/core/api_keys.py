@@ -172,6 +172,17 @@ def pinned_endpoint(url):
     return parts._replace(netloc=netloc).geturl(), {'Host': parts.netloc}
 
 
+_keys_lock = __import__('threading').Lock()
+
+
+def _format_env_value(value):
+    """Quote values containing characters python-dotenv interprets specially (#, quotes, spaces, $)."""
+    if any(ch in value for ch in ('#', '"', "'", '$', ' ', '\t', '\\')):
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$')
+        return f'"{escaped}"'
+    return value
+
+
 def save_credential(provider, value):
     """
     Save a provider's API key (or the local endpoint) to data/api_keys.env and apply it.
@@ -186,24 +197,33 @@ def save_credential(provider, value):
     if '\n' in value or '\r' in value:
         raise ValueError("Invalid value")
 
-    lines = KEYS_FILE.read_text().splitlines() if KEYS_FILE.exists() else []
-    entries = [line for line in lines if line and not line.startswith('#') and not line.startswith(f"{variable}=")]
-    if value:
-        entries.append(f"{variable}={value}")
+    with _keys_lock:
+        lines = KEYS_FILE.read_text().splitlines() if KEYS_FILE.exists() else []
+        entries = [line for line in lines if line and not line.startswith('#') and not line.startswith(f"{variable}=")]
+        if value:
+            entries.append(f"{variable}={_format_env_value(value)}")
 
-    Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # Create with owner-only permissions before writing the secret
-    fd = os.open(KEYS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as f:
-        f.write('# Saved from the web interface (Settings -> Card recognition -> Vision AI); overrides .env\n')
-        f.write(''.join(entry + '\n' for entry in entries))
-    os.chmod(KEYS_FILE, 0o600)
+        Config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        temp_file = KEYS_FILE.with_name(f".{KEYS_FILE.name}.{os.getpid()}.tmp")
+        # Create temp file with owner-only permissions, flush + fsync, then atomically replace
+        fd = os.open(temp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.write('# Saved from the web interface (Settings -> Card recognition -> Vision AI); overrides .env\n')
+                f.write(''.join(entry + '\n' for entry in entries))
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(temp_file, 0o600)
+            os.replace(temp_file, KEYS_FILE)
+        except BaseException:
+            temp_file.unlink(missing_ok=True)
+            raise
 
-    if value:
-        os.environ[variable] = value
-    else:
-        os.environ.pop(variable, None)
-    if provider == 'local':
-        # Cleared: back to the endpoint in config.yaml
-        Config.LOCAL_AI_ENDPOINT = value or get_config_loader().get(
-            'vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')
+        if value:
+            os.environ[variable] = value
+        else:
+            os.environ.pop(variable, None)
+        if provider == 'local':
+            # Cleared: back to the endpoint in config.yaml
+            Config.LOCAL_AI_ENDPOINT = value or get_config_loader().get(
+                'vision_ai', 'local', 'endpoint', default='http://localhost:11434/v1/chat/completions')

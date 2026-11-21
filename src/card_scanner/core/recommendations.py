@@ -19,6 +19,7 @@ the oldest make room when it grows past MAX_BYTES.
 import contextlib
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -127,7 +128,7 @@ class Recommendations:
     def _move_old_cache(self, old_file):
         """Once: the answers cached in the card database come over (compressed), and the table
         there goes - its pages are used again by that file; the file itself does not shrink"""
-        if old_file == self.db_file:
+        if old_file == self.db_file or not os.path.isfile(old_file):
             return
         old = sqlite3.connect(old_file, timeout=10.0)
         try:
@@ -155,11 +156,13 @@ class Recommendations:
             conn.execute('DELETE FROM web_cache WHERE fetched_at < ?', (time.time() - MAX_AGE,))
             total = conn.execute('SELECT COALESCE(SUM(size), 0) FROM web_cache').fetchone()[0]
             if total > MAX_BYTES:
+                drop = []
                 for url, size in conn.execute('SELECT url, size FROM web_cache ORDER BY fetched_at').fetchall():
-                    conn.execute('DELETE FROM web_cache WHERE url = ?', (url,))
+                    drop.append((url,))
                     total -= size
                     if total <= MAX_BYTES:
                         break
+                conn.executemany('DELETE FROM web_cache WHERE url = ?', drop)
 
     # -- Fetching --------------------------------------------------------------
 
@@ -208,7 +211,7 @@ class Recommendations:
             try:
                 response = requests.get(url, headers=HEADERS, timeout=timeout)
                 self._last_request[site] = time.time()
-                if response.status_code in (403, 404):
+                if response.status_code == 404:
                     data = {'_missing': True}  # remembered too: asking again won't help
                 else:
                     response.raise_for_status()
@@ -217,7 +220,7 @@ class Recommendations:
                 self._last_request[site] = time.time()
                 logger.warning(f"{site} not available: {e}")
                 raise Unavailable(f"{site} is not available right now") from e
-        self._store(url, data)
+            self._store(url, data)
         return data
 
     # -- EDHREC ----------------------------------------------------------------
@@ -282,7 +285,10 @@ class Recommendations:
     def precon_list(self):
         """Preconstructed decks, newest first: [{'file', 'name', 'type', 'format', 'released', 'set'}]"""
         try:
-            decks = self._get(f"{MTGJSON}/DeckList.json", 7 * DAY)['data']
+            page = self._get(f"{MTGJSON}/DeckList.json", 7 * DAY)
+            if page.get('_missing'):
+                raise Unavailable("MTGJSON's deck list is not available")
+            decks = page['data']
             precons = [{'file': deck['fileName'], 'name': deck['name'], 'type': deck['type'],
                         'format': PRECON_TYPES[deck['type']], 'released': deck.get('releaseDate') or '',
                         'set': deck.get('code') or ''}
@@ -321,32 +327,35 @@ class Recommendations:
         sites that didn't answer])
         """
         decks, problems = [], []
-        try:
-            query = f"commanderName={quote(commander)}&deckFormat={ARCHIDEKT_FORMATS['commander']}" if commander \
-                else f"cardName={quote(card)}&deckFormat={ARCHIDEKT_FORMATS[deck_format]}" if card \
-                else f"deckFormat={ARCHIDEKT_FORMATS[deck_format]}"
-            # A search by card can take Archidekt half a minute the first time; it runs in the
-            # background (with a Stop button), so it gets the time
-            page = self._get(f"{ARCHIDEKT}/v3/?{query}&orderBy=-viewCount&pageSize={limit}", DAY,
-                             timeout=45 if card else TIMEOUT)
-            for deck in page['results'][:limit]:
-                decks.append({'source': 'Archidekt', 'name': deck['name'],
-                              'author': (deck.get('owner') or {}).get('username') or '',
-                              'views': deck.get('viewCount') or 0, 'cards': deck.get('size') or 0,
-                              'url': f"https://archidekt.com/decks/{deck['id']}"})
-        except Unavailable as e:
-            problems.append(str(e))
-        except (KeyError, TypeError):
-            problems.append("Archidekt's data has changed - its decks are not available")
+        if commander or deck_format in ARCHIDEKT_FORMATS:
+            try:
+                query = f"commanderName={quote(commander)}&deckFormat={ARCHIDEKT_FORMATS['commander']}" if commander \
+                    else f"cardName={quote(card)}&deckFormat={ARCHIDEKT_FORMATS[deck_format]}" if card \
+                    else f"deckFormat={ARCHIDEKT_FORMATS[deck_format]}"
+                # A search by card can take Archidekt half a minute the first time; it runs in the
+                # background (with a Stop button), so it gets the time
+                page = self._get(f"{ARCHIDEKT}/v3/?{query}&orderBy=-viewCount&pageSize={limit}", DAY,
+                                 timeout=45 if card else TIMEOUT)
+                if not page.get('_missing'):
+                    for deck in page['results'][:limit]:
+                        decks.append({'source': 'Archidekt', 'name': deck['name'],
+                                      'author': (deck.get('owner') or {}).get('username') or '',
+                                      'views': deck.get('viewCount') or 0, 'cards': deck.get('size') or 0,
+                                      'url': f"https://archidekt.com/decks/{deck['id']}"})
+            except Unavailable as e:
+                problems.append(str(e))
+            except (KeyError, TypeError):
+                problems.append("Archidekt's data has changed - its decks are not available")
         if not commander and not card:  # Moxfield's search can't be narrowed to a card by name
             try:
                 page = self._get(f"{MOXFIELD}/v2/decks/search?pageNumber=1&pageSize={limit}&fmt={quote(deck_format)}"
                                  "&sortType=views&sortDirection=Descending", DAY)
-                for deck in page['data'][:limit]:
-                    decks.append({'source': 'Moxfield', 'name': deck['name'],
-                                  'author': (deck.get('createdByUser') or {}).get('userName') or '',
-                                  'views': deck.get('viewCount') or 0, 'cards': deck.get('mainboardCount') or 0,
-                                  'url': deck['publicUrl']})
+                if not page.get('_missing'):
+                    for deck in page['data'][:limit]:
+                        decks.append({'source': 'Moxfield', 'name': deck['name'],
+                                      'author': (deck.get('createdByUser') or {}).get('userName') or '',
+                                      'views': deck.get('viewCount') or 0, 'cards': deck.get('mainboardCount') or 0,
+                                      'url': deck['publicUrl']})
             except Unavailable as e:
                 problems.append(str(e))
             except (KeyError, TypeError):

@@ -42,7 +42,7 @@ class Settings:
     }
 
     def __init__(self):
-        self._lock = threading.Lock()  # settings are saved from several threads
+        self._lock = threading.RLock()  # settings are saved from several threads
         self.settings = self._load_settings()
 
     def _load_settings(self):
@@ -85,12 +85,14 @@ class Settings:
 
     def get(self, key, default=None):
         """Get a setting value"""
-        return self.settings.get(key, default)
+        with self._lock:
+            return self.settings.get(key, default)
 
     def set(self, key, value):
         """Set a setting value and save"""
-        self.settings[key] = value
-        self._save_settings(self.settings)
+        with self._lock:
+            self.settings[key] = value
+            self._save_settings(self.settings)
 
     def set_durably(self, key, value):
         """
@@ -99,27 +101,31 @@ class Settings:
         restart would forget while what it changed stays (a Codex review of 2026-10-24)
         """
         missing = object()
-        before = self.settings.get(key, missing)
-        self.settings[key] = value
-        try:
-            self._save_settings(self.settings, strict=True)
-        except BaseException:
-            if before is missing:
-                self.settings.pop(key, None)
-            else:
-                self.settings[key] = before
-            raise
+        with self._lock:
+            before = self.settings.get(key, missing)
+            self.settings[key] = value
+            try:
+                self._save_settings(self.settings, strict=True)
+            except BaseException:
+                if before is missing:
+                    self.settings.pop(key, None)
+                else:
+                    self.settings[key] = before
+                raise
 
     def get_ai_provider(self):
         """Get saved AI provider"""
-        return self.settings.get('ai_provider', 'gemini')
+        with self._lock:
+            return self.settings.get('ai_provider', 'gemini')
 
     def get_ai_model(self):
         """Get saved AI model (None means use provider's default)"""
-        return self.settings.get('ai_model')
+        with self._lock:
+            return self.settings.get('ai_model')
 
     def set_ai_provider(self, provider, model=None):
         """Save AI provider and model preference"""
-        self.settings['ai_provider'] = provider
-        self.settings['ai_model'] = model
-        self._save_settings(self.settings)
+        with self._lock:
+            self.settings['ai_provider'] = provider
+            self.settings['ai_model'] = model
+            self._save_settings(self.settings)

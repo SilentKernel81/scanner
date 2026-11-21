@@ -86,7 +86,10 @@ ANSWER=$(curl -sS -m 300 -b "$COOKIES" -X POST "$SERVER_URL/api/backups/full" 2>
 if printf '%s' "$ANSWER" | grep -q '"locked"'; then
     print_warn "The server wants its settings password for a coordinated snapshot: put SCANNER_SETTINGS_PASSWORD in the environment or in .env"
 fi
-FULL=$(printf '%s' "$ANSWER" | python3 -c 'import json, sys; print(json.load(sys.stdin)["backup"]["id"])' 2>/dev/null || true)
+FULL=$(printf '%s' "$ANSWER" | python3 -c 'import json, re, sys
+bid = json.load(sys.stdin)["backup"]["id"]
+if re.fullmatch(r"[A-Za-z0-9_-]+", str(bid)):
+    print(bid)' 2>/dev/null || true)
 if [ -n "$FULL" ] && [ -d "data/backups/full/$FULL" ]; then
     print_info "The running server took a coordinated snapshot ($FULL)"
     MISSING=$(printf '%s' "$ANSWER" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)["backup"]["missing"]))' 2>/dev/null || echo 0)
@@ -123,6 +126,7 @@ PARTS=()
 
 ARCHIVE="$BACKUP_DIR/${BACKUP_FILE%.gz}"
 trap 'rm -rf "$STAGING" "$ARCHIVE"' EXIT
+tar_rc=0
 tar -cf "$ARCHIVE" \
     --exclude='data/logs' \
     --exclude='data/backups/full' \
@@ -132,7 +136,11 @@ tar -cf "$ARCHIVE" \
     --exclude='data/*.db-shm' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
-    "${PARTS[@]}" || fail "tar failed"
+    "${PARTS[@]}" || tar_rc=$?
+# GNU tar exits 1 when a file changed while archiving (normal on a live server); >= 2 is a fatal error
+if [ "$tar_rc" -gt 1 ]; then
+    fail "tar failed (exit code $tar_rc)"
+fi
 tar -rf "$ARCHIVE" -C "$STAGING" data || fail "tar failed (database snapshots)"
 gzip "$ARCHIVE" || fail "compressing the archive failed"
 tar -tzf "$BACKUP_DIR/$BACKUP_FILE" > /dev/null || fail "the archive cannot be read back"

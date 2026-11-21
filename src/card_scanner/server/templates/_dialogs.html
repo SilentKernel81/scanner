@@ -1,6 +1,6 @@
 <!-- Shared by scanner.html and collection.html (static/js/common.js) -->
 <!-- Edit Card Modal -->
-<div id="edit-card-modal" class="modal">
+<div id="edit-card-modal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content narrow">
         <div class="modal-header">
             <h2>Edit card</h2>
@@ -10,7 +10,7 @@
                 <span id="edit-position"></span>
                 <button type="button" id="edit-next" onclick="stepEditCard(1)" title="Next card (saves your changes)" aria-label="Next card">&#8250;</button>
             </div>
-            <span class="close" onclick="closeEditCard()">&times;</span>
+            <button type="button" class="close" aria-label="Close" onclick="closeEditCard()">&times;</button>
         </div>
         <div class="modal-body">
             <div id="edit-card-name" class="edit-card-name"></div>
@@ -96,11 +96,11 @@
 </div>
 
 <!-- Add the scanned cards to the collection (addScannedToCollection) -->
-<div id="to-collection-modal" class="modal">
+<div id="to-collection-modal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content narrow">
         <div class="modal-header">
             <h2>Add to the collection?</h2>
-            <span class="close" onclick="closeToCollection(null)">&times;</span>
+            <button type="button" class="close" aria-label="Close" onclick="closeToCollection(null)">&times;</button>
         </div>
         <div class="modal-body">
             <p id="to-collection-message" class="dialog-message"></p>
@@ -124,11 +124,11 @@
 
 <!-- Captures kept with an inventory entry: preview on hover, viewer on click / tap -->
 <div id="capture-popover" class="capture-popover" hidden></div>
-<div id="capture-modal" class="modal">
+<div id="capture-modal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content capture-modal">
         <div class="modal-header">
             <h2 id="capture-title">Captures</h2>
-            <span class="close" onclick="closeCaptures()">&times;</span>
+            <button type="button" class="close" aria-label="Close" onclick="closeCaptures()">&times;</button>
         </div>
         <div class="modal-body">
             <div id="capture-grid" class="capture-grid large"></div>
@@ -137,11 +137,11 @@
 </div>
 
 <!-- One capture large (common.js: openCaptureViewer): its large copy, the thumbnail when it has none -->
-<div id="capture-viewer" class="modal">
+<div id="capture-viewer" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content capture-viewer">
         <div class="modal-header">
             <h2 id="capture-viewer-title">Capture</h2>
-            <span class="close" onclick="closeCaptureViewer()">&times;</span>
+            <button type="button" class="close" aria-label="Close" onclick="closeCaptureViewer()">&times;</button>
         </div>
         <div class="modal-body">
             <img id="capture-viewer-image" alt="">
@@ -150,7 +150,7 @@
 </div>
 
 <!-- Confirmation dialog: in-page, because browsers can silently block native confirm() -->
-<div id="dialog-modal" class="modal">
+<div id="dialog-modal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content narrow">
         <div class="modal-header">
             <h2 id="dialog-title"></h2>
@@ -162,4 +162,4 @@
     </div>
 </div>
 
-<div id="toast-container" class="toast-container"></div>
+<div id="toast-container" class="toast-container" aria-live="polite"></div>

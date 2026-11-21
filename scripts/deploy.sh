@@ -278,7 +278,7 @@ fi
 provider=$(config_get vision_ai.provider gemini)
 provider="${VISION_AI_PROVIDER:-$provider}"
 if [ -f data/settings.json ]; then  # the provider chosen in the web UI wins
-    provider=$(venv/bin/python -c "import json; print(json.load(open('data/settings.json')).get('ai_provider') or '$provider')")
+    provider=$(venv/bin/python -c "import json, sys; print(json.load(open('data/settings.json')).get('ai_provider') or sys.argv[1])" "$provider")
 fi
 case "$provider" in
     local) ok "Vision AI: local model server ($(config_get vision_ai.local.endpoint))" ;;

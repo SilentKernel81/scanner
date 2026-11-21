@@ -220,8 +220,8 @@ class Station:
                 time.sleep(delay)
                 delay = next(delays, delay)
         with self.settings_lock:
-            # Too late? A newer connection's hello - or a disconnect - came while this answer was on its way: it changes NOTHING
-            if connection != self.connection:
+            # Too late? A newer connection's hello - or a disconnect/shutdown - came while this answer was on its way: it changes NOTHING
+            if connection != self.connection or self.stopping:
                 logger.warning("The server's answer to hello came for a connection that has ended - not applied")
                 return
             if self.scanner is None:
@@ -513,7 +513,9 @@ class Station:
                 result = getattr(self.scanner, method)(*data.get('args', []), **data.get('kwargs', {}))
             else:
                 return {'ok': False, 'error': f'Unknown command {method}'}
-        except (TypeError, ValueError) as e:
+        except Exception as e:
+            if not isinstance(e, (TypeError, ValueError)):
+                logger.exception(f"Command {method} failed: {e}")
             return {'ok': False, 'error': str(e)}
         return {'ok': True, 'result': result, 'state': self.state()}
 
@@ -673,8 +675,11 @@ class Station:
         foil_path = None
         if foil_image is not None and foil_image is not card_image:
             # Fixed area: the capture is the area, the foil check uses the outlined card
-            foil_path = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
-            cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
+            candidate_foil = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
+            if cv2.imwrite(str(candidate_foil), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR)):
+                foil_path = candidate_foil
+            else:
+                logger.warning(f"Could not save foil image {candidate_foil.name} - sending capture without it")
         item = {'image': Path(image_path), 'foil': foil_path, 'mode': mode,
                 'foil_is_image': foil_image is card_image, 'capture_id': capture_id or uuid.uuid4().hex,
                 'frame': None, 'frame_meta': None, 'release_session': release_session}
@@ -909,8 +914,9 @@ class Station:
         headers = {'X-Station-Token': self.token} if self.token else {}
         try:
             files = {'image': (item['image'].name, item['image'].read_bytes(), 'image/jpeg')}
-            if item['foil']:
-                files['foil_image'] = (item['foil'].name, item['foil'].read_bytes(), 'image/jpeg')
+            foil = item.get('foil')
+            if foil and foil.is_file():
+                files['foil_image'] = (foil.name, foil.read_bytes(), 'image/jpeg')
             frame = item.get('frame')
             if frame and frame.is_file():
                 # Training data, not the capture: the server may ignore it (an older one does)

@@ -9,8 +9,8 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=33">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=65">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=35">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -201,11 +201,11 @@
 
     <!-- A picture of a trade's cards for a sale post: 3 x 3 scans with their names, drawn in the
          browser (collection.js: openSalePicture) -->
-    <div id="sale-modal" class="modal">
+    <div id="sale-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content sale-modal">
             <div class="modal-header">
                 <h2 id="sale-title">Picture for a sale</h2>
-                <span class="close" onclick="closeSalePicture()">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeSalePicture()">&times;</button>
             </div>
             <div class="modal-body">
                 <p class="hint">Tick the scans to show - nine cards a picture, more make several pictures. A <strong>click on a card in the picture turns it upside down</strong> (some scans are). A card without a scan shows Scryfall's picture of its printing; <span class="sale-small-badge">low res</span> marks a scan kept only as a small copy.</p>
@@ -240,8 +240,8 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
-    <script src="{{ url_for('static', filename='js/library.js') }}?v=8"></script>
-    <script src="{{ url_for('static', filename='js/collection.js') }}?v=85"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=9"></script>
+    <script src="{{ url_for('static', filename='js/collection.js') }}?v=86"></script>
 </body>
 </html>

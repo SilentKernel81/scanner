@@ -16,6 +16,10 @@
             {% elif page in ('collection', 'decks') %}
             <span class="game-label" id="game-label"></span>
             {% endif %}
+            <button type="button" class="icon-btn theme-toggle" id="theme-toggle" title="Switch light / dark theme" aria-label="Switch light / dark theme">
+                <svg class="icon icon-sun"><use href="#i-sun"/></svg>
+                <svg class="icon icon-moon"><use href="#i-moon"/></svg>
+            </button>
         </div>
     </div>
     <div class="topbar-nav">
@@ -41,10 +45,10 @@
                 </button>
                 <!-- Counters to read: small tags -->
                 <div class="stat-group">
-                <div class="stat-box" id="db-stat" onclick="offerDataUpdate()">
+                <button type="button" class="stat-box" id="db-stat" onclick="offerDataUpdate()">
                     <span class="stat-label">Database</span>
                     <span class="stat-value" id="db-cards">0</span>
-                </div>
+                </button>
                 <div class="stat-box">
                     <span class="stat-label">Value</span>
                     <span class="stat-value" id="total-value">{{ price_symbol }}0.00</span>
@@ -53,10 +57,10 @@
                     <span class="stat-label">Processing</span>
                     <span class="stat-value" id="processing-queue">0</span>
                 </div>
-                <div class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
+                <button type="button" class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
                     <span class="stat-label">Review</span>
                     <span class="stat-value" id="review-count">0</span>
-                </div>
+                </button>
                 </div>
             </div>
             {% elif page in ('stations', 'settings') %}

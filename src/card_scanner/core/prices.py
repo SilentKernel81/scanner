@@ -74,8 +74,13 @@ def priced_sql(table, source_id):
     """How many printings of a card table have a price in a source: 0 for card data downloaded before the source's columns
     were filled (the EUR prices: before 2026-10-23), and for a shop before the first price update - such a source would
     show the currency without its prices"""
-    columns = [_column_sql(table, source_id, column) for column in source(source_id)['columns'] if column]
-    return f"SELECT COUNT(*) FROM {table} WHERE COALESCE({', '.join(columns + ['NULL'])}) IS NOT NULL"
+    chosen = source(source_id)
+    raw = [column for column in chosen['columns'] if column]
+    if chosen['kind'] == 'shops':
+        cols = [f'shop.{column}' for column in raw]
+        return (f"SELECT COUNT(*) FROM {table} AS c JOIN {SHOP_TABLE} AS shop ON shop.id = c.id "
+                f"WHERE COALESCE({', '.join(cols + ['NULL'])}) IS NOT NULL")
+    return f"SELECT COUNT(*) FROM {table} WHERE COALESCE({', '.join(raw + ['NULL'])}) IS NOT NULL"
 
 
 def apply_sql(table, source_id):

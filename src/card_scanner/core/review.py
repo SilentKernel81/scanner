@@ -98,26 +98,41 @@ class ReviewQueue:
             except OSError as e:
                 logger.warning(f"Could not keep the capture for review: {e}")
                 file = None
-        with self._lock:
-            if transfer:
-                # The commits are normally synchronous=NORMAL (storage.connect): a power cut may
-                # lose the latest ones. The record of a transfer must survive it - the inventory's
-                # copy is removed right after - so this commit alone is FULL (set between
-                # transactions: the pragma does nothing inside one)
-                self.conn.execute('PRAGMA synchronous = FULL')
-            item_id = self.conn.execute(
-                'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
-                'station, capture_key, transfer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                (game, file, name or '', number or '', set_code or '', foil or 'unknown',
-                 card['id'] if card else None, card.get('match') if card else None,
-                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key, transfer)).lastrowid
-            if capture_key:
-                self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
-                                  (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            self.conn.commit()
-            if transfer:
-                self.conn.execute('PRAGMA synchronous = NORMAL')
-        return item_id
+        committed = False
+        try:
+            with self._lock:
+                # Re-check under the lock after copying the file: a concurrent call may have recorded capture_key
+                if capture_key and self.conn.execute('SELECT 1 FROM applied_captures WHERE key = ?', (capture_key,)).fetchone():
+                    logger.warning(f"Capture {capture_key} was queued for review before (a restart read it again): not queued twice")
+                    return None
+                if transfer:
+                    # The commits are normally synchronous=NORMAL (storage.connect): a power cut may
+                    # lose the latest ones. The record of a transfer must survive it - the inventory's
+                    # copy is removed right after - so this commit alone is FULL (set between
+                    # transactions: the pragma does nothing inside one)
+                    self.conn.execute('PRAGMA synchronous = FULL')
+                try:
+                    item_id = self.conn.execute(
+                        'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
+                        'station, capture_key, transfer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        (game, file, name or '', number or '', set_code or '', foil or 'unknown',
+                         card['id'] if card else None, card.get('match') if card else None,
+                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key, transfer)).lastrowid
+                    if capture_key:
+                        self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
+                                          (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    self.conn.commit()
+                    committed = True
+                except BaseException:
+                    self.conn.rollback()
+                    raise
+                finally:
+                    if transfer:
+                        self.conn.execute('PRAGMA synchronous = NORMAL')
+            return item_id
+        finally:
+            if file and not committed:
+                (REVIEW_DIR / file).unlink(missing_ok=True)
 
     @staticmethod
     def _flush(path):
@@ -164,7 +179,8 @@ class ReviewQueue:
         where, values = self._of(game, station)
         with self._lock:
             row = self.conn.execute(f'SELECT * FROM review_queue WHERE {where} ORDER BY id LIMIT 1', values).fetchone()
-        return (dict(row) if row else None), self.count(game, station)
+            total = self.conn.execute(f'SELECT COUNT(*) FROM review_queue WHERE {where}', values).fetchone()[0]
+        return (dict(row) if row else None), total
 
     def get(self, item_id):
         with self._lock:
@@ -182,9 +198,12 @@ class ReviewQueue:
         clearing one camera does not throw them away - station None drops those.
         """
         with self._lock:
-            rows = self.conn.execute('SELECT file FROM review_queue WHERE game = ? AND station IS ?',
-                                     (game, station)).fetchall()
-            self.conn.execute('DELETE FROM review_queue WHERE game = ? AND station IS ?', (game, station))
+            rows = self.conn.execute(
+                'SELECT file FROM review_queue WHERE game = ? AND station IS ? AND transfer IS NULL',
+                (game, station)).fetchall()
+            self.conn.execute(
+                'DELETE FROM review_queue WHERE game = ? AND station IS ? AND transfer IS NULL',
+                (game, station))
             self.conn.commit()
         for row in rows:
             if row['file']:

@@ -132,6 +132,8 @@ class Login:
         # Created private from the start (not written first and restricted after)
         with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as file:
             json.dump(record, file, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
         os.replace(temporary, self.file)
 
     def has_password(self):
@@ -148,19 +150,19 @@ class Login:
         if len(password) < MINIMUM_LENGTH:
             raise ValueError(f"The password needs at least {MINIMUM_LENGTH} characters")
         record = self._new_record(password)
-        self._write(record)
         with self.lock:
+            self._write(record)
             self.record, self.failures, self.locked_until = record, 0, 0.0
 
     def remove_password(self):
         """No password any more (the server's settings lock): the file goes, every login with it"""
         if self.fixed:
             raise ValueError(f"The password is set by {self.variable} in the environment - remove it there")
-        try:
-            self.file.unlink()
-        except FileNotFoundError:
-            pass
         with self.lock:
+            try:
+                self.file.unlink()
+            except FileNotFoundError:
+                pass
             self.record, self.failures, self.locked_until = None, 0, 0.0
 
     def check(self, password):
@@ -192,22 +194,27 @@ class Login:
     # Sessions: "<expiry time>.<signature of it>" in a cookie
     # ------------------------------------------------------------------------
 
-    def _signature(self, expiry):
-        return hmac.new(bytes.fromhex(self.record['key']), str(expiry).encode(), hashlib.sha256).hexdigest()
+    def _signature(self, expiry, record=None):
+        rec = record if record is not None else self.record
+        return hmac.new(bytes.fromhex(rec['key']), str(expiry).encode(), hashlib.sha256).hexdigest()
 
     def new_session(self):
         """The cookie value for a browser that just logged in"""
+        with self.lock:
+            record = self.record
         expiry = int(time.time()) + self.session_seconds
-        return f"{expiry}.{self._signature(expiry)}"
+        return f"{expiry}.{self._signature(expiry, record)}"
 
     def valid_session(self, value):
         """True if a cookie value was made by new_session() with the current key and has not expired"""
-        if self.record is None or not value or '.' not in value:
+        with self.lock:
+            record = self.record
+        if record is None or not value or '.' not in value:
             return False
         expiry, signature = value.split('.', 1)
         if not expiry.isdigit() or int(expiry) < time.time():
             return False
-        return hmac.compare_digest(signature, self._signature(int(expiry)))
+        return hmac.compare_digest(signature, self._signature(int(expiry), record))
 
     def cookie_header(self, value):
         """

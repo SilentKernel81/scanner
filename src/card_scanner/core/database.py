@@ -313,6 +313,8 @@ class CardDatabase:
         self.conn = None
         self._lock = threading.RLock()  # Thread-safe database access
         self._pricing_readers = threading.local()   # card_for_pricing: a read-only connection per thread, no lock
+        self._pricing_readers_lock = threading.Lock()
+        self._pricing_reader_conns = []
         # Whose prices the shown columns hold (prices.SOURCES); the server sets the saved choice at start (set_price_source)
         self.price_source = prices.DEFAULT_SOURCE
         self.initialize_database()
@@ -706,10 +708,11 @@ class CardDatabase:
             if key and number_variants:
                 # Step 2: Name + collector number, then shortened name ("Thanos" for
                 # "Thanos, the Mad Titan") + collector number
-                for comparison, value in (('=', key), ('LIKE', key + '%')):
+                escaped_key = storage.escape_like(key)
+                for clause, value in (('= ?', key), ("LIKE ? ESCAPE '\\'", escaped_key + '%')):
                     rows = cursor.execute(f'''
                         SELECT * FROM cards
-                        WHERE (name_search {comparison} ? OR flavor_search {comparison} ?)
+                        WHERE (name_search {clause} OR flavor_search {clause})
                         AND collector_number IN ({number_placeholders})
                     ''', (value, value, *number_variants)).fetchall()
                     if rows:
@@ -827,9 +830,10 @@ class CardDatabase:
 
             # Shortened legendary name ("Thanos" -> "Thanos, the Mad Titan") - fuzzy
             # matching on whole names would prefer unrelated cards like "Thayan Evokers"
+            escaped_key = storage.escape_like(key)
             result = cursor.execute('''
-                SELECT * FROM cards WHERE name_search LIKE ? OR flavor_search LIKE ? LIMIT 1
-            ''', (key + ',%', key + ',%')).fetchone()
+                SELECT * FROM cards WHERE name_search LIKE ? ESCAPE '\\' OR flavor_search LIKE ? ESCAPE '\\' LIMIT 1
+            ''', (escaped_key + ',%', escaped_key + ',%')).fetchone()
             if result:
                 logger.info(f"Found card via shortened name: {card_name} -> {result['name']}")
                 return self._tagged(result, 'name')
@@ -847,10 +851,11 @@ class CardDatabase:
             # Fuzzy match against names sharing the first letters (widen if there are few)
             candidates = {}
             for prefix_length in (3, 2):
+                prefix = storage.escape_like(key[:prefix_length]) + '%'
                 rows = cursor.execute('''
                     SELECT DISTINCT name, flavor_name, name_search, flavor_search FROM cards
-                    WHERE name_search LIKE ? OR flavor_search LIKE ?
-                ''', (key[:prefix_length] + '%', key[:prefix_length] + '%')).fetchall()
+                    WHERE name_search LIKE ? ESCAPE '\\' OR flavor_search LIKE ? ESCAPE '\\'
+                ''', (prefix, prefix)).fetchall()
                 for row in rows:
                     candidates[row['name_search']] = row['name']
                     if row['flavor_search']:
@@ -870,11 +875,11 @@ class CardDatabase:
 
     def search_cards_by_partial_name(self, partial_name, limit=10):
         """Search for cards with partial name match (searches both name and flavor_name)"""
-        key = search_key(partial_name) or ''
+        key = storage.escape_like(search_key(partial_name) or '')
         with self._lock:
             return self.conn.execute('''
                 SELECT name, set_name, COALESCE(price, price_foil, price_etched) AS price FROM cards
-                WHERE name_search LIKE ? OR flavor_search LIKE ?
+                WHERE name_search LIKE ? ESCAPE '\\' OR flavor_search LIKE ? ESCAPE '\\'
                 ORDER BY name
                 LIMIT ?
             ''', (f'%{key}%', f'%{key}%', limit)).fetchall()
@@ -1095,9 +1100,10 @@ class CardDatabase:
         """
         reader = getattr(self._pricing_readers, 'conn', None)
         if reader is None:
-            reader = sqlite3.connect(f'file:{self.db_file}?mode=ro', uri=True, check_same_thread=False, timeout=10.0)
-            reader.row_factory = sqlite3.Row
+            reader = storage.connect_readonly(self.db_file, timeout=10.0, check_same_thread=False)
             self._pricing_readers.conn = reader
+            with self._pricing_readers_lock:
+                self._pricing_reader_conns.append(reader)
         # fetchall: the statement ends here - a half-read one would keep this reader in an old snapshot (and hold back WAL
         # checkpoints) until its next query
         rows = reader.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchall()
@@ -1250,17 +1256,19 @@ class CardDatabase:
         order, order_params = 'name', []
         if text and search_key(text):
             # The card with exactly this name first, then names starting with it
-            order = '(name_search = ?) DESC, (name_search LIKE ?) DESC, name'
-            order_params = [search_key(text), search_key(text) + '%']
-            where.append('(name_search LIKE ? OR flavor_search LIKE ?)')
-            params += [f'%{search_key(text)}%'] * 2
+            key = search_key(text)
+            escaped = storage.escape_like(key)
+            order = "(name_search = ?) DESC, (name_search LIKE ? ESCAPE '\\') DESC, name"
+            order_params = [key, escaped + '%']
+            where.append("(name_search LIKE ? ESCAPE '\\' OR flavor_search LIKE ? ESCAPE '\\')")
+            params += [f'%{escaped}%'] * 2
         if type_text:
             for word in type_text.split():
-                where.append('type_line LIKE ?')
-                params.append(f'%{word}%')
+                where.append("type_line LIKE ? ESCAPE '\\'")
+                params.append(f'%{storage.escape_like(word)}%')
         if oracle_text:
-            where.append('oracle_text LIKE ?')
-            params.append(f'%{oracle_text}%')
+            where.append("oracle_text LIKE ? ESCAPE '\\'")
+            params.append(f'%{storage.escape_like(oracle_text)}%')
         if identity is not None:
             for color in 'WUBRG':
                 if color not in identity.upper():
@@ -1304,12 +1312,12 @@ class CardDatabase:
             keys = [search_key(name) for name in names]
             if not keys:
                 return [], False
-            where.append(f"name_search IN ({', '.join('?' * len(keys))})")
-            params += keys
+            where.append("name_search IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(keys))
         if exclude_names:
             keys = [search_key(name) for name in exclude_names]
-            where.append(f"name_search NOT IN ({', '.join('?' * len(keys))})")
-            params += keys
+            where.append("name_search NOT IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(keys))
         with self._lock:
             rows = self.conn.execute(
                 self._ONE_PER_NAME.format(where=' AND '.join(where)) + having + f' ORDER BY {order} LIMIT ? OFFSET ?',
@@ -1364,23 +1372,24 @@ class CardDatabase:
 
     def get_database_stats(self):
         """Get database statistics"""
-        cursor = self.conn.cursor()
+        with self._lock:
+            cursor = self.conn.cursor()
 
-        # Get total cards
-        try:
-            cursor.execute('SELECT COUNT(*) FROM cards')
-            result = cursor.fetchone()
-            total_cards = result[0] if result else 0
-        except Exception:
-            total_cards = 0
+            # Get total cards
+            try:
+                cursor.execute('SELECT COUNT(*) FROM cards')
+                result = cursor.fetchone()
+                total_cards = result[0] if result else 0
+            except Exception:
+                total_cards = 0
 
-        # Get cards with prices
-        try:
-            cursor.execute('SELECT COUNT(*) FROM cards WHERE COALESCE(price, price_foil, price_etched) IS NOT NULL')
-            result = cursor.fetchone()
-            cards_with_prices = result[0] if result else 0
-        except Exception:
-            cards_with_prices = 0
+            # Get cards with prices
+            try:
+                cursor.execute('SELECT COUNT(*) FROM cards WHERE COALESCE(price, price_foil, price_etched) IS NOT NULL')
+                result = cursor.fetchone()
+                cards_with_prices = result[0] if result else 0
+            except Exception:
+                cards_with_prices = 0
 
         return {
             'total_cards': total_cards,
@@ -1388,6 +1397,15 @@ class CardDatabase:
         }
 
     def close(self):
-        """Close database connection"""
-        if self.conn:
-            self.conn.close()
+        """Close database connection and any thread-local pricing readers"""
+        with self._pricing_readers_lock:
+            readers, self._pricing_reader_conns = self._pricing_reader_conns, []
+        for reader in readers:
+            try:
+                reader.close()
+            except sqlite3.Error:
+                pass
+        with self._lock:
+            if self.conn:
+                self.conn.close()
+                self.conn = None

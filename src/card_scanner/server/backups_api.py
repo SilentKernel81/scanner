@@ -55,6 +55,7 @@ def run_backup_schedule():
 
 
 @app.route('/api/backups/schedule', methods=['POST'])
+@guarded
 def set_backup_schedule():
     """How often automatic backups are made and how many are kept (JSON: 'every_hours', 'keep')"""
     data = request.get_json(silent=True) or {}

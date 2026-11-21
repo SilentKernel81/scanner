@@ -19,9 +19,18 @@ async function api(path, options = {}) {
     }
     try {
         const response = await fetch(path, options);
-        const data = await response.json();
-        if (data.success === false) {
-            notify(data.error || 'Request failed', 'error');
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (e) {
+            if (!response.ok) {
+                notify(`Request failed (HTTP ${response.status})`, 'error');
+                return null;
+            }
+            throw e;
+        }
+        if (!response.ok || data.success === false) {
+            notify(data.error || `Request failed (HTTP ${response.status})`, 'error');
             return null;
         }
         return data;
@@ -40,8 +49,9 @@ function recall(key, fallback) {
 }
 
 function manaHtml(cost) {
-    // "{2}{W}{U/B}" -> colored pips
-    return (cost || '').replace(/\{([^}]+)\}/g, (_, symbol) => {
+    // "{2}{W}{U/B}" -> colored pips (escape both brace contents and plain text outside braces)
+    return String(cost || '').replace(/\{([^}]+)\}|([^{]+)/g, (_, symbol, plain) => {
+        if (plain !== undefined) return escapeHtml(plain);
         // Hybrid symbols ("W/U") take the first color; numbers and X are neutral
         const color = [...'WUBRGC'].find(letter => symbol.includes(letter)) || 'N';
         const text = symbol.replace('/', '');

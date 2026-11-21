@@ -73,11 +73,16 @@ def decks(deck_id=None):
 
 def generate_frames(camera):
     """MJPEG stream of a camera's annotated live view (each new frame once; encoding is shared)"""
+    if not camera:
+        return
     last_id = -1
     while True:
-        frame_id, jpeg = camera.get_stream_jpeg() if camera else (-1, None)
-        if jpeg is None or frame_id == last_id:
-            time.sleep(0.01)
+        frame_id, jpeg = camera.get_stream_jpeg()
+        if jpeg is None:
+            time.sleep(0.05)
+            continue
+        if frame_id == last_id:
+            time.sleep(0.02)
             continue
         last_id = frame_id
         yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n'
@@ -112,8 +117,11 @@ def last_capture():
 @app.route('/video_feed')
 def video_feed():
     """Video streaming route"""
+    camera = desk().scanner
+    if not camera:
+        return Response(status=204)
     return Response(
-        generate_frames(desk().scanner),  # ?station= names the camera
+        generate_frames(camera),  # ?station= names the camera
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 

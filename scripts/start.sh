@@ -103,8 +103,8 @@ fi
 echo ""
 echo -e "${BLUE}Checking AI Configuration:${NC}"
 
-# Get provider from env or config
-CURRENT_PROVIDER="${VISION_AI_PROVIDER:-$(grep 'provider:' "$PROJECT_DIR/config.yaml" 2>/dev/null | awk '{print $2}' || echo 'gemini')}"
+# Get provider from env or config (vision_ai.provider, not ocr.provider)
+CURRENT_PROVIDER="${VISION_AI_PROVIDER:-$(awk '/^vision_ai:/{in_v=1;next} /^[^ ]/{in_v=0} in_v && /provider:/{print $2; exit}' "$PROJECT_DIR/config.yaml" 2>/dev/null || echo 'gemini')}"
 
 case "$CURRENT_PROVIDER" in
     gemini)

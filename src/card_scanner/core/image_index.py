@@ -379,7 +379,22 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             except requests.RequestException:
                 return None
             if answer.status_code in (429, 403):
-                pause(int(answer.headers.get('Retry-After', 0) or 0) or 60 * (attempt + 1))      # interruptible: the loop's first line then stops
+                retry_after = answer.headers.get('Retry-After', '')
+                delay = 0
+                if retry_after:
+                    try:
+                        delay = max(0, int(retry_after))
+                    except ValueError:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            from datetime import datetime, timezone
+                            when = parsedate_to_datetime(retry_after)
+                            if when.tzinfo is None:
+                                when = when.replace(tzinfo=timezone.utc)
+                            delay = max(0, int((when - datetime.now(timezone.utc)).total_seconds()))
+                        except (TypeError, ValueError):
+                            delay = 0
+                pause(delay or 60 * (attempt + 1))      # interruptible: the loop's first line then stops
                 continue
             return answer.content if answer.ok else None
         stopped.set()
@@ -387,7 +402,7 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
 
     def one(item):
         printing, address = item
-        if cancel is not None and cancel.is_set():
+        if stopped.is_set() or cancelled():
             stopped.set()                  # asked to stop: nothing more is fetched, and what is done is written below
             return printing, None
         try:
@@ -397,20 +412,29 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
         image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
         return printing, None if image is None else np.frombuffer(hash_card(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)), np.uint8)
 
-    new = skipped = 0
-    with ThreadPoolExecutor(workers) as pool:
-        for n, (printing, fingerprint) in enumerate(pool.map(one, todo), 1):
-            if fingerprint is None:
-                if not (cancel is not None and cancel.is_set()):      # one left undone on request is not "without a picture"
-                    skipped += 1
-            else:
-                have[printing] = fingerprint
-                new += 1
-            if progress is not None:
-                progress(n, len(todo))
-            if n % 5000 == 0:      # a checkpoint: a stopped or crashed run keeps what it did
-                write(directory, *_in_order(printings, have))
-                log(f"{n} of {len(todo)} done ({new} new, {skipped} without a picture)")
+    new = skipped = done = 0
+    chunk_size = max(workers * 16, 64)
+    pool = ThreadPoolExecutor(workers)
+    try:
+        for start in range(0, len(todo), chunk_size):
+            if stopped.is_set() or cancelled():
+                break
+            chunk = todo[start:start + chunk_size]
+            for printing, fingerprint in pool.map(one, chunk):
+                done += 1
+                if fingerprint is None:
+                    if not cancelled():      # one left undone on request is not "without a picture"
+                        skipped += 1
+                else:
+                    have[printing] = fingerprint
+                    new += 1
+                if progress is not None:
+                    progress(done, len(todo))
+                if done % 5000 == 0 and not stopped.is_set() and not cancelled():
+                    write(directory, *_in_order(printings, have))
+                    log(f"{done} of {len(todo)} done ({new} new, {skipped} without a picture)")
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
     ids, hashes = _in_order(printings, have)
     write(directory, ids, hashes)
     if cancel is not None and cancel.is_set():

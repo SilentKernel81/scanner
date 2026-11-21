@@ -16,12 +16,14 @@ from card_scanner.core import card_names, image_index, prices, shop_prices
 from card_scanner.server.state import (app, app_settings, arena_inventory, database, deck_store, inventory, maintenance_barrier, others,
                                       printing_check, scan_inventory, socketio)
 from card_scanner.server.logs import logger
-from card_scanner.server.lock import guarded
+from card_scanner.server.lock import guarded, guarded_event
 
 
 # Newer card data found by the update check: game id -> message (shown on the page)
 data_update_notices = {}
 data_updates_running = set()
+_data_updates_lock = threading.Lock()
+_names_lock = threading.Lock()
 # The last failure of a download that is being tried again (game id -> message); the pages say it
 data_update_errors = {}
 # Seconds to wait after each failure of the first download (the last is repeated): without card
@@ -38,9 +40,10 @@ def start_card_data_update(game, retry=False, on_done=None):
     person, or by the schedule, not repeated). on_done(ok, message): called once when the
     download has ended, either way (the schedule remembers how its own attempt ended).
     """
-    if game.id in data_updates_running:
-        return False
-    data_updates_running.add(game.id)
+    with _data_updates_lock:
+        if game.id in data_updates_running:
+            return False
+        data_updates_running.add(game.id)
 
     def finished(ok, message):
         # The caller's callback must never turn the end of a download into a crash of its thread
@@ -90,7 +93,8 @@ def start_card_data_update(game, retry=False, on_done=None):
                     logger.warning(f"{game.label} card data: trying again in {pause} s")
                     time.sleep(pause)
         finally:
-            data_updates_running.discard(game.id)
+            with _data_updates_lock:
+                data_updates_running.discard(game.id)
 
     threading.Thread(target=update_task, daemon=True).start()
     return True
@@ -304,33 +308,34 @@ def adopt_card_names():
     """
     if not database:
         return None   # no card data (yet): nothing it could rename - still owed
-    try:
-        counts = card_names.adopt(database.renamed_printings(), inventories=(inventory, scan_inventory, arena_inventory),
-                                  decks=deck_store, others=others)
-    except Exception as e:
-        counts = {'waiting': list(names_waiting), 'errors': [str(e)]}
-    changed = {key: value for key, value in counts.items() if key not in ('kept', 'waiting', 'errors') and value}
-    if changed:
-        logger.info(f"Card names adopted from the card data: {changed}")
-    if counts['waiting'] != names_waiting:
-        for item in counts['waiting']:
-            logger.warning(f"{item['name']} (entry {item['entry']}) keeps its name for now, not {item['new_name']}: "
-                           f"{item['why']} - tried again until it can change")
-        if names_waiting and not counts['waiting']:
-            logger.info("Card names: no entry is waiting for its new name any more")
-        names_waiting[:] = counts['waiting']
-    if counts['errors'] != _names_said['errors']:
-        if counts['errors']:
-            logger.error("The card data's new names could not all be given to what is kept by name - tried again at the "
-                         f"update schedule's next tick: {'; '.join(counts['errors'])}")
-        elif _names_said['errors']:
-            logger.info("Card names: the pass that failed before went through")
-        _names_said['errors'] = counts['errors']
-    if counts['errors']:
-        names_owed.set()
-    else:
+    with _names_lock:
+        # Clear before reading so a concurrent owe_card_names() (e.g. restore_backup) is never erased
         names_owed.clear()
-    return counts
+        try:
+            counts = card_names.adopt(database.renamed_printings(), inventories=(inventory, scan_inventory, arena_inventory),
+                                      decks=deck_store, others=others)
+        except Exception as e:
+            counts = {'waiting': list(names_waiting), 'errors': [str(e)]}
+        changed = {key: value for key, value in counts.items() if key not in ('kept', 'waiting', 'errors') and value}
+        if changed:
+            logger.info(f"Card names adopted from the card data: {changed}")
+        if counts['waiting'] != names_waiting:
+            for item in counts['waiting']:
+                logger.warning(f"{item['name']} (entry {item['entry']}) keeps its name for now, not {item['new_name']}: "
+                               f"{item['why']} - tried again until it can change")
+            if names_waiting and not counts['waiting']:
+                logger.info("Card names: no entry is waiting for its new name any more")
+            names_waiting[:] = counts['waiting']
+        if counts['errors'] != _names_said['errors']:
+            if counts['errors']:
+                logger.error("The card data's new names could not all be given to what is kept by name - tried again at the "
+                             f"update schedule's next tick: {'; '.join(counts['errors'])}")
+            elif _names_said['errors']:
+                logger.info("Card names: the pass that failed before went through")
+            _names_said['errors'] = counts['errors']
+        if counts['errors']:
+            names_owed.set()
+        return counts
 
 
 def retry_waiting_card_names():
@@ -528,6 +533,7 @@ def run_update_schedule():
 
 
 @socketio.on('update_database')
+@guarded_event
 def handle_update_database():
     """Download the active game's card data again"""
     logger.info("Database update request received")

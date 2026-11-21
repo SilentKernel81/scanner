@@ -381,8 +381,17 @@ def main():
             identification.stop()
         if scanner:
             scanner.cleanup()
-        if database:
-            database.close()
+        for store in (services.database, services.inventory, services.scan_inventory, services.arena_inventory,
+                      services.deck_store, services.review, services.pending, services.others):
+            if store:
+                try:
+                    close = getattr(store, 'close', None)
+                    if callable(close):
+                        close()
+                    elif getattr(store, 'conn', None):
+                        store.conn.close()
+                except Exception:
+                    logger.debug(f"Could not close {type(store).__name__}", exc_info=True)
         logger.info("Scanner stopped successfully")
         print("Scanner stopped.")
 

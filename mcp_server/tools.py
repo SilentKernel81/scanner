@@ -407,6 +407,31 @@ def _plan_changes(api, data, add=None, remove=None):
             users.setdefault(front(entry['name']), set()).add(deck_name)
 
     added, removed, problems = [], [], 0
+    # Apply removals first so moving copies between boards (e.g. main -> side) does not trip copy limits
+    for item in (remove or []):
+        name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
+        wanted_board = str(item['board']).lower() if item.get('board') else None
+        # The deck's entry it is taken from: on the board asked for, else the main deck before the side board
+        entries = [entry for entry in data['cards'] if front(entry['name']) == front(name)
+                   and (wanted_board is None or entry['board'] == wanted_board)]
+        entries.sort(key=lambda entry: {'main': 0, 'commander': 1, 'side': 2}.get(entry['board'], 3))
+        if not entries:
+            removed.append({'name': name, 'problem': 'not in the deck' + (f' ({wanted_board} board)' if wanted_board else '')})
+            problems += 1
+            continue
+        entry = entries[0]
+        taken = min(quantity, entry['quantity'])
+        removed.append({'name': entry['name'], 'copies_removed': taken,
+                        **({'board': entry['board']} if entry['board'] != 'main' else {})})
+        plan['remove'].append({'name': entry['name'], 'board': entry['board'], 'change': -taken})
+        # The copies played after it (a commander deck's side board is not played: nothing to count)
+        existing = playing.get(front(name))
+        if existing and not (commander_format and entry['board'] == 'side'):
+            new_quantity = existing['quantity'] - taken
+            if new_quantity > 0:
+                playing[front(name)] = {**existing, 'quantity': new_quantity}
+            else:
+                del playing[front(name)]
     for item in (add or []):
         name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
         report = {'name': name, 'quantity': quantity}
@@ -452,17 +477,20 @@ def _plan_changes(api, data, add=None, remove=None):
                                  f"{''.join(sorted(identity)) or 'colourless'}, the deck {''.join(sorted(commander_identity)) or 'colourless'}")
             problems += 1
         existing = playing.get(front(match['name']))
+        total = (existing['quantity'] if existing else 0) + quantity
         if existing:
             report['already_in_deck'] = existing['quantity']
-            # Commander formats play one copy of a card (basic lands excepted)
-            if commander_format and 'Basic' not in (match.get('type_line') or ''):
-                report['problem'] = report.get('problem', '') + ('; ' if report.get('problem') else '') \
-                    + 'already in the deck (a commander deck plays one copy of a card)'
+        if commander_format:
+            # Commander formats play one copy of a card (basic lands and "any number" cards excepted)
+            limit = copy_limit(match)
+            if total > 1 and limit is not None:
+                msg = ('already in the deck (a commander deck plays one copy of a card)' if existing
+                       else f'{total} copies: a commander deck plays one copy of a card')
+                report['problem'] = report.get('problem', '') + ('; ' if report.get('problem') else '') + msg
                 problems += 1
-        if not commander_format:
+        else:
             # A 60-card deck: at most 4 copies of a card (basic lands, and cards that say so, excepted)
             limit = copy_limit(match)
-            total = (existing['quantity'] if existing else 0) + quantity
             if limit and total > limit:
                 report['problem'] = report.get('problem', '') + ('; ' if report.get('problem') else '') \
                     + f'{total} copies: a {data["format"]} deck plays at most {limit}'
@@ -471,32 +499,8 @@ def _plan_changes(api, data, add=None, remove=None):
         if others:
             report['also_used_by'] = others[:4] + ([f'and {len(others) - 4} more'] if len(others) > 4 else [])
         playing[front(match['name'])] = {'name': match['name'], 'owned': match.get('owned', 0), 'card': match,
-                                         'quantity': (existing['quantity'] if existing else 0) + quantity}
+                                         'quantity': total}
         added.append(report)
-    for item in (remove or []):
-        name, quantity = str(item.get('name', '')).strip(), max(1, int(item.get('quantity') or 1))
-        wanted_board = str(item['board']).lower() if item.get('board') else None
-        # The deck's entry it is taken from: on the board asked for, else the main deck before the side board
-        entries = [entry for entry in data['cards'] if front(entry['name']) == front(name)
-                   and (wanted_board is None or entry['board'] == wanted_board)]
-        entries.sort(key=lambda entry: {'main': 0, 'commander': 1, 'side': 2}.get(entry['board'], 3))
-        if not entries:
-            removed.append({'name': name, 'problem': 'not in the deck' + (f' ({wanted_board} board)' if wanted_board else '')})
-            problems += 1
-            continue
-        entry = entries[0]
-        taken = min(quantity, entry['quantity'])
-        removed.append({'name': entry['name'], 'copies_removed': taken,
-                        **({'board': entry['board']} if entry['board'] != 'main' else {})})
-        plan['remove'].append({'name': entry['name'], 'board': entry['board'], 'change': -taken})
-        # The copies played after it (a commander deck's side board is not played: nothing to count)
-        existing = playing.get(front(name))
-        if existing and not (commander_format and entry['board'] == 'side'):
-            new_quantity = existing['quantity'] - taken
-            if new_quantity > 0:
-                playing[front(name)] = {**existing, 'quantity': new_quantity}
-            else:
-                del playing[front(name)]
     cards_after = sum(card['quantity'] for card in playing.values())
     # Copies the deck would need beyond what you own, after the change
     missing_after = sum(max(0, card['quantity'] - card['owned']) for card in playing.values())

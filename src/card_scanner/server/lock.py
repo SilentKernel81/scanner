@@ -27,6 +27,7 @@
 # listen on it. Forgotten password: delete data/settings_login.json and restart.
 # ============================================================================
 import functools
+import threading
 
 from flask import jsonify, request
 from flask_socketio import emit
@@ -43,11 +44,23 @@ LOCKED_MESSAGE = 'This needs the settings password'
 
 login = Login(file=Config.DATA_DIR / 'settings_login.json', variable='SCANNER_SETTINGS_PASSWORD',
               cookie=COOKIE, session_seconds=SESSION_SECONDS)
+_revoked_lock = threading.Lock()
+_revoked_sessions = set()
+
+
+def _is_revoked(token):
+    if not token:
+        return False
+    with _revoked_lock:
+        return token in _revoked_sessions
 
 
 def unlocked():
     """Whether the request in hand may do a guarded action: no password is set, or its cookie is a valid session"""
-    return not login.has_password() or login.valid_session(session_from(request.headers.get('Cookie'), COOKIE))
+    if not login.has_password():
+        return True
+    token = session_from(request.headers.get('Cookie'), COOKIE)
+    return not _is_revoked(token) and login.valid_session(token)
 
 
 def guarded(function):
@@ -103,7 +116,13 @@ def settings_unlock():
 
 @app.route('/api/settings_lock', methods=['DELETE'])
 def settings_lock():
-    """Lock again (this browser's cookie is removed)"""
+    """Lock again (this browser's cookie is removed and its session token revoked server-side)"""
+    token = session_from(request.headers.get('Cookie'), COOKIE)
+    if token:
+        with _revoked_lock:
+            if len(_revoked_sessions) > 1000:
+                _revoked_sessions.clear()
+            _revoked_sessions.add(token)
     return with_cookie({**status(), 'unlocked': not login.has_password()}, '')
 
 

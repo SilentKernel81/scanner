@@ -128,10 +128,15 @@ def latest(points):
     if not isinstance(points, dict) or not points:
         return None
     value = points[max(points)]
+    if value is None or isinstance(value, bool):
+        return None
     try:
-        return round(float(value), 2) if value is not None else None
+        amount = float(value)
     except (TypeError, ValueError):
         return None
+    if not (amount == amount) or amount < 0 or amount == float('inf'):
+        return None
+    return round(amount, 2)
 
 
 def shop_values(prices):
