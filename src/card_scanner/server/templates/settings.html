@@ -376,6 +376,14 @@
                             <button type="button" id="update-index" class="btn btn-block" data-guarded>Update the picture index</button>
                             <button type="button" id="stop-index" class="btn btn-block" hidden data-guarded>Stop (what is done is kept)</button>
                             <div class="hint" id="index-hint">Downloads only the pictures it lacks. The first build takes hours (about 12 GB); it can be stopped and goes on later.</div>
+                            <!-- Moving the index to another server or standalone program as one zip file (settings.js: downloadIndex, uploadIndex) -->
+                            <div class="settings-actions">
+                                <button type="button" class="btn btn-small" id="download-index" data-guarded>Download index file</button>
+                                <button type="button" class="btn btn-small" id="upload-index" data-guarded>Upload index file</button>
+                                <button type="button" class="btn btn-small" id="download-index-backup" hidden data-guarded>Download backup</button>
+                                <input type="file" id="upload-index-input" accept=".zip,application/zip" style="display: none;">
+                            </div>
+                            <div class="hint">Copies the index to another server or standalone program. An upload first keeps the current index as one backup: download it and upload that file to go back.</div>
                         </div>
                     </div>
 
@@ -551,6 +559,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=31"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=33"></script>
 </body>
 </html>

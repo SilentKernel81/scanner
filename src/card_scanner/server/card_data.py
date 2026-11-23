@@ -3,8 +3,9 @@
 # Card data: updating the card database from the web interface (and on a schedule), and the picture index.
 # ============================================================================
 from datetime import datetime, timedelta
-from flask import jsonify, request
+from flask import jsonify, request, send_file
 from flask_socketio import emit
+import tempfile
 import threading
 import time
 import uuid
@@ -600,7 +601,7 @@ def index_status():
         state = dict(index_state)
     return {'printings': len(pictured), 'indexed': indexed, 'missing': len(pictured) - indexed, 'built': index.built if index is not None else None,
             'running': state['running'], 'stopping': state['stopping'], 'done': state['done'], 'total': state['total'], 'error': state['error'],
-            'result': state['result']}
+            'result': state['result'], 'backup': image_index.backup_info(printing_check.index_folder) if printing_check else None}
 
 
 def start_index_update(on_done=None):
@@ -784,6 +785,69 @@ def image_index_stop():
     if running:
         index_cancel.set()
     return jsonify({'success': True, **index_status()})
+
+
+@app.route('/api/image_index/export')
+@guarded
+def image_index_export():
+    """The current picture index as one zip file, to import into another server or a standalone program (the phone has its own routes: stations_api.py)"""
+    if not printing_check:
+        return jsonify({'success': False, 'message': 'The printing check is not ready'}), 503
+    packed = tempfile.TemporaryFile()              # on disk: the index is packed once per download and never kept
+    try:
+        manifest = image_index.export_archive(printing_check.index_folder, packed)
+    except image_index.IndexFileError as e:
+        packed.close()
+        return jsonify({'success': False, 'message': str(e)}), 404
+    except Exception as e:
+        packed.close()
+        logger.exception(f"Picture index: packing it for download failed: {e}")
+        return jsonify({'success': False, 'message': f'The picture index could not be packed: {e}'}), 500
+    packed.seek(0)
+    day = str(manifest.get('built') or 'unknown')[:10]
+    return send_file(packed, mimetype='application/zip', as_attachment=True, download_name=f"picture-index-{manifest['count']}-{day}.zip")
+
+
+@app.route('/api/image_index/backup')
+@guarded
+def image_index_backup():
+    """The one backup an upload left (data/image_index_backup.zip), to upload again to go back. An upload replacing it meanwhile cannot tear it: it is renamed into place."""
+    if not printing_check:
+        return jsonify({'success': False, 'message': 'The printing check is not ready'}), 503
+    info = image_index.backup_info(printing_check.index_folder)
+    if info is None:
+        return jsonify({'success': False, 'message': 'There is no backup of the picture index yet'}), 404
+    day = str(info.get('built') or 'unknown')[:10]
+    return send_file(image_index.backup_path(printing_check.index_folder), mimetype='application/zip', as_attachment=True,
+                     download_name=f"picture-index-backup-{info['count']}-{day}.zip", max_age=0)
+
+
+@app.route('/api/image_index/import', methods=['POST'])
+@guarded
+def image_index_import():
+    """
+    Replace the picture index with an uploaded zip (multipart: file): checked first, the current index saved as the one backup
+    (data/image_index_backup.zip), then published as a new generation, which the readers and the phones follow by themselves.
+    """
+    if not printing_check:
+        return jsonify({'success': False, 'message': 'The printing check is not ready'}), 503
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'success': False, 'message': 'No file uploaded'}), 400
+    try:
+        imported = image_index.import_archive(printing_check.index_folder, file.stream)
+    except image_index.IndexFileError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    except image_index.BuildRunning:
+        return jsonify({'success': False, 'message': 'The picture index is being built: wait for it to finish or stop it, then upload again'}), 409
+    except Exception as e:
+        logger.exception(f"Picture index: the import failed: {e}")
+        return jsonify({'success': False, 'message': f'The picture index was not replaced: {e}'}), 500
+    if not imported['unchanged']:
+        with index_lock:
+            if not index_state['running']:         # how the last build ended no longer describes this index
+                index_state.update(error=None, result=None)
+    return jsonify({'success': True, 'imported': imported, **index_status()})
 
 
 # ============================================================================

@@ -445,7 +445,7 @@ class Routes(State):
         self.login.set_password('correct horse')
         answer = self.client.get('/api/image_index', base_url=BASE)
         self.assertEqual(answer.status_code, 200)
-        self.assertEqual(set(answer.get_json()), {'success', 'printings', 'indexed', 'missing', 'built', 'running', 'stopping', 'done', 'total', 'error', 'result'})
+        self.assertEqual(set(answer.get_json()), {'success', 'printings', 'indexed', 'missing', 'built', 'running', 'stopping', 'done', 'total', 'error', 'result', 'backup'})
 
     def test_starting_and_stopping_need_the_settings_password_when_there_is_one(self):
         self.login.set_password('correct horse')

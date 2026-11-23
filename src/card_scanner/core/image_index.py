@@ -47,6 +47,8 @@ import re
 import threading
 import time
 import uuid
+import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -255,12 +257,12 @@ def _generation_of(name):
     return (match.group(1) or match.group(2)) if match else None
 
 
-def write(directory, ids, hashes):
+def write(directory, ids, hashes, built=None):
     """
     Publishes an index as a new generation: its two files first (each whole or not at all, nothing points at them yet), then the manifest
     - one rename, the only step that publishes. Whatever happens before that rename leaves the previous generation current and whole.
     Afterwards everything except this generation and the one before it is removed: what an interrupted earlier build left, and the
-    files of the older format (hashes.bin, ids.txt, meta.json).
+    files of the older format (hashes.bin, ids.txt, meta.json). built: when the index was built, for one imported from elsewhere (default: now).
     """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -273,7 +275,7 @@ def write(directory, ids, hashes):
         generation = f'{int(time.time())}-{uuid.uuid4().hex[:8]}'        # unique even for two writes in one second
         _put(directory / f'hashes-{generation}.bin', hashes_bytes)
         _put(directory / f'ids-{generation}.txt', ids_bytes)
-        manifest = {'descriptor': DESCRIPTOR, 'count': len(ids), 'hash_bytes': HASH_BYTES, 'built': time.strftime('%Y-%m-%d %H:%M:%S'),
+        manifest = {'descriptor': DESCRIPTOR, 'count': len(ids), 'hash_bytes': HASH_BYTES, 'built': built or time.strftime('%Y-%m-%d %H:%M:%S'),
                     'generation': generation, 'hashes': f'hashes-{generation}.bin', 'ids': f'ids-{generation}.txt',
                     'hashes_sha256': hashlib.sha256(hashes_bytes).hexdigest(), 'ids_sha256': hashlib.sha256(ids_bytes).hexdigest()}
         _put(directory / MANIFEST, json.dumps(manifest, indent=1).encode())          # publishes
@@ -289,6 +291,157 @@ def write(directory, ids, hashes):
                     path.unlink()
                 except OSError:
                     pass                                                              # a reader may have it open: the next write clears it
+
+
+# ---------------------------------------------------------------------------------------------
+# Moving an index between servers: one zip file (Settings > Card data > Picture index)
+# ---------------------------------------------------------------------------------------------
+# The zip holds what the folder's current generation is: manifest.json and its two files. An import never unpacks it into the folder: the
+# contents are read into memory, checked, and published by `write` as a NEW generation - so the one-rename rule above holds for an import too, a
+# reader sees the old index or the new one, and a phone sees a new generation and downloads it. The one backup is a zip of the same format, so
+# putting it back is simply uploading it.
+
+ARCHIVE_LIMIT = 200 * 1024 * 1024       # the largest upload taken (a whole index is about 15 MB packed)
+MAX_PRINTINGS = 1_000_000               # far above the game's ~120,000: what a zip may claim before anything is unpacked (a "zip bomb")
+MAX_ID_BYTES = 64                       # a Scryfall id and its line end take 37 bytes
+MAX_MANIFEST_BYTES = 64 * 1024
+_PRINTING_ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')      # what Scryfall's ids look like
+
+
+class IndexFileError(Exception):
+    """An index file that cannot be used, or no index to pack. Its message is shown to the person."""
+
+
+def backup_path(directory):
+    """The ONE backup of an index folder: beside it (data/image_index_backup.zip), so that nothing that cleans up the folder can touch it"""
+    directory = Path(directory)
+    return directory.with_name(directory.name + '_backup.zip')
+
+
+def backup_info(directory):
+    """{'count', 'built'} of the one backup, read from the manifest inside it, or None when there is none or it is not a readable index file"""
+    try:
+        with zipfile.ZipFile(backup_path(directory)) as archive:
+            manifest = json.loads(archive.read(MANIFEST))
+        return {'count': int(manifest['count']), 'built': manifest.get('built')}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile, zlib.error):
+        return None
+
+
+def _current_files(directory):
+    """(manifest, ids bytes, hashes bytes) of the current generation, or None when there is none or it is not whole. The caller holds `_publication`."""
+    try:
+        manifest = json.loads((directory / MANIFEST).read_text())
+        names = manifest['ids'], manifest['hashes']
+        if any(Path(name).name != name for name in names):               # a file name, never a path (as `ImageIndex.load`)
+            return None
+        ids_bytes, hashes_bytes = (directory / names[0]).read_bytes(), (directory / names[1]).read_bytes()
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    count = len(ids_bytes.split())
+    if (manifest.get('descriptor') != DESCRIPTOR or manifest.get('count') != count or len(hashes_bytes) != count * HASH_BYTES
+            or manifest.get('ids_sha256') != hashlib.sha256(ids_bytes).hexdigest()
+            or manifest.get('hashes_sha256') != hashlib.sha256(hashes_bytes).hexdigest()):
+        return None
+    return manifest, ids_bytes, hashes_bytes
+
+
+def export_archive(directory, out):
+    """
+    Writes the current index as a zip to `out` (a binary file) and returns its manifest; IndexFileError when there is no whole index. Under the publication
+    lock from the first read to the last, so that a build publishing meanwhile cannot delete a file between the manifest and the zip.
+    """
+    directory = Path(directory)
+    with _publication(directory):
+        current = _current_files(directory)
+        if current is None:
+            raise IndexFileError('This server has no complete picture index to download')
+        manifest, ids_bytes, hashes_bytes = current
+        with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(MANIFEST, json.dumps(manifest, indent=1))
+            archive.writestr(manifest['ids'], ids_bytes)
+            # Fingerprints look like noise to a compressor: stored as they are, which saves the time and costs nothing
+            archive.writestr(manifest['hashes'], hashes_bytes, compress_type=zipfile.ZIP_STORED)
+    return manifest
+
+
+def _read_archive(stream):
+    """(ids, hashes bytes, built) of an uploaded zip, every check done before anything is changed; IndexFileError says what is wrong with it"""
+    try:
+        with zipfile.ZipFile(stream) as archive:
+            infos = archive.infolist()
+            sizes = {info.filename: info.file_size for info in infos}
+            # Sizes are checked from the zip's table BEFORE unpacking: a small file that unpacks to gigabytes is refused here
+            if len(sizes) != len(infos) or sizes.get(MANIFEST, MAX_MANIFEST_BYTES + 1) > MAX_MANIFEST_BYTES:
+                raise IndexFileError('This is not a picture index file')
+            manifest = json.loads(archive.read(MANIFEST))
+            if not isinstance(manifest, dict):
+                raise IndexFileError('This is not a picture index file')
+            if manifest.get('descriptor') != DESCRIPTOR or manifest.get('hash_bytes') != HASH_BYTES:
+                raise IndexFileError('This picture index was made by another version of the program and cannot be used here')
+            count, ids_name, hashes_name = manifest.get('count'), manifest.get('ids'), manifest.get('hashes')
+            if (isinstance(count, bool) or not isinstance(count, int) or not 0 < count <= MAX_PRINTINGS
+                    or set(sizes) != {MANIFEST, ids_name, hashes_name} or len(sizes) != 3
+                    or sizes[hashes_name] != count * HASH_BYTES or sizes[ids_name] > count * MAX_ID_BYTES):
+                raise IndexFileError('This picture index file is not complete')
+            ids_bytes, hashes_bytes = archive.read(ids_name), archive.read(hashes_name)     # the zip's own checksum is verified here
+    except IndexFileError:
+        raise
+    except (zipfile.BadZipFile, zlib.error, EOFError, ValueError, TypeError, KeyError, RuntimeError, NotImplementedError) as e:   # RuntimeError: encrypted
+        raise IndexFileError('This is not a picture index file, or it is damaged') from e
+    if (manifest.get('ids_sha256') != hashlib.sha256(ids_bytes).hexdigest()
+            or manifest.get('hashes_sha256') != hashlib.sha256(hashes_bytes).hexdigest()):
+        raise IndexFileError('This picture index file is damaged (its checksums do not match)')
+    try:
+        ids = ids_bytes.decode('ascii').split()
+    except UnicodeDecodeError as e:
+        raise IndexFileError('This picture index file is damaged') from e
+    if len(ids) != count or len(set(ids)) != count or not all(_PRINTING_ID.fullmatch(printing) for printing in ids):
+        raise IndexFileError('This picture index file is damaged (its list of printings is wrong)')
+    built = manifest.get('built')
+    return ids, hashes_bytes, built if isinstance(built, str) and len(built) <= 32 else None
+
+
+def _save_backup(directory):
+    """
+    The current index into the one backup file, replacing the last backup only once the new one is whole on disk. Returns its path, or None when there is no
+    whole index to keep (then an earlier backup is left alone: a broken index must never take the place of a good copy). A failure raises: nothing is replaced.
+    """
+    target = backup_path(directory)
+    temporary = target.with_name(target.name + '.tmp')
+    try:
+        with open(temporary, 'wb') as out:
+            export_archive(directory, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, target)
+    except IndexFileError:
+        temporary.unlink(missing_ok=True)
+        return None
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return target
+
+
+def import_archive(directory, stream):
+    """
+    Replaces the folder's index with the one in an uploaded zip: checked whole, the current index saved as the one backup, then published as a new generation.
+    IndexFileError: the file is refused; BuildRunning: a build is running (it would overwrite the import with what it holds in memory when it ends). In both,
+    and when the backup cannot be written, the index is unchanged. Returns {'count', 'built', 'unchanged', 'backup' (whether one was saved)}.
+    """
+    directory = Path(directory)
+    ids, hashes_bytes, built = _read_archive(stream)                     # before any lock: a bad file disturbs nothing
+    with _building(directory):                                           # no build may start or run until the new index is published
+        with _publication(directory):
+            current = _current_files(directory)
+        # The index already in use: nothing to do - and above all no backup, which would replace the good older copy with this same index
+        if current is not None and current[0]['hashes_sha256'] == hashlib.sha256(hashes_bytes).hexdigest() and current[1].split() == [i.encode() for i in ids]:
+            return {'count': len(ids), 'built': current[0].get('built'), 'unchanged': True, 'backup': False}
+        saved = _save_backup(directory)
+        write(directory, ids, [hashes_bytes[n * HASH_BYTES:(n + 1) * HASH_BYTES] for n in range(len(ids))], built=built)
+    logger.info(f"Image index imported: {len(ids)} printings, built {built}" + (f"; the previous one is in {saved.name}" if saved else '; there was no whole index to back up'))
+    return {'count': len(ids), 'built': built, 'unchanged': False, 'backup': saved is not None}
 
 
 # ---------------------------------------------------------------------------------------------
