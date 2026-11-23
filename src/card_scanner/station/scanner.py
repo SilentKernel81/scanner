@@ -196,6 +196,7 @@ class CardScanner:
         self.refocus_on_drop = float(self.settings.get('refocus_on_drop', Config.AUTO_CAPTURE_REFOCUS_ON_DROP) or 0)
         self.focus_probe_running = False  # Short focus probe between two drops
         self.focus_probe_direction = 1  # Probe up (+1) or down (-1) next
+        self.focus_check_due = False  # Scanning just started: check the focus on its first card, before capturing it
         self.disturbed_during_focus = False  # A card was dropped while the focus was moving
         self.last_focus_move = 0.0  # When the last sweep / probe ended
 
@@ -578,6 +579,10 @@ class CardScanner:
         """Start an auto-capture (the callback takes the image and identifies the card)"""
         # Double-check auto_capture_enabled before triggering (avoid race condition)
         if self.auto_capture_enabled and self.auto_capture_callback:
+            # The first card of a run: the lens is checked first. Nothing is marked as captured, so once the
+            # check ends the same card settles again and is captured sharp
+            if self._start_focus_check():
+                return
             self.log(f"Auto-capturing card (stable={self.stable_frames}/{self.required_stable_frames})", level="info")
             self.last_auto_capture_time = time.time()
             self.card_under_review = True  # Set flag to prevent further auto-captures
@@ -1866,11 +1871,15 @@ class CardScanner:
         Starting auto scanning starts the count of captures for the focus check from zero, so a
         session of N cards gets its check at refocus_every, 2 x refocus_every ... (stopping and
         starting again used to carry the count over: a second session of 12 cards, with a check
-        every 20, had it at its 8th). The focus itself is not touched.
+        every 20, had it at its 8th). The focus itself is not touched here: starting only asks for
+        a check on the first card (_start_focus_check), and stopping withdraws it.
         """
         enabled = bool(enabled)
         if enabled and not self._auto_capture_enabled:
             self.captures_since_focus = 0
+            self.focus_check_due = True
+        elif not enabled:
+            self.focus_check_due = False
         self._auto_capture_enabled = enabled
 
     def set_refocus_every(self, captures):
@@ -1972,6 +1981,76 @@ class CardScanner:
         except Exception as e:
             self.log(f"Focus probe failed: {e}", level="warning")
         finally:
+            self.last_focus_move = time.time()
+            self.focus_probe_running = False
+
+    def _start_focus_check(self):
+        """
+        Called when the first card of a scanning run is ready to be captured: start the focus check
+        and return True (the capture waits for it), or False when none is needed. Asked once per
+        run. Not for a camera whose lens cannot be set or that is on continuous autofocus, not with
+        the focus check switched off (refocus_every 0), and not right after a full sweep.
+        On 2026-11-23 a lock that was one step off blurred the first 10 cards of a run, until the
+        probe every 10 captures found it: 6 of them lost their foil marker.
+        """
+        if not getattr(self, 'focus_check_due', False):
+            return False
+        self.focus_check_due = False
+        if (not self.refocus_every or self.focus_locked_value is None or self.camera_type != 'usb' or not self.focus_range
+                or self.focus_sweep_running or self.focus_probe_running or time.time() - self.last_focus_sweep < 30):
+            return False
+        self.stable_frames = 0
+        self.captures_since_focus = 0                # this check counts as the run's first probe
+        self.focus_probe_running = True              # set here, so the next frame cannot capture before the thread runs
+        threading.Thread(target=self._run_focus_check, daemon=True, name="Focus-Check").start()
+        return True
+
+    def _run_focus_check(self, step=10, settle=0.5, margin=1.05, max_steps=3):
+        """
+        The check before a run's first capture. Unlike the probe between two drops, which tries one
+        direction per capture, nothing is waiting to be released here, so it tries BOTH directions
+        and follows an improvement up to max_steps positions. The lens ends on the sharpest position
+        found; a card moved meanwhile spoils the comparison, and the lens goes back where it was.
+        """
+        start = self.focus_locked_value
+        try:
+            low, high = self.focus_range
+            self.disturbed_during_focus = False
+            best, best_score = start, self._measure_focus_sharpness()
+            first = self.focus_probe_direction
+            direction_found = None
+            for direction in (first, -first):
+                for _ in range(max_steps):
+                    probe = best + direction * step
+                    if not low <= probe <= high:
+                        break
+                    self._move_focus(probe, approach=15)     # from below, as always: the lens has play
+                    time.sleep(settle)
+                    score = self._measure_focus_sharpness()
+                    if self.disturbed_during_focus or score <= best_score * margin:
+                        break
+                    best, best_score, direction_found = probe, score, direction
+                if direction_found is not None or self.disturbed_during_focus:
+                    break                                    # sharper this way: the other way need not be tried
+            target = start if self.disturbed_during_focus else best
+            self._move_focus(target, approach=15)
+            time.sleep(settle)                               # still "running": no capture of a lens on its way
+            if target != start:
+                self.focus_locked_value = target
+                self.settings.set('focus_value', target)
+                self.focus_probe_direction = direction_found
+                self.log(f"Focus checked before the first card: {start} -> {target}")
+            else:
+                logger.info(f"Focus check before the first card: {start} kept"
+                            + (" (the card moved meanwhile)" if self.disturbed_during_focus else ""))
+        except Exception as e:
+            self.log(f"Focus check failed: {e}", level="warning")
+            try:
+                self._move_focus(start, approach=15)         # never left at a position that was only being tried
+            except Exception:
+                pass
+        finally:
+            self.stable_frames = 0                           # frames counted while the lens moved say nothing
             self.last_focus_move = time.time()
             self.focus_probe_running = False
 
