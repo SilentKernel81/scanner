@@ -204,6 +204,8 @@ This one was sent back from the collection.*
 - **Import and export:** the app's own CSV, Moxfield (import and export), and ManaBox
   (import - written from the format's known layout, **never tried on a real ManaBox file**).
   Exports can be limited to what is ticked or filtered.
+- **A support file** (since 2026-11-23): Settings > Server shows what it would hold, then downloads one zip of plain text (build, system, safe settings, cameras, database row counts, the newest 2 MB of each log) for the person to read and send themselves. `app.py --support-bundle` makes it when the server cannot start. Keys, passwords, home folders, network addresses and the computer's name are removed; card names, camera names and what was read from the cards stay. Nothing is ever sent by the program. Tried 2026-11-23 on a copy of a real standalone's data (no key, address or home path left) and in a headless browser, with a broken `config.yaml`, and beside a running server. Never tried from the AppImage or a Docker image; a remote station's log is not in it yet.
+- **Errors reach a file** (since 2026-11-23): a route that fails (`app.log`), a library's warning (`errors.log`), an uncaught exception or native crash (`crash-server.log`, `crash-station.log`), and each station's own log (`station.log`, until then only on its console). Every start logs which build it is. A Docker image built from a clone says "unknown build": only a `git archive` export and the AppImage carry the stamp.
 - **Backups** of the collection, the scanned cards and the decks: automatic, on demand,
   restored, downloaded, uploaded, plus a full snapshot of every database file and picture.
   Restoring one first makes a backup of what is there.

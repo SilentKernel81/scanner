@@ -457,6 +457,15 @@ PROGRAM_DOCUMENTATION.md (Stations) and INSTALL.md; **(automated)** is in `tests
 | ONE-03 | P2 H | `./scripts/start.sh --no-station`; `venv/bin/python app.py` with `camera.type: usb` in `config.yaml` and a webcam plugged in. | Only the server starts; it opens no camera whatever `camera.type` says (the webcam's light stays off). **done** for `camera.type: auto` without a webcam |
 | SET-10 | P1 H | Pi camera in the container (`deploy/docker-compose.client-pi.yml`): a session of cards dropped onto a pile, with identical copies in a row and cards landing against the box walls. | Every card captured once, none waiting more than a few seconds; the Pi's temperature on the setup page stays under 80 °C. Not yet run from the container. |
 
+## 17. Logs and the support file
+
+| ID | Priority / type | Steps | Expected |
+|---|---|---|---|
+| SUP-01 **(automated)** | P0 I | `tests/test_support.py`: made-up keys, addresses, names and logs; a damaged database; a secret that survives. | No secret, address, home folder or unlisted setting in the file; card names intact; a surviving secret means no file. |
+| SUP-02 | P0 H | On a test install, Settings > Server > Support file: see what it holds, download it, open each file. | The list matches the zip; nothing private; with a settings password both steps ask for it. |
+| SUP-03 | P1 I | Break `config.yaml`, run `app.py --support-bundle` (AppImage: with the same option). | A file in `data/support/`, with the logs that explain the failure. |
+| SUP-04 | P1 H | Run a station from the AppImage and from a Pi image. | `data/logs/station.log` fills; a station's startup line says its build. |
+
 ## Suggested execution order and automation
 
 1. **Smoke:** BOOT-01, STN-01, CAM-01, SCAN-01, READ-12, SCAN-08, STN-02, REVIEW-03, TRANSFER-02, STN-12, INV-04, IO-01, DECK-01, BACKUP-03.

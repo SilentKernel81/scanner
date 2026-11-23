@@ -96,9 +96,9 @@ program a module belongs to. Module names are written bare below - this says whe
 
 | Folder | Modules |
 |---|---|
-| `card_scanner/` itself (both programs) | `paths.py`, `config.py`, `config_loader.py`, `settings.py` |
+| `card_scanner/` itself (both programs) | `paths.py`, `config.py`, `config_loader.py`, `settings.py`, `diagnostics.py` (+ `build_stamp.txt`) |
 | `station/` (a camera station: all of it) | `station_client.py`, `station_setup.py` + `station_setup.html`, `station_login.py`, `scanner.py`, `object_detector.py` |
-| `core/` (no web app, no camera) | `identification.py`, `card_ocr.py`, `card_identifier.py`, `prompts.py`, `api_keys.py`; `database.py`, `card_search.py`, `setup_database.py`; `inventory.py`, `decks.py`, `trades.py`, `arena.py`, `backups.py`, `storage.py`, `pending.py`, `review.py`, `cleanup.py`; `stations.py`, `remote_scanner.py`, `recommendations.py`, `frames.py` (camera frames behind captures, training data), `card_back.py` (is a capture a card's back) |
+| `core/` (no web app, no camera) | `identification.py`, `card_ocr.py`, `card_identifier.py`, `prompts.py`, `api_keys.py`; `database.py`, `card_search.py`, `setup_database.py`; `inventory.py`, `decks.py`, `trades.py`, `arena.py`, `backups.py`, `storage.py`, `pending.py`, `review.py`, `cleanup.py`; `stations.py`, `remote_scanner.py`, `recommendations.py`, `frames.py` (camera frames behind captures, training data), `card_back.py` (is a capture a card's back), `support.py` (the support file) |
 | `server/` (the web app) | the `server/...` modules below; its pages in `server/templates/`, `server/static/` (written `templates/...`, `static/...` below) |
 | `games/` | `base.py`, `mtg.py`, `mtg_decks.py` |
 
@@ -194,11 +194,11 @@ even when working from elsewhere.
   the scripts import by the full name (`from card_scanner.config import Config`). The
   project is not pip-installed (see `pyproject.toml` for why); `requirements*.txt` are the
   lists of libraries.
-- **Who may import whom is a test** (`tests/test_layout.py`): `station/` and the four shared
+- **Who may import whom is a test** (`tests/test_layout.py`): `station/` and the five shared
   modules import only each other; `core/` and `games/` import nothing of `server/` or
   `station/`; no relative imports; no import by a bare old name (`import inventory`). The
   `__init__.py` of the package, of `station/` and of `core/` must stay empty of code - a
-  station's image holds `station/` and the shared four and nothing else, so one import of
+  station's image holds `station/` and the shared five and nothing else, so one import of
   `core/` there and no station starts. A new module goes into the folder of the program it
   belongs to, and its name into that folder's set in the test (`SHARED` / `STATION` / `CORE`).
 - **Changing the server without changing what it does** (moving code, renaming inside):
@@ -211,7 +211,7 @@ even when working from elsewhere.
   Don't add a "local camera" branch back to the server. The client must not import server
   modules (`database`, `inventory`, `identification`, Flask) - the layout test refuses it -
   and its images copy `station.py`, `config.yaml`, the folder `card_scanner/station/` and
-  the four shared modules by name: a new module in `station/` needs nothing, a new *shared*
+  the five shared modules by name: a new module in `station/` needs nothing, a new *shared*
   one must be added to the `COPY` lines of the `client` and `client-pi` targets (both, kept
   equal). After building an image,
   `docker run --rm --entrypoint python <image> -c "import card_scanner.station.station_client"`
@@ -352,7 +352,7 @@ even when working from elsewhere.
   from scanning code paths. The cache is `data/web_cache.db`: disposable, bounded, in no backup -
   nothing that must be kept goes into it.
 
-**Logs**: on the server `data/logs/app.log` (also every station's scanner lines), `ai.log`,
+**Logs**: on the server `data/logs/app.log` (also every station's scanner lines, Flask's route errors, backups, clean-up), `errors.log` (libraries' warnings and errors), `crash-server.log`, `ai.log`,
 `database.log`, `scanned_cards.log`, `ocr.log`, `printing_check.jsonl` (the shadow check), `reading.jsonl` (the reading log: `core/reading/record.py`, `scripts/reading_report.py`); `requests.log` only with Debug mode on. A station logs to its console
-(`docker compose -f deploy/docker-compose.client.yml logs`) - only there: why a card waits ("Waiting
-N s: ..."), focus probes and saved debug frames.
+(`docker compose -f deploy/docker-compose.client.yml logs`) and its own `data/logs/station.log` (crashes: `crash-station.log`) - only there: why a card waits ("Waiting
+N s: ..."), focus probes and saved debug frames. **The support file** (`core/support.py`, Settings > Server, `app.py --support-bundle`) takes only what it names and cleans it: a new log, setting or table is not in it until added to its lists.

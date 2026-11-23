@@ -62,6 +62,10 @@ step "The app"
 (cd "$ROOT" && git ls-files --cached --others --exclude-standard -- \
     app.py station.py config.yaml LICENSE src \
     | while read -r file; do [ -f "$file" ] && cp --parents "$file" "$APP/"; done)
+# Which build this is (card_scanner/diagnostics.py: build_info): the program has no .git to ask
+stamp="$(git -C "$ROOT" log -1 --format='%H %T %cI')"
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || stamp="$stamp modified"
+echo "$stamp" > "$APP/src/card_scanner/build_stamp.txt"
 "$PYTHON" -m compileall -q "$APP"
 
 step "Node.js and light-ocr"

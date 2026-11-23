@@ -931,8 +931,8 @@ async function loadIndex() {
 // Moving the index between servers as one zip file (core/image_index.py: export_archive, import_archive).
 // The download goes through fetch rather than a plain link: when the server refuses it (the settings password, no index), a link would save
 // the error's JSON as if it were the index, and here the person is told instead.
-async function downloadIndex(button, address) {
-    // The index itself or its backup: the same steps, and each button keeps its own label
+async function downloadFile(button, address, fallbackName = 'picture-index.zip', failed = 'The picture index could not be downloaded') {
+    // The index, its backup or a support file: the same steps, and each button keeps its own label
     const label = button.textContent;
     button.disabled = true;
     button.textContent = 'Preparing...';
@@ -940,15 +940,15 @@ async function downloadIndex(button, address) {
         const response = await fetch(address);
         if (!response.ok) {
             const answer = await response.json().catch(() => ({}));
-            notify(answer.error || answer.message || 'The picture index could not be downloaded', 'error');
+            notify(answer.error || answer.message || failed, 'error');
             return;
         }
         const blob = await response.blob();
-        // The server names the file (how many printings, the day it was built)
+        // The server names the file
         const named = /filename="?([^";]+)"?/.exec(response.headers.get('Content-Disposition') || '');
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = named ? named[1] : 'picture-index.zip';
+        link.download = named ? named[1] : fallbackName;
         link.click();
         setTimeout(() => URL.revokeObjectURL(link.href), 10000);   // after the browser has taken the file
     } catch (error) {
@@ -957,6 +957,15 @@ async function downloadIndex(button, address) {
         button.disabled = false;
         button.textContent = label;
     }
+}
+
+// The support file (core/support.py): first what it would hold, then the file. The person sends it themselves - nothing here sends anything
+async function previewSupport() {
+    const data = await api('/api/support/preview');
+    if (!data) return;
+    const size = bytes => bytes === null ? '' : ` <span class="idea-meta">${bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`}</span>`;
+    $('support-files').innerHTML = data.files.map(file => `<div>${escapeHtml(file.name)}${size(file.bytes)}</div>`).join('');
+    $('support-review').hidden = false;
 }
 
 async function uploadIndex(file) {
@@ -1198,8 +1207,11 @@ function bindData() {
         const state = await api('/api/image_index/stop', {method: 'POST', body: {}});
         if (state) showIndex(state);
     });
-    $('download-index').addEventListener('click', event => downloadIndex(event.currentTarget, '/api/image_index/export'));
-    $('download-index-backup').addEventListener('click', event => downloadIndex(event.currentTarget, '/api/image_index/backup'));
+    $('download-index').addEventListener('click', event => downloadFile(event.currentTarget, '/api/image_index/export'));
+    $('download-index-backup').addEventListener('click', event => downloadFile(event.currentTarget, '/api/image_index/backup'));
+    $('support-prepare').addEventListener('click', previewSupport);
+    $('support-download').addEventListener('click', event =>
+        downloadFile(event.currentTarget, '/api/support/bundle', 'card-scanner-support.zip', 'The support file could not be made'));
     $('upload-index').addEventListener('click', () => $('upload-index-input').click());
     $('upload-index-input').addEventListener('change', event => {
         const file = event.target.files[0];

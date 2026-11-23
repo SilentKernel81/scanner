@@ -540,6 +540,18 @@
                         </details>
                     </div>
 
+                    <!-- The support file: shown first, downloaded by the person, sent by them (settings.js: previewSupport; core/support.py) -->
+                    <div class="settings-card">
+                        <h3>Support file</h3>
+                        <p class="hint">If something goes wrong, this collects what is needed to find out why into one file you can read and send to whoever helps you. Nothing is sent by the program.</p>
+                        <button type="button" class="btn btn-block" id="support-prepare" data-guarded>See what it holds</button>
+                        <div id="support-review" hidden>
+                            <div class="storage-usage" id="support-files"></div>
+                            <p class="hint">Keys, passwords, your home folder, network addresses and this computer's name are removed. <strong>Card names, camera names and what was read from your cards stay</strong>, so the file shows part of your collection.</p>
+                            <button type="button" class="btn btn-block btn-primary" id="support-download" data-guarded>Download support file</button>
+                        </div>
+                    </div>
+
                     <details class="settings-advanced">
                         <summary>Troubleshooting</summary>
                         <label class="switch-row">
@@ -559,6 +571,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=33"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=34"></script>
 </body>
 </html>

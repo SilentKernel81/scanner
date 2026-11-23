@@ -15,7 +15,7 @@ The code is one package, card_scanner, sorted by which program a module belongs 
 
 Three rules follow from that, and each used to be kept by nothing but attention:
 
-  1. A station stands alone. Its image holds station/ and the four shared modules, not core/
+  1. A station stands alone. Its image holds station/ and the five shared modules, not core/
      or server/ - an import of `inventory` in a station module would be found by a station
      that does not start.
   2. core/ knows neither the web app nor the camera (no import from server/ or station/).
@@ -44,12 +44,12 @@ PACKAGED = (SRC / PACKAGE).is_dir()          # False: the layout before the move
 sys.path.insert(0, str(SRC))
 
 # The modules by where they belong - their names never changed, only their folder
-SHARED = {'paths', 'config', 'config_loader', 'settings'}
+SHARED = {'paths', 'config', 'config_loader', 'settings', 'diagnostics'}
 STATION = {'station_client', 'station_setup', 'station_login', 'scanner', 'object_detector', 'corner_net', 'dropper'}
 CORE = {'identification', 'prices', 'shop_prices', 'card_ocr', 'foil_marker', 'image_index', 'printing_check', 'card_identifier', 'prompts', 'api_keys',
         'database', 'card_search', 'setup_database',
         'inventory', 'decks', 'trades', 'others', 'backups', 'storage', 'pending', 'review', 'cleanup',
-        'stations', 'remote_scanner', 'recommendations', 'arena', 'frames', 'record', 'report', 'capture', 'card_back'}
+        'stations', 'remote_scanner', 'recommendations', 'arena', 'frames', 'record', 'report', 'capture', 'card_back', 'support'}
 # What an import began with before the package existed: any of these at the start of an
 # import now is one the move forgot
 OLD_NAMES = SHARED | STATION | CORE | {'server', 'games'}

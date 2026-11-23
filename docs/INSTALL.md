@@ -446,3 +446,15 @@ switch to a local model.
 
 **The server doesn't start** - `docker compose logs` shows why. With an empty `data/` it
 first downloads the card data; without internet it stops there.
+
+## If something goes wrong: the support file
+
+Settings > Server > Support file shows what the file would hold and downloads it: plain text you can read before sending it to whoever helps you. The program sends nothing by itself. When the pages will not open, make it from the command line. It is written to `data/support/` (`~/.mtg-scanner/data/support/` for the desktop program):
+
+```bash
+./Card_Scanner-x86_64.AppImage --support-bundle                        # the desktop program
+docker exec mtg-scanner-server python app.py --support-bundle          # the Docker server
+venv/bin/python app.py --support-bundle                                # from a checkout
+```
+
+Keys, passwords, home folders, network addresses and the computer's name are removed. Card names, camera names and what was read from your cards stay, so the file shows part of your collection.
