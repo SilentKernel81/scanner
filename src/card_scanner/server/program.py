@@ -36,6 +36,8 @@ def parse_arguments(argv=None):
     parser.add_argument('--no-browser', action='store_true', help="with --app: don't open the browser")
     parser.add_argument('--no-station', action='store_true', help="with --app: don't start a camera station")
     parser.add_argument('--quit', action='store_true', help='stop the program started with --app')
+    # (app.py acts on this one before anything of the server is imported, so that it works when the server cannot start; named here for --help)
+    parser.add_argument('--support-bundle', action='store_true', help='make a support file in data/support/ and exit: nothing is sent')
     return parser.parse_args(argv)
 
 

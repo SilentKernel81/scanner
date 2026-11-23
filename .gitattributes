@@ -1,0 +1,2 @@
+# `git archive` writes the commit into this file (card_scanner/diagnostics.py: build_info), so a deployed copy without .git still knows its build
+src/card_scanner/build_stamp.txt export-subst

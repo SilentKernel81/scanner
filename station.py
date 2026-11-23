@@ -23,6 +23,11 @@ SRC = str(Path(__file__).resolve().parent / 'src')
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# Before the station is imported: what fails while it loads goes to data/logs/crash-station.log, not only to a console nobody may be watching
+if __name__ == "__main__":
+    from card_scanner import diagnostics
+    diagnostics.install_crash_capture('station')
+
 from card_scanner.station.station_client import main  # noqa: E402 - after the path is set
 
 if __name__ == "__main__":

@@ -57,6 +57,23 @@ def setup_logging():
     app_logger.addHandler(app_file_handler)
     app_logger.addHandler(console_handler)
 
+    # Loggers of the program that go by other names: Flask's own - named after the app, 'app', which is where the traceback of a route that fails goes - and
+    # the backups' and clean-up's. Without a file of their own those lines reached only a console, which a desktop program does not show. They share app.log's
+    # one handler: two handlers on one file would each rotate it under the other
+    for name in ('app', 'backups', 'cleanup'):
+        other = logging.getLogger(name)
+        other.setLevel(logging.INFO)
+        other.propagate = False
+        other.addHandler(app_file_handler)
+        other.addHandler(console_handler)
+
+    # Everything else that warns - the libraries (Socket.IO, Werkzeug, ...) - in a file of its own. WARNING and up only: debug mode turns Werkzeug's
+    # request lines on, and they reach the root logger too
+    errors_file_handler = RotatingFileHandler(log_dir / 'errors.log', maxBytes=5*1024*1024, backupCount=2, delay=True)
+    errors_file_handler.setLevel(logging.WARNING)
+    errors_file_handler.setFormatter(detailed_formatter)
+    root_logger.addHandler(errors_file_handler)
+
     # ========================================================================
     # AI LOGGER - Vision AI identification, model changes, API calls
     # ========================================================================
@@ -120,7 +137,7 @@ def setup_logging():
     app_logger.info("="*80)
     app_logger.info("Logging initialized - Multi-file configuration")
     app_logger.info(f"Log directory: {log_dir}")
-    app_logger.info("Log files: app.log, ai.log, database.log, scanned_cards.log")
+    app_logger.info("Log files: app.log, errors.log, ai.log, database.log, scanned_cards.log")
     app_logger.info("="*80)
 
     return app_logger

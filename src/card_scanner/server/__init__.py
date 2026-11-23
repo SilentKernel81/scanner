@@ -18,6 +18,7 @@ they build on each other - a module imports only from those above it:
     pages            the pages, the live view, thumbnails, the header's numbers
     decks_api, deck_ideas_api, inventory_api, trades_api, others_api, backups_api      the collection page
                      (others_api: other people's collections to trade with or buy from, the buy list)
+    support_api      the support file (core/support.py): what it would hold, and the file
     arena_api        the digital collection (MTG Arena): importing an export (after inventory_api)
     stations_api     the stations' routes; a station's capture arriving
     scan_events, settings_events, ai_events                                the scanner page

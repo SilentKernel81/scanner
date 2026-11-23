@@ -24,6 +24,7 @@ import argparse
 import contextlib
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import queue
 import re
@@ -42,6 +43,7 @@ import socketio
 from card_scanner.station import station_setup
 from card_scanner.station import dropper as dropper_module
 from card_scanner.station.dropper import Dropper
+from card_scanner import diagnostics
 from card_scanner.config import Config
 
 NAMESPACE = '/station'
@@ -55,6 +57,8 @@ METHODS = ('set_rotation', 'set_refocus_every', 'set_refocus_on_drop', 'set_fixe
 SETTABLE = ('fast_scan_mode', 'required_stable_frames', 'auto_capture_delay', 'debug_trace_enabled',
             'auto_capture_enabled', 'card_under_review', 'capture_pending', 'stable_frames')
 
+STATION_LOG_BYTES = 2 * 1024 * 1024
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('station')
 # CardScanner's lines for the page are logged here (send_log), not a second time by its own
@@ -65,6 +69,26 @@ scanner_console = logging.StreamHandler()
 scanner_console.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S'))
 scanner_console.addFilter(lambda record: record.funcName != 'log')
 logging.getLogger('scanner').addHandler(scanner_console)
+
+
+def enable_log_file():
+    """
+    What this station logs also goes to data/logs/station.log: until now only to a console, which a desktop program, or a station started at boot, shows nobody.
+    A file of its own, because a server on the same machine shares the data folder, and two processes must not rotate one file. Small, as a Pi writes to an SD card.
+    Called by main(), never on import. A station that cannot write there still runs.
+    """
+    try:
+        log_dir = Config.DATA_DIR / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(log_dir / 'station.log', maxBytes=STATION_LOG_BYTES, backupCount=2)
+    except OSError as e:
+        logger.warning(f"No log file for this station: {e}")
+        return
+    handler.setFormatter(logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    # (the scanner's lines for the page arrive through send_log too: as on the console, once)
+    handler.addFilter(lambda record: not (record.name == 'scanner' and record.funcName == 'log'))
+    logging.getLogger().addHandler(handler)
+    logging.getLogger('scanner').addHandler(handler)        # it does not propagate (above)
 
 
 class ServerSettings:
@@ -1027,6 +1051,9 @@ def main():
     signal.signal(signal.SIGTERM, lambda number, frame: signal.default_int_handler(signal.SIGINT, frame))
 
     Config.create_directories()  # data/ must exist before the saved settings are read
+    enable_log_file()
+    diagnostics.install_crash_capture('station')
+    logger.info(f"Build: {diagnostics.describe_build()}")
     values, fixed = station_setup.resolve({'server': args.server, 'id': args.id, 'name': args.name, 'token': args.token},
                                           station_setup.load(), host)
     if not re.fullmatch(station_setup.ID_PATTERN, values['id']):

@@ -19,6 +19,16 @@ SRC = str(Path(__file__).resolve().parent / 'src')
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# The support file is made BEFORE the server is imported: it is needed most when the server cannot start (a broken config.yaml, a library that fails to load)
+if __name__ == "__main__" and '--support-bundle' in sys.argv:
+    from card_scanner.core.support import command_line
+    sys.exit(command_line())
+
+# Before the server is imported: a library or setting that fails while it loads is a crash too, and the desktop program shows nobody its console
+if __name__ == "__main__" and '--quit' not in sys.argv:
+    from card_scanner import diagnostics
+    diagnostics.install_crash_capture('server')
+
 from card_scanner.server.startup import main  # noqa: E402 - after the path is set
 from card_scanner.server.state import app, socketio  # noqa: E402,F401 - for whoever imports this module
 

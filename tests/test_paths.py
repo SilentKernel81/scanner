@@ -44,6 +44,16 @@ class DataAndSettings(unittest.TestCase):
         # The card database is a file inside data/ (its name comes from config.yaml)
         self.assertEqual(Config.DATABASE_FILE.parent, TOP / 'data')
 
+    def test_the_support_file_and_crash_logs_use_the_same_data_folder(self):
+        # core/support.py cannot import Config (it must work when config.yaml is broken), so its copy of the path is checked here
+        from card_scanner import diagnostics
+        from card_scanner.config import Config
+        from card_scanner.core import support
+        self.assertEqual(support.DATA_DIR, Config.DATA_DIR)
+        self.assertEqual(support.LOG_DIR, Config.DATA_DIR / 'logs')
+        self.assertEqual(diagnostics.LOG_DIR, Config.DATA_DIR / 'logs')
+        self.assertTrue(diagnostics.STAMP_FILE.is_file())
+
     def test_config_yaml_is_read_from_the_top_folder(self):
         # config.py's values all come from this one loader: the file it opened is the question
         from card_scanner.config_loader import get_config_loader

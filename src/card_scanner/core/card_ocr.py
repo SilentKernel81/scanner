@@ -22,7 +22,10 @@ import time
 import cv2
 
 from card_scanner.config import Config
+from card_scanner.diagnostics import bound_log
 from card_scanner.paths import TOP, tool
+
+OCR_LOG_BYTES = 5 * 1024 * 1024
 
 # OCR is logged with the AI: both are "what was read from the card"
 logger = logging.getLogger('ai')
@@ -217,6 +220,8 @@ class CardOcr:
         log_dir = Config.DATA_DIR / 'logs'
         log_dir.mkdir(parents=True, exist_ok=True)
         try:
+            # The reader's stderr goes straight into this file, so no logging handler can rotate it: it is bounded here, at each start of the reader
+            bound_log(log_dir / 'ocr.log', OCR_LOG_BYTES)
             with open(log_dir / 'ocr.log', 'ab') as errors:
                 self.process = subprocess.Popen(
                     [tool('node'), 'server.mjs', Config.OCR_PROVIDER], cwd=str(OCR_DIR), env=reader_environment(),

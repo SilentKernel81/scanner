@@ -59,13 +59,14 @@ RUN pip install --no-cache-dir -r requirements-client.txt
 
 # Only what the station runs, laid out as in the project: the launcher and config.yaml in
 # /app - where paths.py says the top folder is, and where the volumes put data/ and
-# station_captures/ - and of the package card_scanner its station/ folder and the four
+# station_captures/ - and of the package card_scanner its station/ folder and the five
 # modules both programs use. Not core/, server/ or games/: a station imports none of them
 # (tests/test_layout.py). A new module in station/ is in the image without a change here;
 # a new SHARED module must be named in this list AND in the client-pi target below.
 COPY station.py config.yaml ./
 COPY src/card_scanner/__init__.py src/card_scanner/paths.py src/card_scanner/config.py \
-     src/card_scanner/config_loader.py src/card_scanner/settings.py src/card_scanner/
+     src/card_scanner/config_loader.py src/card_scanner/settings.py \
+     src/card_scanner/diagnostics.py src/card_scanner/build_stamp.txt src/card_scanner/
 COPY src/card_scanner/station src/card_scanner/station
 
 # The station's setup page (station_setup.py)
@@ -122,7 +123,8 @@ WORKDIR /app
 # The same files as the client target above (keep the two lists equal)
 COPY station.py config.yaml ./
 COPY src/card_scanner/__init__.py src/card_scanner/paths.py src/card_scanner/config.py \
-     src/card_scanner/config_loader.py src/card_scanner/settings.py src/card_scanner/
+     src/card_scanner/config_loader.py src/card_scanner/settings.py \
+     src/card_scanner/diagnostics.py src/card_scanner/build_stamp.txt src/card_scanner/
 COPY src/card_scanner/station src/card_scanner/station
 
 EXPOSE 8080

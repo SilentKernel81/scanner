@@ -625,6 +625,20 @@
    "storage_compress"
   ],
   [
+   "/api/support/bundle",
+   [
+    "GET"
+   ],
+   "support_bundle"
+  ],
+  [
+   "/api/support/preview",
+   [
+    "GET"
+   ],
+   "support_preview"
+  ],
+  [
    "/api/trades",
    [
     "GET",

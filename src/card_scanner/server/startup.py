@@ -41,6 +41,7 @@ from card_scanner.server.desks import Desk, log_to_client, make_remote_scanner, 
 from card_scanner.server.captures import resume_pending
 from card_scanner.server.card_data import (adopt_card_names, current_card_price, prices_withheld, resume_price_transition,
                                           run_update_schedule, start_card_data_update)
+from card_scanner import diagnostics
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
@@ -50,7 +51,7 @@ from card_scanner.server.settings_events import cleanup_days, run_image_cleanup,
 # from this list is a set of routes that silently does not exist (tests/test_app_surface.py
 # notices).
 from card_scanner.server import (  # noqa: F401
-    lock, pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, others_api, backups_api, stations_api,
+    lock, pages, decks_api, deck_ideas_api, inventory_api, arena_api, trades_api, others_api, backups_api, support_api, stations_api,
     scan_events, settings_events, ai_events, card_data, program,
 )
 
@@ -268,6 +269,10 @@ def main():
         if services.app_mode and not args.no_browser:
             webbrowser.open(url)
         return
+
+    # From here on this is the copy that runs: what would die with it goes to data/logs/crash-server.log, and every start says which build it is
+    diagnostics.install_crash_capture('server')
+    logger.info(f"Build: {diagnostics.describe_build()}")
 
     # Use print for important startup messages that should always be visible
     print("="*60)
