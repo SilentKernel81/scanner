@@ -9,10 +9,10 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=63">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=65">
     {# The decks' rules are still in the collection page's stylesheet, from when they were one of its tabs #}
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=23">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v=35">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/decks.css') }}?v=8">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -241,11 +241,11 @@
     </aside>
 
     <!-- New deck -->
-    <div id="deck-modal" class="modal">
+    <div id="deck-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content narrow">
             <div class="modal-header">
                 <h2 id="deck-modal-title">New deck</h2>
-                <span class="close" onclick="closeModal('deck-modal')">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeModal('deck-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="input-group" id="deck-modal-name-group">
@@ -285,14 +285,14 @@
     </div>
 
     <!-- The deck as a list for MTG Arena: shown, to be copied (Arena's Import reads the clipboard) -->
-    <div id="arena-modal" class="modal">
+    <div id="arena-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content narrow">
             <div class="modal-header">
                 <div>
                     <h2>For MTG Arena</h2>
                     <div class="modal-subtitle" id="arena-subtitle"></div>
                 </div>
-                <span class="close" onclick="closeModal('arena-modal')">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeModal('arena-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <textarea id="arena-text" class="text-input arena-text" rows="14" readonly spellcheck="false"></textarea>
@@ -310,14 +310,14 @@
     </div>
 
     <!-- Printing of a deck card -->
-    <div id="printing-modal" class="modal">
+    <div id="printing-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content">
             <div class="modal-header">
                 <div>
                     <h2 id="printing-title">Printing</h2>
                     <div class="modal-subtitle">The printing this deck shows for the card. Any printing you own counts as owned.</div>
                 </div>
-                <span class="close" onclick="closeModal('printing-modal')">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeModal('printing-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="printing-grid" class="printing-grid"></div>
@@ -326,14 +326,14 @@
     </div>
 
     <!-- A preconstructed deck's cards, to look at; a deck is only made with the button -->
-    <div id="precon-modal" class="modal">
+    <div id="precon-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content">
             <div class="modal-header">
                 <div>
                     <h2 id="precon-title">Preconstructed deck</h2>
                     <div class="modal-subtitle" id="precon-subtitle"></div>
                 </div>
-                <span class="close" onclick="closeModal('precon-modal')">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeModal('precon-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="precon-cards" class="precon-cards"></div>
@@ -353,8 +353,8 @@
 
     {% include '_dialogs.html' %}
 
-    <script src="{{ url_for('static', filename='js/common.js') }}?v=31"></script>
-    <script src="{{ url_for('static', filename='js/library.js') }}?v=8"></script>
-    <script src="{{ url_for('static', filename='js/decks.js') }}?v=12"></script>
+    <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}?v=9"></script>
+    <script src="{{ url_for('static', filename='js/decks.js') }}?v=13"></script>
 </body>
 </html>

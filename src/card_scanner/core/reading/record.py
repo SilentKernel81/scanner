@@ -135,14 +135,12 @@ class ReadingRecord:
 
 
 def _plain(value):
-    """JSON for what json does not know: NumPy numbers and booleans (the similarities), anything else as its text"""
-    for kind in (float, int, bool):
+    """JSON for what json does not know: NumPy scalars, anything else as its text"""
+    if hasattr(value, 'item'):
         try:
-            if hasattr(value, 'item'):
-                return value.item()
-            return kind(value)
+            return value.item()
         except (TypeError, ValueError):
-            continue
+            pass
     return str(value)
 
 

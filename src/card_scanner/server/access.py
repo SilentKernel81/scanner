@@ -55,7 +55,10 @@ def host_allowed(host):
     Another name that resolves here is a web page reaching in through its own domain (DNS
     rebinding).
     """
-    name = (urlsplit(f'//{host}').hostname or '').lower().rstrip('.')
+    try:
+        name = (urlsplit(f'//{host}').hostname or '').lower().rstrip('.')
+    except ValueError:
+        return False
     if name == 'localhost' or name in own_host_names():
         return True
     try:
@@ -67,7 +70,10 @@ def host_allowed(host):
 
 def same_origin(origin, host):
     """Whether a request's Origin header is the page it was sent to (`host`: its Host header)"""
-    return urlsplit(origin).netloc.lower() == (host or '').lower()
+    try:
+        return urlsplit(origin).netloc.lower() == (host or '').lower()
+    except ValueError:
+        return False
 
 
 def socket_origin_allowed(origin, environ=None):

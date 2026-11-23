@@ -1,11 +1,11 @@
 {# The dialog that asks for one value - a location, a tag, a deck (library.js: valueDialog).
    On the collection page and on the deck pages. #}
     <!-- One value for a bulk action (location, tag, condition, deck) -->
-    <div id="value-modal" class="modal">
+    <div id="value-modal" class="modal" role="dialog" aria-modal="true">
         <div class="modal-content narrow">
             <div class="modal-header">
                 <h2 id="value-title"></h2>
-                <span class="close" onclick="closeValueDialog(null)">&times;</span>
+                <button type="button" class="close" aria-label="Close" onclick="closeValueDialog(null)">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="input-group">

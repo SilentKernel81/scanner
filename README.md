@@ -295,7 +295,10 @@ a phone too; the deck pages are made for a screen with a pointer.
   shown as a card, its **cover**: the commander (with two, a button turns to the other), or
   for a deck without one its most valuable card - or any card of the deck you choose with
   its **Cover** button. **Arena** shows the deck as a list for MTG Arena's Import button -
-  only the cards that exist on Arena, and which ones were left out. A deck copied out of
+  only the cards that exist on Arena, and which ones were left out - and copies it to the
+  clipboard as it opens (**Download** there for a file; when the browser refuses the copy,
+  **Copy**). On an Arena deck **Export** does the same, instead of downloading the text list
+  (whose "Adventure // Spell" names Arena refuses). A deck copied out of
   Arena can be pasted into **New deck**. (Tried with a few lines pasted into Arena, which made the deck;
   a whole deck with a commander or a sideboard has not been tried.) The same window says
   whether you could **build the deck in Arena**: how many of its cards your Arena
@@ -305,7 +308,9 @@ a phone too; the deck pages are made for a screen with a pointer.
   [mtga-export](https://github.com/SilentKernel81/mtga-export) (a separate program by the
   same author, for Linux with Steam / Proton, that reads the game while it runs), then **Import from
   Arena** with its `mtga_collection.json` (your cards) and `mtga_decks.json` (your Arena
-  decks) - both at once or one at a time. Each import replaces the one before, Arena cards
+  decks) - both at once or one at a time. Each import replaces the one before - with the deck
+  file, every Arena deck, also one made or copied here, is replaced by the file's decks (paper
+  decks stay; copy an Arena deck as Physical to keep it) - Arena cards
   have no price, and the list cannot be changed here: Arena
   is where that collection lives. Decks are **Physical** or **Arena** (the Decks page
   filters by it): an Arena deck counts what you own in Arena and shows what is missing in

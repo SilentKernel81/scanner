@@ -8,23 +8,24 @@
 }
 
 .settings-title {
-    margin: 4px 0 16px;
-    font-size: 22px;
+    margin: 4px 0 18px;
+    font-size: 24px;
+    letter-spacing: -0.02em;
 }
 
 .settings-layout {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 24px;
+    grid-template-columns: 224px minmax(0, 1fr);
+    gap: 28px;
     align-items: start;
 }
 
 .settings-nav {
     position: sticky;
-    top: 72px;
+    top: calc(var(--topbar-nav) + 16px);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 
 .settings-nav button {
@@ -32,45 +33,53 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 10px 12px;
+    padding: 9px 12px;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--text-muted);
     font: inherit;
+    font-size: 14px;
+    font-weight: 500;
     text-align: left;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s;
 }
 
 .settings-nav button:hover {
     background: var(--surface-2);
+    color: var(--text);
+}
+
+.settings-nav button:focus-visible,
+.mini-btn:focus-visible,
+.settings-advanced > summary:focus-visible,
+.settings-more > summary:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
 }
 
 .settings-nav button.is-active {
     background: var(--accent-soft);
-    border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
 }
 
 .settings-nav .icon {
-    width: 18px;
-    height: 18px;
+    width: 17px;
+    height: 17px;
     flex: none;
+    color: currentColor;
 }
 
 .settings-content {
     max-width: 760px;
 }
 
-.settings-category[hidden],
-.settings-content [hidden] {
-    display: none !important;
-}
-
 .settings-category > h2 {
     margin: 0 0 6px;
-    font-size: 18px;
+    font-size: 19px;
+    letter-spacing: -0.015em;
 }
 
 /* A part of a section whose settings have another scope: Cameras' "This camera" (the one chosen) and "All cameras" */
@@ -89,10 +98,11 @@
 
 .settings-card {
     margin-top: 14px;
-    padding: 16px;
+    padding: 20px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     background: var(--surface);
+    box-shadow: var(--shadow-sm), var(--panel-inset);
 }
 
 .settings-card.flat {
@@ -298,8 +308,9 @@
 .overview-list {
     margin-top: 14px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     background: var(--surface);
+    box-shadow: var(--shadow-sm), var(--panel-inset);
     overflow: hidden;
 }
 

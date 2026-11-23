@@ -863,3 +863,26 @@ document.addEventListener('click', event => {
     const caption = image.parentElement.querySelector('figcaption');
     openCaptureViewer(image.dataset.full, `${image.alt}${caption ? ' - ' + caption.textContent : ''}`);
 });
+
+// ============================================================================
+// Light / Dark theme toggle (header button #theme-toggle, persisted in localStorage)
+// ============================================================================
+(function initThemeToggle() {
+    const button = document.getElementById('theme-toggle');
+    if (!button) return;
+    const root = document.documentElement;
+    const isDark = () => root.dataset.theme === 'dark' ||
+        (!root.dataset.theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const syncLabel = () => {
+        const next = isDark() ? 'light' : 'dark';
+        button.title = `Switch to ${next} theme`;
+        button.setAttribute('aria-label', button.title);
+    };
+    syncLabel();
+    button.addEventListener('click', () => {
+        const next = isDark() ? 'light' : 'dark';
+        root.dataset.theme = next;
+        try { localStorage.setItem('scanner-theme', next); } catch (e) {}
+        syncLabel();
+    });
+})();

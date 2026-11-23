@@ -3,6 +3,7 @@
 # The inventory's routes: list, edit, delete, bulk edits, import / export, clear.
 # ============================================================================
 import csv
+import sqlite3
 import tempfile
 from pathlib import Path
 from datetime import datetime
@@ -292,30 +293,32 @@ def update_inventory_card(row_id):
     if inventory:
         try:
             # Get data from request
-            data = request.get_json() if request.is_json else {}
+            data = request.get_json(silent=True) if request.is_json else {}
+            if not isinstance(data, dict):
+                return jsonify({'success': False, 'split': False, 'error': 'Invalid request body'}), 400
             quantity = data.get('quantity')
             condition = data.get('condition')
             finish = data.get('finish')
             split_quantity = data.get('split_quantity')
             location = data.get('location')
             tags = data.get('tags')
-            if finish is not None and finish not in games.active().finishes:
-                return jsonify({'success': False, 'split': False, 'error': f'Unknown finish: {finish}'}), 400
 
             # A new finish takes the printing's price in that finish (foil / holo / reverse)
             finish_price = None
             printing = None
             card_id = data.get('card_id')
-            entry = inventory_area().get_entry(row_id) if finish or card_id else None
+            entry = inventory_area().get_entry(row_id) if finish is not None or card_id else None
+            entry_game = (games.get(entry['game']) if entry else None) or games.active()
+            if finish is not None and finish not in entry_game.finishes:
+                return jsonify({'success': False, 'split': False, 'error': f'Unknown finish: {finish}'}), 400
             if entry and card_id:
                 # Another printing of the same card: its set, number, rarity and price
-                game = games.get(entry['game']) or games.active()
-                card = game.get_card(card_id)
+                card = entry_game.get_card(card_id)
                 if not card or search_key(card['name']) != search_key(entry['card_name']):
                     return jsonify({'success': False, 'split': False,
                                     'error': f"Not a printing of {entry['card_name']}"}), 400
                 if not same_printing(entry, card):
-                    fields = game.inventory_fields(card, finish or entry['finish'])
+                    fields = entry_game.inventory_fields(card, finish or entry['finish'])
                     printing = {'card_id': fields.get('card_id'), 'card_name': fields['name'],
                                 'set_name': fields.get('set_name') or '', 'set_code': fields.get('set_code') or None,
                                 'card_number': fields.get('number') or '', 'rarity': fields.get('rarity'),
@@ -323,10 +326,9 @@ def update_inventory_card(row_id):
                                 'colors': fields.get('colors'), 'color_identity': fields.get('color_identity')}
                     finish_price = float(fields.get('price') or 0)
             if entry and not printing and finish and finish != entry['finish'] and entry['card_id']:
-                game = games.get(entry['game']) or games.active()
-                card = game.get_card(entry['card_id'])
+                card = entry_game.get_card(entry['card_id'])
                 if card:
-                    finish_price = game.inventory_fields(card, finish)['price']
+                    finish_price = entry_game.inventory_fields(card, finish)['price']
 
             # Changing the finish of several copies splits the entry
             result = inventory_area().update_card(row_id, quantity=quantity, condition=condition,
@@ -340,6 +342,8 @@ def update_inventory_card(row_id):
             else:
                 return jsonify(result), 400
 
+        except sqlite3.IntegrityError:
+            raise  # let trades_api's global TRADE_HELD handler return 409
         except Exception as e:
             logger.error(f"Error updating card: {e}")
             return jsonify({'success': False, 'split': False, 'error': str(e)}), 500
@@ -382,16 +386,17 @@ def export_inventory(fmt):
         return jsonify({'error': f'Unknown export format: {fmt}'}), 404
     try:
         _label, prefix, writer = formats[fmt]
+        cards = inventory_area().get_all_cards(game.id)
         if request.method == 'POST':
             ids = {int(row_id) for row_id in (request.get_json(silent=True) or {}).get('ids') or []}
-            text = io.StringIO(newline='')
-            writer([card for card in inventory_area().get_all_cards(game.id) if card['id'] in ids], text)
+            cards = [card for card in cards if card['id'] in ids]
             name = f"{prefix}_part_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            return Response(text.getvalue(), mimetype='text/csv',
-                            headers={'Content-Disposition': f'attachment; filename="{name}"'})
-        export_path = inventory_area().export(game.id, writer, prefix)
-        return send_file(str(export_path), mimetype='text/csv', as_attachment=True,
-                         download_name=export_path.name)
+        else:
+            name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        text = io.StringIO(newline='')
+        writer(cards, text)
+        return Response(text.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
     except Exception as e:
         logger.exception(f"Export failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -487,6 +492,8 @@ def import_inventory():
             })
         return jsonify({'success': False, 'error': stats.get('error', 'Import failed')}), 400
 
+    except sqlite3.IntegrityError:
+        raise  # let trades_api's global TRADE_HELD handler return 409
     except Exception as e:
         logger.exception(f"Import failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

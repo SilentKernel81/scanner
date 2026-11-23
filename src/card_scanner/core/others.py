@@ -182,9 +182,11 @@ class Others(storage.Transactional):
         collection = self.collection(collection_id)
         where, values = ['collection_id = ?'], [collection_id]
         for word in str(query or '').lower().split():
-            where.append("(LOWER(card_name) LIKE ? OR LOWER(set_name) LIKE ? OR LOWER(COALESCE(set_code, '')) = ? "
-                         "OR LOWER(COALESCE(type_line, '')) LIKE ? OR LOWER(COALESCE(rarity, '')) = ?)")
-            values += [f'%{word}%', f'%{word}%', word, f'%{word}%', word]
+            escaped = storage.escape_like(word)
+            where.append("(LOWER(card_name) LIKE ? ESCAPE '\\' OR LOWER(set_name) LIKE ? ESCAPE '\\' "
+                         "OR LOWER(COALESCE(set_code, '')) = ? "
+                         "OR LOWER(COALESCE(type_line, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(rarity, '')) = ?)")
+            values += [f'%{escaped}%', f'%{escaped}%', word, f'%{escaped}%', word]
         order = SORTS.get(sort, SORTS['name'])
         with self._lock:
             total = self.conn.execute(f"SELECT COUNT(*) FROM other_cards WHERE {' AND '.join(where)}", values).fetchone()[0]

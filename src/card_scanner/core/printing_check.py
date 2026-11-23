@@ -310,6 +310,7 @@ class StripReader:
         self._reader = None
         self._last_used = 0.0
         self._timer = None
+        self._closed = False
         self._lock = threading.Lock()                 # one request at a time; also guards starting and stopping
 
     def read(self, rgb):
@@ -317,6 +318,8 @@ class StripReader:
         if not self.ocr_enabled():
             return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
         with self._lock:
+            if self._closed:
+                return {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
             if self._reader is None:
                 self._reader = self._make()
             self._last_used = time.monotonic()
@@ -351,6 +354,7 @@ class StripReader:
     def close(self):
         """Stops the reader now (the server's shutdown)"""
         with self._lock:
+            self._closed = True
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
@@ -806,14 +810,27 @@ class PrintingCheck:
         except Exception as e:
             logger.debug(f"Printing check could not queue a capture: {e}")
 
+    _closed = False
+
     def close(self):
-        """The server's shutdown: lets go of the strip reader's process, if it has one (a plain function has nothing to close)"""
+        """The server's shutdown: stops the worker thread and lets go of the strip reader's process"""
+        with self._lock:
+            self._closed = True
+            thread = self._thread
+        if thread is not None:
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                pass
+            thread.join(timeout=2)
         close = getattr(self.strip_reader, 'close', None)
         if close:
             close()
 
     def _start(self):
         with self._lock:
+            if self._closed:
+                return
             if self._thread is None:
                 self._thread = threading.Thread(target=self._work, daemon=True, name="Printing-check")
                 self._thread.start()
@@ -821,6 +838,9 @@ class PrintingCheck:
     def _work(self):
         while True:
             job = self._queue.get()
+            if job is None:
+                self._queue.task_done()
+                return
             try:
                 self._look(*job)
             except Exception as e:        # a bad picture, a full disk: written down, never raised (a few times, then silent)

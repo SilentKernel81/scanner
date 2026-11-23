@@ -6,6 +6,7 @@
 # cards (scan_inventory.db), which move into the collection with take_from.
 # ============================================================================
 import csv
+import json
 import os
 import functools
 import re
@@ -268,6 +269,7 @@ INVENTORY_INDEXES = ('CREATE INDEX IF NOT EXISTS idx_inventory_game_name ON inve
 # One row per capture: the database refuses a second copy under the same capture, whatever
 # the code that asks first does. (In this list, so a rebuilt table gets the index again.)
 CAPTURES_INDEXES = ('CREATE INDEX IF NOT EXISTS idx_captures_entry ON inventory_captures(inventory_id)',
+                    'CREATE INDEX IF NOT EXISTS idx_captures_file ON inventory_captures(file)',
                     'CREATE UNIQUE INDEX IF NOT EXISTS idx_captures_key ON inventory_captures(capture_key) '
                     'WHERE capture_key IS NOT NULL')
 CONSTRAINTS_MIGRATION = 'inventory_constraints_1'
@@ -485,6 +487,13 @@ class InventoryManager(storage.Transactional):
         self.conn.commit()
         self._committed()
 
+    @staticmethod
+    def _safe_capture_path(folder, file):
+        """Resolve a capture filename inside folder, refusing path traversal or absolute paths."""
+        if not isinstance(file, str) or not file or file in ('.', '..') or '/' in file or '\\' in file or Path(file).name != file:
+            return None
+        return folder / file
+
     def _committed(self):
         """Only after a commit the thumbnails of the captures that went with it are deleted:
         rolled back, their rows are there again and still need the files"""
@@ -493,10 +502,14 @@ class InventoryManager(storage.Transactional):
             # The change is committed: a file that cannot be deleted is a leftover (the
             # clean-up of unused pictures can find it), never a reason to report the change failed
             for folder in (CAPTURES_DIR, FULL_CAPTURES_DIR):
+                path = self._safe_capture_path(folder, file)
+                if path is None:
+                    logger.warning(f"Refusing to delete unsafe capture filename: {file!r}")
+                    continue
                 try:
-                    (folder / file).unlink(missing_ok=True)
+                    path.unlink(missing_ok=True)
                 except OSError as e:
-                    logger.warning(f"Could not delete the picture {folder / file}: {e}")
+                    logger.warning(f"Could not delete the picture {path}: {e}")
 
     def _rollback(self):
         self.conn.rollback()
@@ -1205,7 +1218,12 @@ class InventoryManager(storage.Transactional):
         self.log(f"Undid add: {quantity}x {row['card_name']}")
         return row['card_name']
 
-    @_writes
+    def _invalidate_last_added(self, row_id):
+        """Drop any station Undo pointer referencing an entry that was split, merged, or reduced."""
+        for source, entry in list(self.last_added.items()):
+            if entry[0] == row_id:
+                self.last_added.pop(source, None)
+
     def capture_keys(self, game, station=None):
         """The uids of the captures that have a copy here (of one station's, with `station`)"""
         query = '''SELECT c.capture_key FROM inventory_captures c JOIN inventory i ON i.id = c.inventory_id
@@ -1266,7 +1284,9 @@ class InventoryManager(storage.Transactional):
         if row is None:
             return None
         # The large copy when there is one: the reviewer compares it with the printings
-        file = next((path for path in (FULL_CAPTURES_DIR / row['file'], CAPTURES_DIR / row['file']) if path.exists()), None)
+        candidates = (self._safe_capture_path(FULL_CAPTURES_DIR, row['file']),
+                      self._safe_capture_path(CAPTURES_DIR, row['file']))
+        file = next((path for path in candidates if path is not None and path.exists()), None)
         if file is None:
             return None
         return {'row': dict(row), 'entry': dict(entry), 'file': file, 'station': row['station'],
@@ -1299,7 +1319,9 @@ class InventoryManager(storage.Transactional):
 
     def picture_exists(self, file):
         """Is the picture file of a copy on the disk (the small one or the large one)?"""
-        return (CAPTURES_DIR / file).exists() or (FULL_CAPTURES_DIR / file).exists()
+        small = self._safe_capture_path(CAPTURES_DIR, file)
+        full = self._safe_capture_path(FULL_CAPTURES_DIR, file)
+        return (small is not None and small.exists()) or (full is not None and full.exists())
 
     @_writes
     def _release_for_review(self, candidate):
@@ -1366,8 +1388,8 @@ class InventoryManager(storage.Transactional):
                 return 'unfollowed', None  # not this station's to ask about or remove
             if not remove:
                 return 'scanned', row['card_name']
-            self._give_up_copy(row)
-            self._commit()
+            with self._transaction():
+                self._give_up_copy(row)
         self.log(f"Removed from the scanned cards: {row['card_name']} (its capture was removed at the station)")
         return 'removed', row['card_name']
 
@@ -1577,6 +1599,7 @@ class InventoryManager(storage.Transactional):
                     self._trim_batches(row_id, remaining)
                 else:
                     self._delete_entries('id = ?', (row_id,))
+                self._invalidate_last_added(row_id)
                 self._commit()
                 if not quiet:
                     where = ', '.join(part for part in (
@@ -1601,6 +1624,7 @@ class InventoryManager(storage.Transactional):
                 self._take_from_batches(row_id, new_quantity, to_id=twin['id'])
                 self._add_tags(twin['id'], new_tags)
                 self._delete_entries('id = ?', (row_id,))  # its captures and stations went to the twin
+                self._invalidate_last_added(row_id)
             else:
                 self.conn.execute('UPDATE inventory SET quantity = ?, condition = ?, finish = ?, price_usd = ?, '
                                   'location = ?, tags = ? WHERE id = ?',
@@ -1612,6 +1636,7 @@ class InventoryManager(storage.Transactional):
                 self._trim_captures(row_id, new_quantity)
                 if new_quantity < row['quantity']:
                     self._take_from_batches(row_id, row['quantity'] - new_quantity)  # the newest go, as captures do
+                    self._invalidate_last_added(row_id)
                 self._trim_batches(row_id, new_quantity)
             self._commit()
         if not quiet:
@@ -1640,8 +1665,8 @@ class InventoryManager(storage.Transactional):
             # refused before anything changes - whole stacks that go or move while a trade holds
             # copies of them - so the user gets the message instead of a rolled-back error
             if action in ('delete', 'location') and row_ids and self.conn.execute(
-                    f"SELECT 1 FROM trade_cards WHERE inventory_id IN ({', '.join('?' * len(row_ids))})",
-                    tuple(row_ids)).fetchone():
+                    "SELECT 1 FROM trade_cards WHERE inventory_id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(list(row_ids)),)).fetchone():
                 raise sqlite3.IntegrityError(TRADE_HELD)
             for row_id in row_ids:
                 row = self._get_row(row_id)
@@ -1819,31 +1844,27 @@ class InventoryManager(storage.Transactional):
         """
         if station:
             try:
-                with self._lock:
+                with self._transaction():
                     rows = self._station_rows(game, station)
                     for row, copies in rows:
                         self._delete_captures('inventory_id = ? AND station = ?', (row['id'], station))
                         self._set_source(row['id'], station, 0)
                         self._take_copies(row['id'], copies)
-                    self._commit()
                     self.last_added.pop(station, None)
                 deleted = sum(copies for _, copies in rows)
                 self.log(f"Scanned cards of {station} cleared: {deleted} cards removed", level="success")
                 return {'success': True, 'deleted': deleted}
             except Exception as e:
-                self._rollback()
                 self.log(f"Failed to clear the scanned cards of {station}: {e}", level="error")
                 return {'success': False, 'error': str(e), 'deleted': 0}
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
         try:
-            with self._lock:
+            with self._transaction():
                 deleted = self._delete_entries('game = ?' if game else '1', params)
-                self._commit()
                 self.last_added = {}
             self.log(f"Inventory cleared: {deleted} entries removed", level="success")
             return {'success': True, 'deleted': deleted}
         except Exception as e:
-            self._rollback()
             self.log(f"Failed to clear inventory: {e}", level="error")
             return {'success': False, 'error': str(e), 'deleted': 0}
 

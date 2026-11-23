@@ -82,6 +82,8 @@ class Magic(Game):
         # Scryfall republishes every day (prices); new sets are what matters, so the local
         # copy only counts as outdated after update_after_days
         remote = self.db.fetch_scryfall_info().get('updated_at') or ''
+        if not remote:
+            return None
         local = (self.db.get_data_info(self.id) or {}).get('source_updated')
         if not local:
             return f"Scryfall has card data from {remote[:10]}; when yours was downloaded is not recorded"

@@ -178,9 +178,13 @@ def queue_changed(change):
     emit_desk('processing_queue_update', {'queue_count': count})
 
 
+VALID_LOG_LEVELS = {'info', 'warning', 'error', 'success', 'debug'}
+
+
 def log_to_client(message, level="info"):
     """Send log message to web client and log file"""
     timestamp = datetime.now().strftime('%H:%M:%S')
+    level = level if level in VALID_LOG_LEVELS else 'info'
 
     # Log to file with appropriate level
     if level == "error":

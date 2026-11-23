@@ -254,14 +254,27 @@ class CardOcr:
         return False
 
     def _stop(self):
-        if self.process:
+        proc = self.process
+        self.process = None
+        if proc:
             try:
-                self.process.stdin.close()
-                self.process.terminate()
-                self.process.wait(timeout=2)
+                if proc.stdin:
+                    proc.stdin.close()
+                proc.terminate()
+                proc.wait(timeout=2)
             except Exception:
-                self.process.kill()
-            self.process = None
+                try:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+            finally:
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
+                    if stream:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
 
     def stop(self):
         with self._lock:

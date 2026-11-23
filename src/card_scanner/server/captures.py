@@ -443,7 +443,8 @@ def resume_pending():
             seen_captures[row['capture_id']] = outcome_key
         with in_desk(desk_for(row['station']) if row['station'] else None):
             submit_capture(image_path, image, foil_image, row['number'], row['game'], station, row['captured_at'],
-                           foil_path=foil_path, pending_id=row['id'], outcome_key=outcome_key, uid=row['uid'])
+                           foil_path=foil_path, pending_id=row['id'], outcome_key=outcome_key, uid=row['uid'],
+                           capture_id=row['capture_id'])
 
 
 def start_price_update(game, card, row_ids):

@@ -135,7 +135,7 @@ function deckTileHtml(item) {
                     ? `<img src="${escapeHtml(cover.image_uri)}" alt="${escapeHtml(cover.name)}" title="${escapeHtml(cover.name)}" loading="lazy">`
                     : '<span class="deck-tile-empty">No cards yet</span>'}
                 ${item.kind === 'arena' ? `<span class="deck-kind-badge" title="${item.from_arena
-                    ? 'A deck from MTG Arena: the next import brings it again as it is there' : 'A deck for MTG Arena, made here'}">Arena</span>` : ''}
+                    ? 'A deck from MTG Arena: the next import brings it again as it is there' : 'A deck for MTG Arena, made here: the next import with a deck file removes it'}">Arena</span>` : ''}
                 ${(item.covers || []).length > 1
                     ? `<button class="deck-flip" data-flip title="Show the other commander: ${escapeHtml(item.covers[(coverIndex(item) + 1) % item.covers.length].name)}"><svg class="icon"><use href="#i-swap"/></svg></button>` : ''}
             </span>
@@ -767,7 +767,7 @@ function renderDeck() {
     const digital = deck.kind === 'arena';
     const wild = digital ? wildcardsHtml(deck.wildcards) : '';
     $('deck-totals').innerHTML = `
-        ${digital ? `<span class="deck-kind-badge" title="${deck.from_arena ? 'This deck came from MTG Arena: the next import replaces it with what it is there then - changes made here are lost' : 'A deck for MTG Arena, made here: counted against your Arena collection'}">Arena</span>` : ''}
+        ${digital ? `<span class="deck-kind-badge" title="${deck.from_arena ? 'This deck came from MTG Arena: the next import replaces it with what it is there then - changes made here are lost' : 'A deck for MTG Arena, made here: counted against your Arena collection. The next Arena import with a deck file removes it - every Arena deck is then the file\'s'}">Arena</span>` : ''}
         <span><strong>${totals.cards}</strong> cards${totals.side ? ` <small>+ ${totals.side} ${considering ? 'considered' : 'sideboard'}</small>` : ''}</span>
         ${digital ? '' : `<span><strong>${money(totals.price)}</strong> value</span>`}
         <span title="${totals.missing ? `${plural(totals.missing, 'card')} missing` : digital ? 'Every card is in your Arena collection' : 'You own every card'}"><strong>${owned}%</strong> ${digital ? 'in Arena' : 'owned'}${
@@ -846,6 +846,10 @@ async function openArena() {
     $('arena-copy').disabled = $('arena-download').disabled = !data.text;
     $('arena-modal').classList.add('show');
     $('arena-text').select();
+    // Straight to the clipboard: Arena's Import reads it from there, so a file is only the
+    // fallback (the Download button). Copied right away, while the click that opened the
+    // window still counts for the browser; if it refuses, the window is open with its Copy
+    if (data.text) await copyArena();
 }
 
 function arenaCheckHtml(check, onArena) {
@@ -1229,7 +1233,12 @@ function bindBuilderEvents() {
     $('deck-name').addEventListener('change', event => saveDeckInfo({name: event.target.value}));
     $('deck-format').addEventListener('change', event => saveDeckInfo({format: event.target.value}));
     $('deck-import').addEventListener('click', () => openDeckModal({importInto: deck}));
-    $('deck-export').addEventListener('click', () => { window.location = `/api/decks/${deck.id}/export/text`; });
+    $('deck-export').addEventListener('click', () => {
+        // An Arena deck is exported for Arena: its list (front names only - Arena refuses
+        // "Adventure // Its spell") goes to the clipboard. A paper deck downloads its text list
+        if (deck.kind === 'arena' && gameInfo.arena) return openArena();
+        window.location = `/api/decks/${deck.id}/export/text`;
+    });
     // Only a game that has a digital client to write for (games/: arena_decklist) shows the button
     $('deck-arena').hidden = !gameInfo.arena;
     $('deck-arena').addEventListener('click', openArena);

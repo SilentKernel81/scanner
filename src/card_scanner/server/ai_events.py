@@ -4,6 +4,7 @@
 # ============================================================================
 from flask import jsonify, request
 from flask_socketio import emit
+import threading
 import time
 
 from card_scanner.core.api_keys import credential_status, pinned_endpoint, save_credential
@@ -119,6 +120,14 @@ def handle_save_ai_credential(data):
         emit('error', {'message': f'Could not save: {e}'})
         return
     logger.info(f"Credential for {provider} {'saved' if data.get('value') else 'removed'} from the web interface")
+    # Refresh active CardIdentifier when its own provider's credential changed or was removed
+    if identification and identification.card_identifier and identification.card_identifier.provider == provider:
+        model = identification.card_identifier.model
+        try:
+            from card_scanner.core.card_identifier import CardIdentifier
+            identification.set_identifier(CardIdentifier(provider=provider, model=model))
+        except ValueError:
+            identification.set_identifier(None)
     emit('ai_credential_saved', {'provider': provider, 'status': credential_status()[provider]})
 
 
@@ -142,7 +151,11 @@ def get_prompts():
     return jsonify(prompts_payload())
 
 
+_prompt_test_slots = threading.BoundedSemaphore(2)
+
+
 @socketio.on('save_prompt')
+@guarded_event
 def handle_save_prompt(data):
     """Save edited prompt instructions for the active model (scope 'model') or all models"""
     provider, model = active_ai()
@@ -162,6 +175,7 @@ def handle_save_prompt(data):
 
 
 @socketio.on('reset_prompt')
+@guarded_event
 def handle_reset_prompt(data):
     """Remove the saved prompt in effect (this model's, else the all-models one)"""
     provider, model = active_ai()
@@ -176,6 +190,7 @@ def handle_reset_prompt(data):
 
 
 @socketio.on('test_prompt')
+@guarded_event
 def handle_test_prompt(data):
     """
     Run the AI on the last captured card with the prompt text from the editor (not saved)
@@ -201,6 +216,9 @@ def handle_test_prompt(data):
     if kind == 'foil' and foil_image is None:
         reply(error='The last capture has no detected card outline, so the foil corner cannot be located')
         return
+    if not _prompt_test_slots.acquire(blocking=False):
+        reply(error='A prompt test is already running - wait for it to finish')
+        return
 
     def run():
         identifier = identification.card_identifier
@@ -225,5 +243,7 @@ def handle_test_prompt(data):
         except Exception as e:
             logger.exception(f"Prompt test failed: {e}")
             reply(error=str(e))
+        finally:
+            _prompt_test_slots.release()
 
     socketio.start_background_task(run)

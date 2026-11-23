@@ -220,8 +220,8 @@ class Station:
                 time.sleep(delay)
                 delay = next(delays, delay)
         with self.settings_lock:
-            # Too late? A newer connection's hello - or a disconnect - came while this answer was on its way: it changes NOTHING
-            if connection != self.connection:
+            # Too late? A newer connection's hello - or a disconnect/shutdown - came while this answer was on its way: it changes NOTHING
+            if connection != self.connection or self.stopping:
                 logger.warning("The server's answer to hello came for a connection that has ended - not applied")
                 return
             if self.scanner is None:
@@ -236,6 +236,7 @@ class Station:
                 self.scanner = scanner
                 if 'dropper' in values:           # (not when a newer live value has set it already)
                     self.configure_dropper(values['dropper'])
+                self._sync_drop_gate()
             else:
                 # Through on_set: a stop the server replays (pressed while this station was away) goes through the session's
                 # bookkeeping - a new session, everything pending, kept or deferred cleared - as a stop does when it comes live. Never a
@@ -343,6 +344,8 @@ class Station:
                         scanner.auto_capture_enabled = wanted
                         if wanted:
                             started = self.scan_session
+                            if getattr(scanner, 'require_drop_signal', False) and not scanner.is_card_detected():
+                                scanner.awaiting_new_card = True
                 values = {name: value for name, value in values.items() if name != 'auto_capture_enabled'}
             self.apply(scanner, values)       # the rest (the switch is made above, under the lock, only)
             self.after_set(started)
@@ -376,6 +379,13 @@ class Station:
     # The card dropper (dropper.py: what it does; here: when)
     # ------------------------------------------------------------------------
 
+    def _sync_drop_gate(self):
+        """Gate auto-capture on confirmed dropper release whenever the Wi-Fi feeder is active."""
+        scanner = self.scanner
+        if scanner is None:
+            return
+        scanner.require_drop_signal = bool(self.dropper.enabled and self.dropper.config.get('transport') == 'wifi')
+
     def configure_dropper(self, config):
         """The dropper's settings from the server; wrong ones are refused (the server checks them first: dropper.checked)"""
         try:
@@ -383,6 +393,7 @@ class Station:
         except ValueError as e:
             logger.error(f"Card dropper: the server's settings are refused ({e}) - it stays as it was")
             return
+        self._sync_drop_gate()
         if not values['enabled']:
             # Off: everything asked for before is cancelled - the debt, the release kept for later, and the one waiting for the focus
             # (a new session: _release refuses it right before its pulse). Switched on again, nothing of before can come back
@@ -453,8 +464,22 @@ class Station:
             logger.info(f"Card dropper: scanning was stopped meanwhile - no card released ({reason})")
             return
         # Checked again at the very last moment, atomically with the pin going active (the gate): the checks above are early answers
-        if not self.dropper.pulse(reason, gate=lambda: self._still_wanted(session, first, reason)) and self.dropper.error:
-            self.send_log(f"Card dropper: {self.dropper.error} - drop the next card by hand", level="error")
+        if self.dropper.pulse(reason, gate=lambda: self._still_wanted(session, first, reason)):
+            if getattr(scanner, 'require_drop_signal', False) and hasattr(scanner, 'notify_card_dropped'):
+                scanner.notify_card_dropped()
+        elif self.dropper.last_drop == 'no_card':
+            # Magazine empty: stop auto-scanning cleanly (just like a card back ends the stack)
+            with self.release_lock:
+                self.scan_session += 1
+                self.release_pending = None
+                self.release_deferred = None
+                self.drop_owed = None
+                scanner.auto_capture_enabled = False
+                scanner.card_under_review = False
+            logger.info("Card dropper: no card seen on ramp (magazine empty) - auto-scanning stopped")
+            self.send_log("Card dropper: magazine empty (no card seen) - auto scanning stopped. Reload and start again.", level="warning")
+        elif self.dropper.error:
+            self.send_log(f"Card dropper: {self.dropper.error} - capture locked until cleared", level="error")
 
     @contextlib.contextmanager
     def _still_wanted(self, session, first=False, reason=''):
@@ -492,6 +517,8 @@ class Station:
             raise ValueError('The card dropper is off')
         if not self.dropper.pulse('a test from the Settings page'):
             raise ValueError(self.dropper.error or 'A card is still being released')
+        if self.scanner is not None and getattr(self.scanner, 'require_drop_signal', False) and hasattr(self.scanner, 'notify_card_dropped'):
+            self.scanner.notify_card_dropped()
         return self.dropper.pulses
 
     def on_command(self, data):
@@ -513,7 +540,9 @@ class Station:
                 result = getattr(self.scanner, method)(*data.get('args', []), **data.get('kwargs', {}))
             else:
                 return {'ok': False, 'error': f'Unknown command {method}'}
-        except (TypeError, ValueError) as e:
+        except Exception as e:
+            if not isinstance(e, (TypeError, ValueError)):
+                logger.exception(f"Command {method} failed: {e}")
             return {'ok': False, 'error': str(e)}
         return {'ok': True, 'result': result, 'state': self.state()}
 
@@ -673,8 +702,11 @@ class Station:
         foil_path = None
         if foil_image is not None and foil_image is not card_image:
             # Fixed area: the capture is the area, the foil check uses the outlined card
-            foil_path = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
-            cv2.imwrite(str(foil_path), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR))
+            candidate_foil = Path(image_path).with_name(f"{Path(image_path).stem}_foil.jpg")
+            if cv2.imwrite(str(candidate_foil), cv2.cvtColor(foil_image, cv2.COLOR_RGB2BGR)):
+                foil_path = candidate_foil
+            else:
+                logger.warning(f"Could not save foil image {candidate_foil.name} - sending capture without it")
         item = {'image': Path(image_path), 'foil': foil_path, 'mode': mode,
                 'foil_is_image': foil_image is card_image, 'capture_id': capture_id or uuid.uuid4().hex,
                 'frame': None, 'frame_meta': None, 'release_session': release_session}
@@ -909,8 +941,9 @@ class Station:
         headers = {'X-Station-Token': self.token} if self.token else {}
         try:
             files = {'image': (item['image'].name, item['image'].read_bytes(), 'image/jpeg')}
-            if item['foil']:
-                files['foil_image'] = (item['foil'].name, item['foil'].read_bytes(), 'image/jpeg')
+            foil = item.get('foil')
+            if foil and foil.is_file():
+                files['foil_image'] = (foil.name, foil.read_bytes(), 'image/jpeg')
             frame = item.get('frame')
             if frame and frame.is_file():
                 # Training data, not the capture: the server may ignore it (an older one does)

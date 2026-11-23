@@ -82,14 +82,19 @@ socket.on('error', function(data) {
     }
 });
 
+const LOG_LEVELS = new Set(['info', 'warning', 'error', 'success', 'debug']);
+
 function addLog(timestamp, level, message) {
     const logContainer = $('log-container');
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
-    logEntry.innerHTML = `
-        <span class="log-timestamp">[${timestamp}]</span>
-        <span class="log-${level}">${escapeHtml(message)}</span>
-    `;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'log-timestamp';
+    timeSpan.textContent = `[${timestamp ?? ''}] `;
+    const msgSpan = document.createElement('span');
+    msgSpan.className = `log-${LOG_LEVELS.has(level) ? level : 'info'}`;
+    msgSpan.textContent = String(message ?? '');
+    logEntry.append(timeSpan, msgSpan);
     logContainer.appendChild(logEntry);
     logContainer.scrollTop = logContainer.scrollHeight;
 
@@ -310,8 +315,18 @@ socket.on('card_found', function(data) {
     displayCard(data.card);
 });
 
+let notFoundTimer = null;
+
+function cancelNotFoundDismiss() {
+    if (notFoundTimer) {
+        clearTimeout(notFoundTimer);
+        notFoundTimer = null;
+    }
+}
+
 socket.on('card_not_found', function(data) {
     audioManager.playError();
+    cancelNotFoundDismiss();
 
     const message = data.message || `Card "${data.card_name}" not found in database.`;
     addLog(timeNow(), 'warning', message);
@@ -323,17 +338,20 @@ socket.on('card_not_found', function(data) {
     `);
     // Auto-dismiss after card not found to allow next auto-capture; the capture is kept for
     // a manual search
-    setTimeout(function() {
+    notFoundTimer = setTimeout(function() {
+        notFoundTimer = null;
         socket.emit('dismiss_card', {keep_capture: true});
     }, 2000);
 });
 
 socket.on('card_printings', function(data) {
+    cancelNotFoundDismiss();
     currentCard = null;
     displayPrintings(data.name, data.cards);
 });
 
 socket.on('similar_cards', function(data) {
+    cancelNotFoundDismiss();
     displaySimilarCards(data.cards);
 });
 
@@ -1006,7 +1024,6 @@ function loadPrompts() {
         .then(response => response.json())
         .then(data => {
             promptData = data;
-            updatePromptSummary();
             if (isOpen('prompt-modal')) renderPromptEditor();
         })
         .catch(error => console.error('Error loading prompts:', error));
@@ -1119,7 +1136,6 @@ async function resetPrompt() {
 socket.on('prompts_updated', function(data) {
     delete promptDrafts[promptKind];
     promptData = data;
-    updatePromptSummary();
     if (isOpen('prompt-modal')) {
         $('prompt-text').value = '';  // force a refresh with the saved text
         renderPromptEditor();
@@ -1507,6 +1523,7 @@ const OVERLAYS = [
     ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],
     ['dialog-modal', () => closeDialog(null)],
+    ['to-collection-modal', () => closeToCollection(null)],
     ['edit-card-modal', closeEditCard],
     ['prompt-modal', closePromptEditor],
     ['inventory-modal', closeInventory],

@@ -288,9 +288,10 @@ class RemoteScanner:
             if (waiting and state.get('auto_capture_enabled') is False and isinstance(applied, (list, tuple)) and len(applied) == 2
                     and applied[0] == waiting[0] and isinstance(applied[1], int) and applied[1] >= waiting[1]):
                 self.__dict__['stop_unsent'] = None
-        before = self._state.get('auto_capture_enabled')
-        self._state.update(state)
-        after = self._state.get('auto_capture_enabled')
+        with self._lock:
+            before = self._state.get('auto_capture_enabled')
+            self._state.update(state)
+            after = self._state.get('auto_capture_enabled')
         if before is not None and after != before and self.on_auto_capture_changed:
             self.on_auto_capture_changed(bool(after))
 
@@ -304,8 +305,10 @@ class RemoteScanner:
             self._preview = (-1, None)
         self.log(f"Camera station connected: {station['name']}", level="success")
 
-    def detach(self):
+    def detach(self, expected_sid=None):
         with self._lock:
+            if expected_sid is not None and self.sid != expected_sid:
+                return
             name = self.station['name'] if self.station else '?'
             self.sid = None
             self._state.clear()
@@ -361,20 +364,27 @@ class CameraHub:
             return self._scanners[station_id]
 
     def connected(self, station_id):
-        scanner = self._scanners.get(station_id)
+        with self._lock:
+            scanner = self._scanners.get(station_id)
         return bool(scanner and scanner.connected)
 
     def forget(self, station_id):
         with self._lock:
-            self._scanners.pop(station_id, None)
+            scanner = self._scanners.pop(station_id, None)
             self._setup_pages.pop(station_id, None)
+            if scanner and scanner.sid:
+                self._by_sid.pop(scanner.sid, None)
+        if scanner:
+            scanner.detach()
 
     def setup_page(self, station_id):
         """Where the station's setup page is: {'address': the address it connected from, 'port'}, or None"""
-        return self._setup_pages.get(station_id)
+        with self._lock:
+            return self._setup_pages.get(station_id)
 
     def _client(self):
-        return self._by_sid.get(request.sid)
+        with self._lock:
+            return self._by_sid.get(request.sid)
 
     def _register(self):
         socketio = self.socketio
@@ -393,20 +403,24 @@ class CameraHub:
                 port = int(auth.get('setup_port') or 0)
             except (TypeError, ValueError):
                 port = 0
-            if 0 < port < 65536:
-                self._setup_pages[station_id] = {'address': request.remote_addr, 'port': port}
-            scanner = self.scanner(station_id)
-            previous = scanner.sid
-            if previous:
-                self._by_sid.pop(previous, None)  # the same station again: the new connection counts
-            self._by_sid[request.sid] = scanner
+            with self._lock:
+                if 0 < port < 65536:
+                    self._setup_pages[station_id] = {'address': request.remote_addr, 'port': port}
+                if station_id not in self._scanners:
+                    self._scanners[station_id] = self.make_scanner(station_id)
+                scanner = self._scanners[station_id]
+                previous = scanner.sid
+                if previous:
+                    self._by_sid.pop(previous, None)  # the same station again: the new connection counts
+                self._by_sid[request.sid] = scanner
             scanner.attach(request.sid, station)
 
         @socketio.on('disconnect', namespace=NAMESPACE)
         def station_disconnect(*_args):
-            scanner = self._by_sid.pop(request.sid, None)
-            if scanner and scanner.sid == request.sid:
-                scanner.detach()
+            with self._lock:
+                scanner = self._by_sid.pop(request.sid, None)
+            if scanner:
+                scanner.detach(expected_sid=request.sid)
 
         @socketio.on('hello', namespace=NAMESPACE)
         def station_hello(_data=None):

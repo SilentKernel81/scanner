@@ -8,6 +8,7 @@
 # ============================================================================
 import logging
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,12 @@ MIGRATIONS_TABLE = ('CREATE TABLE IF NOT EXISTS schema_migrations '
                     '(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL, note TEXT)')
 MIGRATION_BACKUPS = Path('backups') / 'migrations'  # beside the database file that is migrated
 _backed_up = {}  # {database file: its backup of this run} - one per file, however many migrations
+_backup_lock = threading.Lock()
+
+
+def escape_like(text):
+    """Escape SQLite LIKE wildcards (%, _, \\) for use with ESCAPE '\\'."""
+    return str(text).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
 
 
 def connect(path, timeout=10.0):
@@ -38,12 +45,20 @@ def connect(path, timeout=10.0):
     return conn
 
 
+def connect_readonly(path, timeout=10.0, check_same_thread=True):
+    """Open an existing SQLite file read-only using a properly escaped file: URI."""
+    uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, check_same_thread=check_same_thread, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 class Transactional:
     """
     For a manager with self.conn and self._lock (an RLock). `with self._transaction():` is one
     edit: everything in it is committed together, or - when it raises - not at all, so a
     failure never leaves half an edit on the connection for the next commit to pick up.
-    Methods that use it may call each other: the outermost one commits.
+    Methods that use it may call each other: nested blocks use SAVEPOINTs and the outermost commits.
     """
 
     _transaction_depth = 0
@@ -55,15 +70,21 @@ class Transactional:
                 yield  # part of the edit that is under way
                 return
             self._transaction_depth = 1
+            committed = False
             try:
                 yield
                 self.conn.commit()
+                committed = True
             except BaseException:
-                self.conn.rollback()
-                self._transaction_depth = 0
-                self._rolled_back()
+                try:
+                    self.conn.rollback()
+                finally:
+                    self._transaction_depth = 0
+                    self._rolled_back()
                 raise
-            self._transaction_depth = 0
+            finally:
+                if committed:
+                    self._transaction_depth = 0
             self._committed()
 
     def _committed(self):
@@ -122,24 +143,25 @@ def backup_file(path, label):
     A copy of a database file before it is migrated (SQLite's backup: consistent, also while the
     file is in use), opened and checked - or the migration does not start. Returns the copy.
     """
-    path = Path(path)
-    if path in _backed_up:
-        return _backed_up[path]
-    folder = path.parent / MIGRATION_BACKUPS
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{path.stem}_before_{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-    source = sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=30.0)
-    copy = sqlite3.connect(str(target))
-    try:
-        source.backup(copy)
-        if copy.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
-            raise RuntimeError(f"The backup {target} cannot be read back")
-    finally:
-        source.close()
-        copy.close()
-    _backed_up[path] = target
-    logger.info(f"{path.name} backed up to {target} before the migration {label}")
-    return target
+    path = Path(path).resolve()
+    with _backup_lock:
+        if path in _backed_up and _backed_up[path].is_file():
+            return _backed_up[path]
+        folder = path.parent / MIGRATION_BACKUPS
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{path.stem}_before_{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        source = connect_readonly(path, timeout=30.0)
+        copy = sqlite3.connect(str(target))
+        try:
+            source.backup(copy)
+            if copy.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                raise RuntimeError(f"The backup {target} cannot be read back")
+        finally:
+            source.close()
+            copy.close()
+        _backed_up[path] = target
+        logger.info(f"{path.name} backed up to {target} before the migration {label}")
+        return target
 
 
 def rebuild(path, name, tables, facts, prepare=()):

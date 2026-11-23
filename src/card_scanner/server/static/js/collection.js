@@ -2106,6 +2106,7 @@ function bindInventoryEvents() {
 // Topmost first
 const OVERLAYS = [
     ['dialog-modal', () => closeDialog(null)],
+    ['to-collection-modal', () => closeToCollection(null)],
     ['value-modal', () => closeValueDialog(null)],
     ['capture-viewer', closeCaptureViewer],
     ['capture-modal', closeCaptures],

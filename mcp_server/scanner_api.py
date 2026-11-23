@@ -76,6 +76,11 @@ class ScannerApi:
         _url, answer = self._request(path, params)
         if isinstance(answer, dict) and answer.get('success') is False:
             raise ScannerError(answer.get('error') or 'The scanner server refused the request')
+        if len(self._cache) >= 256:
+            # Drop expired entries first, then oldest if still full
+            self._cache = {k: v for k, v in self._cache.items() if now - v[0] < self.cache_seconds}
+            if len(self._cache) >= 256:
+                self._cache.pop(next(iter(self._cache)))
         self._cache[key] = (now, answer)
         return answer
 

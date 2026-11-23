@@ -11,12 +11,14 @@ import os
 import re
 import shutil
 import sqlite3
+import uuid
 import zipfile
 from zlib import error as zlib_error
 from datetime import datetime
 from pathlib import Path
 
 from card_scanner.config import Config
+from card_scanner.core import storage
 from card_scanner.core.inventory import CAPTURES_DIR
 
 logger = logging.getLogger('backups')  # the name its log lines always had (the module is card_scanner.core.backups)
@@ -56,18 +58,19 @@ UPLOAD_MAX_FILES = 400_000
 # restore: the rows of a backup that can stand in the tables as they are now (the constraints of
 # inventory.py / decks.py) - backups made before them may hold entries without copies and rows
 # beside entries or decks that were gone already. {prefix}: 'collection_' / 'scanned_' / ''
+_POS_INT = "typeof(quantity) = 'integer' AND quantity > 0"
 RESTORABLE = {
-    'inventory': 'quantity > 0',
-    'inventory_captures': 'inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
-    'inventory_batches': 'quantity > 0 AND inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
-    'inventory_sources': 'quantity > 0 AND inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0)',
+    'inventory': _POS_INT,
+    'inventory_captures': f'inventory_id IN (SELECT id FROM {{prefix}}inventory WHERE {_POS_INT})',
+    'inventory_batches': f'{_POS_INT} AND inventory_id IN (SELECT id FROM {{prefix}}inventory WHERE {_POS_INT})',
+    'inventory_sources': f'{_POS_INT} AND inventory_id IN (SELECT id FROM {{prefix}}inventory WHERE {_POS_INT})',
     'trades': '1',
-    'trade_cards': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades) AND (inventory_id IS NULL '
-                   'OR inventory_id IN (SELECT id FROM {prefix}inventory WHERE quantity > 0))',
-    'trade_receives': 'quantity > 0 AND trade_id IN (SELECT id FROM {prefix}trades)',
+    'trade_cards': f'{_POS_INT} AND trade_id IN (SELECT id FROM {{prefix}}trades) AND (inventory_id IS NULL '
+                   f'OR inventory_id IN (SELECT id FROM {{prefix}}inventory WHERE {_POS_INT}))',
+    'trade_receives': f'{_POS_INT} AND trade_id IN (SELECT id FROM {{prefix}}trades)',
     'arena_account': '1',
     'decks': '1',
-    'deck_cards': "quantity > 0 AND board IN ('commander', 'main', 'side') AND deck_id IN (SELECT id FROM decks)",
+    'deck_cards': f"{_POS_INT} AND board IN ('commander', 'main', 'side') AND deck_id IN (SELECT id FROM decks)",
 }
 KEEP_AUTOMATIC = 5  # backups made before a restore; the ones the user makes are kept until deleted
 # The scheduled ones (create_scheduled; marked 'daily' in their info, whatever the interval):
@@ -120,6 +123,22 @@ def full_captures_dir():
     return inventory.FULL_CAPTURES_DIR
 
 
+def _safe_filename(name):
+    """True only for plain filenames with no directory component or traversal."""
+    return isinstance(name, str) and bool(name) and name not in ('.', '..') and Path(name).name == name and '/' not in name and '\\' not in name
+
+
+def _validate_capture_names(conn):
+    """Refuse a backup database whose inventory_captures.file column contains path traversal or invalid names."""
+    for prefix in ('collection_', 'scanned_'):
+        table = f'{prefix}inventory_captures'
+        if not _columns(conn, table):
+            continue
+        for (file,) in conn.execute(f'SELECT file FROM {table} WHERE file IS NOT NULL'):
+            if not isinstance(file, str) or not CAPTURE_NAME.fullmatch(file):
+                raise BackupError(f'This backup file has an invalid capture filename: "{str(file)[:80]}"')
+
+
 def _link(source, target):
     """A capture file in another place: a hard link, or a copy where links don't work"""
     if target.exists() or not source.exists():
@@ -158,41 +177,42 @@ def create(inventory, scan_inventory, deck_store, note='', automatic=False, dail
         number += 1
         backup_id = f"{created.strftime('%Y-%m-%d_%H-%M-%S')}-{number}"
     folder = BACKUPS_DIR / backup_id
-    work = BACKUPS_DIR / f'.{backup_id}.tmp'  # moved into place when complete
+    work = BACKUPS_DIR / f'.{backup_id}.{uuid.uuid4().hex[:8]}.tmp'  # moved into place when complete
     (work / 'captures').mkdir(parents=True)
     (work / 'captures_full').mkdir()
     try:
-        target = sqlite3.connect(str(work / 'backup.db'))
-        parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
-        with _locked(parts):
-            fingerprint = _fingerprint(inventory, scan_inventory, deck_store, arena_inventory)
-            for prefix, manager, tables in parts:
-                for table in tables:
-                    columns = _columns(manager.conn, table)
-                    target.execute(f"CREATE TABLE {prefix}{table} ({', '.join(columns)})")
-                    target.executemany(
-                        f"INSERT INTO {prefix}{table} VALUES ({', '.join('?' * len(columns))})",
-                        (tuple(row) for row in manager.conn.execute(f"SELECT {', '.join(columns)} FROM {table}")))
-            for prefix in ('collection_', 'scanned_'):
-                for (file,) in target.execute(f'SELECT file FROM {prefix}inventory_captures'):
-                    _link(CAPTURES_DIR / file, work / 'captures' / file)
-                    _link(full_captures_dir() / file, work / 'captures_full' / file)  # none for the older ones
-        count = lambda sql: target.execute(sql).fetchone()[0]
-        info = {
-            'id': backup_id, 'created': created.strftime('%Y-%m-%d %H:%M:%S'), 'note': (note or '').strip()[:80],
-            'automatic': bool(automatic), 'daily': bool(daily),
-            'cards': count('SELECT COALESCE(SUM(quantity), 0) FROM collection_inventory'),
-            'entries': count('SELECT COUNT(*) FROM collection_inventory'),
-            'scanned': count('SELECT COALESCE(SUM(quantity), 0) FROM scanned_inventory'),
-            'decks': count('SELECT COUNT(*) FROM decks'),
-            # The digital collection's cards (a backup without that part: 0)
-            'arena': count('SELECT COALESCE(SUM(quantity), 0) FROM arena_inventory') if arena_inventory is not None else 0,
-            'fingerprint': fingerprint,  # create_scheduled: nothing changed since, no new backup
-        }
-        target.execute('CREATE TABLE info (value TEXT)')
-        target.execute('INSERT INTO info VALUES (?)', (json.dumps(info),))
-        target.commit()
-        target.close()
+        with contextlib.closing(sqlite3.connect(str(work / 'backup.db'))) as target:
+            parts = _parts(inventory, scan_inventory, deck_store, arena_inventory)
+            with _locked(parts):
+                fingerprint = _fingerprint(inventory, scan_inventory, deck_store, arena_inventory)
+                for prefix, manager, tables in parts:
+                    for table in tables:
+                        columns = _columns(manager.conn, table)
+                        target.execute(f"CREATE TABLE {prefix}{table} ({', '.join(columns)})")
+                        target.executemany(
+                            f"INSERT INTO {prefix}{table} VALUES ({', '.join('?' * len(columns))})",
+                            (tuple(row) for row in manager.conn.execute(f"SELECT {', '.join(columns)} FROM {table}")))
+                for prefix in ('collection_', 'scanned_'):
+                    for (file,) in target.execute(f'SELECT file FROM {prefix}inventory_captures'):
+                        if not _safe_filename(file):
+                            continue
+                        _link(CAPTURES_DIR / file, work / 'captures' / file)
+                        _link(full_captures_dir() / file, work / 'captures_full' / file)  # none for the older ones
+            count = lambda sql: target.execute(sql).fetchone()[0]
+            info = {
+                'id': backup_id, 'created': created.strftime('%Y-%m-%d %H:%M:%S'), 'note': (note or '').strip()[:80],
+                'automatic': bool(automatic), 'daily': bool(daily),
+                'cards': count('SELECT COALESCE(SUM(quantity), 0) FROM collection_inventory'),
+                'entries': count('SELECT COUNT(*) FROM collection_inventory'),
+                'scanned': count('SELECT COALESCE(SUM(quantity), 0) FROM scanned_inventory'),
+                'decks': count('SELECT COUNT(*) FROM decks'),
+                # The digital collection's cards (a backup without that part: 0)
+                'arena': count('SELECT COALESCE(SUM(quantity), 0) FROM arena_inventory') if arena_inventory is not None else 0,
+                'fingerprint': fingerprint,  # create_scheduled: nothing changed since, no new backup
+            }
+            target.execute('CREATE TABLE info (value TEXT)')
+            target.execute('INSERT INTO info VALUES (?)', (json.dumps(info),))
+            target.commit()
         os.replace(work, folder)
     except Exception:
         shutil.rmtree(work, ignore_errors=True)
@@ -267,9 +287,8 @@ def list_backups():
         if not BACKUP_ID.match(folder.name) or not (folder / 'backup.db').is_file():
             continue
         try:
-            source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
-            info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
-            source.close()
+            with contextlib.closing(storage.connect_readonly(folder / 'backup.db')) as source:
+                info = json.loads(source.execute('SELECT value FROM info').fetchone()[0])
         except (sqlite3.Error, TypeError, ValueError) as e:
             logger.warning(f"Backup {folder.name} cannot be read: {e}")
             continue
@@ -291,11 +310,14 @@ def restore(backup_id, inventory, scan_inventory, deck_store, arena_inventory=No
     # accepted between the two would be in neither the backup nor the restored tables (the
     # managers' locks are re-entrant: create() takes them again)
     with _locked(parts):
+        # Validate the backup database before taking a pre-restore backup or modifying live tables
+        with contextlib.closing(storage.connect_readonly(folder / 'backup.db')) as check_source:
+            _validate_capture_names(check_source)
         # keep: the backup made here must not push out the one being restored (restoring the oldest
         # of the automatic backups once deleted it before it was read)
         previous = create(inventory, scan_inventory, deck_store, note=f"Before restoring {backup_id.replace('_', ' ')}",
                           automatic=True, keep=backup_id, arena_inventory=arena_inventory)
-        source = sqlite3.connect(f"file:{folder / 'backup.db'}?mode=ro", uri=True)
+        source = storage.connect_readonly(folder / 'backup.db')
         try:
             # One part at a time: the collection and the decks are two connections to one
             # file, which cannot both hold a write. If a part fails the ones before it are
@@ -389,8 +411,7 @@ def add_archive(source):
             raise BackupError('This backup file is too large')
         if (BACKUPS_DIR / backup_id).exists():
             raise BackupError(f"The backup of {backup_id.replace('_', ' ')} is here already")
-        work = BACKUPS_DIR / f'.{backup_id}.upload.tmp'  # moved into place when complete and checked
-        shutil.rmtree(work, ignore_errors=True)
+        work = BACKUPS_DIR / f'.{backup_id}.{uuid.uuid4().hex[:8]}.upload.tmp'  # moved into place when complete and checked
         (work / 'captures').mkdir(parents=True)
         (work / 'captures_full').mkdir()
         try:
@@ -403,17 +424,19 @@ def add_archive(source):
                             raise BackupError('This backup file is too large')
                         out.write(chunk)
             try:
-                saved = sqlite3.connect(str(work / 'backup.db'))
-                info = json.loads(saved.execute('SELECT value FROM info').fetchone()[0])
-                for prefix, _manager, tables in _parts(None, None, None):
-                    for table in tables[:1] if prefix else tables:  # inventory_sources: newer than some backups
-                        saved.execute(f'SELECT 1 FROM {prefix}{table} LIMIT 1')
-                info = {**info, 'id': backup_id, 'automatic': False, 'daily': False, 'uploaded': True,
-                        'created': str(info['created']), 'note': str(info.get('note') or '')[:80],
-                        **{key: int(info.get(key) or 0) for key in ('cards', 'entries', 'scanned', 'decks')}}
-                saved.execute('UPDATE info SET value = ?', (json.dumps(info),))
-                saved.commit()
-                saved.close()
+                with contextlib.closing(sqlite3.connect(str(work / 'backup.db'))) as saved:
+                    info = json.loads(saved.execute('SELECT value FROM info').fetchone()[0])
+                    for prefix, _manager, tables in _parts(None, None, None):
+                        for table in tables[:1] if prefix else tables:  # inventory_sources: newer than some backups
+                            saved.execute(f'SELECT 1 FROM {prefix}{table} LIMIT 1')
+                    _validate_capture_names(saved)
+                    info = {**info, 'id': backup_id, 'automatic': False, 'daily': False, 'uploaded': True,
+                            'created': str(info['created']), 'note': str(info.get('note') or '')[:80],
+                            **{key: int(info.get(key) or 0) for key in ('cards', 'entries', 'scanned', 'decks')}}
+                    saved.execute('UPDATE info SET value = ?', (json.dumps(info),))
+                    saved.commit()
+            except BackupError:
+                raise
             except (sqlite3.Error, TypeError, ValueError, KeyError, AttributeError) as e:
                 raise BackupError(f'This backup file cannot be read ({e})')
             os.replace(work, BACKUPS_DIR / backup_id)
@@ -435,7 +458,7 @@ def add_archive(source):
 
 FULL_DIR = BACKUPS_DIR / 'full'
 KEEP_FULL = 2  # each holds a copy of the card database (the pictures are hard links)
-FULL_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+FULL_ID = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$')
 
 
 def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL):
@@ -457,9 +480,12 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
     """
     created = datetime.now()
     backup_id = created.strftime('%Y-%m-%d_%H-%M-%S')
+    number = 1
+    while (FULL_DIR / backup_id).exists():
+        number += 1
+        backup_id = f"{created.strftime('%Y-%m-%d_%H-%M-%S')}-{number}"
     folder = FULL_DIR / backup_id
-    work = FULL_DIR / f'.{backup_id}.tmp'
-    shutil.rmtree(work, ignore_errors=True)
+    work = FULL_DIR / f'.{backup_id}.{uuid.uuid4().hex[:8]}.tmp'
     work.mkdir(parents=True)
     try:
         with contextlib.ExitStack() as held:
@@ -471,20 +497,14 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
                 # VACUUM INTO (since 2026-11-11; SQLite's backup before): the same consistent snapshot, WAL included, but
                 # without the free pages - the card data's file is half free after an update replaced its table (272 MB
                 # on disk, 141 MB of it written this way, measured on the server's on 2026-11-11). It writes a new file
-                source = sqlite3.connect(f'file:{database}?mode=ro', uri=True, timeout=30.0)
-                try:
+                with contextlib.closing(storage.connect_readonly(database, timeout=30.0)) as source:
                     source.execute('VACUUM INTO ?', (str(work / Path(database).name),))
-                finally:
-                    source.close()
             for name, source_dir, database, sql, *_ in linked:
                 (work / name).mkdir(exist_ok=True)
-                snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
-                try:
+                with contextlib.closing(storage.connect_readonly(work / Path(database).name)) as snapshot:
                     for (file,) in snapshot.execute(sql):
-                        if file:
+                        if _safe_filename(file):
                             _link(Path(source_dir) / file, work / name / file)
-                finally:
-                    snapshot.close()
             for file in copied:
                 if Path(file).is_file():
                     shutil.copy2(file, work / Path(file).name)
@@ -492,22 +512,16 @@ def create_full(managers, barrier, databases, linked, copied=(), keep=KEEP_FULL)
         manifest = {'id': backup_id, 'created': created.strftime('%Y-%m-%d %H:%M:%S'), 'databases': {}, 'files': {},
                     'missing': [], 'copied': [Path(file).name for file in copied if (work / Path(file).name).is_file()]}
         for database in databases:
-            snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
-            try:
+            with contextlib.closing(storage.connect_readonly(work / Path(database).name)) as snapshot:
                 if snapshot.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                     raise BackupError(f'The snapshot of {Path(database).name} cannot be read back')
                 tables = [row[0] for row in snapshot.execute(
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
                 manifest['databases'][Path(database).name] = {
                     table: snapshot.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in tables}
-            finally:
-                snapshot.close()
         for name, _source_dir, database, sql, *rest in linked:
-            snapshot = sqlite3.connect(f'file:{work / Path(database).name}?mode=ro', uri=True)
-            try:
-                named = {file for (file,) in snapshot.execute(sql) if file}
-            finally:
-                snapshot.close()
+            with contextlib.closing(storage.connect_readonly(work / Path(database).name)) as snapshot:
+                named = {file for (file,) in snapshot.execute(sql) if _safe_filename(file)}
             if rest and rest[0]:
                 # Optional pictures (the large copies: older captures have none): only what is
                 # there is counted, and the rest is not "missing"

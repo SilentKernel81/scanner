@@ -367,7 +367,8 @@ class CardIdentifier:
                     {"text": prompt},
                     {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}}
                 ]
-            }]
+            }],
+            "generationConfig": {"maxOutputTokens": max_tokens},
         }
         response = self._post_with_retry(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",

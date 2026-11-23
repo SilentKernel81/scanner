@@ -105,10 +105,13 @@ class PendingCaptures:
                 self.conn.commit()
             except sqlite3.IntegrityError:
                 self.conn.rollback()
-                row = self.conn.execute(
-                    "SELECT id, uid FROM pending_captures WHERE COALESCE(sender, station, '') = ? AND capture_id = ?",
-                    (sender or station or '', capture_id)).fetchone()
-                return row['id'], row['uid']
+                if capture_id is not None:
+                    row = self.conn.execute(
+                        "SELECT id, uid FROM pending_captures WHERE COALESCE(sender, station, '') = ? AND capture_id = ?",
+                        (sender or station or '', capture_id)).fetchone()
+                    if row is not None:
+                        return row['id'], row['uid']
+                raise
         return pending_id, uid
 
     def remove(self, pending_id):
