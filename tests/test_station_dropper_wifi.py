@@ -41,6 +41,7 @@ class FakeFeeder:
         self.lose = 0
         self.down = False
         self.fail_next = False
+        self.fail_drop = None
         self.requests = []
 
     def restart(self):
@@ -63,7 +64,12 @@ class FakeFeeder:
                 if self.polls[n] >= self.done_after:
                     self.results[n] = 'failed' if self.fail_next else 'done'
                     self.fed.append(n)
-            return 200, {'n': n, 'state': self.results[n], 'boot': self.boot, 'error': 'jammed' if self.results[n] == 'failed' else None}
+            payload = {'n': n, 'state': self.results[n], 'boot': self.boot, 'error': 'jammed' if self.results[n] == 'failed' else None}
+            if self.results[n] == 'failed' and self.fail_drop:
+                payload['drop'] = self.fail_drop
+            elif self.results[n] == 'done':
+                payload['drop'] = 'dropped'
+            return 200, payload
         if path == 'feed':
             if form['key'] != self.key:
                 return 403, {'error': 'wrong key - nothing fed', 'boot': self.boot}
@@ -456,6 +462,85 @@ class TheServer(unittest.TestCase):
                 self.assertTrue(station.settings.saved['dropper']['enabled'])
             finally:
                 client.disconnect()
+
+
+class DropGateIntegration(unittest.TestCase):
+    """Wi-Fi dropper sensor confirmation gates auto-capture on the station."""
+
+    def test_wifi_dropper_gates_capture_until_sensor_confirms_drop(self):
+        import time
+        from card_scanner.station.station_client import Station
+
+        class FakeScanner:
+            def __init__(self):
+                self.auto_capture_enabled = False
+                self.focus_sweep_running = False
+                self.focus_probe_running = False
+                self.capture_pending = False
+                self.camera = object()
+                self.awaiting_new_card = False
+                self.require_drop_signal = False
+                self.stable_frames = 5
+                self.detected = False
+                self.notified = 0
+
+            def is_card_detected(self):
+                return self.detected
+
+            def notify_card_dropped(self):
+                self.notified += 1
+                self.awaiting_new_card = False
+                self.stable_frames = 0
+
+        fake = FakeFeeder(done_after=1)
+        st = Station('http://example.test', 's1', 'Desk', 'tok')
+        st.dropper = Dropper(open_feeder=lambda ip, key: feeder_for(fake))
+        st.scanner = FakeScanner()
+        st.dropper_synced = True
+        st.send_log = mock.MagicMock()
+
+        # Enabling Wi-Fi dropper enables the drop-signal capture gate
+        st.configure_dropper(WIFI_ON)
+        self.assertTrue(st.scanner.require_drop_signal)
+
+        # Starting auto-scan on an empty tray locks awaiting_new_card, then releases Card #1 in the background
+        st.on_set({'auto_capture_enabled': True})
+        deadline = time.time() + 2.0
+        while st.release_busy and time.time() < deadline:
+            time.sleep(0.01)
+        # Background release succeeded (sensor confirmed 'dropped') -> unlocked capture!
+        self.assertEqual(st.scanner.notified, 1)
+        self.assertFalse(st.scanner.awaiting_new_card)
+        self.assertEqual(st.scanner.stable_frames, 0)
+
+        # Stuck card on ramp: keeps capture locked AND keeps auto-scan armed (user clears jam)
+        time.sleep(0.002)
+        st.scanner.awaiting_new_card = True
+        fake.fail_next = True
+        fake.fail_drop = 'stuck'
+        st._release('jammed card', st.scan_session, first=False)
+        self.assertEqual(st.scanner.notified, 1)
+        self.assertTrue(st.scanner.awaiting_new_card)
+        self.assertTrue(st.scanner.auto_capture_enabled)
+        st.send_log.assert_called()
+
+        # Empty magazine ('no_card'): keeps capture locked AND disables auto-scan cleanly (like card back!)
+        time.sleep(0.002)
+        st.scanner.awaiting_new_card = True
+        fake.fail_next = True
+        fake.fail_drop = 'no_card'
+        st._release('empty stack', st.scan_session, first=False)
+        self.assertEqual(st.scanner.notified, 1)
+        self.assertTrue(st.scanner.awaiting_new_card)
+        self.assertFalse(st.scanner.auto_capture_enabled)
+
+        # Verify scanner.py's real notify_card_dropped() and require_drop_signal attribute exist and work
+        from card_scanner.station.scanner import CardScanner
+        self.assertTrue(hasattr(CardScanner, 'notify_card_dropped'))
+
+        # Switching dropper OFF disables the gate for manual hand-scanning
+        st.configure_dropper({'enabled': False, 'transport': 'wifi', 'feeder': FEEDER, 'pair_key': KEY})
+        self.assertFalse(st.scanner.require_drop_signal)
 
 
 if __name__ == '__main__':

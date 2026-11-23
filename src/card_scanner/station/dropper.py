@@ -186,6 +186,7 @@ class WifiFeeder:
         self._http, self._clock, self._sleep = http, clock, sleep
         self.number = 0
         self.under_way = None            # the number asked for and not yet done
+        self.last_drop = None            # sensor verdict from feeder: 'dropped' | 'stuck' | 'no_card' | None
         self.boot = self._status_boot()  # here, when opened - before the caller's gate, never inside it
 
     def _status_boot(self):
@@ -206,6 +207,7 @@ class WifiFeeder:
 
     def _ask(self):
         # A number never used before by this station: the time in ms, and always more than the last one
+        self.last_drop = None
         self.number = max(self.number + 1, int(time.time() * 1000))
         n = self.number
         tries, boot_read = 0, False
@@ -248,8 +250,10 @@ class WifiFeeder:
                 raise RuntimeError('the feeder restarted while releasing the card - look at the pile before going on')
             state = answer.get('state')
             if state == 'done':
+                self.last_drop = answer.get('drop')
                 return
             if state == 'failed':
+                self.last_drop = answer.get('drop')
                 raise RuntimeError(f'the feeder could not release the card ({answer.get("error")})')
             if self._clock() > until:
                 raise RuntimeError(f'the feeder did not finish the card within {FEEDER_WAIT_S} s')
@@ -371,6 +375,7 @@ class Dropper:
         self._lock = threading.Lock()      # held for the whole pulse
         self.pulses = 0                    # cards released since the station started
         self.error = None                  # why the last pulse could not be sent (None: it was, or none was asked for)
+        self.last_drop = None              # ramp sensor verdict of last Wi-Fi feed ('dropped' | 'stuck' | 'no_card' | None)
         self.last_pulse = None             # time.time() of the last pulse sent
 
     @property
@@ -434,7 +439,9 @@ class Dropper:
                 # Inactive again whatever happened: a pin left active would hold the mechanism open
                 try:
                     self._pin.set(False)
+                    self.last_drop = getattr(self._pin, 'last_drop', None)
                 except Exception as e:
+                    self.last_drop = getattr(self._pin, 'last_drop', None)
                     self._fail(e)
                     self._close_pin()
                     return False

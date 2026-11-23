@@ -138,6 +138,10 @@ class CardScanner:
         # auto-capture waits for the next drop (see _new_card_arrived) so the same card
         # is never captured twice
         self.awaiting_new_card = False
+        # When True (Wi-Fi card dropper with ramp sensor), only notify_card_dropped() may clear
+        # awaiting_new_card: prevents premature/duplicate captures from shadows or flicker AND
+        # allows identical back-to-back cards to capture cleanly once the sensor confirms the drop.
+        self.require_drop_signal = False
 
         # User settings
         self.settings = settings or Settings()
@@ -559,6 +563,17 @@ class CardScanner:
         elif now - self.out_of_focus_since > 3.0 and now - self.last_focus_sweep > 15.0:
             self.refocus("card out of focus")
 
+    def notify_card_dropped(self):
+        """Called when the card dropper confirms a card physically dropped onto the tray: unlocks
+        auto-capture so the camera waits only for stillness/sharpness (also handles identical cards)."""
+        self.disturbed_during_focus = False
+        self.awaiting_new_card = False
+        self.tracked_outline = None
+        self.stable_frames = 0
+        self.last_new_card = {'kind': 'dropper_sensor', 'at': time.time()}
+        if self.auto_capture_enabled:
+            self.log("Dropper confirmed card landed - waiting for card to settle")
+
     def _trigger_auto_capture(self):
         """Start an auto-capture (the callback takes the image and identifies the card)"""
         # Double-check auto_capture_enabled before triggering (avoid race condition)
@@ -717,14 +732,14 @@ class CardScanner:
         if focus_moving and not self.focus_sweep_running and self.area_big_changes >= 2:
             self.disturbed_during_focus = True
         self._rebaseline_after_focus(focus_moving)
-        if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
+        if self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self.disturbed_during_focus:
             self.disturbed_during_focus = False
             self.awaiting_new_card = False
             self.stable_frames = 0
             self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
             if self.auto_capture_enabled:
                 self.log("New card detected (dropped while focusing)")
-        elif self.awaiting_new_card and not focus_moving:
+        elif self.awaiting_new_card and not self.require_drop_signal and not focus_moving:
             different = self.area_captured is not None and \
                 self._area_difference(thumb, self.area_captured) > self.AREA_DIFFERENT
             if self.area_big_changes >= 2 or (settled and different):
@@ -759,7 +774,8 @@ class CardScanner:
         if not present:
             color, label = (160, 160, 160), "Fixed area - no card"
         elif self.awaiting_new_card and self.auto_capture_enabled:
-            color, label = (100, 200, 255), "Fixed area [Captured - drop next card]"
+            color = (100, 200, 255)
+            label = "Fixed area [Waiting for dropper]" if self.require_drop_signal else "Fixed area [Captured - drop next card]"
         elif self.stable_frames < self.required_stable_frames:
             color, label = (255, 165, 0), f"Fixed area [Stabilizing {self.stable_frames}/{self.required_stable_frames}]"
         else:
@@ -1278,7 +1294,7 @@ class CardScanner:
                             movement, _ = getattr(self, 'last_frame_change', (0.0, 0.0))
                             if focus_moving and not self.focus_sweep_running and movement > 0.03:
                                 self.disturbed_during_focus = True
-                            if self.awaiting_new_card and not focus_moving and self.disturbed_during_focus:
+                            if self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self.disturbed_during_focus:
                                 self.disturbed_during_focus = False
                                 self.awaiting_new_card = False
                                 self.tracked_outline = None
@@ -1286,7 +1302,7 @@ class CardScanner:
                                 self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
                                 if self.auto_capture_enabled:
                                     self.log("New card detected (dropped while focusing)")
-                            elif self.awaiting_new_card and not focus_moving and self._new_card_arrived(gap):
+                            elif self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self._new_card_arrived(gap):
                                 self.awaiting_new_card = False
                                 self.stable_frames = 0  # the new card must settle first
                                 jump, change = getattr(self, 'last_frame_change', (0.0, 0.0))
@@ -1325,7 +1341,7 @@ class CardScanner:
                         # Card gone for more than a detector hiccup: treat as a change of card
                         # (not while the lens moves - the blur can hide the card)
                         self.missing_frames = 0 if self._focus_moving() else self.missing_frames + 1
-                        if self.awaiting_new_card and self.missing_frames >= self._frames(self.missing_frames_for_new_card):
+                        if self.awaiting_new_card and not self.require_drop_signal and self.missing_frames >= self._frames(self.missing_frames_for_new_card):
                             self.awaiting_new_card = False
                             self.last_new_card = {'kind': 'card_gone', 'at': time.time()}
                             if self.auto_capture_enabled:
@@ -1397,7 +1413,7 @@ class CardScanner:
                             time_remaining = self.card_display_duration - (time.time() - self.last_card_detection['time'])
                             label += f" [HOLD {time_remaining:.1f}s]"
                         elif self.awaiting_new_card and self.auto_capture_enabled:
-                            label += " [Captured - drop next card]"
+                            label += " [Waiting for dropper]" if self.require_drop_signal else " [Captured - drop next card]"
                         elif not self.card_in_focus:
                             label += " [Focusing]"
                         elif self.stable_frames < self.required_stable_frames:
@@ -1431,7 +1447,7 @@ class CardScanner:
                                     remaining = self.auto_capture_delay - time_since_last_capture
                                     self.log(f"Auto-capture ready, waiting for cooldown: {remaining:.1f}s remaining", level="info")
 
-                            if time_since_last_capture >= self.auto_capture_delay and self._outline_flicker():
+                            if time_since_last_capture >= self.auto_capture_delay and not self.require_drop_signal and self._outline_flicker():
                                 self.awaiting_new_card = True
                                 self.log("Same card as the last capture (its outline flickered) - not captured again")
                             elif time_since_last_capture >= self.auto_capture_delay:
