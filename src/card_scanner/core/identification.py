@@ -292,6 +292,26 @@ class Identification:
             return 'unknown', None
         return foil_marker.answer_for(strip['net'])
 
+    def _foil_of_unconfirmed_read(self, image, foil_image, ocr_info):
+        """
+        The marker of a card the OCR named but did not confirm, from the strip live_read already read for this capture: 'foil', 'non-foil' or 'unknown'. Nothing is read
+        again. The strip's answer is only about a printing it can vouch for (PrintingCheck.finish_named_by_strip). Never raises: this is never a reason to lose a card.
+        """
+        if self.evidence is None:
+            return 'unknown'
+        try:
+            kept, strip = reading_capture.recall('strip', foil_image if foil_image is not None else image)
+            if not kept or not strip:
+                return 'unknown'
+            foil = self.evidence.finish_named_by_strip(strip, ocr_info.get('name'))
+        except Exception as e:
+            self.log(f"The strip's foil marker could not be used ({e})", level="warning")
+            return 'unknown'
+        if foil in ('foil', 'non-foil'):
+            self.log(f"Foil marker from the strip, for review: {foil}")
+            return foil
+        return 'unknown'
+
     def _read_card(self, image):
         """
         The full-card OCR of a capture - ONE read per capture (core/reading/capture.py): _ocr_names (the picture alone's confirmation) and _read_with_ocr ask about
@@ -486,6 +506,9 @@ class Identification:
 
         if self._ai():
             return ocr_info, IDENTIFY
+        if ocr_info and ocr_info.get('foil', 'unknown') == 'unknown':
+            # No AI will look at this card: it goes on as it is, usually to review. What the strip already said about its marker goes with it
+            ocr_info['foil'] = self._foil_of_unconfirmed_read(image, foil_image, ocr_info)
         if not ocr_info:
             if self.card_identifier:      # there is one, and it is switched off
                 self.log("Vision AI is switched off - this card goes to the review queue", level="warning")

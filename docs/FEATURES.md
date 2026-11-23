@@ -146,7 +146,8 @@ game sits behind one interface (`games/`), so another could be added.
   review). Thresholds from 20 known-wrong labels; deployed on the server on 2026-10-20 but not yet judged on live scans; never tried on a Pi or the Android app.
 - **Added or reviewed:** a confirmed printing goes straight into the *scanned cards* (with an
   Undo); anything uncertain waits in that camera's **review queue**, where you search, choose
-  the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read.
+  the printing, finish and quantity, and add it. With the image index the review also shows the five printings the capture's picture looks like, to pick from, and says when the foil marker was not read. A card the OCR named but did not confirm keeps the marker its collector strip showed (since 2026-11-23), when that strip names a printing of the same name that prints a marker: checked on the saved capture that lost it; a printing the server can confirm from the name alone is then added without waiting for review.
+- **The focus is checked before the first card of a scanning run** (since 2026-11-23): with a locked focus, the lens tries a step either way and keeps the sharpest position before the first capture. Unit tests with a simulated lens; never yet run on a real camera.
   Scanning goes on meanwhile. Since 2026-10-21 a confirmed printing made in foil AND non-foil whose ★ / • nothing read (OCR, the foil network, the AI) is not
   added as regular either: it waits for review with its printing filled in, "finish not read" (the same rule in the Android app's standalone mode).
 - **Send back to review:** a button on any entry of the collection or the scanned cards sends

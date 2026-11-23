@@ -79,6 +79,7 @@ For data-changing tests compare database rows, summed quantities, per-finish pri
 | SCAN-12 | P0 I/E | Set Scan into location; scan more cards; change location and scan again. | Each addition uses its capture workflow's applicable location; existing entries retain their locations. |
 | SCAN-13 | P1 I/E | Set location to blank, whitespace, and more than 60 characters. | Blank clears location; whitespace is trimmed and accepted length is limited consistently. |
 | SCAN-14 | P0 H/E | Capture with focus check enabled; observe beep timing. | Capture signal occurs after the image is taken; dropping next card after the signal cannot alter that image. |
+| SCAN-15 | P1 H | With a locked focus moved one step off, start auto scanning with the dropper and a stack of cards. | The first card waits a few seconds while the lens moves, the log says "Focus checked before the first card", it is captured once and sharp, and the dropper releases the next card only after it. |
 | SOUND-01 | P1 E | Enable/disable sound; set volume 0/30/100; reload/restart. | Preference persists; muted/zero volume is silent; enabled effects use chosen volume. |
 | SOUND-04 | P1 E | Switch *Capture beep* off and *Card added* on, scan a card; then the other way round; reload. | Only the sound left on is heard; errors and alerts still sound; both switches persist. **Not tested in a browser** (settings route and script syntax checked only) |
 | SOUND-02 | P2 E | Use a browser with suspended/unsupported Web Audio. | User interaction enables supported audio; audio failure does not block scanning. |

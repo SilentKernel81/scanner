@@ -673,6 +673,20 @@ class PrintingCheck:
                 # which way up the search found the card - the strip above was read turned so; the full-card confirmation reads it so too (_ocr_names)
                 'rotated': bool(search['rotated'])}
 
+    def finish_named_by_strip(self, strip, name):
+        """
+        The finish of a card whose printing was NOT decided, from its strip: 'foil', 'non-foil' or 'unknown'. Only when the strip's whole line names a printing, that printing
+        has the name the OCR read, and it prints a marker (prints_a_marker: the foil network answers confidently on older frames too, and is wrong there). The rule is the
+        decided card's, decide_finish.
+        """
+        named = self._strip_printing(strip)
+        if named is NO_LINE or named is LOOKUP_FAILED or not named or not name or not prints_a_marker(named):
+            return 'unknown'
+        if not database_names_match(name, {'name': named.get('name'), 'flavor_name': named.get('flavor_name')}):
+            return 'unknown'
+        finish = decide_finish(named.get('finishes'), strip.get('symbol', 'unknown'), strip.get('net'))['finish']
+        return {'foil': 'foil', 'regular': 'non-foil'}.get(finish, 'unknown')
+
     def _strip_printing(self, strip):
         """
         The printing the strip's whole line (a number AND a set) names - a card dict, None when the card data has no such printing, NO_LINE without a whole line,
