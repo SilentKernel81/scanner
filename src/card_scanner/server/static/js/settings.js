@@ -889,6 +889,10 @@ function showIndex(state) {
     const status = $('index-status');
     const covers = `${state.indexed.toLocaleString()} of ${state.printings.toLocaleString()} printings`;
     $('update-index').disabled = !!state.running;
+    $('upload-index').disabled = !!state.running;      // a running build would overwrite an upload when it ends (the server refuses it too)
+    // The backup's button exists only once an upload has left a backup, and says what is in it
+    $('download-index-backup').hidden = !state.backup;
+    $('download-index-backup').title = state.backup ? `${state.backup.count.toLocaleString()} printings, built ${state.backup.built || 'at an unknown time'}` : '';
     $('stop-index').hidden = !state.running;
     $('stop-index').disabled = !!state.stopping;
     setOverview('index', state.running ? `Building: ${state.done.toLocaleString()} of ${state.total ? state.total.toLocaleString() : '?'} new pictures`
@@ -922,6 +926,56 @@ function showIndex(state) {
 async function loadIndex() {
     const state = await api('/api/image_index');
     if (state) showIndex(state);
+}
+
+// Moving the index between servers as one zip file (core/image_index.py: export_archive, import_archive).
+// The download goes through fetch rather than a plain link: when the server refuses it (the settings password, no index), a link would save
+// the error's JSON as if it were the index, and here the person is told instead.
+async function downloadIndex(button, address) {
+    // The index itself or its backup: the same steps, and each button keeps its own label
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Preparing...';
+    try {
+        const response = await fetch(address);
+        if (!response.ok) {
+            const answer = await response.json().catch(() => ({}));
+            notify(answer.error || answer.message || 'The picture index could not be downloaded', 'error');
+            return;
+        }
+        const blob = await response.blob();
+        // The server names the file (how many printings, the day it was built)
+        const named = /filename="?([^";]+)"?/.exec(response.headers.get('Content-Disposition') || '');
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = named ? named[1] : 'picture-index.zip';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);   // after the browser has taken the file
+    } catch (error) {
+        notify(`Download failed: ${error.message}`, 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = label;
+    }
+}
+
+async function uploadIndex(file) {
+    const ok = await confirmDialog({title: 'Replace the picture index?', confirmText: 'Replace', danger: true,
+        message: `The index is replaced by "${file.name}". The current one is kept first as the one backup file, replacing the previous backup.`});
+    if (!ok) return;
+    const button = $('upload-index');
+    button.disabled = true;
+    button.textContent = 'Uploading...';
+    const form = new FormData();
+    form.append('file', file);
+    const state = await api('/api/image_index/import', {method: 'POST', body: form});
+    button.disabled = false;
+    button.textContent = 'Upload index file';
+    if (!state) return;
+    showIndex(state);
+    const count = state.imported.count.toLocaleString();
+    notify(state.imported.unchanged ? 'This is already the index in use: nothing was changed'
+        : `Picture index replaced: ${count} printings` + (state.imported.backup ? '. The previous one is in the backup file' : ''), 'success');
 }
 
 // The automatic updates (server/card_data.py: update_schedule_state): the card data's download and the picture index's retry - each a
@@ -1143,6 +1197,14 @@ function bindData() {
     $('stop-index').addEventListener('click', async () => {
         const state = await api('/api/image_index/stop', {method: 'POST', body: {}});
         if (state) showIndex(state);
+    });
+    $('download-index').addEventListener('click', event => downloadIndex(event.currentTarget, '/api/image_index/export'));
+    $('download-index-backup').addEventListener('click', event => downloadIndex(event.currentTarget, '/api/image_index/backup'));
+    $('upload-index').addEventListener('click', () => $('upload-index-input').click());
+    $('upload-index-input').addEventListener('change', event => {
+        const file = event.target.files[0];
+        event.target.value = '';                 // so that choosing the same file again is a new choice
+        if (file) uploadIndex(file);
     });
     $('compress-copies').addEventListener('click', async () => {
         const data = await api('/api/storage/compress', {method: 'POST', body: {}});

@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 
-from card_scanner.core import backups
+from card_scanner.core import backups, image_index
 from card_scanner.config import Config
 from card_scanner import games
 from card_scanner.core.others import OTHERS_FILE
@@ -161,6 +161,8 @@ def limit_the_request_body():
     """
     if request.endpoint == 'upload_backup':
         request.max_content_length = BACKUP_UPLOAD_LIMIT
+    elif request.endpoint == 'image_index_import':       # the picture index: about 15 MB today, and it grows with every set
+        request.max_content_length = image_index.ARCHIVE_LIMIT
     limit = request.max_content_length
     if limit is not None and request.content_length is not None and request.content_length > limit:
         abort(413)

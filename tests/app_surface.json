@@ -256,6 +256,13 @@
    "image_index_state"
   ],
   [
+   "/api/image_index/backup",
+   [
+    "GET"
+   ],
+   "image_index_backup"
+  ],
+  [
    "/api/image_index/download",
    [
     "GET"
@@ -268,6 +275,20 @@
     "GET"
    ],
    "image_index_file"
+  ],
+  [
+   "/api/image_index/export",
+   [
+    "GET"
+   ],
+   "image_index_export"
+  ],
+  [
+   "/api/image_index/import",
+   [
+    "POST"
+   ],
+   "image_index_import"
   ],
   [
    "/api/image_index/stop",
