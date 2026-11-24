@@ -71,6 +71,14 @@ class SettingAside(TradeData):
             self.trades.add(GAME, '  ', [self.other])
         self.assertEqual([trade['name'] for trade in self.trades.list(GAME)], ['Jo'])
 
+    def test_quantities_cap_how_many_copies_are_set_aside(self):
+        # Extra copies (keep 1): 3 copies owned -> set aside 2, keeping 1 free in the collection
+        result = self.trades.add(GAME, 'Jo', [self.card, self.other], quantities={self.card: 2, self.other: 5})
+        self.assertEqual((result['cards'], result['skipped']), (3, 0))  # other is capped at its 1 free copy
+        self.assertEqual({card['name']: card['quantity'] for card in self.trade()['cards']},
+                         {'Test Card': 2, 'Other Card': 1})
+        self.assertEqual(self.trades.by_entry(GAME)[self.card][0]['quantity'], 2)
+
     def test_taking_a_card_out(self):
         trade = self.trades.add(GAME, 'Jo', [self.card, self.other])['trade']
         row = next(card['row'] for card in self.trade()['cards'] if card['name'] == 'Other Card')
@@ -319,6 +327,15 @@ class TradeRoutes(TradeData):
         self.assertEqual(self.client.delete(f'/api/trades/{self.id}?action=cancel').status_code, 200)
         self.assertEqual(self.trades.list(GAME), [])
 
+    def test_post_trade_accepts_optional_quantities(self):
+        # Self.card has 1 free copy left (2 of 3 are in Jo); requesting 1 succeeds, non-numeric fails
+        bad = self.client.post('/api/trades', json={'name': 'Ana', 'ids': [self.card], 'quantities': {str(self.card): 'two'}})
+        self.assertEqual(bad.status_code, 400)
+        ok = self.client.post('/api/trades', json={'name': 'Ana', 'ids': [self.card], 'quantities': {str(self.card): 1}})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.get_json()['cards'], 1)
+        self.assertEqual(self.trade('Ana')['quantity'], 1)
+
     def test_a_stale_confirm_is_refused(self):
         # The page sends the fingerprint of the trade it showed
         listed = self.client.get('/api/trades').get_json()['trades'][0]
@@ -362,6 +379,7 @@ class OldPagesCannotConfirm(TradeRoutes):
     test_cancel_from_a_stale_page_keeps_the_confirmed_record = None
     test_forget_does_not_cancel_an_open_trade = None
     test_a_stale_confirm_is_refused = None
+    test_post_trade_accepts_optional_quantities = None
 
 
 class TradesInBackups(TradeData):

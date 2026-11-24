@@ -705,7 +705,51 @@ body.arena-view .inventory-thumb {
 
 /* ---------------------------------------------------------------- Trades */
 
-.trade {
+.trades-header {
+    padding-bottom: 12px;
+}
+
+.trades-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+}
+
+.trades-nav-row h2 {
+    margin: 0;
+}
+
+.trades-subtabs {
+    flex-wrap: wrap;
+}
+
+.trades-subtabs .tab-count {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--surface-3, rgba(127, 127, 127, 0.2));
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.trades-subtabs button.is-active .tab-count {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.trades-blurb {
+    margin: 8px 0 0;
+}
+
+.trades-empty-actions {
+    margin-top: 12px;
+}
+
+.trade,
+.others-panel,
+.spare-panel {
     margin-top: 14px;
 }
 
@@ -751,19 +795,48 @@ body.arena-view .inventory-thumb {
     cursor: default;
 }
 
-/* The list of spare cards: a trade's row with a tick at its end */
-.spare-panel {
-    margin-top: 14px;
+/* Instant card finder for trading / selling */
+.spare-presets-row {
+    margin-bottom: 8px;
 }
 
-.spare-title {
-    cursor: pointer;
-    font-weight: 600;
+.spare-presets {
+    flex-wrap: wrap;
+}
+
+.spare-action-row {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
 }
 
 .spare-row {
-    grid-template-columns: 76px 1fr auto 24px;
+    grid-template-columns: 22px 86px 1fr auto auto;
     cursor: pointer;
+}
+
+.spare-row.is-ticked {
+    background: var(--surface-2);
+}
+
+.spare-prices {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.spare-buylist {
+    font-size: 11px;
+    color: var(--success, #22c55e);
+}
+
+.spare-pager {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
 }
 
 details.trade .trade-row {
@@ -772,10 +845,6 @@ details.trade .trade-row {
 
 .trade-actions {
     margin-top: 10px;
-}
-
-#trades-done-title {
-    margin: 24px 0 0;
 }
 
 /* A trade's sale picture (collection.js: openSalePicture): the scans to tick on the left, the
@@ -1444,6 +1513,15 @@ details.trade .trade-row {
 
     .trade-row.others-collection {
         grid-template-columns: 1fr auto;
+    }
+
+    .trade-row.spare-row {
+        grid-template-columns: 22px auto 1fr auto;
+    }
+
+    .trade-row.spare-row .spare-quick-add {
+        grid-column: 1 / -1;
+        justify-self: start;
     }
 
     .deck-row {

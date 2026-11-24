@@ -87,7 +87,7 @@ async function showCollection(kind) {
     document.body.classList.toggle('arena-view', inArena());
     $('arena-bar').hidden = !inArena();
     selected.clear();
-    suggested = null;   // the spare cards were worked out for the other view's cards
+    spareTicked.clear();
     if (inArena() && currentTab === 'trades') showTab('inventory');   // trades are of paper cards
     await loadArenaInfo();
     await loadInventory();
@@ -138,7 +138,7 @@ function showTab(tab) {
     document.querySelectorAll('.tab').forEach(button => button.classList.toggle('is-active', button.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach(panel => { panel.hidden = panel.id !== `tab-${tab}`; });
     if (tab === 'stats') renderStats();
-    if (tab === 'trades') { loadTrades(); loadOthers(); loadBuyList(); }
+    if (tab === 'trades') { loadTrades(); loadOthers(); loadBuyList(); renderSpare(); }
 }
 
 // ============================================================================
@@ -1112,6 +1112,30 @@ function renderStats() {
 // ============================================================================
 
 let trades = [];   // open ones first, then the confirmed ones (GET /api/trades)
+let currentTradeView = 'open';
+
+const TRADE_VIEW_BLURBS = {
+    open: 'Cards set aside for a trade stay in your collection, marked, until you confirm the trade - only then are they removed.',
+    find: 'Instant local filter over your free copies (not held in any open trade). Pick a preset or search to find cards to sell or trade.',
+    others: 'Import someone else\'s CSV to browse their cards, add what you would receive to a trade, or build a buy list.',
+    history: 'Confirmed trades kept as a record. The cards you gave have already left your collection.',
+};
+
+function showTradeView(view) {
+    currentTradeView = TRADE_VIEW_BLURBS[view] ? view : 'open';
+    document.querySelectorAll('#trades-views button').forEach(button =>
+        button.classList.toggle('is-active', button.dataset.tradeView === currentTradeView));
+    document.querySelectorAll('#tab-trades .trades-view').forEach(panel => {
+        panel.hidden = panel.id !== `trades-view-${currentTradeView}`;
+    });
+    $('trades-blurb').textContent = TRADE_VIEW_BLURBS[currentTradeView];
+    if (currentTradeView === 'find') renderSpare();
+}
+
+function cardImageUrl(card) {
+    return (card.captures && card.captures[0] && card.captures[0].url)
+        || (card.details && card.details.image_uri) || '';
+}
 
 async function loadTrades() {
     const data = await api('/api/trades');
@@ -1123,8 +1147,10 @@ async function loadTrades() {
 function tradeCardHtml(card, open) {
     const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
                    card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+    const entry = open ? inventory.find(item => item.id === card.id) : null;
+    const image = entry ? cardImageUrl(entry) : '';
     return `
-        <div class="trade-row" data-row="${card.row}">
+        <div class="trade-row" data-row="${card.row}"${image ? ` data-image="${escapeHtml(image)}"` : ''}>
             <span class="trade-qty"><strong>${card.quantity}×</strong>${open && card.entry_quantity > card.quantity ? ` <span class="hint">of ${card.entry_quantity}</span>` : ''}</span>
             <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span></span>
             <span class="summary">${money(card.price * card.quantity)}</span>
@@ -1203,56 +1229,128 @@ function tradeHtml(trade) {
         </div>`;
 }
 
+function setTabBadge(id, count) {
+    const badge = $(id);
+    if (!badge) return;
+    badge.textContent = count;
+    badge.hidden = !count;
+}
+
 function renderTrades() {
     const open = trades.filter(trade => trade.status === 'open'), done = trades.filter(trade => trade.status !== 'open');
+    setTabBadge('trades-open-count', open.length);
+    setTabBadge('trades-done-count', done.length);
     // Confirmed trades that were unfolded stay so when the list is drawn again
     const unfolded = new Set([...document.querySelectorAll('#trades-done details[open]')].map(item => item.dataset.trade));
     $('trades-open').innerHTML = open.map(tradeHtml).join('')
-        || '<div class="empty-state">No trade is open.</div>';
-    $('trades-done').innerHTML = done.map(tradeHtml).join('');
-    $('trades-done-title').hidden = !done.length;
+        || `<div class="panel empty-state">
+                <div>No trade is open yet.</div>
+                <div class="trades-empty-actions">
+                    <button type="button" class="btn btn-small btn-primary" data-goto-trade-view="find">Find cards to trade or sell</button>
+                </div>
+            </div>`;
+    $('trades-done').innerHTML = done.map(tradeHtml).join('')
+        || '<div class="panel empty-state">No confirmed trades yet.</div>';
     document.querySelectorAll('#trades-done details').forEach(item => { item.open = unfolded.has(item.dataset.trade); });
 }
 
-// -- Cards to trade or sell: no deck uses them, and EDHREC does not list them for a commander ----
+// -- Instant local finder for cards to trade or sell -----------------------------------------------
+// Runs entirely on the loaded paper inventory (no EDHREC / network wait): filters by preset
+// (Not in a deck, Extra copies keep 1 / keep 4, Buylist offers, All free), search terms, minimum
+// price, location, tag and sort order.
 
-let suggested = null;        // {card name: [decks whose commander it is played with]}, once EDHREC was asked
-let spareUnknown = [];       // decks EDHREC had no answer for: their cards are not counted
+const SPARE_PAGE = 100;
+let sparePreset = 'free';    // 'free' | 'extra1' | 'extra4' | 'buylist' | 'all'
+let sparePage = 0;
 let spareTicked = new Set(); // entry ids ticked in the list
 
-function spareBase() {
-    // The entries no deck uses and EDHREC does not suggest, with the copies that no trade holds
-    if (!suggested) return [];
-    return inventory.map(card => ({...card, free: card.quantity - (card.trades || []).reduce((sum, trade) => sum + trade.quantity, 0)}))
-        .filter(card => card.free > 0 && !card.decks.length && !suggested[card.name])
-        .sort((a, b) => b.price * b.free - a.price * a.free || a.name.localeCompare(b.name));
+function spareKeepLimit() {
+    return sparePreset === 'extra1' ? 1 : sparePreset === 'extra4' ? 4 : 0;
+}
+
+function sparePool() {
+    // Every paper entry that still has at least one copy not held in an open trade, annotated with
+    // `free` (free copies of this entry), `nameFree` (free copies across all printings of the name),
+    // and `take` (copies suggested for trade under the active preset)
+    if (inArena()) return [];
+    const entries = inventory
+        .map(card => ({...card, free: card.quantity - (card.trades || []).reduce((sum, trade) => sum + trade.quantity, 0)}))
+        .filter(card => card.free > 0);
+    const keep = spareKeepLimit();
+    // Extra copies: `keep` copies of each NAME stay (across all its printings, the cheapest ones);
+    // the rest - priciest first - is what is offered. Decided per name, then split over its entries,
+    // so two printings of one copy each under "keep 1" offer one copy, not both
+    const byName = new Map(), takeById = new Map();
+    if (keep) {
+        for (const card of entries) {
+            const key = (card.name || '').toLowerCase();
+            if (!byName.has(key)) byName.set(key, []);
+            byName.get(key).push(card);
+        }
+        for (const group of byName.values()) {
+            let extra = group.reduce((sum, card) => sum + card.free, 0) - keep;
+            for (const card of [...group].sort((a, b) => (b.price || 0) - (a.price || 0) || b.free - a.free || a.id - b.id)) {
+                if (extra <= 0) break;
+                const take = Math.min(card.free, extra);
+                takeById.set(card.id, take);
+                extra -= take;
+            }
+        }
+    }
+    return entries.filter(card => {
+        if (keep) return takeById.has(card.id);
+        if (sparePreset === 'free') return !card.decks.length;
+        if (sparePreset === 'buylist') return !!card.buylist;
+        return true;
+    }).map(card => {
+        const nameFree = keep ? byName.get((card.name || '').toLowerCase()).reduce((sum, item) => sum + item.free, 0) : card.free;
+        return {...card, nameFree, take: keep ? takeById.get(card.id) : card.free};
+    });
 }
 
 function spareCards() {
-    // ... of the place chosen above the list ('' = every place, '(none)' = no location)
+    const base = sparePool();
+    const text = $('spare-search').value.trim();
+    const {terms, phrase} = parseSearch(text);
+    const setCodes = new Set(inventory.map(card => (card.set_code || '').toLowerCase()).filter(Boolean));
+    const minPrice = parseFloat($('spare-min-price').value);
     const location = $('spare-location').value;
-    return spareBase().filter(card => !location || card.location === (location === '(none)' ? '' : location));
+    const tag = $('spare-tag').value;
+    const sort = $('spare-sort').value;
+
+    const filtered = base.filter(card => {
+        if (phrase && ![card.name, card.set_name, card.set_code, card.type_line, card.rarity, card.location, ...card.tags]
+            .some(value => (value || '').toLowerCase().includes(phrase))) return false;
+        if (terms.length && !terms.every(term => SEARCH_FIELDS[term.field](card, term.value, setCodes) !== term.not)) return false;
+        if (!isNaN(minPrice) && card.price < minPrice) return false;
+        if (location && card.location !== (location === '(none)' ? '' : location)) return false;
+        if (tag && !card.tags.includes(tag)) return false;
+        return true;
+    });
+
+    const buylistVal = card => (card.buylist && card.buylist_as_listed) ? card.buylist * card.take : (card.buylist || 0);
+    filtered.sort((a, b) => {
+        if (sort === 'price_desc') return b.price - a.price || a.name.localeCompare(b.name);
+        if (sort === 'buylist_desc') return buylistVal(b) - buylistVal(a) || b.price * b.take - a.price * a.take || a.name.localeCompare(b.name);
+        if (sort === 'copies_desc') return b.take - a.take || b.price * b.take - a.price * a.take || a.name.localeCompare(b.name);
+        if (sort === 'name') return a.name.localeCompare(b.name) || b.price - a.price;
+        return b.price * b.take - a.price * a.take || a.name.localeCompare(b.name);
+    });
+    return filtered;
 }
 
 function renderSpareLocations() {
-    // The places to choose from, always there: with the spare cards found, those that have
-    // some (with how many entries); before that, every place of the collection. The choice
-    // stays while it is on the list
     const select = $('spare-location');
+    if (!select) return;
     const chosen = select.value;
-    let head, places;   // head: "all" and "(none)"; places: [[location, label]]
-    if (suggested) {
-        const counts = new Map();
-        for (const card of spareBase()) counts.set(card.location, (counts.get(card.location) || 0) + 1);
-        head = [['', `All locations (${[...counts.values()].reduce((sum, count) => sum + count, 0)})`],
-            ...(counts.has('') ? [['(none)', `(none) (${counts.get('')})`]] : [])];
-        places = [...counts].filter(([place]) => place).sort((a, b) => byText(a[0], b[0])).map(([place, count]) => [place, `${place} (${count})`]);
-    } else {
-        head = [['', 'All locations'], ['(none)', '(none)']];
-        places = knownLocations().map(place => [place, place]);
-    }
-    // As the inventory's location filter: boxes and binders first, the locations named after
-    // one of the decks under their own "Decks" heading at the bottom
+    const counts = new Map();
+    for (const card of sparePool()) counts.set(card.location, (counts.get(card.location) || 0) + 1);
+    const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    const head = [['', `All locations (${total})`],
+        ...(counts.has('') ? [['(none)', `(none) (${counts.get('')})`]] : [])];
+    const places = [...counts].filter(([place]) => place).sort((a, b) => byText(a[0], b[0]))
+        .map(([place, count]) => [place, `${place} (${count})`]);
+    // Boxes and binders first, locations named after a deck grouped at the bottom
     const decks = new Set(deckList.map(deck => deck.name.toLowerCase()));
     const inDecks = places.filter(([place]) => decks.has(place.toLowerCase()));
     select.innerHTML = optionsHtml([...head, ...places.filter(option => !inDecks.includes(option))])
@@ -1260,53 +1358,131 @@ function renderSpareLocations() {
     select.value = [...head, ...places].some(([value]) => value === chosen) ? chosen : '';
 }
 
-function renderSpare() {
-    const list = $('spare-list');
-    renderSpareLocations();
-    if (!suggested) {
-        list.innerHTML = '';
-        $('spare-summary').textContent = '';
-        $('spare-aside').disabled = true;
-        return;
-    }
-    const cards = spareCards();
-    // Cards that are gone (set aside, sold) leave the ticks
-    spareTicked = new Set([...spareTicked].filter(id => cards.some(card => card.id === id)));
-    const value = cards.reduce((sum, card) => sum + card.price * card.free, 0);
-    $('spare-summary').innerHTML = `${plural(cards.length, 'entry', 'entries')} · ${plural(cards.reduce((sum, card) => sum + card.free, 0), 'free copy', 'free copies')} · <strong>${money(value)}</strong>`
-        + (spareUnknown.length ? ` · <span class="hint">no EDHREC data for ${escapeHtml(spareUnknown.join(', '))} - their cards are not counted</span>` : '');
-    list.innerHTML = cards.map(card => {
-        const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
-                       card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
-        return `
-        <label class="trade-row spare-row" data-id="${card.id}">
-            <span class="trade-qty"><strong>${card.free}×</strong>${card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : ''}</span>
-            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span></span>
-            <span class="summary">${money(card.price * card.free)}</span>
-            <input type="checkbox" class="spare-check" ${spareTicked.has(card.id) ? 'checked' : ''}>
-        </label>`;
-    }).join('') || '<div class="empty-state">Every card is in a deck, suggested for one, or already set aside.</div>';
-    $('spare-all').checked = !!cards.length && spareTicked.size === cards.length;
-    $('spare-aside').disabled = !spareTicked.size;
-    $('spare-aside').textContent = spareTicked.size ? `Set ${plural(spareTicked.size, 'entry', 'entries')} aside for a trade` : 'Set aside for a trade';
+function renderSpareTags() {
+    const select = $('spare-tag');
+    if (!select) return;
+    const chosen = select.value;
+    const tags = distinct(inventory.flatMap(card => card.tags || []));
+    select.innerHTML = optionsHtml([['', 'Any tag'], ...tags.map(tag => [tag, tag])]);
+    select.value = tags.includes(chosen) ? chosen : '';
+    select.hidden = !tags.length;
 }
 
-async function findSpareCards() {
-    // Slow the first time: one request per deck with a commander (then from the 7-day cache)
-    $('spare-find').disabled = true;
-    $('spare-list').innerHTML = '<div class="hint">Asking EDHREC about your commanders...</div>';
-    const data = await api('/api/inventory/suggested');
-    $('spare-find').disabled = false;
-    if (!data) return renderSpare();
-    suggested = data.cards;
-    spareUnknown = data.unknown;
-    spareTicked.clear();
-    $('spare-find').textContent = 'Ask EDHREC again';
-    renderSpare();
+function renderSpare() {
+    const list = $('spare-list');
+    if (!list) return;
+    renderSpareLocations();
+    renderSpareTags();
+    const hasFilters = !!($('spare-search').value.trim() || $('spare-min-price').value || $('spare-location').value || $('spare-tag').value);
+    $('spare-clear').hidden = !hasFilters;
+
+    const cards = spareCards();
+    const keep = spareKeepLimit();
+    // Cards that left the filtered list leave the ticks
+    spareTicked = new Set([...spareTicked].filter(id => cards.some(card => card.id === id)));
+
+    const totalCopies = cards.reduce((sum, card) => sum + card.take, 0);
+    const totalValue = cards.reduce((sum, card) => sum + card.price * card.take, 0);
+    const offer = buylistTotal(cards.map(card => ({buylist: card.buylist, buylist_as_listed: card.buylist_as_listed, quantity: card.take})));
+    $('spare-summary').innerHTML = `${plural(cards.length, 'entry', 'entries')} · ${plural(totalCopies, keep ? 'extra copy' : 'free copy', keep ? 'extra copies' : 'free copies')} · <strong>${money(totalValue)}</strong>`
+        + (offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for Near Mint copies ${escapeHtml(buylistWhen())} (USD)">${BUYLIST_SHOP} ${buylistMoney(offer.value)}</span>` : '');
+
+    const pages = Math.max(1, Math.ceil(cards.length / SPARE_PAGE));
+    sparePage = Math.max(0, Math.min(sparePage, pages - 1));
+    const start = sparePage * SPARE_PAGE;
+    const visible = cards.slice(start, start + SPARE_PAGE);
+
+    list.innerHTML = visible.map(card => {
+        const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+                       card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+        const badges = [
+            ...(card.decks.length ? [`<span class="inventory-badge deck" title="Used in: ${escapeHtml(card.decks.join(', '))}">In deck</span>`] : []),
+            ...(card.tags || []).map(tag => `<span class="inventory-badge tag">${escapeHtml(tag)}</span>`),
+        ].join(' ');
+        const qtyHint = keep && card.take < card.free
+            ? ` <span class="hint">of ${card.free}</span>`
+            : keep && card.nameFree > card.free
+                ? ` <span class="hint">(${card.nameFree} total)</span>`
+                : card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
+        const image = cardImageUrl(card);
+        const buylistHtml = card.buylist
+            ? `<span class="spare-buylist" title="${BUYLIST_SHOP} buylist offer ${escapeHtml(buylistWhen())} (USD, Near Mint)${card.buylist_as_listed ? '' : ' - worn copy graded lower'}">CK ${buylistMoney(card.buylist * card.take)}${card.buylist_as_listed ? '' : '*'}</span>`
+            : '';
+        const ticked = spareTicked.has(card.id);
+        return `
+        <label class="trade-row spare-row${ticked ? ' is-ticked' : ''}" data-id="${card.id}" data-take="${card.take}"${image ? ` data-image="${escapeHtml(image)}"` : ''}>
+            <input type="checkbox" class="spare-check" ${ticked ? 'checked' : ''}>
+            <span class="trade-qty"><strong>${card.take}×</strong>${qtyHint}</span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span>${badges ? ' ' + badges : ''}</span>
+            <span class="spare-prices"><span class="summary">${money(card.price * card.take)}${card.take > 1 ? ` <span class="hint">(${money(card.price)})</span>` : ''}</span>${buylistHtml}</span>
+            <button type="button" class="btn btn-small spare-quick-add" data-spare-add="${card.id}" data-take="${card.take}" title="Set ${card.take}× aside for a trade">+ Trade</button>
+        </label>`;
+    }).join('') || '<div class="empty-state">No cards match these filters.</div>';
+
+    const pager = $('spare-pager');
+    pager.hidden = cards.length <= SPARE_PAGE;
+    if (!pager.hidden) {
+        $('spare-page-info').textContent = `Showing ${start + 1}–${start + visible.length} of ${cards.length.toLocaleString()}`;
+        $('spare-prev').disabled = sparePage === 0;
+        $('spare-next').disabled = sparePage >= pages - 1;
+    }
+
+    const tickedCards = cards.filter(card => spareTicked.has(card.id));
+    const tickedValue = tickedCards.reduce((sum, card) => sum + card.price * card.take, 0);
+    $('spare-all').checked = !!cards.length && spareTicked.size === cards.length;
+    $('spare-aside').disabled = !spareTicked.size;
+    $('spare-aside').textContent = spareTicked.size
+        ? `Set ${plural(spareTicked.size, 'entry', 'entries')} (${money(tickedValue)}) aside for a trade`
+        : 'Set aside for a trade';
+}
+
+function spareQuantitiesFor(ids) {
+    // Only cap quantities when an Extra copies preset is active; other presets set aside all free copies
+    if (!spareKeepLimit()) return null;
+    const byId = new Map(sparePool().map(card => [card.id, card.take]));
+    const quantities = {};
+    for (const id of ids) {
+        if (byId.has(id)) quantities[id] = byId.get(id);
+    }
+    return quantities;
 }
 
 function bindSpareEvents() {
-    $('spare-find').addEventListener('click', findSpareCards);
+    $('trades-views').addEventListener('click', event => {
+        const button = event.target.closest('[data-trade-view]');
+        if (button) showTradeView(button.dataset.tradeView);
+    });
+    $('spare-presets').addEventListener('click', event => {
+        const button = event.target.closest('[data-preset]');
+        if (!button) return;
+        sparePreset = button.dataset.preset;
+        sparePage = 0;
+        spareTicked.clear();
+        document.querySelectorAll('#spare-presets button').forEach(item =>
+            item.classList.toggle('is-active', item.dataset.preset === sparePreset));
+        if (sparePreset === 'buylist' && $('spare-sort').value === 'value_desc') $('spare-sort').value = 'buylist_desc';
+        renderSpare();
+    });
+    ['spare-search', 'spare-min-price'].forEach(id => $(id).addEventListener('input', debounce(() => {
+        sparePage = 0;
+        renderSpare();
+    }, 150)));
+    ['spare-location', 'spare-tag', 'spare-sort'].forEach(id => $(id).addEventListener('change', () => {
+        sparePage = 0;
+        if (id !== 'spare-sort') spareTicked.clear();
+        renderSpare();
+    }));
+    $('spare-clear').addEventListener('click', () => {
+        $('spare-search').value = '';
+        $('spare-min-price').value = '';
+        $('spare-location').value = '';
+        $('spare-tag').value = '';
+        sparePage = 0;
+        spareTicked.clear();
+        renderSpare();
+    });
+    $('spare-prev').addEventListener('click', () => { if (sparePage > 0) { sparePage--; renderSpare(); } });
+    $('spare-next').addEventListener('click', () => { sparePage++; renderSpare(); });
     $('spare-list').addEventListener('change', event => {
         const row = event.target.closest('.spare-row');
         if (!row || !event.target.classList.contains('spare-check')) return;
@@ -1314,9 +1490,15 @@ function bindSpareEvents() {
         if (event.target.checked) spareTicked.add(id); else spareTicked.delete(id);
         renderSpare();
     });
-    $('spare-location').addEventListener('change', () => {
-        spareTicked.clear();   // what is ticked stays to the place that was shown
-        renderSpare();
+    $('spare-list').addEventListener('click', event => {
+        const addBtn = event.target.closest('[data-spare-add]');
+        if (!addBtn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const id = parseInt(addBtn.dataset.spareAdd);
+        const card = inventory.find(item => item.id === id);
+        const take = parseInt(addBtn.dataset.take);
+        setAsideForTrade(card || null, [id], spareKeepLimit() ? {[id]: take} : null);
     });
     $('spare-all').addEventListener('change', event => {
         spareTicked = new Set(event.target.checked ? spareCards().map(card => card.id) : []);
@@ -1324,23 +1506,24 @@ function bindSpareEvents() {
     });
     $('spare-aside').addEventListener('click', () => {
         const ids = [...spareTicked];
+        const quantities = spareQuantitiesFor(ids);
         spareTicked.clear();
-        setAsideForTrade(null, ids);
+        setAsideForTrade(null, ids, quantities);
     });
 }
 
-async function setAsideForTrade(card = null, chosen = null) {
-    // Every free copy of the selected entries - or of one row's, from its own button; how many
-    // of each is changed on the Trades tab
+async function setAsideForTrade(card = null, chosen = null, quantities = null) {
+    // Every free copy of the selected entries (or capped by `quantities`, e.g. from Extra copies)
     if (inArena()) return;   // a trade is of paper cards: an Arena entry's id means another card there
-    // chosen: the ids ticked in the Trades tab's list of spare cards (it leaves the Inventory's ticks alone)
+    // chosen: the ids ticked in the Trades tab's card finder (it leaves the Inventory's ticks alone)
     const ids = chosen || (card ? [card.id] : [...selected]);
     const open = trades.filter(trade => trade.status === 'open').map(trade => trade.name);
     const name = await valueDialog({title: `Set ${card ? card.name : entriesText(ids.length)} aside for a trade`,
         label: open.length ? 'Trade (one of the open ones, or a new name)' : 'Name of the trade (who it is with)',
         options: open, value: open.length === 1 ? open[0] : ''});
     if (!name) return;
-    const data = await api('/api/trades', {method: 'POST', body: {name, ids}});
+    const body = quantities ? {name, ids, quantities} : {name, ids};
+    const data = await api('/api/trades', {method: 'POST', body});
     if (!data) return;
     notify(`${plural(data.cards, 'card')} set aside for "${data.name}"`
         + (data.skipped ? ` - ${entriesText(data.skipped)} had no copy left to give` : ''), data.cards ? 'success' : 'warning');
@@ -1838,8 +2021,10 @@ async function loadBuyList() {
 }
 
 function renderBuyList() {
+    const copies = buyList.reduce((sum, card) => sum + card.quantity, 0);
     const value = buyList.reduce((sum, card) => sum + card.price * card.quantity, 0);
-    $('buy-summary').textContent = buyList.length ? `· ${plural(buyList.reduce((sum, card) => sum + card.quantity, 0), 'card')} · ${money(value)}` : '';
+    setTabBadge('trades-others-count', copies);
+    $('buy-summary').textContent = buyList.length ? `· ${plural(copies, 'card')} · ${money(value)}` : '';
     $('buy-export').innerHTML = optionsHtml([['', 'Export…'], ...gameInfo.exports]);
     $('buy-export').hidden = !buyList.length;
     $('buy-clear').hidden = !buyList.length;
@@ -1932,6 +2117,8 @@ function bindOthersEvents() {
 
 function bindTradeEvents() {
     $('tab-trades').addEventListener('click', async event => {
+        const goto = event.target.closest('[data-goto-trade-view]');
+        if (goto) return showTradeView(goto.dataset.gotoTradeView);
         const panel = event.target.closest('[data-trade]');
         const trade = panel && trades.find(item => item.id === parseInt(panel.dataset.trade));
         if (!trade) return;
