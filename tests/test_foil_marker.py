@@ -174,7 +174,9 @@ class Reading(unittest.TestCase):
     def test_the_symbols_ocr_gives_are_read_as_parse_magic_reads_them(self):
         for text, want in (('HOB ★ EN', 'foil'), ('HOB*EN', 'foil'), ('HOB ☆ EN', 'foil'), ('HOB·EN', 'non-foil'),
                            ('HOB • EN', 'non-foil'), ('SPM.EN', 'non-foil'), ('HOB EN', 'unknown'), ('HOBEN', 'unknown'),
-                           ('SPM·ENLADRAWS', 'non-foil')):
+                           ('SPM·ENLADRAWS', 'non-foil'),
+                           # a blurred dot read as a dash is a dot; any other character stays unread, for review
+                           ('FRA-EN', 'non-foil'), ('FRA - EN', 'non-foil'), ('FRA~EN', 'unknown'), ('FRA/EN', 'unknown')):
             self.assertEqual(foil_marker.symbol_read({'text': text, 'box': []}), want, text)
         self.assertEqual(foil_marker.symbol_read({'text': 'Illus. Somebody', 'box': []}), 'unknown')
 

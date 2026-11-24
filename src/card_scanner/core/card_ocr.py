@@ -61,7 +61,11 @@ def prints_token_letter(match):
 def token_set_code(set_code):
     """The set a token printed with the code `set_code` is filed under: 't' + the code, in the case it was written in (tokens: 'TFRA', the strip: 'tfra')"""
     return ('t' if set_code[:1].islower() else 'T') + set_code
-STARS, DOTS = '*★☆', '·•.'
+
+# The foil marker as the OCR writes it. A dash counts as a dot (2026-11-23): on a slightly blurred capture the printed dot often comes out as "-". Of 538 saved captures of one
+# camera, 166 read a dash: 149 logged regular, 13 unread, 3 with no result, and 1 logged foil - a Treasure whose picture shows a dot. NOT measured: other cameras, confetti foils.
+# No other character is added: anything else stays unread, and such a card goes to review.
+STARS, DOTS = '*★☆', '·•.-'
 
 
 def parse_magic(lines, width, height):
