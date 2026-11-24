@@ -129,13 +129,27 @@ def similarity(distance):
 class ImageIndex:
     """All the fingerprints in memory (~11 MB for the whole card database): `distances` of one to all of them in a few ms"""
 
-    def __init__(self, ids, hashes, built=None):
+    def __init__(self, ids, hashes, built=None, embeds=None):
         self.ids = ids                                             # Scryfall ids, in the order of the rows
         self.hashes = hashes                                       # (n, 96) uint8
         self.built = built
         self._row = {printing: n for n, printing in enumerate(ids)}
         # The same bytes as 12 numbers of 64 bits a row: xor and count bits 8 bytes at a time
         self._words = np.ascontiguousarray(hashes).view(np.uint64) if len(hashes) else None
+        # Optional v2 learned embedding sidecar: (n, 128) int8 + precomputed 1/||row||_2 (float32)
+        self.embeds = None
+        self._embed_inv_norms = None
+        if embeds is not None and len(ids) > 0:
+            from card_scanner.core import visual_embed
+            arr = np.asarray(embeds, dtype=np.int8)
+            if arr.shape == (len(ids), visual_embed.DIMS):
+                self.embeds = np.ascontiguousarray(arr)
+                self._embed_inv_norms = visual_embed.row_inv_norms(self.embeds)
+
+    @property
+    def has_embeddings(self):
+        """Whether this index has a loaded v2 int8 embedding sidecar aligned with its rows."""
+        return self.embeds is not None and len(self.embeds) == len(self.ids) and len(self.ids) > 0
 
     def __len__(self):
         return len(self.ids)
@@ -154,11 +168,20 @@ class ImageIndex:
             return np.bitwise_count(differing).sum(axis=1, dtype=np.int32)
         return _POPCOUNT[differing.view(np.uint8)].sum(axis=1, dtype=np.int32)
 
+    def embed_similarities(self, query):
+        """Cosine similarities (float32, (n,)) between the v2 sidecar and a float32 query embedding, or None without a sidecar."""
+        if not self.has_embeddings:
+            return None
+        from card_scanner.core import visual_embed
+        return visual_embed.cosine_similarities(self.embeds, self._embed_inv_norms, query)
+
     @classmethod
     def load(cls, directory):
         """
         The index in a folder - the generation the manifest points at - or None when there is none, or it is not whole, not of
         this descriptor, or its two files do not belong together (the checksums in the manifest).
+        An optional v2 embedding sidecar listed under manifest['sidecar'] is loaded and checksum-verified if present; a missing
+        or corrupt sidecar falls back cleanly to v1 (embeds=None) with a warning.
         """
         directory = Path(directory)
         try:
@@ -177,7 +200,23 @@ class ImageIndex:
             logger.warning(f"Image index in {directory} is not usable (another descriptor, not whole, or its files do not belong together)"
                            " - build it again")
             return None
-        return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'))
+        embeds = None
+        sidecar = manifest.get('sidecar')
+        if isinstance(sidecar, dict) and len(ids) > 0:
+            from card_scanner.core import visual_embed
+            try:
+                embed_name = sidecar.get('embeds')
+                if (sidecar.get('descriptor') != visual_embed.DESCRIPTOR or sidecar.get('dims') != visual_embed.DIMS
+                        or not isinstance(embed_name, str) or Path(embed_name).name != embed_name):
+                    raise ValueError("incompatible sidecar metadata")
+                embeds_bytes = (directory / embed_name).read_bytes()
+                if (len(embeds_bytes) != len(ids) * visual_embed.DIMS
+                        or sidecar.get('embeds_sha256') != hashlib.sha256(embeds_bytes).hexdigest()):
+                    raise ValueError("sidecar size or checksum mismatch")
+                embeds = np.frombuffer(embeds_bytes, np.int8).reshape(-1, visual_embed.DIMS)
+            except (OSError, ValueError, TypeError) as e:
+                logger.warning(f"Image index sidecar in {directory} is not usable ({e}) - continuing with colour hash alone")
+        return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'), embeds=embeds)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -299,21 +338,33 @@ def _put(path, data):
 
 
 def _generation_of(name):
-    """The generation a folder's file belongs to ('hashes-<g>.bin' -> g), or None for the manifest and anything else"""
-    match = re.fullmatch(r'(?:hashes-(.+)\.bin|ids-(.+)\.txt)(?:\.tmp)?', name)
-    return (match.group(1) or match.group(2)) if match else None
+    """The generation a folder's file belongs to ('hashes-<g>.bin', 'embeds-<g>.bin', 'ids-<g>.txt' -> g), or None for the manifest and anything else"""
+    match = re.fullmatch(r'(?:hashes-(.+)\.bin|embeds-(.+)\.bin|ids-(.+)\.txt)(?:\.tmp)?', name)
+    return (match.group(1) or match.group(2) or match.group(3)) if match else None
 
 
-def write(directory, ids, hashes, built=None):
+def write(directory, ids, hashes, built=None, embeds=None):
     """
-    Publishes an index as a new generation: its two files first (each whole or not at all, nothing points at them yet), then the manifest
+    Publishes an index as a new generation: its files first (each whole or not at all, nothing points at them yet), then the manifest
     - one rename, the only step that publishes. Whatever happens before that rename leaves the previous generation current and whole.
     Afterwards everything except this generation and the one before it is removed: what an interrupted earlier build left, and the
     files of the older format (hashes.bin, ids.txt, meta.json). built: when the index was built, for one imported from elsewhere (default: now).
+    embeds: optional v2 int8 embeddings aligned with `ids` (sequence of 128-byte items or (len(ids), 128) int8 ndarray).
     """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     ids_bytes, hashes_bytes = ''.join(i + '\n' for i in ids).encode(), b''.join(hashes)
+    embeds_bytes = None
+    sidecar_meta = None
+    if embeds is not None and len(ids) > 0:
+        from card_scanner.core import visual_embed
+        if isinstance(embeds, np.ndarray):
+            arr = np.ascontiguousarray(embeds, dtype=np.int8)
+            embeds_bytes = arr.tobytes()
+        else:
+            embeds_bytes = b''.join(bytes(e) for e in embeds)
+        if len(embeds_bytes) != len(ids) * visual_embed.DIMS:
+            raise ValueError(f"Expected {len(ids) * visual_embed.DIMS} embedding bytes, got {len(embeds_bytes)}")
     with _publication(directory):        # from the lookup of the previous generation to the end of the clean-up: one writer at a time
         try:
             previous = json.loads((directory / MANIFEST).read_text()).get('generation')
@@ -322,9 +373,17 @@ def write(directory, ids, hashes, built=None):
         generation = f'{int(time.time())}-{uuid.uuid4().hex[:8]}'        # unique even for two writes in one second
         _put(directory / f'hashes-{generation}.bin', hashes_bytes)
         _put(directory / f'ids-{generation}.txt', ids_bytes)
+        if embeds_bytes is not None:
+            from card_scanner.core import visual_embed
+            embed_name = f'embeds-{generation}.bin'
+            _put(directory / embed_name, embeds_bytes)
+            sidecar_meta = {'descriptor': visual_embed.DESCRIPTOR, 'dims': visual_embed.DIMS, 'embeds': embed_name,
+                            'embeds_sha256': hashlib.sha256(embeds_bytes).hexdigest()}
         manifest = {'descriptor': DESCRIPTOR, 'count': len(ids), 'hash_bytes': HASH_BYTES, 'built': built or time.strftime('%Y-%m-%d %H:%M:%S'),
                     'generation': generation, 'hashes': f'hashes-{generation}.bin', 'ids': f'ids-{generation}.txt',
                     'hashes_sha256': hashlib.sha256(hashes_bytes).hexdigest(), 'ids_sha256': hashlib.sha256(ids_bytes).hexdigest()}
+        if sidecar_meta is not None:
+            manifest['sidecar'] = sidecar_meta
         _put(directory / MANIFEST, json.dumps(manifest, indent=1).encode())          # publishes
         keep = {generation, previous}
         for path in directory.iterdir():
@@ -404,12 +463,14 @@ def export_archive(directory, out):
         if current is None:
             raise IndexFileError('This server has no complete picture index to download')
         manifest, ids_bytes, hashes_bytes = current
+        # Keep exported archives strictly 3-file v1 compatible (Android + server-to-server transfer)
+        export_manifest = {k: v for k, v in manifest.items() if k != 'sidecar'}
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(MANIFEST, json.dumps(manifest, indent=1))
-            archive.writestr(manifest['ids'], ids_bytes)
+            archive.writestr(MANIFEST, json.dumps(export_manifest, indent=1))
+            archive.writestr(export_manifest['ids'], ids_bytes)
             # Fingerprints look like noise to a compressor: stored as they are, which saves the time and costs nothing
-            archive.writestr(manifest['hashes'], hashes_bytes, compress_type=zipfile.ZIP_STORED)
-    return manifest
+            archive.writestr(export_manifest['hashes'], hashes_bytes, compress_type=zipfile.ZIP_STORED)
+    return export_manifest
 
 
 def _read_archive(stream):
@@ -518,12 +579,15 @@ class BuildResult(tuple):
 
 
 @_one_build_at_a_time
-def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=None, log=print, progress=None, cancel=None):
+def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=None, log=print, progress=None, cancel=None,
+          embedder=None, rebuild_sidecar=False):
     """
     Builds (or completes) the index of a folder from a list of (Scryfall id, picture address). One build at a time per folder
     (BuildRunning for a second); writing the result is one more, short lock (`write`: two writers must not clean up each other's files).
     Fingerprints already in the folder's index are kept (a descriptor of another kind is not
     reused: the loader refuses it), so a run after new sets arrive only does the new printings.
+    embedder: optional visual_embed.VisualEmbedder to populate the v2 int8 sidecar alongside hashes (from the same decoded RGB image).
+    rebuild_sidecar: when True with an embedder, also process printings that already have a hash but lack a v2 embedding.
     image_dir: a folder of <id>.jpg pictures to take first (the experiment's cache has them all:
     no download); fetch: download what is missing from Scryfall - 8 requests at a time but never
     two started less than 0.1 s apart, one 429 / 403 is waited out, a refusal that goes on stops the
@@ -535,10 +599,15 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     """
     existing = ImageIndex.load(directory)
     have = dict(zip(existing.ids, existing.hashes)) if existing else {}
-    todo = [(printing, address) for printing, address in printings if printing not in have]
+    have_embeds = dict(zip(existing.ids, existing.embeds)) if (existing and existing.has_embeddings) else {}
+    if embedder is not None and rebuild_sidecar:
+        todo = [(printing, address) for printing, address in printings if printing not in have or printing not in have_embeds]
+    else:
+        todo = [(printing, address) for printing, address in printings if printing not in have]
     if limit:
         todo = todo[:limit]
-    log(f"{len(have)} printings already in the index, {len(todo)} to do")
+    log(f"{len(have)} printings already in the index, {len(todo)} to do"
+        + (f" (v2 sidecar: {len(have_embeds)} embeddings)" if embedder is not None else ""))
     gate, next_start, stopped = threading.Lock(), [0.0], threading.Event()
     image_dir = Path(image_dir) if image_dir else None
     session_pool = queue.LifoQueue(maxsize=max(1, workers))
@@ -653,13 +722,23 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
         printing, address = item
         if stopped.is_set() or cancelled():
             stopped.set()                  # asked to stop: nothing more is fetched, and what is done is written below
-            return printing, None
+            return printing, None, None
         try:
             data = picture(printing, address)
         except Stopped:
-            return printing, None
+            return printing, None, None
         image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
-        return printing, None if image is None else np.frombuffer(hash_card(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)), np.uint8)
+        if image is None:
+            return printing, None, None
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        fingerprint = have[printing] if printing in have else np.frombuffer(hash_card(rgb), np.uint8)
+        embedding = embedder.embed_int8(rgb) if embedder is not None else None
+        return printing, fingerprint, embedding
+
+    def _ordered_embeds(ids):
+        if ids and have_embeds and all(printing in have_embeds for printing in ids):
+            return [bytes(have_embeds[printing]) for printing in ids]
+        return None
 
     new = skipped = done = 0
     chunk_size = max(workers * 16, 64)
@@ -669,18 +748,23 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             if stopped.is_set() or cancelled():
                 break
             chunk = todo[start:start + chunk_size]
-            for printing, fingerprint in pool.map(one, chunk):
+            for printing, fingerprint, embedding in pool.map(one, chunk):
                 done += 1
                 if fingerprint is None:
                     if not cancelled():      # one left undone on request is not "without a picture"
                         skipped += 1
                 else:
+                    was_new = printing not in have
                     have[printing] = fingerprint
-                    new += 1
+                    if embedding is not None:
+                        have_embeds[printing] = embedding
+                    if was_new or (embedder is not None and rebuild_sidecar):
+                        new += 1
                 if progress is not None:
                     progress(done, len(todo))
                 if done % 1000 == 0 and not stopped.is_set() and not cancelled():
-                    write(directory, *_in_order(printings, have))
+                    ckpt_ids, ckpt_hashes = _in_order(printings, have)
+                    write(directory, ckpt_ids, ckpt_hashes, embeds=_ordered_embeds(ckpt_ids))
                     log(f"{done} of {len(todo)} done ({new} new, {skipped} without a picture)")
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
@@ -690,12 +774,14 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             except Exception:
                 pass
     ids, hashes = _in_order(printings, have)
-    write(directory, ids, hashes)
+    embeds = _ordered_embeds(ids)
+    write(directory, ids, hashes, embeds=embeds)
     if cancel is not None and cancel.is_set():
         log("Stopped on request. What was done is written; run it again and it resumes")
     elif stopped.is_set():
         log("Scryfall kept refusing: stopped. What was done is written; run it again later, it resumes")
-    log(f"Index written: {len(ids)} printings ({new} new, {skipped} left out for want of a picture)")
+    log(f"Index written: {len(ids)} printings ({new} new, {skipped} left out for want of a picture)"
+        + (" + v2 sidecar" if embeds is not None else ""))
     result = BuildResult((len(ids), new, skipped))
     result.reason = 'cancelled' if cancelled() else 'refused' if stopped.is_set() else 'done'
     return result
@@ -708,7 +794,7 @@ def _in_order(printings, have):
 
 
 def main(argv=None):
-    """scripts/build_image_index.py: python scripts/build_image_index.py [--images FOLDER] [--no-fetch] [--limit N] [--folder DATA_FOLDER]"""
+    """scripts/build_image_index.py: python scripts/build_image_index.py [--images FOLDER] [--no-fetch] [--limit N] [--folder DATA_FOLDER] [--v2] [--model PATH]"""
     import argparse
     from card_scanner.config import Config
     from card_scanner.core.database import CardDatabase
@@ -717,9 +803,20 @@ def main(argv=None):
     parser.add_argument('--no-fetch', action='store_true', help="do not download: only what --images has")
     parser.add_argument('--limit', type=int, default=0, help="stop after this many new printings (a trial run)")
     parser.add_argument('--folder', default=str(Config.DATA_DIR / 'image_index'), help="where the index is written")
+    parser.add_argument('--v2', action='store_true', help="also build or backfill the v2 visual embedding sidecar (requires embed_net.onnx)")
+    parser.add_argument('--model', help="path to embed_net.onnx for --v2 (default: beside visual_embed.py or data/embed_net.onnx)")
     arguments = parser.parse_args(argv)
+    embedder = None
+    rebuild_sidecar = False
+    if arguments.v2 or arguments.model:
+        from card_scanner.core import visual_embed
+        embedder = visual_embed.load(arguments.model)
+        if embedder is None:
+            raise SystemExit("v2 embedding model (embed_net.onnx) not found or could not be loaded.")
+        rebuild_sidecar = True
     try:
-        result = build(CardDatabase().printing_images(), arguments.folder, arguments.images, not arguments.no_fetch, limit=arguments.limit)
+        result = build(CardDatabase().printing_images(), arguments.folder, arguments.images, not arguments.no_fetch,
+                       limit=arguments.limit, embedder=embedder, rebuild_sidecar=rebuild_sidecar)
     except BuildRunning as e:
         raise SystemExit(f"{e}. Wait for it to finish (or stop it), then run this again.")
     if result.reason == 'refused':

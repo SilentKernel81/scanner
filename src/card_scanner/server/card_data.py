@@ -13,7 +13,7 @@ import uuid
 from card_scanner import games
 from card_scanner.config import Config
 
-from card_scanner.core import card_names, image_index, prices, shop_prices
+from card_scanner.core import card_names, image_index, prices, shop_prices, visual_embed
 from card_scanner.server.state import (app, app_settings, arena_inventory, database, deck_store, inventory, maintenance_barrier, others,
                                       printing_check, scan_inventory, socketio)
 from card_scanner.server.logs import logger
@@ -626,8 +626,11 @@ def start_index_update(on_done=None):
         refused = False  # Scryfall kept refusing: told to the schedule in its own words (the result's shape is the page's, and pinned)
         try:
             logger.info("Picture index: extending it from Scryfall's pictures")
+            existing_index = printing_check.index() if printing_check else None
+            embedder = visual_embed.load() if getattr(existing_index, 'has_embeddings', False) else None
+            extra = {'embedder': embedder} if embedder is not None else {}
             built = image_index.build(database.printing_images(), printing_check.index_folder, fetch=True, log=logger.info,
-                                      progress=progress, cancel=index_cancel)
+                                      progress=progress, cancel=index_cancel, **extra)
             kept, new, skipped = built
             reason = getattr(built, 'reason', 'done')          # image_index.BuildResult: 'done', 'cancelled' or 'refused'
             result = {'printings': kept, 'new': new, 'skipped': skipped, 'stopped': reason == 'cancelled'}
