@@ -363,12 +363,23 @@ def submit_capture(image_path, image, foil_image, number, game_id, station=None,
 
 # The per-camera setting (Settings > Cameras > Scanning: "Stop auto-capture at a card back"), kept like auto_add in the station's settings; on unless switched off
 CARD_BACK_SETTING = 'stop_at_card_back'
+CARDS_SAME_WAY_SETTING = 'cards_same_way'
 
 
 def stops_at_card_back():
     """Whether the current desk's camera stops at a card back (its own setting, else the app's, else on)"""
     settings = scanner.settings if scanner else app_settings
     return bool(settings.get(CARD_BACK_SETTING, True)) if settings else True
+
+
+def cards_same_way():
+    """
+    Whether the current desk's camera has every card lying the same way up, so that a card is never read as upside down (its own setting, off unless switched on).
+    Only for a station's desk: the shadow check's thread belongs to none, and keeps looking both ways.
+    """
+    if not desk().station or not scanner:
+        return False
+    return bool(scanner.settings.get(CARDS_SAME_WAY_SETTING, False))
 
 
 def stop_at_card_back(image_path, image, foil_image, number, station=None):

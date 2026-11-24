@@ -42,6 +42,7 @@ from card_scanner.server.captures import resume_pending
 from card_scanner.server.card_data import (adopt_card_names, current_card_price, prices_withheld, resume_price_transition,
                                           run_update_schedule, start_card_data_update)
 from card_scanner import diagnostics
+from card_scanner.server.captures import cards_same_way
 from card_scanner.server.backups_api import run_backup_schedule, scheduled_backup
 from card_scanner.server.inventory_api import finish_interrupted_sends
 from card_scanner.server.settings_events import cleanup_days, run_image_cleanup, saved_debug_mode
@@ -129,6 +130,7 @@ def initialize_components():
         finish_for=lambda card, foil: games.active().suggested_finish(card, foil), game_id=games.active_id)
     # reading.mode 'evidence' reads a card by its picture and strip with the printing check's image index (the live reading's counterpart of its lookup)
     services.identification.evidence = services.printing_check
+    services.printing_check.cards_upright = cards_same_way   # Settings > Cameras: asked for the desk of the capture being read
     # The reading log: one line per capture of what each step of the reading saw and did, in either mode (core/reading/record.py; the report:
     # scripts/reading_report.py) - the live evidence the picture's thresholds and guards are to be judged on
     services.identification.reading_log = ReadingLog(Config.DATA_DIR / 'logs' / 'reading.jsonl')

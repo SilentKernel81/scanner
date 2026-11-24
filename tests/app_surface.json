@@ -805,6 +805,7 @@
   "test_prompt",
   "toggle_ai",
   "toggle_auto_capture",
+  "toggle_cards_same_way",
   "toggle_debug_mode",
   "toggle_debug_trace",
   "toggle_detection",
