@@ -92,6 +92,13 @@
                                 </span>
                                 <input type="checkbox" class="switch" id="toggle-stop-at-back">
                             </label>
+                            <label class="switch-row">
+                                <span class="switch-text">
+                                    <span class="switch-title">Cards all face the same way</span>
+                                    <span class="switch-desc">For a stack or a dropper: cards are never read as upside down. A flipped card goes to review.</span>
+                                </span>
+                                <input type="checkbox" class="switch" id="toggle-cards-same-way">
+                            </label>
                             <div class="input-group">
                                 <label for="camera-rotation">Camera rotation</label>
                                 <select id="camera-rotation" class="select narrow">
@@ -571,6 +578,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=34"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=35"></script>
 </body>
 </html>

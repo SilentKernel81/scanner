@@ -114,7 +114,9 @@ class LiveRead(unittest.TestCase):
         for named in (2, 6):
             self.assertIsNone(self.check.live_read(picture, None, FakeReader(strip_lines(named))), named)
             self.assertIsNone(self.check.live_read(picture, None, FakeReader(strip_lines(named)), accept_image_alone=True), named)
-        with mock.patch.object(printing_check, 'STRONG_MIN_SIMILARITY', -1.0):        # the floor off: the very reading the review described
+        # the floor off: the very reading the review described. (This picture matches nothing, so the search's orientation is a close call that live_read no longer
+        # follows since 2026-11-23: told it is sure, the candidates are the ones this hazard is about)
+        with mock.patch.object(printing_check, 'STRONG_MIN_SIMILARITY', -1.0), mock.patch.object(printing_check, 'orientation_established', return_value=True):
             self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(2)))['path'], 'strong')
 
     def test_a_good_strong_decision_is_not_refused_by_its_floor(self):

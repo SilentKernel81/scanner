@@ -112,6 +112,7 @@ STRONG_MIN_SIMILARITY = 0.30
 # 'unknown' costs only the AI's check, a wrong orientation costs a silent wrong finish, so the margin is the conservative one.
 ORIENTATION_MIN_SIMILARITY = 0.30
 ORIENTATION_MIN_MARGIN = 0.20
+FLAT_CARD_MIN_SIMILARITY = 0.30      # PrintingCheck.flat_card: a rectangle that looks less like any printing than this is not taken for the card
 # Which printings print the ★ / • marker the foil network reads (a Codex review of 2026-10-20: knowing which way up a card is does not say it has a marker, and the network has only the two outputs
 # foil / non-foil - on an older frame it would classify whatever sits in the box, with a confident answer). The evaluation set the network was trained and measured on holds only releases of 2023,
 # 2025 and 2026, all in the modern frame; the earliest set where the OCR reads a marker is The Lord of the Rings (2023-06-23, on 83% of its cards, nothing older is in the data to say
@@ -260,6 +261,11 @@ def orientation_established(search):
     similarity = float(image_index.similarity(best))
     margin = similarity - float(image_index.similarity(other))
     return similarity >= ORIENTATION_MIN_SIMILARITY and margin >= ORIENTATION_MIN_MARGIN
+
+
+def saw_a_set_line(strip):
+    """Whether a strip's read found the set line (a set code, a marker, or the network asked about one): a number alone can be anything on the wrong end of a card"""
+    return bool(strip.get('set')) or strip.get('symbol', 'unknown') != 'unknown' or strip.get('net') is not None
 
 
 def read_strip_evidence(ocr, card_rgb, net=None):
@@ -469,15 +475,71 @@ class PrintingCheck:
         if index is None or not len(index):
             return None
         upright = index.distances(image_index.hash_card(rgb))
+        if self._known_upright():
+            # The person says this camera's cards all lie the same way (Settings > Cameras): nothing to guess. 'nearest' then shows the other way as no match at all
+            top, sims = self._nearest_rows(upright)
+            return {'index': index, 'distances': upright, 'rotated': False, 'top': top, 'sims': sims, 'nearest': (int(upright.min()), image_index.HASH_BITS),
+                    'both': (upright, upright), 'known_upright': True}
         turned = index.distances(image_index.hash_card(cv2.rotate(rgb, cv2.ROTATE_180)))
         rotated = int(turned.min()) < int(upright.min())      # the card was put in upside down
         distances = turned if rotated else upright
+        top, sims = self._nearest_rows(distances)
+        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': sims,
+                # the nearest row of each orientation (bits): how far the better orientation is ahead of the other (upright())
+                'nearest': (int(upright.min()), int(turned.min())),
+                'both': (upright, turned)}                    # live_read, when the strip shows the card lies the other way (_oriented)
+
+    def _known_upright(self):
+        """Whether the camera of the capture being read has its cards all the same way up (`cards_upright`, set by the server; no answer, or a failing one: not known)"""
+        ask = getattr(self, 'cards_upright', None)
+        try:
+            return bool(ask()) if ask is not None else False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _nearest_rows(distances):
+        """The five nearest rows, nearest first, and their similarities"""
         k = min(5, len(distances))
         top = np.argpartition(distances, k - 1)[:k]
         top = top[np.argsort(distances[top], kind='stable')]
-        return {'index': index, 'distances': distances, 'rotated': rotated, 'top': top, 'sims': image_index.similarity(distances[top]),
-                # the nearest row of each orientation (bits): how far the better orientation is ahead of the other (upright())
-                'nearest': (int(upright.min()), int(turned.min()))}
+        return top, image_index.similarity(distances[top])
+
+    def _oriented(self, search, rotated):
+        """The search as seen with the card lying this way: its candidates must be those of the orientation the strip was actually read in"""
+        if bool(rotated) == bool(search['rotated']) or 'both' not in search:
+            return search
+        distances = search['both'][int(bool(rotated))]
+        top, sims = self._nearest_rows(distances)
+        return {**search, 'distances': distances, 'rotated': bool(rotated), 'top': top, 'sims': sims}
+
+    def flat_card(self, image):
+        """
+        The card inside a picture that is more than the card (a fixed capture area with no outline found): the rectangle of image_index.card_regions that looks most
+        like a printing - or None, and the picture is used as it is, when none is clearly a card (FLAT_CARD_MIN_SIMILARITY) or none beats the whole picture, or there
+        is no index. Measured 2026-11-23 on 34 captures of a fixed area over a stacked pile: the right printing first in 3 of them as drawn, in 34 of 34 cut this way.
+        Never raises: this is never a reason to lose a card.
+        """
+        try:
+            index = self.index()
+            if index is None or not len(index):
+                return None
+
+            def nearest(picture):
+                fingerprint, turned = image_index.hash_card(picture), image_index.hash_card(cv2.rotate(picture, cv2.ROTATE_180))
+                return min(int(index.distances(fingerprint).min()), int(index.distances(turned).min()))
+            best, chosen = nearest(image), None
+            for x0, y0, x1, y1 in image_index.card_regions(image):
+                candidate = image[y0:y1, x0:x1]
+                distance = nearest(candidate)
+                if distance < best:
+                    best, chosen = distance, candidate
+            if chosen is None or float(image_index.similarity(best)) < FLAT_CARD_MIN_SIMILARITY:
+                return None
+            return chosen.copy()
+        except Exception as e:
+            logger.warning(f"Printing check: the card could not be found inside the capture: {e}")
+            return None
 
     def marker_expected(self, search):
         """
@@ -628,12 +690,24 @@ class PrintingCheck:
         search = self._search(card_image)
         if search is None:
             return None
-        upright = cv2.rotate(card_image, cv2.ROTATE_180) if search['rotated'] else card_image
+        # Which way up to read the strip. The search always names a winner, even when both orientations look like nothing much, and on 2026-11-23 it turned 6 of 36
+        # upright cards over by a lead of 0.005 - 0.037. So: the search's way only when it is sure (orientation_established), else as captured - and with OCR, a read
+        # that finds no set line is tried the other way, which also brings back a card that really is upside down. The candidates follow the way the strip was read.
+        # (OCR off: nothing to check it against, the search decides, as it always did - and the network is asked only when the search is sure, below.)
+        read_turned = bool(search['rotated']) if ocr is None or orientation_established(search) else False
+
+        def as_read(turned):
+            return cv2.rotate(card_image, cv2.ROTATE_180) if turned else card_image
         # ocr None: the person switched OCR off (to try the picture alone) - no strip is read, not even by the live reader; the foil network is still asked, at a fixed place - but only
         # when the search is sure which way up the card is (the fixed place is the set line on an UPRIGHT card): not sure, no network (net None), and the finish falls back as it always did
         # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
         net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
-        strip = read_strip_evidence(ocr, upright, net_at_a_fixed_place)
+        strip = read_strip_evidence(ocr, as_read(read_turned), net_at_a_fixed_place)
+        if ocr is not None and not search.get('known_upright') and not saw_a_set_line(strip):
+            other_way = read_strip_evidence(ocr, as_read(not read_turned), net_at_a_fixed_place)
+            if saw_a_set_line(other_way):
+                strip, read_turned = other_way, not read_turned
+        search = self._oriented(search, read_turned)
         if ocr is not None:
             # kept for the capture: the foil marker of a card the full-card OCR then confirms is this strip's symbol / network answer - the same reading
             # foil_marker.read would do again, but of the card turned UPRIGHT (Identification._read_foil_locally)

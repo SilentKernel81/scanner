@@ -21,7 +21,7 @@ from card_scanner.server.state import app, app_settings, identification, invento
 from card_scanner.server.logs import logger
 from card_scanner.server.lock import LOCKED_MESSAGE, guarded, guarded_event, unlocked
 from card_scanner.server.desks import desk, desks, emit_desk, in_desk, log_to_client, scanner
-from card_scanner.server.captures import CARD_BACK_SETTING, scan_location, set_pending_capture, stops_at_card_back
+from card_scanner.server.captures import CARD_BACK_SETTING, CARDS_SAME_WAY_SETTING, cards_same_way, scan_location, set_pending_capture, stops_at_card_back
 from card_scanner.server.card_data import extend_index_wanted, index_progress, start_card_data_update
 
 
@@ -170,6 +170,7 @@ def get_scan_settings():
     """Scanning preferences the page needs on load"""
     return jsonify({
         'auto_add': bool(scanner.fast_scan_mode) if scanner else True,
+        'cards_same_way': cards_same_way(),            # this camera's: its cards are never read as upside down
         'stop_at_card_back': stops_at_card_back(),     # this camera's: a face-down card stops its auto-capture (captures.stop_at_card_back)
         'ocr_first': bool(identification.ocr_enabled) if identification else True,
         'ocr_installed': CardOcr.installed(),
@@ -392,6 +393,18 @@ def handle_toggle_stop_at_card_back(data):
     scanner.settings.set(CARD_BACK_SETTING, enabled)
     emit_desk('stop_at_card_back_toggled', {'enabled': enabled})      # every page of this camera (the Settings page shows its switch)
     log_to_client(f"A card back {'stops' if enabled else 'no longer stops'} auto-capture", level="info")
+
+
+@socketio.on('toggle_cards_same_way')
+def handle_toggle_cards_same_way(data):
+    """Whether every card under this camera lies the same way up: the picture search then does not guess (remembered per camera). A flipped card goes to review"""
+    if not scanner or not desk().station:
+        emit('error', {'message': 'No camera selected'})
+        return
+    enabled = bool(data.get('enabled', False))
+    scanner.settings.set(CARDS_SAME_WAY_SETTING, enabled)
+    emit_desk('cards_same_way_toggled', {'enabled': enabled})
+    log_to_client(f"Cards under this camera: {'all the same way up' if enabled else 'either way up (detected)'}", level="info")
 
 
 @socketio.on('toggle_ocr')

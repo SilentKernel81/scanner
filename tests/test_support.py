@@ -299,8 +299,10 @@ class Crashes(unittest.TestCase):
         self.assertIn('thread worker-x', text)
         self.assertIn('ZeroDivisionError', text)
 
-    def test_a_fatal_signal(self):
-        self.assertIn('Segmentation fault', self.run_program("import faulthandler; faulthandler._sigsegv()"))
+    def test_a_fatal_signal_would_be_written_there(self):
+        # Armed, on this file, and able to write to it - without crashing anything. A real fault here left a core dump and a desktop crash notification at every test run
+        text = self.run_program("import faulthandler; assert faulthandler.is_enabled(); faulthandler.dump_traceback(file=diagnostics._captured['test'], all_threads=True)")
+        self.assertIn('Current thread', text)
 
     def test_ctrl_c_is_no_crash(self):
         self.assertNotIn('uncaught', self.run_program('raise KeyboardInterrupt'))

@@ -461,6 +461,8 @@ PROGRAM_DOCUMENTATION.md (Stations) and INSTALL.md; **(automated)** is in `tests
 
 | ID | Priority / type | Steps | Expected |
 |---|---|---|---|
+| ORI-01 **(automated)** | P0 I | `tests/test_card_orientation.py`: a close call, a sure search, no set line, the setting on, a card on a tray. | Read as captured unless sure; retried the other way; never turned with the setting on; a picture already flat is left alone. |
+| ORI-02 | P1 H | A fixed area over a stack, with "Cards all face the same way" on and off. | Right printing and finish; with it on, a flipped card goes to review. |
 | SUP-01 **(automated)** | P0 I | `tests/test_support.py`: made-up keys, addresses, names and logs; a damaged database; a secret that survives. | No secret, address, home folder or unlisted setting in the file; card names intact; a surviving secret means no file. |
 | SUP-02 | P0 H | On a test install, Settings > Server > Support file: see what it holds, download it, open each file. | The list matches the zip; nothing private; with a settings password both steps ask for it. |
 | SUP-03 | P1 I | Break `config.yaml`, run `app.py --support-bundle` (AppImage: with the same option). | A file in `data/support/`, with the logs that explain the failure. |

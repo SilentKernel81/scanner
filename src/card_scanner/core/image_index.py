@@ -179,6 +179,52 @@ class ImageIndex:
         return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'))
 
 
+# ---------------------------------------------------------------------------------------------
+# Where the card is, in a picture that is more than the card
+# ---------------------------------------------------------------------------------------------
+
+CARD_RATIO = 88 / 63              # a card's height / width
+TRAY_BRIGHTNESS = 125             # brighter than this and connected to the picture's edge: what the card lies on, not the card
+REGION_WORK_WIDTH = 320           # the search for the rectangle is done on a small copy
+REGION_MIN_AREA = 0.35            # a "card" smaller than this share of the picture is something else
+
+
+def card_regions(rgb):
+    """
+    Rectangles (x0, y0, x1, y1) that may be the card in a picture holding more than the card: a fixed capture area as drawn, with tray around it and the edges of the
+    cards below. What is bright and touches the picture's edge is taken for the tray; what is left is the pile, and since the cards below stick out on some side, the
+    card itself is tried against each side at a card's proportions. Only proposals: PrintingCheck.flat_card keeps one only if it looks more like a printing than the
+    whole picture does. So a light-bordered card or a dark mat, which this rule misreads, costs nothing. NOT part of the fingerprint (hash_card, prepare).
+    """
+    height, width = rgb.shape[:2]
+    if width < 32 or height < 32:
+        return []
+    scale = REGION_WORK_WIDTH / width
+    small = cv2.resize(rgb, (REGION_WORK_WIDTH, max(8, int(height * scale))), interpolation=cv2.INTER_AREA)
+    grey = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), (5, 5), 0)
+    light = cv2.morphologyEx((grey > TRAY_BRIGHTNESS).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    _, labels = cv2.connectedComponents(light)
+    touching = set(labels[0]) | set(labels[-1]) | set(labels[:, 0]) | set(labels[:, -1])
+    touching.discard(0)                                    # 0 is "not light"
+    pile = ~np.isin(labels, list(touching))
+    columns, rows = np.flatnonzero(pile.mean(axis=0) > 0.6), np.flatnonzero(pile.mean(axis=1) > 0.6)
+    if not len(columns) or not len(rows):
+        return []
+    x0, x1, y0, y1 = columns[0] / scale, (columns[-1] + 1) / scale, rows[0] / scale, (rows[-1] + 1) / scale
+    box_width, box_height = x1 - x0, y1 - y0
+    if box_width * box_height < REGION_MIN_AREA * width * height:
+        return []
+    boxes = [(x0, y0, x1, y1)]
+    if box_height / box_width < CARD_RATIO:                # wider than a card: the pile sticks out left or right
+        card_width = box_height / CARD_RATIO
+        boxes += [(x0, y0, x0 + card_width, y1), (x1 - card_width, y0, x1, y1), ((x0 + x1 - card_width) / 2, y0, (x0 + x1 + card_width) / 2, y1)]
+    else:                                                  # taller: above or below
+        card_height = box_width * CARD_RATIO
+        boxes += [(x0, y0, x1, y0 + card_height), (x0, y1 - card_height, x1, y1), (x0, (y0 + y1 - card_height) / 2, x1, (y0 + y1 + card_height) / 2)]
+    inside = [(max(0, int(a)), max(0, int(b)), min(width, int(c)), min(height, int(d))) for a, b, c, d in boxes]
+    return [box for box in dict.fromkeys(inside) if box[2] - box[0] >= 32 and box[3] - box[1] >= 32]
+
+
 TABLE_COLUMNS = ('id', 'set', 'number', 'oracle_id', 'finishes', 'name', 'released_at', 'frame')
 
 
