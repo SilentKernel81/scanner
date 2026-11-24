@@ -135,6 +135,16 @@ class CardScanner:
         self.stable_frames = 0
         self.required_stable_frames = 5  # Require 5 stable frames before capture
         self.settled_corners = ()        # Immutable tuple of corners from the current still streak
+        self.settle_anchor = None        # Corners at the start of the current still streak (2-frame mean)
+        self._settle_anchor_samples = 0
+        self._sharpness_box = None       # Locked inset interior ROI (x1, y1, x2, y2) for sharpness & pixel stillness
+        self._sharpness_box_corners = None
+        self._interior_prev = None       # Previous frame's interior 48x64 patch on _sharpness_box
+        self._interior_anchor = None     # Streak-start interior patch on _sharpness_box
+        self._interior_anchor_samples = 0
+        self._pixel_still_streak = 0     # Consecutive frames with still fixed-box interior pixels
+        self._settle_hiccups = 0         # Consecutive minor-hiccup frames tolerated without wiping stable_frames
+        self.last_settle_outcome = 'reset'
         self.frames_since_card_lost = 0  # Track frames without card detection
         self.previous_card_points = None  # Card corners in the previous frame (stillness check)
         self.tracked_outline = None  # Corners of the last outline detection, followed by the detector
@@ -230,7 +240,10 @@ class CardScanner:
         self.fixed_area = self.settings.get('fixed_area')
         self.area_thumb = None  # This frame's area thumbnail (brightness removed)
         self.area_previous = None
+        self._area_last_raw = None  # Unheld previous thumbnail for drop detection (area_big_changes)
         self.area_anchor = None  # Thumbnail when the current still streak began
+        self._area_anchor_samples = 0
+        self._area_hiccups = 0
         self.area_captured = None  # Thumbnail of the last captured card
         self.area_metrics = (0.0, 0.0, 0.0)  # (change since previous frame, drift, sharpness)
         self.area_big_changes = 0  # Frames in a row with a change > AREA_DROP
@@ -338,42 +351,180 @@ class CardScanner:
         self.smoothed_bbox = (x1_smooth, y1_smooth, x2_smooth, y2_smooth)
         return self.smoothed_bbox
 
-    def _is_card_settled(self, frame, points):
-        """
-        True if the card is still and in focus: its corners moved less than ~1.5% of the
-        card size (Config.AUTO_CAPTURE_MAX_MOVEMENT) since the previous frame and since the
-        still streak began, its sharpness
-        changed by less than 20%
-        (autofocus still adjusting changes it a lot between frames), and the image is
-        sharp enough to read (a camera that hasn't focused yet is steady but blurry).
-        """
-        points = np.asarray(points, dtype=np.float32)
-        x1, y1 = np.maximum(points.min(axis=0).astype(int), 0)
-        x2, y2 = points.max(axis=0).astype(int)
+    # Stabilization helpers & measured thresholds (2026-11-24 on 704 recorded debug frames + simulated slow slides):
+    # - SHARPNESS_INSET: crop 6% inward so 1-px corner jitter never pulls the white-box / black-border step edge
+    #   into the Laplacian window (which swung variance 20-30% on a still card).
+    # - SHARPNESS_BOX_LOCK_SHIFT: keep the exact same pixel ROI while corners stay within 3% of diagonal so
+    #   INTER_AREA downscaling phase doesn't change frame-to-frame (dropped false swings from 20-30% to 0-2%).
+    # - INTERIOR_PIXEL_STILL / DRIFT: gain-adjusted mean diff of a 48x64 patch on the locked ROI. Measured on
+    #   239 real 6-frame still windows: 1-frame max 4.22, 6-frame drift max 3.63; 1.3 px/frame slide over 6 frames: 10.1.
+    SHARPNESS_INSET = 0.06
+    SHARPNESS_BOX_LOCK_SHIFT = 0.03
+    INTERIOR_PIXEL_STILL = 4.5
+    INTERIOR_PIXEL_DRIFT = 5.5
+    MAX_SETTLE_HICCUPS = 1
+
+    @classmethod
+    def _inset_box(cls, frame_shape, points, inset=None):
+        """Integer interior ROI (x1, y1, x2, y2) inset inside `points`, clipped to `frame_shape`."""
+        margin = cls.SHARPNESS_INSET if inset is None else inset
+        height, width = frame_shape[:2]
+        x1, y1 = points.min(axis=0)
+        x2, y2 = points.max(axis=0)
+        dx, dy = (x2 - x1) * margin, (y2 - y1) * margin
+        ix1, iy1 = max(0, int(round(x1 + dx))), max(0, int(round(y1 + dy)))
+        ix2, iy2 = min(width, int(round(x2 - dx))), min(height, int(round(y2 - dy)))
+        if ix2 - ix1 < 16 or iy2 - iy1 < 16:
+            ix1, iy1 = max(0, int(x1)), max(0, int(y1))
+            ix2, iy2 = min(width, int(x2)), min(height, int(y2))
+        return ix1, iy1, ix2, iy2
+
+    @staticmethod
+    def _box_sharpness(frame, box):
+        """Laplacian variance of `frame` inside `box` resized to width 160, or None if empty."""
+        x1, y1, x2, y2 = box
         region = frame[y1:y2, x1:x2]
         if region.size == 0:
-            return False
+            return None
         small = cv2.resize(region, (160, max(1, int(160 * region.shape[0] / region.shape[1]))), interpolation=cv2.INTER_AREA)
-        sharpness = cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var()
+        return float(cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var())
+
+    @classmethod
+    def _box_patch(cls, frame, box):
+        """48x64 brightness-removed interior patch on fixed frame coordinates, or None if empty."""
+        x1, y1, x2, y2 = box
+        region = frame[y1:y2, x1:x2]
+        if region.size == 0:
+            return None
+        return cls._area_thumbnail(region)
+
+    @staticmethod
+    def _gain_adjusted_difference(a, b):
+        """
+        Mean absolute difference between two mean-subtracted patches after removing up to ±15%
+        multiplicative exposure / LED flicker (10% flicker drops 2.23 -> 0.47; a 1.3 px/frame
+        6-frame slide stays ~10.1 because spatial shifts are orthogonal to scalar gain).
+        """
+        if a is None or b is None or a.shape != b.shape:
+            return 0.0
+        a_flat, b_flat = a.ravel(), b.ravel()
+        denom = float(np.dot(a_flat, a_flat))
+        if denom > 1e-6:
+            alpha = float(np.clip(float(np.dot(a_flat, b_flat)) / denom, 0.85, 1.15))
+            return float(np.abs(alpha * a - b).mean())
+        return float(np.abs(a - b).mean())
+
+    def _reset_settle_state(self, clear_roi=False):
+        """Clear the active still streak and its anchors (also the locked interior ROI when `clear_roi`)."""
+        self.stable_frames = 0
+        self._clear_settled_corners()
+        self.settle_anchor = None
+        self._settle_anchor_samples = 0
+        self._interior_anchor = None
+        self._interior_anchor_samples = 0
+        self._settle_hiccups = 0
+        self._area_hiccups = 0
+        self._area_anchor_samples = 0
+        if clear_roi:
+            self._sharpness_box = None
+            self._sharpness_box_corners = None
+            self._interior_prev = None
+            self._pixel_still_streak = 0
+
+    def _tolerate_missing_frame(self, frame):
+        """
+        True when a single missed detection frame during an active still streak looks like a
+        detector hiccup (pixels inside the locked card ROI did not jump): holds stable_frames
+        instead of wiping it to 0. Two misses in a row or a real disturbance always returns False.
+        """
+        if (self.missing_frames != 0 or self.stable_frames <= 0
+                or getattr(self, '_settle_hiccups', 0) >= self.MAX_SETTLE_HICCUPS):
+            return False
+        box = getattr(self, '_sharpness_box', None)
+        prev_patch = getattr(self, '_interior_prev', None)
+        if box is None or prev_patch is None or box[2] > frame.shape[1] or box[3] > frame.shape[0]:
+            return False
+        patch = self._box_patch(frame, box)
+        if patch is None or self._gain_adjusted_difference(patch, prev_patch) >= self.INTERIOR_PIXEL_STILL:
+            return False
+        self._settle_hiccups = getattr(self, '_settle_hiccups', 0) + 1
+        self._interior_prev = patch
+        return True
+
+    def _is_card_settled(self, frame, points):
+        """
+        True if the card is still and in focus:
+        - sharpness is measured on a locked inset interior ROI (so 1-px corner jitter cannot
+          pull the white tray edge into the Laplacian or shift INTER_AREA's sampling grid),
+          must be >= auto_capture.min_sharpness, and change < 20% frame to frame;
+        - corners moved less than auto_capture.max_movement on average across the 4 corners
+          (catching coherent slides and rotations) and < 2x that on any single corner (tolerating
+          isolated 1-corner jitter), both frame to frame and against the 2-frame-averaged streak
+          anchor; or, if the outline oscillates on a physically motionless card, fixed-coordinate
+          interior pixels have stayed still for >= 2 consecutive frames with low drift.
+        Sets `last_settle_outcome` to 'settled', 'hiccup' (1-frame minor glitch held without
+        poisoning the reference), or 'reset'.
+        """
+        points = np.asarray(points, dtype=np.float32)
+        card_size = float(np.linalg.norm(points[2] - points[0]))
+        if card_size <= 0:
+            self.last_settle_outcome = 'reset'
+            return False
+
+        box = getattr(self, '_sharpness_box', None)
+        box_corners = getattr(self, '_sharpness_box_corners', None)
+        box_reused = False
+        if (box is not None and box_corners is not None
+                and box[2] <= frame.shape[1] and box[3] <= frame.shape[0]
+                and float(np.linalg.norm(points - box_corners, axis=1).max()) / card_size <= self.SHARPNESS_BOX_LOCK_SHIFT):
+            box_reused = True
+        else:
+            box = self._inset_box(frame.shape, points)
+            self._sharpness_box = box
+            self._sharpness_box_corners = points.copy()
+
+        sharpness = self._box_sharpness(frame, box)
+        if sharpness is None:
+            self.last_settle_outcome = 'reset'
+            return False
 
         self.card_in_focus = bool(sharpness >= Config.AUTO_CAPTURE_MIN_SHARPNESS)  # plain bool: sent as JSON
         thumbnail = self._card_thumbnail(frame, points)
+        patch = self._box_patch(frame, box)
+        prev_patch = getattr(self, '_interior_prev', None) if box_reused else None
+        pixel_change = self._gain_adjusted_difference(patch, prev_patch) if (prev_patch is not None and patch is not None) else None
 
         previous_points, previous_sharpness = self.previous_card_points, self.previous_sharpness
         previous_thumbnail = self.previous_thumbnail
-        self.previous_card_points, self.previous_sharpness, self.previous_thumbnail = points, sharpness, thumbnail
+        # Always keep the latest thumbnail so _new_card_arrived sees genuine card swaps even after a hiccup
+        self.previous_thumbnail = thumbnail
         if previous_points is None or previous_sharpness is None:
+            self.previous_card_points, self.previous_sharpness = points, sharpness
+            self._interior_prev = patch
+            self._pixel_still_streak = 0
             self.card_disturbed = True
+            self.last_settle_outcome = 'reset'
             return False
 
-        card_size = np.linalg.norm(points[2] - points[0])
-        movement = np.linalg.norm(points - previous_points, axis=1).max() / card_size
-        # Drift since the still streak began: a sleeved card sliding slowly moves less than 1%
-        # per frame, passes the frame-to-frame test and used to be captured mid-slide (blurred,
-        # then captured again once it stopped)
+        corner_steps = np.linalg.norm(points - previous_points, axis=1) / card_size
+        movement = float(corner_steps.max())
+        mean_movement = float(corner_steps.mean())
+        # Drift since the still streak began: a sleeved card sliding slowly moves < 1% per frame,
+        # passes the frame-to-frame test and used to be captured mid-slide (blurred, then captured
+        # again once it stopped)
         if self.stable_frames == 0 or getattr(self, 'settle_anchor', None) is None:
-            self.settle_anchor = points
-        drift = np.linalg.norm(points - self.settle_anchor, axis=1).max() / card_size
+            self.settle_anchor = points.copy()
+            self._settle_anchor_samples = 1
+            self._interior_anchor = patch
+            self._interior_anchor_samples = 1 if patch is not None else 0
+        anchor_steps = np.linalg.norm(points - self.settle_anchor, axis=1) / card_size
+        drift = float(anchor_steps.max())
+        mean_drift = float(anchor_steps.mean())
+
+        interior_anchor = getattr(self, '_interior_anchor', None) if box_reused else None
+        pixel_drift = (self._gain_adjusted_difference(patch, interior_anchor)
+                       if (interior_anchor is not None and patch is not None) else None)
+
         sharpness_change = abs(sharpness - previous_sharpness) / max(previous_sharpness, 1e-6)
         image_change = self._thumbnail_difference(thumbnail, previous_thumbnail, smooth=True)
 
@@ -382,11 +533,65 @@ class CardScanner:
         self.card_disturbed = movement > 0.03 or image_change > self.IMAGE_CHANGE_LIMIT
         self.last_frame_change = (movement, image_change)
         self.settle_metrics = (movement, drift, sharpness_change, sharpness)
+
+        pixels_still = (pixel_change is not None and pixel_change < self.INTERIOR_PIXEL_STILL
+                        and (pixel_drift is None or pixel_drift < self.INTERIOR_PIXEL_DRIFT))
+        self._pixel_still_streak = getattr(self, '_pixel_still_streak', 0) + 1 if pixels_still else 0
+
         limit = Config.AUTO_CAPTURE_MAX_MOVEMENT
-        settled = movement < limit and drift < limit and sharpness_change < 0.2 and self.card_in_focus
-        if not settled:
-            self.settle_anchor = points
-        return settled
+        corners_still = (mean_movement < limit and movement < 2.0 * limit
+                         and mean_drift < limit and drift < 2.0 * limit)
+        # If the outline detector oscillates between two nearby edges on a physically motionless
+        # card, sustained interior-pixel stillness (both frame-to-frame and zero drift from streak
+        # start) lets the card finish settling without ever passing a sliding card or a real drop
+        # (a real drop or card swap spikes pixel_change and resets _pixel_still_streak to 0)
+        oscillation_override = (movement <= 0.03
+                                and self._pixel_still_streak >= 2
+                                and pixel_drift is not None and pixel_drift < self.INTERIOR_PIXEL_DRIFT)
+        # Guard against slow slides that drag corners under `limit` on a large card: if interior
+        # pixels drifted far past still-card noise, the card is physically sliding
+        pixels_drifting = pixel_drift is not None and pixel_drift >= self.INTERIOR_PIXEL_DRIFT * 1.25
+        settled = (sharpness_change < 0.2 and self.card_in_focus
+                   and not pixels_drifting and (corners_still or oscillation_override))
+
+        if settled:
+            self._settle_hiccups = 0
+            # Average the first two still frames into the anchor (cuts frame-0 jitter noise by sqrt(2)
+            # without letting a slow slide drag the anchor along)
+            if getattr(self, '_settle_anchor_samples', 1) == 1 and self.stable_frames >= 1:
+                self.settle_anchor = 0.5 * (self.settle_anchor + points)
+                self._settle_anchor_samples = 2
+                if interior_anchor is not None and patch is not None:
+                    self._interior_anchor = 0.5 * (interior_anchor + patch)
+                    self._interior_anchor_samples = 2
+            self.previous_card_points, self.previous_sharpness = points, sharpness
+            self._interior_prev = patch
+            self.last_settle_outcome = 'settled'
+            return True
+
+        # Tolerate a single isolated minor glitch frame during an active still streak without
+        # wiping stable_frames or poisoning previous_card_points / settle_anchor
+        minor_hiccup = (self.stable_frames > 0
+                        and self.card_in_focus
+                        and not self.card_disturbed
+                        and not pixels_drifting
+                        and getattr(self, '_settle_hiccups', 0) < self.MAX_SETTLE_HICCUPS
+                        and (pixel_drift is None or pixel_drift < self.INTERIOR_PIXEL_DRIFT))
+        if minor_hiccup:
+            self._settle_hiccups = getattr(self, '_settle_hiccups', 0) + 1
+            self._interior_prev = patch
+            self.last_settle_outcome = 'hiccup'
+            return False
+
+        self._settle_hiccups = 0
+        self.settle_anchor = points.copy()
+        self._settle_anchor_samples = 1
+        self._interior_anchor = patch
+        self._interior_anchor_samples = 1 if patch is not None else 0
+        self.previous_card_points, self.previous_sharpness = points, sharpness
+        self._interior_prev = patch
+        self.last_settle_outcome = 'reset'
+        return False
 
     @staticmethod
     def _card_thumbnail(frame, points):
@@ -595,8 +800,7 @@ class CardScanner:
         self.disturbed_during_focus = False
         self.awaiting_new_card = False
         self.tracked_outline = None
-        self.stable_frames = 0
-        self._clear_settled_corners()
+        self._reset_settle_state(clear_roi=True)
         self.last_new_card = {'kind': 'dropper_sensor', 'at': time.time()}
         if self.auto_capture_enabled:
             self.log("Dropper confirmed card landed - waiting for card to settle")
@@ -627,6 +831,7 @@ class CardScanner:
     # so a drop needs AREA_DROP in 2 frames in a row.
     AREA_STILL = 3.0
     AREA_DRIFT = 4.0
+    AREA_MINOR_SPIKE = 5.5
     AREA_DROP = 8.0
     AREA_DIFFERENT = 10.0
 
@@ -680,8 +885,7 @@ class CardScanner:
             self.card_detected = False
         self.tracked_outline = self.previous_card_points = self.previous_sharpness = None
         self.smoothed_bbox = self.last_card_detection = None
-        self.stable_frames = 0
-        self._clear_settled_corners()
+        self._reset_settle_state(clear_roi=True)
         fixed_area_off = self.fixed_area_enabled
         if fixed_area_off:
             self.set_fixed_area(enabled=False)
@@ -700,10 +904,9 @@ class CardScanner:
             self.fixed_area_enabled = bool(enabled)
             self.settings.set('fixed_area_enabled', self.fixed_area_enabled)
         # Start the area's judgement afresh; a card already captured stays captured
-        self.area_previous = self.area_anchor = None
+        self.area_previous = self._area_last_raw = self.area_anchor = None
         self.area_captured = self.area_thumb if self.awaiting_new_card else None
-        self.stable_frames = 0
-        self._clear_settled_corners()
+        self._reset_settle_state(clear_roi=True)
         return {'enabled': self.fixed_area_enabled, 'area': self.fixed_area}
 
     def detected_area(self, margin=0.05):
@@ -746,20 +949,40 @@ class CardScanner:
         present = bool(sharpness >= Config.AUTO_CAPTURE_MIN_SHARPNESS)
 
         self.area_thumb = thumb = self._area_thumbnail(region)
-        change = self._area_difference(thumb, self.area_previous) if self.area_previous is not None else 0.0
-        self.area_previous = thumb
+        # Drop detection always compares against the actual previous frame (never held during a hiccup)
+        last_raw = getattr(self, '_area_last_raw', self.area_previous)
+        raw_change = self._area_difference(thumb, last_raw) if last_raw is not None else 0.0
+        self._area_last_raw = thumb
+        # Stillness & drift remove up to ±15% multiplicative exposure / LED flicker while keeping the 0-255 scale
+        change = self._gain_adjusted_difference(thumb, self.area_previous) if self.area_previous is not None else 0.0
         if self.stable_frames == 0 or self.area_anchor is None:
             self.area_anchor = thumb
-        drift = self._area_difference(thumb, self.area_anchor)
+            self._area_anchor_samples = 1
+        drift = self._gain_adjusted_difference(thumb, self.area_anchor)
         self.area_metrics = (change, drift, sharpness)
 
         focus_moving = self._focus_moving()
         settled = present and not focus_moving and change < self.AREA_STILL and drift < self.AREA_DRIFT
-        self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames) if settled else 0
-        if not settled:
+        if settled:
+            self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
+            self._area_hiccups = 0
+            if getattr(self, '_area_anchor_samples', 1) == 1 and self.stable_frames >= 2:
+                self.area_anchor = 0.5 * (self.area_anchor + thumb)
+                self._area_anchor_samples = 2
+            self.area_previous = thumb
+        elif (present and not focus_moving and self.stable_frames > 0
+              and getattr(self, '_area_hiccups', 0) < self.MAX_SETTLE_HICCUPS
+              and change < self.AREA_MINOR_SPIKE and drift < self.AREA_MINOR_SPIKE):
+            # Single minor sensor-noise / flicker spike: hold streak without poisoning area_previous or area_anchor
+            self._area_hiccups = getattr(self, '_area_hiccups', 0) + 1
+        else:
+            self.stable_frames = 0
+            self._area_hiccups = 0
             self.area_anchor = thumb
+            self._area_anchor_samples = 1
+            self.area_previous = thumb
 
-        self.area_big_changes = self.area_big_changes + 1 if change > self.AREA_DROP else 0
+        self.area_big_changes = self.area_big_changes + 1 if raw_change > self.AREA_DROP else 0
         # A card falling in while a focus probe moves the lens (only slightly blurred): it counts
         # as new once the focus is done (and the probe's measurement is discarded)
         if focus_moving and not self.focus_sweep_running and self.area_big_changes >= 2:
@@ -768,7 +991,7 @@ class CardScanner:
         if self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self.disturbed_during_focus:
             self.disturbed_during_focus = False
             self.awaiting_new_card = False
-            self.stable_frames = 0
+            self._reset_settle_state()
             self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
             if self.auto_capture_enabled:
                 self.log("New card detected (dropped while focusing)")
@@ -777,14 +1000,14 @@ class CardScanner:
                 self._area_difference(thumb, self.area_captured) > self.AREA_DIFFERENT
             if self.area_big_changes >= 2 or (settled and different):
                 self.awaiting_new_card = False
-                self.stable_frames = 0
+                self._reset_settle_state()
                 # The fixed area's own measure - not the outline mode's jump / image change,
                 # whose last values would otherwise be recorded here
-                self.last_new_card = {'kind': 'area_change', 'area_change': round(float(change), 2),
+                self.last_new_card = {'kind': 'area_change', 'area_change': round(float(raw_change), 2),
                                       'big_changes': int(self.area_big_changes),
                                       'differs_from_captured': bool(different), 'at': time.time()}
                 if self.auto_capture_enabled:
-                    self.log(f"New card detected (area change {change:.1f})")
+                    self.log(f"New card detected (area change {raw_change:.1f})")
 
         # Outline inside the area -> flat, tight crop for the photo
         _, _, _, corners = self._detect_outline(
@@ -807,6 +1030,8 @@ class CardScanner:
         else:
             self._clear_settled_corners()
         capture_corners = self._averaged_settled_corners(corners) if corners is not None else None
+        if self.stable_frames > 0 and capture_corners is not None:
+            self.tracked_outline = capture_corners
         with self.frame_lock:
             self.card_detected = present
             self.card_in_focus = present
@@ -836,6 +1061,7 @@ class CardScanner:
         if (self.auto_capture_enabled and present and not self.card_under_review and not self.awaiting_new_card
                 and not self.focus_sweep_running and not self.focus_probe_running
                 and self.stable_frames >= self.required_stable_frames
+                and settled  # this very frame is still: a held hiccup frame keeps the count but is never the photo
                 and time.time() - self.last_auto_capture_time >= self.auto_capture_delay):
             self._trigger_auto_capture()
 
@@ -1050,8 +1276,7 @@ class CardScanner:
             self.camera_error = reason
             self.current_frame = self.current_raw = self.annotated_frame = self.whole_frame = None
             self.card_detected = False
-            self.stable_frames = 0
-            self._clear_settled_corners()
+            self._reset_settle_state(clear_roi=True)
 
     def _wait_for_camera(self):
         """No camera: try to open it again every CAMERA_RETRY_SECONDS"""
@@ -1271,8 +1496,7 @@ class CardScanner:
                 elif not self.enable_detection:
                     # Detection is disabled - clear all detection state
                     self.last_card_detection = None
-                    self.stable_frames = 0
-                    self._clear_settled_corners()
+                    self._reset_settle_state(clear_roi=True)
                     with self.frame_lock:
                         self.detected_card = None
                         self.detected_card_name = ""
@@ -1320,13 +1544,13 @@ class CardScanner:
                             # Card is detected - reset lost frames counter
                             self.frames_since_card_lost = 0
 
-                            # Count consecutive frames where the card is still and in focus
+                            # Count frames where the card is still and in focus (holding the streak across
+                            # a single minor glitch frame instead of wiping it to 0)
                             if self._is_card_settled(frame, raw_points):
                                 self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
                                 self._record_settled_corners(raw_points)
-                            else:
-                                self.stable_frames = 0
-                                self._clear_settled_corners()
+                            elif getattr(self, 'last_settle_outcome', 'reset') != 'hiccup':
+                                self._reset_settle_state()
                             self._trace_waiting(detected=True)
 
                             self._check_focus_drift()
@@ -1345,15 +1569,13 @@ class CardScanner:
                                 self.disturbed_during_focus = False
                                 self.awaiting_new_card = False
                                 self.tracked_outline = None
-                                self.stable_frames = 0
-                                self._clear_settled_corners()
+                                self._reset_settle_state(clear_roi=True)
                                 self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
                                 if self.auto_capture_enabled:
                                     self.log("New card detected (dropped while focusing)")
                             elif self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self._new_card_arrived(gap):
                                 self.awaiting_new_card = False
-                                self.stable_frames = 0  # the new card must settle first
-                                self._clear_settled_corners()
+                                self._reset_settle_state(clear_roi=True)  # the new card must settle first
                                 jump, change = getattr(self, 'last_frame_change', (0.0, 0.0))
                                 self.last_new_card = {'kind': 'jump_or_image_change', 'jump': round(float(jump), 4),
                                                       'image_change': round(float(change), 3), 'at': time.time()}
@@ -1366,8 +1588,12 @@ class CardScanner:
                                     self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
                                     if time.time() - self.last_auto_capture_time < 2.0:
                                         self._start_debug_dump('new_card_soon_after_capture')
-                            # Keep the card for capture (averaged over the still streak when settled)
+                            # Keep the card for capture (averaged over the still streak when settled),
+                            # and feed the steady averaged outline back to CornerNet while still so
+                            # its Stage-2 crop window doesn't amplify single-frame jitter
                             capture_corners = self._averaged_settled_corners(corners)
+                            if self.stable_frames > 0 and self.tracked_outline is not None:
+                                self.tracked_outline = capture_corners
                             display_corners = capture_corners
                             self.last_card_detection['corners'] = capture_corners
                             if display_bbox:
@@ -1384,10 +1610,11 @@ class CardScanner:
                         # No current detection - signal to smoothing algorithm
                         self.smooth_bounding_box(None)
 
-                        # A cached (held) detection is not a still card: the next card
-                        # must settle from scratch
-                        self.stable_frames = 0
-                        self._clear_settled_corners()
+                        # A single missed outline frame on an undisturbed still card is held (not
+                        # counted, and never captured via cached detection); any real disturbance
+                        # or 2+ misses in a row wipes the streak from scratch
+                        if not self._tolerate_missing_frame(frame):
+                            self._reset_settle_state(clear_roi=(self.missing_frames >= 1))
 
                         self._trace_waiting(detected=False)
 
@@ -1488,7 +1715,9 @@ class CardScanner:
                             not self.awaiting_new_card and  # Still the card from the last capture
                             not self.focus_sweep_running and  # Frames are blurry while the lens moves
                             not self.focus_probe_running and
-                            self.stable_frames >= self.required_stable_frames):
+                            self.stable_frames >= self.required_stable_frames and
+                            # this very frame passed the settle test: a held 'hiccup' frame keeps the count, never takes the photo
+                            getattr(self, 'last_settle_outcome', 'settled') == 'settled'):
 
                             # Check if enough time has passed since last auto-capture
                             time_since_last_capture = time.time() - self.last_auto_capture_time
@@ -2071,8 +2300,7 @@ class CardScanner:
         if (not self.refocus_every or self.focus_locked_value is None or self.camera_type != 'usb' or not self.focus_range
                 or self.focus_sweep_running or self.focus_probe_running or time.time() - self.last_focus_sweep < 30):
             return False
-        self.stable_frames = 0
-        self._clear_settled_corners()
+        self._reset_settle_state()
         self.captures_since_focus = 0                # this check counts as the run's first probe
         self.focus_probe_running = True              # set here, so the next frame cannot capture before the thread runs
         threading.Thread(target=self._run_focus_check, daemon=True, name="Focus-Check").start()
@@ -2123,8 +2351,7 @@ class CardScanner:
             except Exception:
                 pass
         finally:
-            self.stable_frames = 0                           # frames counted while the lens moved say nothing
-            self._clear_settled_corners()
+            self._reset_settle_state()               # frames counted while the lens moved say nothing
             self.last_focus_move = time.time()
             self.focus_probe_running = False
 

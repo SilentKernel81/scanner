@@ -856,21 +856,29 @@ A frame counts toward `stable_frames` only if `_is_card_settled()` holds:
   picture unchanged) and put back - the limit is not to be moved on one run's evidence; 1% was changed when
   a Pi 5 run of 211 cards showed the corner network's outline jittering 1-1.5% on a still card
   on a tall sleeved pile: 32 waits, 18 of 5 s or more, the longest 15 s; the outline detector
-  measured <= 0.4%) of the card size since the previous frame **and** since
-  the still streak began - a sleeved card sliding slowly (a few px per frame) passes the
-  frame-to-frame test on every frame and used to be captured mid-slide: blurred, then captured
-  again when it stopped (seen live with a Lake-town),
-- sharpness (variance of the Laplacian on a 160 px wide crop) changed by less than **20%**
-  (autofocus still adjusting changes it a lot),
+  measured <= 0.4%) of the card size on average across the 4 corners (and < 2× on any single corner,
+  so isolated 1-corner jitter doesn't stall capture while coherent slides and rotations are still caught)
+  since the previous frame **and** since the 2-frame-averaged streak anchor - a sleeved card sliding slowly
+  (a few px per frame) passes the frame-to-frame test on every frame and used to be captured mid-slide:
+  blurred, then captured again when it stopped (seen live with a Lake-town). If the outline oscillates
+  between two nearby edges on a physically motionless card, sustained fixed-coordinate interior-pixel
+  stillness (gain-adjusted 48×64 diff < 4.5 frame to frame, < 5.5 from the streak anchor, for ≥ 2 frames;
+  measured on 239 real 6-frame still windows: max drift 3.63 vs 10.1 for a 1.3 px/frame slide) lets it
+  settle while still rejecting slow slides (drift ≥ 6.9),
+- sharpness (variance of the Laplacian on a 160 px wide crop of a locked 6%-inset interior ROI, so
+  1-px corner jitter cannot pull the white tray edge into the Laplacian or shift `INTER_AREA`'s grid;
+  measured on 704 recorded debug frames: dropped false still-card resets from 10 to 0) changed by less
+  than **20%** (autofocus still adjusting changes it a lot),
 - sharpness is at least `auto_capture.min_sharpness` (**250**) - a camera that hasn't focused
   yet is steady but blurry.
 
-A capture needs `auto_capture.stability_frames` (5) such frames in a row, or
-`fast_scan.stability_frames` (6, about 0.3 s) when cards are added automatically. Simulated
-sleeve slides (0.8 s after landing): with 4 frames and only the frame-to-frame test, 12 of 12
-cards were captured mid-slide; with the drift test and 6 frames none (slides of 2-3 px/frame),
-captured ~0.5 s after the card stopped. 4 frames with the drift test still let a 2 px/frame
-slide through. The status
+A capture needs `auto_capture.stability_frames` (5) such frames, or `fast_scan.stability_frames` (6,
+about 0.3 s) when cards are added automatically. A single isolated minor glitch frame (or 1 missed
+outline frame while interior pixels stay undisturbed) holds `stable_frames` and keeps the reference
+anchor intact instead of wiping the streak to 0 (a held frame is never the one photographed: the capture waits for the next still frame); two glitches/misses in a row or any real disturbance
+still hard-reset. While settling, `tracked_outline` feeds the averaged `settled_corners` back to
+`CornerNet` (cutting Stage-2 window jitter ~33% on recorded still frames). Simulated sleeve slides
+(1.0-3.0 px/frame on recorded cards): 0 of 5 captured mid-slide. The status
 pill shows *Focusing*, *Stabilizing n/N*, *Ready*, *Capturing - wait for the beep*, or
 *Captured - drop the next card*.
 
@@ -1074,9 +1082,10 @@ shadow or exposure change is not a change) is compared with the previous frame's
 | A different card settled, compared with the last one | ~21 |
 
 - **card present:** area sharpness ≥ `min_sharpness` (empty box ~30, a card ~1,600);
-- **still:** change < 3 frame to frame and < 4 since the still streak began (a slow slide
-  drifts), for `stability_frames` frames;
-- **new card after a capture:** change > 8 in 2 frames in a row (a card falling in - also an
+- **still:** gain-adjusted change < 3 frame to frame and < 4 from the 2-frame-averaged streak anchor
+  (removing up to ±15% multiplicative exposure/LED flicker while keeping slow slides caught), for
+  `stability_frames` frames; a single minor noise spike (< 5.5) holds the streak without resetting it;
+- **new card after a capture:** raw change > 8 in 2 frames in a row (a card falling in - also an
   identical copy), or the settled area differs > 10 from the captured one.
 
 **The photo is the area as drawn.** The outline detector still runs, only for the ★/• foil

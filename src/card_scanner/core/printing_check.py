@@ -48,7 +48,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from card_scanner.core import card_ocr, foil_marker, image_index
+from card_scanner.core import card_ocr, foil_marker, image_index, visual_embed
 from card_scanner.core.database import names_match as database_names_match, search_key as database_search_key
 # The decision itself is a pure function of plain data (core/reading/decide.py, docs/plans/READING_REFACTOR_PLAN.md); this module GATHERS the evidence
 # for it. AGREE_BELOW and IMAGE_LEAD are defined there and kept here under the names this module always exported.
@@ -58,6 +58,9 @@ from card_scanner.core.reading.decide import AGREE_BELOW, IMAGE_LEAD, accept_pri
 logger = logging.getLogger('ai')
 
 DISAGREE_FROM = 0.06
+# Cascade -> Fusion weight when a v2 embedding sidecar is loaded and phash_rgb_v1 alone is unsure:
+# fused_sim = FUSION_HASH_WEIGHT * phash_sim + (1 - FUSION_HASH_WEIGHT) * embed_sim
+FUSION_HASH_WEIGHT = 0.5
 
 
 def name_only_partly_read(read_name, card):
@@ -388,7 +391,7 @@ class PrintingCheck:
     the lookup then goes by the picture alone.
     """
 
-    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None, game_id=None):
+    def __init__(self, database, index_folder, log_file, mode='shadow', lookup='ai_cases', strip_reader=None, finish_for=None, game_id=None, embedder=None):
         self.database = database
         # game_id(): the game whose card data the index is measured against (missing_printings) - the server passes games.active_id; a script that makes one without
         # it gets Magic, the one game an index exists for
@@ -403,6 +406,9 @@ class PrintingCheck:
         self.finish_for = finish_for
         self._index = None
         self._index_stamp = 'not looked at yet'   # meta.json's modification time when the index was loaded (None: no index)
+        self._embedder = embedder
+        self._embedder_checked = embedder is not None
+        self._embedder_lock = threading.Lock()
         self._queue = queue.Queue(QUEUE_SIZE)
         self._thread = None
         self._lock = threading.Lock()       # starting the thread, loading the index
@@ -451,7 +457,8 @@ class PrintingCheck:
                 self._index = image_index.ImageIndex.load(self.index_folder) if stamp is not None else None
                 self._index_stamp = stamp
                 if self._index is not None:
-                    logger.info(f"Printing check: image index loaded ({len(self._index)} printings, built {self._index.built})")
+                    sidecar_note = ", + v2 sidecar" if getattr(self._index, 'has_embeddings', False) else ""
+                    logger.info(f"Printing check: image index loaded ({len(self._index)} printings, built {self._index.built}{sidecar_note})")
             if self._index is None and not self._said_no_index:
                 self._said_no_index = True
                 logger.info("Printing check: no image index (build one with scripts/build_image_index.py): nothing is checked")
@@ -506,6 +513,63 @@ class PrintingCheck:
         top = np.argpartition(distances, k - 1)[:k]
         top = top[np.argsort(distances[top], kind='stable')]
         return top, image_index.similarity(distances[top])
+
+    @staticmethod
+    def _top_from_sims(similarities):
+        """The five highest-similarity rows, highest first, and their similarities"""
+        k = min(5, len(similarities))
+        top = np.argpartition(-similarities, k - 1)[:k]
+        top = top[np.argsort(-similarities[top], kind='stable')]
+        return top, similarities[top].astype(np.float64)
+
+    def _get_embedder(self):
+        """Lazy-load the v2 ONNX embedder only when an index with a v2 sidecar actually needs it."""
+        if not self._embedder_checked:
+            with self._embedder_lock:
+                if not self._embedder_checked:
+                    self._embedder = visual_embed.load()
+                    self._embedder_checked = True
+        return self._embedder
+
+    def _search_fused(self, rgb, search):
+        """
+        v2 Cascade -> Fusion search: combines the already-computed phash_rgb_v1 similarities with cosine similarities
+        from the v2 int8 sidecar (FUSION_HASH_WEIGHT * phash + (1 - FUSION_HASH_WEIGHT) * embed). Called ONLY when
+        phash_rgb_v1 alone returned 'review' or failed a similarity floor (~2% of cards). Returns None if unavailable.
+        """
+        index = search['index']
+        if not getattr(index, 'has_embeddings', False) or 'both' not in search:
+            return None
+        embedder = self._get_embedder()
+        if embedder is None:
+            return None
+
+        def compute():
+            w_hash = FUSION_HASH_WEIGHT
+            w_emb = 1.0 - w_hash
+            emb_up = embedder.embed(rgb)
+            sim_up = (w_hash * image_index.similarity(search['both'][0]) + w_emb * index.embed_similarities(emb_up)).astype(np.float32)
+            if search.get('known_upright'):
+                top, sims = self._top_from_sims(sim_up)
+                return {'index': index, 'similarities': sim_up, 'rotated': False, 'top': top, 'sims': sims,
+                        'both_sims': (sim_up, sim_up), 'known_upright': True, 'fused': True}
+            emb_turn = embedder.embed(cv2.rotate(rgb, cv2.ROTATE_180))
+            sim_turn = (w_hash * image_index.similarity(search['both'][1]) + w_emb * index.embed_similarities(emb_turn)).astype(np.float32)
+            rotated = float(sim_turn.max()) > float(sim_up.max())
+            chosen = sim_turn if rotated else sim_up
+            top, sims = self._top_from_sims(chosen)
+            return {'index': index, 'similarities': chosen, 'rotated': rotated, 'top': top, 'sims': sims,
+                    'both_sims': (sim_up, sim_turn), 'fused': True}
+
+        return reading_capture.get('search_fused', rgb, compute)
+
+    def _oriented_fused(self, fused, rotated):
+        """The fused search as seen with the card lying this way (same role as _oriented for phash searches)."""
+        if bool(rotated) == bool(fused['rotated']) or 'both_sims' not in fused:
+            return fused
+        similarities = fused['both_sims'][int(bool(rotated))]
+        top, sims = self._top_from_sims(similarities)
+        return {**fused, 'similarities': similarities, 'rotated': bool(rotated), 'top': top, 'sims': sims}
 
     def _oriented(self, search, rotated):
         """The search as seen with the card lying this way: its candidates must be those of the orientation the strip was actually read in"""
@@ -759,6 +823,34 @@ class PrintingCheck:
                  # what the strip's whole line names: looked up only where a guard asks it (the picture alone, when allowed)
                  'strip_names': self._strip_names(search['index'], strip, decision['printing_id']) if alone and accept_image_alone and card else None}
         verdict = accept_printing(decision, facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
+        # v2 Cascade -> Fusion: only when phash_rgb_v1 alone could not accept/confirm (~2% of cards) AND a v2 sidecar is loaded
+        if not (verdict['accepted'] or verdict['needs_ocr']) and getattr(search['index'], 'has_embeddings', False):
+            try:
+                fused = self._search_fused(card_image, search)
+            except Exception as e:
+                logger.warning(f"Printing check: v2 embedding fusion failed ({e}) - keeping colour hash verdict")
+                fused = None
+            if fused is not None:
+                if search.get('known_upright'):
+                    fused = self._oriented_fused(fused, False)
+                elif ocr is not None and saw_a_set_line(strip):
+                    fused = self._oriented_fused(fused, read_turned)
+                fused_picture, fused_cards = self._picture_evidence(fused)
+                fused_decision = decide_printing(fused_picture, {'number': strip['number'], 'set': strip['set']})
+                fused_card = fused_cards.get(fused_decision['printing_id']) if fused_decision['printing_id'] is not None else None
+                fused_alone = fused_decision['path'] == 'image'
+                fused_facts = {'accept_image_alone': bool(accept_image_alone), 'index_covers': True, 'in_data': bool(fused_card), 'ocr_on': ocr is not None,
+                               'strip_names': self._strip_names(fused['index'], strip, fused_decision['printing_id']) if fused_alone and accept_image_alone and fused_card else None}
+                fused_verdict = accept_printing(fused_decision, fused_facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
+                if fused_verdict['accepted'] or fused_verdict['needs_ocr']:
+                    search, picture, cards, decision, card, verdict = fused, fused_picture, fused_cards, fused_decision, fused_card, fused_verdict
+                    fused_lead = None if decision['lead'] is None else round(float(decision['lead']), 4)
+                    reading_record.note('picture', rotated=bool(search['rotated']), lead=fused_lead, v2_fused=True,
+                                        candidates=[{'id': c['id'], 'set': c['set'], 'number': c['number'], 'similarity': round(c['similarity'], 4)} for c in picture['candidates']])
+                    reading_record.note('decision', path=decision['path'], printing_id=decision['printing_id'], lead=fused_lead, v2_fused=True,
+                                        similarity=None if decision['similarity'] is None else round(decision['similarity'], 4))
+                else:
+                    reading_record.note('decision', v2_tried=True)
         if verdict['refused']:
             reading_record.refuse(verdict['refused'])
         if not (verdict['accepted'] or verdict['needs_ocr']):
