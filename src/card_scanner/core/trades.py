@@ -188,15 +188,17 @@ class Trades:
                 self.conn.execute('UPDATE trade_receives SET quantity = ? WHERE id = ?', (quantity, row_id))
         return self._writing(change)
 
-    def add(self, game, name, entry_ids):
+    def add(self, game, name, entry_ids, quantities=None):
         """
         Set entries aside for the open trade with this name (made when there is none): every
-        copy of each that no trade holds yet. Returns {'trade': id, 'name', 'cards': copies set
-        aside now, 'skipped': entries that had none free}.
+        copy of each that no trade holds yet, or at most `quantities[entry_id]` when given.
+        Returns {'trade': id, 'name', 'cards': copies set aside now, 'skipped': entries that
+        had none free}.
         """
         name = ' '.join(str(name or '').split())[:60]
         if not name:
             raise TradeError('The trade needs a name')
+        limits = quantities or {}
 
         def change():
             trade_id, trade_name, made = self._open_trade(game, name)
@@ -204,13 +206,14 @@ class Trades:
             for entry_id in dict.fromkeys(entry_ids):
                 entry = self.inventory._get_row(entry_id)
                 free = entry['quantity'] - self._set_aside(entry_id) if entry and entry['game'] == game else 0
-                if free <= 0:
+                take = min(free, int(limits[entry_id])) if entry_id in limits else free
+                if take <= 0:
                     skipped += 1
                     continue
                 self.conn.execute('''INSERT INTO trade_cards (trade_id, inventory_id, quantity) VALUES (?, ?, ?)
                                      ON CONFLICT(trade_id, inventory_id) DO UPDATE SET quantity = quantity + excluded.quantity''',
-                                  (trade_id, entry_id, free))
-                cards += free
+                                  (trade_id, entry_id, take))
+                cards += take
             if not cards and made:
                 raise TradeError('None of these cards has a copy that is not in a trade already')
             return {'trade': trade_id, 'name': trade_name, 'cards': cards, 'skipped': skipped}

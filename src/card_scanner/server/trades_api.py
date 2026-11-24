@@ -47,9 +47,13 @@ def trade_list():
     data = request.get_json(silent=True) or {}
     try:
         ids = [int(row_id) for row_id in data.get('ids') or []]
+        raw_qty = data.get('quantities') or {}
+        if not isinstance(raw_qty, dict):
+            raise TypeError('quantities must be an object')
+        quantities = {int(row_id): int(copies) for row_id, copies in raw_qty.items()}
     except (ValueError, TypeError):
-        return jsonify({'success': False, 'error': 'ids must be numbers'}), 400
-    result = trade_store.add(game.id, data.get('name'), ids)
+        return jsonify({'success': False, 'error': 'ids and quantities must be numbers'}), 400
+    result = trade_store.add(game.id, data.get('name'), ids, quantities=quantities or None)
     collection_changed()
     return jsonify({'success': True, **result})
 
