@@ -40,7 +40,7 @@ class CardSearcher:
             card_info = self.db.search_card_exact(card_name, collector_number, set_code)
 
             # Check if we got an exact match or fallback
-            if card_info and card_info.get('number') != collector_number.lstrip('0'):
+            if card_info and card_info.get('number') != (collector_number.lstrip('0') or '0'):
                 # We got a different number - log it
                 variants = collector_number_variants(collector_number)
                 if variants and card_info.get('number') not in variants:

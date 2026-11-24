@@ -357,6 +357,8 @@ class CardOcr:
             return None
         return answer['lines']
 
+    MAX_CARD_HEIGHT = 1200  # full-card OCR: PP-OCRv6 downscales internally; capping tall captures saves JPEG/IPC/decode overhead
+
     def read_card(self, image_rgb, game_id):
         """
         What OCR read on a card of the given game.
@@ -369,11 +371,18 @@ class CardOcr:
         if not parser:
             return None
         start_time = time.time()
-        lines = self.read_lines(image_rgb)
+        height, width = image_rgb.shape[:2]
+        if height > self.MAX_CARD_HEIGHT:
+            scale = self.MAX_CARD_HEIGHT / height
+            ocr_image = cv2.resize(image_rgb, (max(1, int(round(width * scale))), self.MAX_CARD_HEIGHT),
+                                   interpolation=cv2.INTER_AREA)
+        else:
+            ocr_image = image_rgb
+        lines = self.read_lines(ocr_image)
         if lines is None:
             return None
-        height, width = image_rgb.shape[:2]
-        result = parser(lines, width, height)
+        ocr_h, ocr_w = ocr_image.shape[:2]
+        result = parser(lines, ocr_w, ocr_h)
         elapsed = time.time() - start_time
         if not result:
             self.log(f"light-ocr found no card name ({elapsed:.2f}s)", level="warning")

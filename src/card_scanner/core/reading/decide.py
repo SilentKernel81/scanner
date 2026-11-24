@@ -82,8 +82,10 @@ def decide_printing(picture, strip, thresholds: Optional[dict] = None):
     lead = best - candidates[1]['similarity'] if len(candidates) > 1 else None
     number, set_code = (strip or {}).get('number') or '', (strip or {}).get('set') or ''
     if number and set_code:
+        norm_number = plain_number(number).lower()
         for candidate in candidates:                      # nearest first: the first that names the strip's printing
-            if plain_number(candidate.get('number')) == number and (candidate.get('set') or '').lower() == set_code:
+            raw_cand = str(candidate.get('number') or '').strip()
+            if raw_cand and plain_number(raw_cand).lower() == norm_number and (candidate.get('set') or '').lower() == set_code:
                 if best - candidate['similarity'] < thresholds['agree_below']:      # it looks as much like the picture as the best match does
                     return {'path': 'strong', 'printing_id': candidate['id'], 'similarity': candidate['similarity'], 'lead': lead}
                 break                                     # one that names it but looks different: the strip is not believed

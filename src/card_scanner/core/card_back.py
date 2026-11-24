@@ -12,6 +12,7 @@
 import numpy as np
 
 from card_scanner.core import image_index
+from card_scanner.core.reading import capture as reading_capture
 
 # The fingerprint of Scryfall's picture of the standard Magic back, https://backs.scryfall.io/large/0/a/0aeebaf5-8c7d-4636-9e82-8c27447861f7.jpg (672 x 936,
 # SHA-256 f9535ae9...a1e1222, fetched 2026-10-21), as image_index.hash_card makes it. Recompute it with scripts/experiments/image_match/card_back_fingerprint.py -
@@ -32,9 +33,15 @@ CARD_BACK_MIN_SIMILARITY = 0.35
 def card_back_similarity(rgb):
     """-1..1: how much a picture (RGB uint8, the flat card filling it) looks like the Magic back - the better of the picture as given and turned 180 degrees"""
     back = np.frombuffer(CARD_BACK_FINGERPRINT, np.uint8)
+    # Cache both orientation hashes on the current CaptureEvidence (if any) so PrintingCheck._search_now reuses them instead of hashing the card twice more
+    hashes = (
+        reading_capture.get('hash_upright', rgb, lambda: image_index.hash_card(rgb)),
+        reading_capture.get('hash_turned', rgb, lambda: image_index.hash_card(np.ascontiguousarray(rgb[::-1, ::-1]))),
+    )
     best = -1.0
-    for picture in (rgb, np.ascontiguousarray(rgb[::-1, ::-1])):        # [::-1, ::-1]: turned 180 degrees, as cv2.rotate(ROTATE_180) does
-        differing = np.unpackbits(np.bitwise_xor(back, np.frombuffer(image_index.hash_card(picture), np.uint8))).sum()
+    for digest in hashes:
+        xor = np.bitwise_xor(back, np.frombuffer(digest, np.uint8))
+        differing = int(np.bitwise_count(xor).sum()) if hasattr(np, 'bitwise_count') else int(np.unpackbits(xor).sum())
         best = max(best, float(image_index.similarity(differing)))
     return best
 

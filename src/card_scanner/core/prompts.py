@@ -34,7 +34,7 @@ BUILT_IN = {
             # "LTR") instead of saying they could not read the card
             'instructions': """This is a Magic: The Gathering card. Read three things:
 - NAME: the card name at the top-left (for a double-faced card, the front face).
-- NUMBER: the collector number at the bottom-left corner, first line: a letter and a number - give only the number, with its leading zeros. It is not the mana cost at the top-right.
+- NUMBER: the collector number at the bottom-left corner, first line: a letter and a number - give only the number, with its leading zeros (keep a leading T if the letter is T for a token). It is not the mana cost at the top-right.
 - SET: the set code (3-4 letters or digits) at the start of the bottom-left second line, before the language code.
 Copy exactly what is printed. If a value is blurry or unreadable, write Unknown - do not guess.""",
             # With "Answer with exactly three lines" qwen3.5:9b often dropped the labels, and
