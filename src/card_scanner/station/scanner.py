@@ -27,8 +27,17 @@ from pathlib import Path
 from card_scanner.config import Config, camera_index_or_none
 from card_scanner.paths import tool
 from card_scanner.station import corner_net
-from card_scanner.station.object_detector import ObjectDetector, warp_card
+from card_scanner.station.object_detector import (
+    NEURAL_MIN_SCORE,
+    ObjectDetector,
+    _plausible_neural,
+    warp_card,
+)
 from card_scanner.settings import Settings
+
+# The full-resolution corner pass at capture may move a corner by at most this share of the card's diagonal: it is there for the detector's
+# 1-1.5% jitter at the live resolution, and a bigger move is another answer (a different edge, a card below), not a sharper one
+CAPTURE_REFINE_MAX_SHIFT = 0.03
 
 # Create scanner logger
 logger = logging.getLogger('scanner')
@@ -125,6 +134,7 @@ class CardScanner:
         # Frame stability tracking (for auto-capture)
         self.stable_frames = 0
         self.required_stable_frames = 5  # Require 5 stable frames before capture
+        self.settled_corners = ()        # Immutable tuple of corners from the current still streak
         self.frames_since_card_lost = 0  # Track frames without card detection
         self.previous_card_points = None  # Card corners in the previous frame (stillness check)
         self.tracked_outline = None  # Corners of the last outline detection, followed by the detector
@@ -564,6 +574,21 @@ class CardScanner:
         elif now - self.out_of_focus_since > 3.0 and now - self.last_focus_sweep > 15.0:
             self.refocus("card out of focus")
 
+    def _clear_settled_corners(self):
+        self.settled_corners = ()
+
+    def _record_settled_corners(self, corners):
+        limit = max(1, int(getattr(self, 'required_stable_frames', 5) or 5))
+        prev = getattr(self, 'settled_corners', ())
+        self.settled_corners = (prev + (np.asarray(corners, dtype=np.float32),))[-limit:]
+
+    def _averaged_settled_corners(self, fallback):
+        """Mean of corners collected during the current still streak (cuts CornerNet jitter ~2x)."""
+        samples = getattr(self, 'settled_corners', ())
+        if len(samples) >= 2:
+            return np.mean(samples, axis=0).astype(np.float32)
+        return fallback
+
     def notify_card_dropped(self):
         """Called when the card dropper confirms a card physically dropped onto the tray: unlocks
         auto-capture so the camera waits only for stillness/sharpness (also handles identical cards)."""
@@ -571,6 +596,7 @@ class CardScanner:
         self.awaiting_new_card = False
         self.tracked_outline = None
         self.stable_frames = 0
+        self._clear_settled_corners()
         self.last_new_card = {'kind': 'dropper_sensor', 'at': time.time()}
         if self.auto_capture_enabled:
             self.log("Dropper confirmed card landed - waiting for card to settle")
@@ -655,6 +681,7 @@ class CardScanner:
         self.tracked_outline = self.previous_card_points = self.previous_sharpness = None
         self.smoothed_bbox = self.last_card_detection = None
         self.stable_frames = 0
+        self._clear_settled_corners()
         fixed_area_off = self.fixed_area_enabled
         if fixed_area_off:
             self.set_fixed_area(enabled=False)
@@ -676,6 +703,7 @@ class CardScanner:
         self.area_previous = self.area_anchor = None
         self.area_captured = self.area_thumb if self.awaiting_new_card else None
         self.stable_frames = 0
+        self._clear_settled_corners()
         return {'enabled': self.fixed_area_enabled, 'area': self.fixed_area}
 
     def detected_area(self, margin=0.05):
@@ -769,10 +797,20 @@ class CardScanner:
                 corners = None  # an outline outside the area (e.g. the whole pile)
         else:
             self.missing_frames += 1
+        if self.stable_frames > 0 and corners is not None:
+            buf = getattr(self, 'settled_corners', ())
+            if buf:
+                diag = float(np.linalg.norm(corners[2] - corners[0]))
+                if diag <= 0 or float(np.linalg.norm(corners - buf[-1], axis=1).max()) / diag > 0.03:
+                    self._clear_settled_corners()
+            self._record_settled_corners(corners)
+        else:
+            self._clear_settled_corners()
+        capture_corners = self._averaged_settled_corners(corners) if corners is not None else None
         with self.frame_lock:
             self.card_detected = present
             self.card_in_focus = present
-            self.detected_card = (frame, (x1, y1, x2, y2), corners, raw) if present else None
+            self.detected_card = (frame, (x1, y1, x2, y2), capture_corners, raw) if present else None
             self.detected_card_name = "Card" if present else ""
 
         # Overlay: the area (the photo); the outline, used only for the foil check, isn't drawn
@@ -1013,6 +1051,7 @@ class CardScanner:
             self.current_frame = self.current_raw = self.annotated_frame = self.whole_frame = None
             self.card_detected = False
             self.stable_frames = 0
+            self._clear_settled_corners()
 
     def _wait_for_camera(self):
         """No camera: try to open it again every CAMERA_RETRY_SECONDS"""
@@ -1233,6 +1272,7 @@ class CardScanner:
                     # Detection is disabled - clear all detection state
                     self.last_card_detection = None
                     self.stable_frames = 0
+                    self._clear_settled_corners()
                     with self.frame_lock:
                         self.detected_card = None
                         self.detected_card_name = ""
@@ -1283,8 +1323,10 @@ class CardScanner:
                             # Count consecutive frames where the card is still and in focus
                             if self._is_card_settled(frame, raw_points):
                                 self.stable_frames = min(self.stable_frames + 1, self.required_stable_frames)
+                                self._record_settled_corners(raw_points)
                             else:
                                 self.stable_frames = 0
+                                self._clear_settled_corners()
                             self._trace_waiting(detected=True)
 
                             self._check_focus_drift()
@@ -1304,12 +1346,14 @@ class CardScanner:
                                 self.awaiting_new_card = False
                                 self.tracked_outline = None
                                 self.stable_frames = 0
+                                self._clear_settled_corners()
                                 self.last_new_card = {'kind': 'dropped_while_focusing', 'at': time.time()}
                                 if self.auto_capture_enabled:
                                     self.log("New card detected (dropped while focusing)")
                             elif self.awaiting_new_card and not self.require_drop_signal and not focus_moving and self._new_card_arrived(gap):
                                 self.awaiting_new_card = False
                                 self.stable_frames = 0  # the new card must settle first
+                                self._clear_settled_corners()
                                 jump, change = getattr(self, 'last_frame_change', (0.0, 0.0))
                                 self.last_new_card = {'kind': 'jump_or_image_change', 'jump': round(float(jump), 4),
                                                       'image_change': round(float(change), 3), 'at': time.time()}
@@ -1322,10 +1366,13 @@ class CardScanner:
                                     self.log(f"New card detected (jump {movement:.1%}, image change {image_change:.2f})")
                                     if time.time() - self.last_auto_capture_time < 2.0:
                                         self._start_debug_dump('new_card_soon_after_capture')
-                            # Keep the card for capture
+                            # Keep the card for capture (averaged over the still streak when settled)
+                            capture_corners = self._averaged_settled_corners(corners)
+                            display_corners = capture_corners
+                            self.last_card_detection['corners'] = capture_corners
                             if display_bbox:
                                 with self.frame_lock:
-                                    self.detected_card = (frame, display_bbox, corners, raw)
+                                    self.detected_card = (frame, display_bbox, capture_corners, raw)
                                     self.detected_card_name = card_name
                                     self.card_detected = True
                             else:
@@ -1340,6 +1387,7 @@ class CardScanner:
                         # A cached (held) detection is not a still card: the next card
                         # must settle from scratch
                         self.stable_frames = 0
+                        self._clear_settled_corners()
 
                         self._trace_waiting(detected=False)
 
@@ -1514,6 +1562,24 @@ class CardScanner:
             self._stream_cache = (frame_id, jpeg)
         return frame_id, jpeg
     
+    def _refine_capture_corners(self, frame, corners):
+        """Run one Stage-2 CornerNet pass on the full-resolution frame when live detection ran downscaled."""
+        detector = getattr(self, 'object_detector', None)
+        neural = getattr(detector, 'neural', None)
+        if neural is None or not hasattr(neural, 'refine_corners'):
+            return corners
+        try:
+            refined, score = neural.refine_corners(frame, corners)
+        except Exception as e:
+            logger.debug(f"Full-resolution corner refinement skipped ({e})")
+            return corners
+        if score < NEURAL_MIN_SCORE or not _plausible_neural(refined, frame.shape, detector.allow_landscape):
+            return corners
+        diag = float(np.linalg.norm(corners[2] - corners[0]))
+        if diag <= 0 or float(np.linalg.norm(refined - corners, axis=1).max()) / diag > CAPTURE_REFINE_MAX_SHIFT:
+            return corners
+        return refined
+
     def get_detected_card(self, snapshot=None):
         """
         Get the currently detected card image
@@ -1535,6 +1601,7 @@ class CardScanner:
 
         # Frames are never modified after capture, so cropping outside the lock is safe
         frame, bbox, corners, raw = detected
+        upscaled = False
         if raw is not None and self.half_size_decode:
             # Detection ran on the half-size frame: cut the card from the full-size image
             full = self._view(cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
@@ -1543,6 +1610,11 @@ class CardScanner:
             if corners is not None:
                 corners = corners * np.array([scale_x, scale_y], dtype=np.float32)
             bbox = (int(bbox[0] * scale_x), int(bbox[1] * scale_y), int(bbox[2] * scale_x), int(bbox[3] * scale_y))
+            upscaled = True
+        elif getattr(self, 'current_small', None) is not None and corners is not None:
+            upscaled = True
+        if upscaled and corners is not None:
+            corners = self._refine_capture_corners(frame, corners)
         if snapshot is not None:
             snapshot.update(self._frame_snapshot(frame, raw, corners))
         warped = warp_card(frame, corners) if corners is not None else None
@@ -2000,6 +2072,7 @@ class CardScanner:
                 or self.focus_sweep_running or self.focus_probe_running or time.time() - self.last_focus_sweep < 30):
             return False
         self.stable_frames = 0
+        self._clear_settled_corners()
         self.captures_since_focus = 0                # this check counts as the run's first probe
         self.focus_probe_running = True              # set here, so the next frame cannot capture before the thread runs
         threading.Thread(target=self._run_focus_check, daemon=True, name="Focus-Check").start()
@@ -2051,6 +2124,7 @@ class CardScanner:
                 pass
         finally:
             self.stable_frames = 0                           # frames counted while the lens moved say nothing
+            self._clear_settled_corners()
             self.last_focus_move = time.time()
             self.focus_probe_running = False
 

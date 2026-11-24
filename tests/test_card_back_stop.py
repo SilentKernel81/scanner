@@ -206,6 +206,14 @@ class CardBackStop(TemporaryData):
         self.assertEqual(answer.status_code, 409)                    # never 'resolved': nothing was added for it
         self.assertIn('back of a card', answer.json['message'])
 
+    def test_duplicate_upload_does_not_rerun_flat_card(self):
+        front = degraded(synthetic_card(5))
+        fake_check = mock.Mock(flat_card=mock.Mock(return_value=None))
+        with mock.patch.object(self.api, 'printing_check', fake_check):
+            self.upload(front, capture_id='dup-1', foil_is_image=None)
+            self.upload(front, capture_id='dup-1', foil_is_image=None)
+        self.assertEqual(fake_check.flat_card.call_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

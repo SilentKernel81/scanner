@@ -1137,6 +1137,18 @@ class CardDatabase:
                     result[row['id']] = self._format_card_result(row)
         return result
 
+    def marker_layouts_by_ids(self, card_ids):
+        """{printing id: {'released_at', 'frame'}} in one lightweight query for printing_check.marker_expected (no JSON column parsing)"""
+        result = {}
+        ids = [card_id for card_id in dict.fromkeys(card_ids) if card_id]
+        with self._lock:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                for row in self.conn.execute(
+                        f"SELECT id, released_at, frame FROM cards WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                    result[row['id']] = {'released_at': row['released_at'], 'frame': row['frame']}
+        return result
+
     # One row per card name: with a single MAX(), SQLite takes the other columns from the row
     # that has it - the newest ordinary printing: one with an image, then one that exists
     # non-foil (foil-only inserts and collector editions are rarely the copy meant), then the

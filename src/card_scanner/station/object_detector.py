@@ -410,13 +410,21 @@ def warp_card(frame, corners, out_h=None):
     if np.linalg.norm(tr - tl) > np.linalg.norm(bl - tl):
         # Card lying sideways - rotate so the output is portrait
         tl, tr, br, bl = bl, tl, tr, br
-    if out_h is None:
-        out_h = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
-    out_w = int(out_h / CARD_ASPECT_RATIO)
+    full_res = out_h is None
+    if full_res:
+        out_h = max(2, int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr))))
+    out_w = max(2, int(out_h / CARD_ASPECT_RATIO))
     src = np.array([tl, tr, br, bl], dtype=np.float32)
     dst = np.array([[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32)
-    return cv2.warpPerspective(frame, cv2.getPerspectiveTransform(src, dst), (out_w, out_h))
+    # Full-resolution capture warps run once per card: cubic interpolation keeps tiny collector
+    # numbers and the ~18px foil marker sharper on tilted cards; live thumbnails stay linear
+    flags = cv2.INTER_CUBIC if full_res else cv2.INTER_LINEAR
+    return cv2.warpPerspective(frame, cv2.getPerspectiveTransform(src, dst), (out_w, out_h), flags=flags)
 
+
+# Errors in a row before the corner network is switched off for good (until the station restarts): one bad frame or a passing
+# runtime hiccup is not a broken model, and every frame the network is off goes to the weaker outline detector
+NEURAL_MAX_FAILURES = 5
 
 # What the corner network's answer must be before it is believed (else the outline detector looks)
 NEURAL_MIN_SCORE = 0.5
@@ -455,6 +463,7 @@ class ObjectDetector:
         """
         self.allow_landscape = allow_landscape
         self.neural = neural
+        self.neural_failures = 0      # errors in a row (NEURAL_MAX_FAILURES)
 
     def detect(self, frame, previous=None):
         """
@@ -471,10 +480,20 @@ class ObjectDetector:
         if self.neural is not None:
             try:
                 corners, score = self.neural.find(frame, previous=previous)
+                if (previous is not None and corners is not None and score >= NEURAL_MIN_SCORE
+                        and not _plausible_neural(corners, frame.shape, self.allow_landscape)):
+                    # The previous-guided window returned a confident but clipped/implausible shape
+                    # (e.g. card shifted partly out of the previous window): retry whole-frame once
+                    corners, score = self.neural.find(frame, previous=None)
+                self.neural_failures = 0
             except Exception as e:  # never stop scanning over the second opinion
-                logger.warning(f"Corner network failed ({e}) - the outline detector alone is used")
-                self.neural = None
+                self.neural_failures = getattr(self, 'neural_failures', 0) + 1
                 corners = None
+                if self.neural_failures >= NEURAL_MAX_FAILURES:
+                    logger.warning(f"Corner network failed {self.neural_failures} times in a row ({e}) - the outline detector alone is used from now on")
+                    self.neural = None
+                else:
+                    logger.warning(f"Corner network failed ({e}) - the outline detector answers for this frame")
             if corners is not None and score >= NEURAL_MIN_SCORE and \
                     _plausible_neural(corners, frame.shape, self.allow_landscape):
                 x1, y1 = np.floor(corners.min(axis=0)).astype(int)

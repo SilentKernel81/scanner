@@ -525,9 +525,14 @@ class PrintingCheck:
             if index is None or not len(index):
                 return None
 
+            known_upright = self._known_upright()
+
             def nearest(picture):
-                fingerprint, turned = image_index.hash_card(picture), image_index.hash_card(cv2.rotate(picture, cv2.ROTATE_180))
-                return min(int(index.distances(fingerprint).min()), int(index.distances(turned).min()))
+                best_distance = int(index.distances(image_index.hash_card(picture)).min())
+                if known_upright:
+                    return best_distance
+                turned = image_index.hash_card(cv2.rotate(picture, cv2.ROTATE_180))
+                return min(best_distance, int(index.distances(turned).min()))
             best, chosen = nearest(image), None
             for x0, y0, x1, y1 in image_index.card_regions(image):
                 candidate = image[y0:y1, x0:x1]
@@ -540,6 +545,18 @@ class PrintingCheck:
         except Exception as e:
             logger.warning(f"Printing check: the card could not be found inside the capture: {e}")
             return None
+
+    def _cards_by_ids(self, printing_ids, method='cards_by_ids'):
+        """{printing_id: card} in one database query when the database implements `method`, else one get_card_by_id at a time (test stand-ins)"""
+        ids = list(dict.fromkeys(printing_ids))
+        if not ids:
+            return {}
+        batch = getattr(type(self.database), method, None)
+        if callable(batch) and not isinstance(self.database, type):
+            found = batch(self.database, ids)
+            if isinstance(found, dict):
+                return found
+        return {printing_id: card for printing_id in ids if (card := self.database.get_card_by_id(printing_id))}
 
     def marker_expected(self, search):
         """
@@ -555,7 +572,9 @@ class PrintingCheck:
         if len(tied) > MARKER_MAX_TIED:
             return False
         try:
-            return all(prints_a_marker(self.database.get_card_by_id(search['index'].ids[int(row)])) for row in tied)
+            ids = [search['index'].ids[int(row)] for row in tied]
+            layouts = self._cards_by_ids(ids, method='marker_layouts_by_ids')
+            return all(prints_a_marker(layouts.get(printing_id)) for printing_id in ids)
         except Exception as e:
             logger.debug(f"Printing check: the marker layout could not be judged: {e}")
             return False
@@ -663,10 +682,11 @@ class PrintingCheck:
         printing the card database does not have). Every database read the decision needs is done here.
         """
         index = search['index']
+        printing_ids = [index.ids[int(row)] for row in search['top']]
+        fetched = self._cards_by_ids(printing_ids)
         cards, candidates = {}, []
-        for row, similarity in zip(search['top'], search['sims']):
-            printing_id = index.ids[int(row)]
-            card = cards[printing_id] = self.database.get_card_by_id(printing_id) or {}
+        for printing_id, similarity in zip(printing_ids, search['sims']):
+            card = cards[printing_id] = fetched.get(printing_id) or {}
             candidates.append({'id': printing_id, 'similarity': float(similarity), 'set': card.get('set_code'), 'number': card.get('number'),
                                'oracle_id': card.get('oracle_id'), 'finishes': card.get('finishes') or []})
         return {'rotated': bool(search['rotated']), 'candidates': candidates}, cards
@@ -708,6 +728,10 @@ class PrintingCheck:
             if saw_a_set_line(other_way):
                 strip, read_turned = other_way, not read_turned
         search = self._oriented(search, read_turned)
+        # Keep the oriented search in CaptureEvidence so subsequent checks (contradicts, disagrees, verdict_of) use the confirmed orientation
+        reading_capture.remember('search', card_image, search)
+        if bool(search.get('known_upright')) or (ocr is not None and saw_a_set_line(strip)) or orientation_established(search):
+            reading_capture.remember('rotated', card_image, bool(search['rotated']))
         if ocr is not None:
             # kept for the capture: the foil marker of a card the full-card OCR then confirms is this strip's symbol / network answer - the same reading
             # foil_marker.read would do again, but of the card turned UPRIGHT (Identification._read_foil_locally)

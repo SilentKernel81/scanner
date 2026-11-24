@@ -512,6 +512,35 @@ class LiveRead(unittest.TestCase):
         self.assertEqual(self.check.verdict_of(degraded(synthetic_card(3)), 'p2'), 'disagree')
         self.assertIsNone(self.make(Cards(), self.root / 'no-index').verdict_of(degraded(synthetic_card(3)), 'p3'))
 
+    def test_picture_evidence_and_marker_expected_batch_database_lookups(self):
+        class BatchedCards(Cards):
+            def __init__(self):
+                super().__init__()
+                self.single_calls = 0
+                self.batch_calls = 0
+                self.marker_calls = 0
+
+            def get_card_by_id(self, printing_id):
+                self.single_calls += 1
+                return super().get_card_by_id(printing_id)
+
+            def cards_by_ids(self, card_ids):
+                self.batch_calls += 1
+                return {i: super(BatchedCards, self).get_card_by_id(i) for i in card_ids if super(BatchedCards, self).get_card_by_id(i)}
+
+            def marker_layouts_by_ids(self, card_ids):
+                self.marker_calls += 1
+                return {i: {'released_at': c['released_at'], 'frame': c['frame']}
+                        for i in card_ids if (c := super(BatchedCards, self).get_card_by_id(i))}
+
+        db = BatchedCards()
+        check = self.make(db)
+        picture = degraded(synthetic_card(3))
+        search = check._search(picture)
+        check._picture_evidence(search)
+        self.assertTrue(check.marker_expected(search))
+        self.assertEqual((db.single_calls, db.batch_calls, db.marker_calls), (0, 1, 1))
+
 
 class FakeGame:
     """The game as _read_with_ocr and _ask_ai use it: `confirm` says which OCR reads are confirmed; identify gives the AI's answer a printing"""
@@ -1082,6 +1111,31 @@ class InIdentification(unittest.TestCase):
         self.ident.evidence.contradicted = RuntimeError('index went away')
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual((info['collector_number'], task), ('242', None))
+
+    def test_single_finish_ocr_confirmed_card_skips_foil_network_and_ai_foil_check(self):
+        self.confirmed_ocr()
+        self.ocr_read['foil'] = 'unknown'
+        self.ident.foil_marker = mock.Mock()
+        self.ident._ai_foil_check = lambda foil_image: True
+        self.game.confirmed_card = lambda name, number=None, set_code=None: {
+            'id': 'ocr-printing', 'name': name, 'flavor_name': None, 'number': number, 'set_code': set_code,
+            'finishes': ['nonfoil'], 'released_at': '2024-05-01', 'frame': '2015'}
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertIsNone(task)
+        self.ident.foil_marker.read.assert_not_called()
+
+    def test_old_frame_ocr_confirmed_card_skips_foil_network_and_falls_back_to_ai_foil_check(self):
+        self.confirmed_ocr()
+        self.ocr_read['foil'] = 'unknown'
+        self.ident.foil_marker = mock.Mock()
+        self.ident.foil_marker.read.return_value = ('foil', 0.99)
+        self.ident._ai_foil_check = lambda foil_image: True
+        self.game.confirmed_card = lambda name, number=None, set_code=None: {
+            'id': 'ocr-printing', 'name': name, 'flavor_name': None, 'number': number, 'set_code': set_code,
+            'finishes': ['nonfoil', 'foil'], 'released_at': '2019-11-01', 'frame': '2015'}
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual(task, identification.FOIL)
+        self.ident.foil_marker.read.assert_not_called()
 
     def test_without_the_printing_check_or_in_cascade_the_ocr_read_is_not_questioned(self):
         self.confirmed_ocr()

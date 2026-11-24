@@ -116,6 +116,21 @@ class OnTheSyntheticIndex(unittest.TestCase):
         self.assertEqual(len(reader.images), 1)       # one read of the strip, of the card turned back upright
         np.testing.assert_array_equal(reader.images[0], foil_marker.strip_of(cv2.rotate(turned, cv2.ROTATE_180)))
 
+    def test_live_read_updates_cached_search_after_reorienting(self):
+        # When orientation_established is False, _search initially picks the flipped orientation for a turned card,
+        # live_read tries as-captured (no set line), then tries turned (finds set line) -> _oriented updates the cached search.
+        # Conversely, if a close-call search mistakenly flipped an upright card, finding the set line upright updates the cached search.
+        picture = self.picture
+        with capture.using(capture.CaptureEvidence()):
+            initial = self.check._search(picture)
+            # Simulate a close-call search that initially chose rotated=True for an upright card
+            flipped = self.check._oriented(initial, True)
+            capture.remember('search', picture, flipped)
+            with mock.patch.object(printing_check, 'orientation_established', return_value=False):
+                self.check.live_read(picture, None, FakeReader(strip_lines(3)))
+            # Subsequent checks (verdict_of) must see the corrected upright search, not the stale flipped one
+            self.assertEqual(self.check.verdict_of(picture, 'p3'), 'agree')
+
 
 class InIdentification(unittest.TestCase):
     """The full-card OCR is read once per capture"""
@@ -142,6 +157,46 @@ class InIdentification(unittest.TestCase):
         info = self.ident.identify(self.image, self.image)
         self.assertEqual(info['name'], 'Frodo')                  # read by the OCR instead, as before
         self.ident.card_ocr.read_card.assert_called_once()
+
+    def test_an_upside_down_picture_alone_refused_by_ocr_reuses_the_upright_read(self):
+        turned = np.arange(100 * 70 * 3, dtype=np.uint8).reshape(100, 70, 3)
+        expected_upright = cv2.rotate(turned, cv2.ROTATE_180)
+        seen = []
+        self.ident.evidence.reading = {**READING, 'path': 'image', 'lead': 0.0625, 'rotated': True}
+        self.ident.card_ocr.read_card.side_effect = lambda img, game: seen.append(img.copy()) or {'name': 'Frodo', 'collector_number': '', 'set_code': '', 'foil': 'unknown'}
+        info = self.ident.identify(turned, turned)
+        self.assertEqual(info['name'], 'Frodo')
+        self.assertEqual(len(seen), 1)                           # cached: not read a second time upside down
+        np.testing.assert_array_equal(seen[0], expected_upright)
+
+    def test_an_upside_down_card_passes_upright_images_to_ai_identify_and_foil_check(self):
+        turned = np.arange(100 * 70 * 3, dtype=np.uint8).reshape(100, 70, 3)
+        expected_upright = cv2.rotate(turned, cv2.ROTATE_180)
+        identifier = mock.Mock()
+        identifier.identify_card.return_value = {'name': 'Gandalf', 'collector_number': '242', 'set_code': 'hob'}
+        identifier.read_foil_symbol.return_value = 'foil'
+        self.ident.card_identifier = identifier
+        self.ident._ai_foil_check = lambda foil_image: True
+        # Case 1: live_read decides 'strong' on upside-down card with unknown finish -> FOIL task gets upright foil_image
+        self.ident.evidence.reading = {**READING, 'rotated': True, 'finish': {'finish': 'unknown', 'source': 'none'}}
+        info = self.ident.identify(turned, turned)
+        self.assertEqual(info['foil'], 'foil')
+        np.testing.assert_array_equal(identifier.read_foil_symbol.call_args[0][0], expected_upright)
+
+        # Case 2: live_read returns None after establishing rotated=True -> fallback OCR, AI identify & AI foil check all get upright
+        identifier.reset_mock()
+        ocr_seen = []
+        self.ident.card_ocr.read_card.side_effect = lambda img, game: ocr_seen.append(img.copy()) or {'name': 'Frodo', 'collector_number': '', 'set_code': '', 'foil': 'unknown'}
+
+        def live_read_none_rotated(image, card_image, ocr, foil_net, accept_image_alone):
+            capture.remember('rotated', card_image if card_image is not None else image, True)
+            return None
+        self.ident.evidence.live_read = live_read_none_rotated
+        info = self.ident.identify(turned, turned)
+        self.assertEqual(info['name'], 'Gandalf')
+        np.testing.assert_array_equal(ocr_seen[0], expected_upright)
+        np.testing.assert_array_equal(identifier.identify_card.call_args[0][0], expected_upright)
+        np.testing.assert_array_equal(identifier.read_foil_symbol.call_args[0][0], expected_upright)
 
     def test_the_read_handed_on_is_a_copy(self):
         with capture.using(capture.CaptureEvidence()):

@@ -93,6 +93,19 @@ class FlatCard(Index):
         self.assertEqual(image_index.card_regions(np.zeros((10, 10, 3), np.uint8)), [])
         self.assertEqual(image_index.card_regions(np.full((400, 300, 3), 200, np.uint8)), [])
 
+    def test_flat_card_skips_rotated_hashing_when_cards_are_known_upright(self):
+        picture = on_a_tray(self.cards['p3'])
+        with mock.patch.object(image_index, 'hash_card', wraps=image_index.hash_card) as hashed:
+            self.check.cards_upright = lambda: False
+            self.check.flat_card(picture)
+            both_ways_calls = hashed.call_count
+            hashed.reset_mock()
+            self.check.cards_upright = lambda: True
+            found = self.check.flat_card(picture)
+            upright_only_calls = hashed.call_count
+        self.assertIsNotNone(found)
+        self.assertEqual(upright_only_calls * 2, both_ways_calls)
+
 
 class Orientation(Index):
     """The strip reader sees a set line only on the side of the picture where `line_on` says it is"""

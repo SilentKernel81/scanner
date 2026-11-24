@@ -182,6 +182,18 @@ class Frames:
                 if box[:, 0].max() < lo[0] or box[:, 0].min() > hi[0] or box[:, 1].max() < lo[1] or box[:, 1].min() > hi[1]:
                     win = augment_colour(cut(it['rgb'], m), rng)
                     return to_tensor(win), np.zeros((4, 2), np.float32), 0.0, 0.0
+        if rng.random() < 0.05:                 # hard negative: off-center / half-cut-off card (stale `previous` window)
+            height = card_h / rng.uniform(0.55, 0.8)
+            for _ in range(10):
+                angle_off = rng.uniform(0, 2 * math.pi)
+                dist = rng.uniform(0.55, 1.1) * height
+                cx = centre[0] + math.cos(angle_off) * dist
+                cy = centre[1] + math.sin(angle_off) * dist
+                m = window_matrix(cx, cy, height, angle=rng.uniform(-12, 12))
+                pts = quad @ m[:, :2].T + m[:, 2]
+                outside = ((pts[:, 0] < 0) | (pts[:, 0] > W) | (pts[:, 1] < 0) | (pts[:, 1] > H)).sum()
+                if outside >= 2:
+                    return to_tensor(augment_colour(cut(it['rgb'], m), rng)), np.zeros((4, 2), np.float32), 0.0, 0.0
         # the card fills 12% - 80% of the window's height: wide windows teach stage 1, tight ones stage 2
         if rng.random() < 0.35:
             fill = math.exp(rng.uniform(math.log(0.12), math.log(0.45)))
@@ -190,12 +202,15 @@ class Frames:
         height = card_h / fill
         jitter = height * 0.12 * (1 - fill) + card_h * 0.06
         cx, cy = centre + rng.uniform(-jitter, jitter, 2)
-        m = window_matrix(cx, cy, height, angle=rng.uniform(-8, 8))
+        m = window_matrix(cx, cy, height, angle=rng.uniform(-12, 12))
         win = cut(it['rgb'], m)
         pts = quad @ m[:, :2].T + m[:, 2]
-        if rng.random() < 0.5:                  # a mirror image: the corners swap sides
+        if rng.random() < 0.5:                  # horizontal mirror: left/right corners swap
             win = win[:, ::-1]
             pts = np.stack([W - pts[:, 0], pts[:, 1]], 1)[[1, 0, 3, 2]]
+        if rng.random() < 0.5:                  # vertical mirror (with horizontal, covers 180° upside-down cards too)
+            win = win[::-1, :]
+            pts = np.stack([pts[:, 0], H - pts[:, 1]], 1)[[3, 2, 1, 0]]
         return to_tensor(augment_colour(np.ascontiguousarray(win), rng)), pts.astype(np.float32), 1.0, 1.0
 
 
@@ -254,6 +269,8 @@ def find(model, rgb):
     # stage 1: the whole frame in one window (letterboxed: the window is taller than any frame)
     height = max(h, w * H / W)
     quad, score = read_window(model, rgb, w / 2, h / 2, height)
+    if score < 0.02:                            # matches station/corner_net.py STAGE1_SKIP_REFINE
+        return quad, score
     # stage 2: a window around that quad, twice
     for _ in range(2):
         xs, ys = quad[:, 0], quad[:, 1]
@@ -327,6 +344,8 @@ def main():
         sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps, pct_start=0.1)
         started = time.time()
         feeder = Prefetch(train, args.batch, args.seed, workers=args.workers)
+        best_val = -1.0
+        best_state = None
         for step in range(1, args.steps + 1):
             model.train()
             x, pts, pres, mask = (t.to(device, non_blocking=True) for t in feeder.get())
@@ -350,9 +369,15 @@ def main():
             if step % 250 == 0 or step == args.steps:
                 print(f"  step {step:5d}  loss {loss.item():.3f} (corners {corner_loss.item():.1f}px, map {heat_loss.item():.2f}, "
                       f"score {presence_loss.item():.2f})  {time.time() - started:.0f}s")
-            if val.items and step % 1000 == 0 and step != args.steps:
-                evaluate(model, val, f"held out @ step {step}")
+            if val.items and (step % 500 == 0 or step == args.steps):
+                stats = evaluate(model, val, f"held out @ step {step}")
+                if stats.get('mean', -1.0) > best_val:
+                    best_val = stats['mean']
+                    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         feeder.close()
+        if best_state is not None:
+            model.load_state_dict(best_state)
+            print(f"restored best validation checkpoint (mean IoU {best_val:.3f})")
         if args.save:
             torch.save(model.state_dict(), args.save)
 

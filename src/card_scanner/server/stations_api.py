@@ -256,11 +256,6 @@ def station_capture(station_id):
     foil_data, foil_image = decode_upload(request.files.get('foil_image'))
     if foil_image is None and request.form.get('foil_is_image') == '1':
         foil_image = image  # the card image is the perspective-corrected card
-    elif foil_image is None and printing_check:
-        # A fixed area as drawn, with no outline found in it: tray and the pile's edges around the card. The picture search, the strip and the foil marker all read
-        # "the flat card", so the card is found here, once; the capture itself stays the picture as taken. None: the area is used as it always was
-        foil_image = printing_check.flat_card(image)
-        foil_data = b''                                # no bytes of the station's: save_upload encodes it
     try:
         wait = max(0.0, min(float(request.form.get('wait', STATION_CAPTURE_WAIT)), 120.0))
     except ValueError:
@@ -289,6 +284,11 @@ def station_capture(station_id):
         # Settled before a restart (the list above is this run's): the same answer, no second card
         outcome = settled[2]
         return jsonify({'success': outcome.get('status') != 'error', 'capture': settled[1], **outcome})
+    if foil_image is None and printing_check:
+        # A fixed area as drawn, with no outline found in it: tray and the pile's edges around the card. Located after deduplication
+        # (so retried uploads do no index scans) and once the station's desk exists (so cards_same_way applies). The capture itself stays as taken.
+        foil_image = printing_check.flat_card(image)
+        foil_data = b''                                # no bytes of the station's: save_upload encodes it
     image_path = Config.IMAGES_DIR / f"{station_id}_{number}_{int(time.time())}.jpg"
     save_upload(image_path, data, image)
     keep_camera_frame(station_id, number, capture_id, image_path.name)

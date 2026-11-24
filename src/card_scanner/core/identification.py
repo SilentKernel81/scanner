@@ -174,8 +174,7 @@ class Identification:
             new_identifier = CardIdentifier(provider=provider, model=model, log_callback=self.log_callback)
 
             # If successful, replace the old identifier
-            self.card_identifier = new_identifier
-            new_identifier.warm_up()
+            self.set_identifier(new_identifier)
 
             # Save the selection to settings for persistence
             self.settings.set_ai_provider(provider, model)
@@ -211,6 +210,20 @@ class Identification:
     def _ai(self):
         """The vision AI's identifier - or None when there is none or the person switched it off: every place that would ask it asks this, so the one switch covers the identification, the foil check and a card already in the queue"""
         return self.card_identifier if self.ai_enabled else None
+
+    def set_identifier(self, identifier):
+        """Replace or clear the active vision AI identifier (e.g. when its API key is saved or removed in Settings)"""
+        previous = self.card_identifier
+        self.card_identifier = identifier
+        if identifier is not None:
+            identifier.warm_up()
+        if previous is not None and previous is not identifier:
+            close = getattr(previous, 'close', None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
 
     def set_ai_enabled(self, enabled):
         """Ask the vision AI at all (remembered). Off: what OCR and the picture cannot decide goes to the review queue under the name OCR read; the provider and its key are kept"""
@@ -325,6 +338,20 @@ class Identification:
         how = {EVIDENCE_READER: 'picture and strip', PICTURE_READER: 'picture'}.get(ocr_info.get('reader'), 'OCR')
         return f"✓ Card identified by {how}: {ocr_info['name']} #{ocr_info['collector_number']}"
 
+    @staticmethod
+    def _upright_picture(image, rotated):
+        """`image` turned 180 degrees when `rotated` is True, cached in CaptureEvidence so repeated steps share the same array object"""
+        if not rotated or image is None:
+            return image
+        return reading_capture.get('upright', image, lambda: cv2.rotate(image, cv2.ROTATE_180))
+
+    @staticmethod
+    def _rotated_for(image, foil_image=None):
+        """Whether the current capture's flat card was established to be upside down by the picture/strip step"""
+        picture = foil_image if foil_image is not None else image
+        kept, rotated = reading_capture.recall('rotated', picture)
+        return bool(kept and rotated)
+
     def _read_by_picture(self, image, foil_image):
         """
         reading.mode 'evidence': the card read by its picture and its strip (printing_check.live_read) - the FIRST step of _read_with_ocr - (card_info, what the AI is still needed
@@ -354,6 +381,8 @@ class Identification:
                 # live_read was told not to take the picture alone - here because the index lacks printings of the card data, not because the person said no
                 reading_record.refuse(reading_record.INDEX_INCOMPLETE, missing=missing)
             return None
+        rotated = bool(reading.get('rotated', False))
+        reading_capture.remember('rotated', foil_image if foil_image is not None else image, rotated)
         card = reading['card']
         # (decide.accept_printing's needs_ocr: the picture alone with OCR on - the second half of the guards, decide.confirm_by_ocr, through ocr_agrees)
         if reading['path'] == 'image' and (ocr_on or reading.get('needs_ocr')):
@@ -361,7 +390,6 @@ class Identification:
             # said. A card newer than the card data is in neither the data nor the index, and its best match is another card's printing (a third Codex review of 2026-10-20);
             # and a strip naming ANOTHER existing printing is a contradiction the picture alone must not overrule unconfirmed (a fourth). Not agreeing: the card is in doubt,
             # and the OCR path below reads it as any other.
-            rotated = bool(reading.get('rotated', False))
             if not self._ocr_names(image, card, reading.get('lead'), reading.get('strip'), rotated):
                 self.log(f"The picture chose {card['name']} [{card['set_code']} {card['number']}] alone, and OCR did not read that printing - read by OCR instead")
                 return None
@@ -385,7 +413,7 @@ class Identification:
         try:
             # the card the way up the picture search found it - as the strip was read (live_read): parse_magic looks for the title at the top and the
             # collector line at the bottom, so a card dropped upside down was read for nothing and its decision refused (a Codex review of 2026-10-21)
-            upright = cv2.rotate(image, cv2.ROTATE_180) if rotated else image
+            upright = self._upright_picture(image, rotated)
             with reading_record.timed('ocr'):
                 read = self._read_card(upright)
             # what the OCR's collector line names (ocr_agrees looks it up): a letter suffix kept first ("233a" is not "233": printing_named_by_line)
@@ -473,8 +501,9 @@ class Identification:
             return by_picture
         ocr_info = None
         if self.ocr_enabled:
+            ocr_image = self._upright_picture(image, self._rotated_for(image, foil_image))
             with reading_record.timed('ocr'):
-                ocr_info = self._read_card(image)      # (read already when the picture alone asked it to confirm: not read again)
+                ocr_info = self._read_card(ocr_image)      # (read already when the picture alone asked it to confirm: not read again)
             confirmed, ocr_card = False, None
             if ocr_info:
                 if self.reading_mode == EVIDENCE and self.evidence is not None:
@@ -493,11 +522,15 @@ class Identification:
                 ocr_info = {**ocr_info, 'collector_number': '', 'set_code': ''}
                 confirmed = False
             if confirmed:
+                # A printing made in only one finish needs no foil marker read (neither local network nor AI check)
+                finishes = (ocr_card or {}).get('finishes') or []
+                needs_foil = not finishes or (('foil' in finishes or 'etched' in finishes) and 'nonfoil' in finishes)
                 # OCR misses the marker on about a third of the foils: the small network reads it
-                # from the set line first; only what it is not sure of is asked of the AI
-                if ocr_info['foil'] == 'unknown':
-                    ocr_info['foil'] = self._read_foil_locally(image, foil_image)
-                if ocr_info['foil'] == 'unknown' and self._ai_foil_check(foil_image):
+                # from the set line first (when the printing prints a marker); only what it is not sure of is asked of the AI
+                if ocr_info['foil'] == 'unknown' and needs_foil:
+                    if ocr_card is None or not ocr_card.get('released_at') or prints_a_marker(ocr_card):
+                        ocr_info['foil'] = self._read_foil_locally(image, foil_image)
+                if ocr_info['foil'] == 'unknown' and needs_foil and self._ai_foil_check(foil_image):
                     return ocr_info, FOIL
                 self.log(self._said_by_ocr(ocr_info), level="success")
                 return ocr_info, None
@@ -522,10 +555,19 @@ class Identification:
         if identifier is None:
             return ocr_info
 
+        rotated = self._rotated_for(image, foil_image)
+        ai_image = self._upright_picture(image, rotated)
+        if foil_image is image:
+            ai_foil_image = ai_image
+        elif rotated and foil_image is not None:
+            ai_foil_image = reading_capture.get('upright_foil', foil_image, lambda: cv2.rotate(foil_image, cv2.ROTATE_180))
+        else:
+            ai_foil_image = foil_image
+
         reading_record.note('ai', asked=task)
         if task == FOIL:
             with reading_record.timed('ai'):
-                ocr_info['foil'] = identifier.read_foil_symbol(foil_image)
+                ocr_info['foil'] = identifier.read_foil_symbol(ai_foil_image)
             reading_record.note('ai', answer={'foil': ocr_info['foil']})
             self.log(self._said_by_ocr(ocr_info), level="success")
             return ocr_info
@@ -545,20 +587,20 @@ class Identification:
                 # With OCR off that answer is the network at a FIXED place, judged fit by the nearest INDEXED printings - a card the index lacks can borrow a modern lookalike's
                 # marker layout. So it stands only until the AI says which printing this really is (a Codex review, 2026-10-20): see below.
                 provisional = not self.ocr_enabled
-        if 'foil' not in foil_result and self._ai_foil_check(foil_image) and (not ocr_info or ocr_info['foil'] == 'unknown'):
+        if 'foil' not in foil_result and self._ai_foil_check(ai_foil_image) and (not ocr_info or ocr_info['foil'] == 'unknown'):
             foil_thread = threading.Thread(
-                target=lambda: foil_result.update(foil=identifier.read_foil_symbol(foil_image)),
+                target=lambda: foil_result.update(foil=identifier.read_foil_symbol(ai_foil_image)),
                 daemon=True)
             foil_thread.start()
         with reading_record.timed('ai'):
-            card_info = identifier.identify_card(image)
+            card_info = identifier.identify_card(ai_image)
         reading_record.note('ai', answer={'name': card_info.get('name'), 'collector_number': card_info.get('collector_number'),
                                           'set_code': card_info.get('set_code')} if card_info else None)
         if provisional and not self._resolved_prints_a_marker(card_info):
             # The printing the AI named is not one that prints a marker (or cannot be found): the network's answer was about whatever sat in the box. Discarded - the AI's own check answers.
             foil_result.pop('foil', None)
-            if self._ai_foil_check(foil_image):
-                foil_result['foil'] = identifier.read_foil_symbol(foil_image)
+            if self._ai_foil_check(ai_foil_image):
+                foil_result['foil'] = identifier.read_foil_symbol(ai_foil_image)
         if foil_thread:
             foil_thread.join(timeout=60)
         # A marker OCR did read stands (it agreed with the AI on 480 of 481 scans)
@@ -633,6 +675,12 @@ class Identification:
     def stop(self):
         self._running = False
         self.card_ocr.stop()
+        close = getattr(self.card_identifier, 'close', None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
     def submit(self, image, foil_image, game_id, on_done, scope=None):
         """

@@ -125,7 +125,7 @@ def handle_save_ai_credential(data):
         model = identification.card_identifier.model
         try:
             from card_scanner.core.card_identifier import CardIdentifier
-            identification.set_identifier(CardIdentifier(provider=provider, model=model))
+            identification.set_identifier(CardIdentifier(provider=provider, model=model, log_callback=identification.log_callback))
         except ValueError:
             identification.set_identifier(None)
     emit('ai_credential_saved', {'provider': provider, 'status': credential_status()[provider]})
