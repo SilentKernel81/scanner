@@ -28,9 +28,9 @@ np.random.seed(0)
 
 d = np.load(OUT / 'foil_crops.npz')
 crops, label, truth, kind, read_marker, both = (d[k] for k in ('crops', 'label', 'truth', 'kind', 'read_marker', 'both'))
-bucket = np.array([int(hashlib.md5(t.encode()).hexdigest(), 16) % 5 for t in truth])
-test = bucket == 0          # whole cards held out: what is reported below (and what SURE is chosen from) - never used to train or to pick a checkpoint
-val = bucket == 1           # whole cards held out of training to pick the best checkpoint by; picking it on `test` would make the test numbers optimistic
+hashes = [int(hashlib.md5(t.encode()).hexdigest(), 16) for t in truth]
+test = np.array([h % 5 == 0 for h in hashes])          # 20% whole cards held out: never used to train or to pick a checkpoint
+val = (~test) & np.array([h % 10 == 1 for h in hashes])  # 10% whole cards held out of training to pick the best checkpoint by
 print(f'{len(crops)} crops; train {int((~test & ~val).sum())}, validation {int(val.sum())}, test {int(test.sum())}; foil share {label.mean():.2f}')
 
 
@@ -43,12 +43,12 @@ def net():
 def _affine_jitter(x):
     """Per-sample shift (±3 px), rotation (±2.5°), and scale (0.92-1.08x) with border padding (no wrap-around)."""
     n, _, h, w = x.shape
-    angles = torch.empty(n).uniform_(-2.5, 2.5) * (np.pi / 180.0)
-    scales = torch.empty(n).uniform_(0.92, 1.08)
-    tx = torch.empty(n).uniform_(-3.0, 3.0) * (2.0 / w)
-    ty = torch.empty(n).uniform_(-3.0, 3.0) * (2.0 / h)
+    angles = torch.empty(n, device=x.device).uniform_(-2.5, 2.5) * (np.pi / 180.0)
+    scales = torch.empty(n, device=x.device).uniform_(0.92, 1.08)
+    tx = torch.empty(n, device=x.device).uniform_(-3.0, 3.0) * (2.0 / w)
+    ty = torch.empty(n, device=x.device).uniform_(-3.0, 3.0) * (2.0 / h)
     c, s = torch.cos(angles) / scales, torch.sin(angles) / scales
-    theta = torch.zeros(n, 2, 3, dtype=x.dtype)
+    theta = torch.zeros(n, 2, 3, dtype=x.dtype, device=x.device)
     theta[:, 0, 0] = c
     theta[:, 0, 1] = -s * (h / w)
     theta[:, 0, 2] = tx
@@ -60,33 +60,32 @@ def _affine_jitter(x):
 
 
 def _glare_speckles(x):
-    """Synthetic sleeve glare / confetti-foil bright spots on ~35% of crops."""
+    """Vectorized synthetic sleeve glare / confetti-foil bright spots on ~35% of crops."""
     n, _, h, w = x.shape
-    ys = torch.arange(h, dtype=x.dtype).view(1, h, 1)
-    xs = torch.arange(w, dtype=x.dtype).view(1, 1, w)
-    out = x.clone()
-    for i in range(n):
-        if np.random.rand() >= 0.35:
-            continue
-        for _ in range(np.random.randint(1, 4)):
-            cx = float(np.random.uniform(0, w))
-            cy = float(np.random.uniform(0, h))
-            sx = float(np.random.uniform(1.5, 4.5))
-            sy = float(np.random.uniform(1.0, 3.0))
-            amp = float(np.random.uniform(-0.2, 0.35))
-            blob = torch.exp(-(((xs - cx) / sx) ** 2 + ((ys - cy) / sy) ** 2) * 0.5)
-            out[i] = (out[i] + amp * blob).clamp(0.0, 1.0)
+    ys = torch.arange(h, dtype=x.dtype, device=x.device).view(1, 1, h, 1)
+    xs = torch.arange(w, dtype=x.dtype, device=x.device).view(1, 1, 1, w)
+    active = (torch.rand(n, 1, 1, 1, device=x.device) < 0.35).to(x.dtype)
+    out = x
+    for _ in range(3):
+        on = active * (torch.rand(n, 1, 1, 1, device=x.device) < 0.67).to(x.dtype)
+        cx = torch.empty(n, 1, 1, 1, device=x.device).uniform_(0, w)
+        cy = torch.empty(n, 1, 1, 1, device=x.device).uniform_(0, h)
+        sx = torch.empty(n, 1, 1, 1, device=x.device).uniform_(1.5, 4.5)
+        sy = torch.empty(n, 1, 1, 1, device=x.device).uniform_(1.0, 3.0)
+        amp = torch.empty(n, 1, 1, 1, device=x.device).uniform_(-0.2, 0.35)
+        blob = torch.exp(-0.5 * (((xs - cx) / sx) ** 2 + ((ys - cy) / sy) ** 2))
+        out = (out + on * amp * blob).clamp(0.0, 1.0)
     return out
 
 
 def batch(x, train):
-    x = torch.from_numpy(x).float().div(255).unsqueeze(1)
+    x = torch.from_numpy(x).to(device=device, dtype=torch.float32).div_(255.0).unsqueeze(1)
     if train:       # what a camera does to the line: affine offset/tilt, contrast/gamma, glare speckles, blur, noise
         n = len(x)
         x = _affine_jitter(x)
-        gamma = torch.empty(n, 1, 1, 1).uniform_(0.75, 1.35)
+        gamma = torch.empty(n, 1, 1, 1, device=device).uniform_(0.75, 1.35)
         x = x.clamp(1e-4, 1.0).pow(gamma)
-        x = (x - 0.5) * torch.empty(n, 1, 1, 1).uniform_(0.55, 1.45) + 0.5 + torch.empty(n, 1, 1, 1).uniform_(-0.2, 0.2)
+        x = (x - 0.5) * torch.empty(n, 1, 1, 1, device=device).uniform_(0.55, 1.45) + 0.5 + torch.empty(n, 1, 1, 1, device=device).uniform_(-0.2, 0.2)
         x = x.clamp(0.0, 1.0)
         x = _glare_speckles(x)
         if np.random.rand() < 0.5:
@@ -99,7 +98,7 @@ model = net().to(device)
 opt = torch.optim.AdamW(model.parameters(), 2e-3, weight_decay=1e-3)
 tr = np.where(~test & ~val)[0]
 va = np.where(val)[0]
-epochs = 40
+epochs = 60
 sched = torch.optim.lr_scheduler.OneCycleLR(opt, 4e-3, total_steps=epochs * (len(tr) // 128 + 1))
 best_val_loss = float('inf')
 best_state = None
@@ -108,7 +107,7 @@ for epoch in range(epochs):
     np.random.shuffle(tr)
     for s in range(0, len(tr), 128):
         idx = tr[s:s + 128]
-        loss = F.cross_entropy(model(batch(crops[idx], True).to(device)), torch.from_numpy(label[idx]).to(device), label_smoothing=0.05)
+        loss = F.cross_entropy(model(batch(crops[idx], True)), torch.from_numpy(label[idx]).to(device))
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -116,7 +115,7 @@ for epoch in range(epochs):
     if len(va):
         model.eval()
         with torch.no_grad():
-            logits = torch.cat([model(batch(crops[va[s:s + 512]], False).to(device)).cpu() for s in range(0, len(va), 512)])
+            logits = torch.cat([model(batch(crops[va[s:s + 512]], False)).cpu() for s in range(0, len(va), 512)])
             val_loss = float(F.cross_entropy(logits, torch.from_numpy(label[va])))
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -126,7 +125,7 @@ if best_state is not None:
     print(f'restored best validation checkpoint (val cross-entropy {best_val_loss:.4f})')
 model.eval()
 with torch.no_grad():
-    prob = torch.cat([F.softmax(model(batch(crops[s:s + 512], False).to(device)), 1)[:, 1].cpu() for s in range(0, len(crops), 512)]).numpy()
+    prob = torch.cat([F.softmax(model(batch(crops[s:s + 512], False)), 1)[:, 1].cpu() for s in range(0, len(crops), 512)]).numpy()
 pred = (prob > 0.5).astype(int)
 conf = np.maximum(prob, 1 - prob)
 

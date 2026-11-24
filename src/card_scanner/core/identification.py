@@ -49,7 +49,7 @@ CASCADE, EVIDENCE = 'cascade', 'evidence'
 class Job:
     """A capture on its way through the two stages"""
 
-    def __init__(self, image, foil_image, game_id, on_done, scope=None):
+    def __init__(self, image, foil_image, game_id, on_done, scope=None, capture=None):
         self.image = image
         self.foil_image = foil_image
         self.game_id = game_id  # the game being scanned at capture: not read as another game's card
@@ -61,9 +61,9 @@ class Job:
         self.ocr_info = None
         self.task = None  # IDENTIFY or FOIL, once OCR has passed it on
         self.record = None  # what its reading saw and did (core/reading/record.py), when the reading log is on
-        # what its reading has worked out about its picture (core/reading/capture.py: the picture search, the strip, the full-card OCR), so that the
-        # AI stage does not search the picture again; let go of when it is finished
-        self.capture = None
+        # what its reading has worked out about its picture (core/reading/capture.py: pre-computed hashes, the picture search, the strip, the full-card OCR),
+        # so that neither the OCR stage nor the AI stage repeats work; let go of when it is finished
+        self.capture = capture
 
 
 class Identification:
@@ -646,7 +646,8 @@ class Identification:
         """
         self.last_capture = (image, foil_image)
         record = self._new_record()
-        with reading_record.using(record), reading_capture.using(reading_capture.CaptureEvidence()):
+        capture = reading_capture.current() or reading_capture.CaptureEvidence()
+        with reading_record.using(record), reading_capture.using(capture):
             ocr_info, task = self._read_with_ocr(image, foil_image)
             card_info = self._ask_ai(task, image, foil_image, ocr_info) if task else ocr_info
         if record is not None:
@@ -688,7 +689,7 @@ class Identification:
         one thread that hands results back - in the order cards are settled, not submitted.
         """
         self.last_capture = (image, foil_image)
-        self._ocr_queue.put(Job(image, foil_image, game_id, on_done, scope))
+        self._ocr_queue.put(Job(image, foil_image, game_id, on_done, scope, capture=reading_capture.current()))
 
     def waiting(self):
         """(captures waiting for OCR, captures waiting for the AI) - not counting those being read"""
@@ -734,7 +735,7 @@ class Identification:
                     self._finish(job, None)
                     continue
                 job.record = self._new_record()
-                job.capture = reading_capture.CaptureEvidence()
+                job.capture = job.capture or reading_capture.CaptureEvidence()
                 with job.scope(), reading_record.using(job.record), reading_capture.using(job.capture):
                     job.ocr_info, job.task = self._read_with_ocr(job.image, job.foil_image)
                 if job.task:

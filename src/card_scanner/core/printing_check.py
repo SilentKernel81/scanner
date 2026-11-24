@@ -474,13 +474,15 @@ class PrintingCheck:
         index = self.index()
         if index is None or not len(index):
             return None
-        upright = index.distances(image_index.hash_card(rgb))
+        upright_hash = reading_capture.get('hash_upright', rgb, lambda: image_index.hash_card(rgb))
+        upright = index.distances(upright_hash)
         if self._known_upright():
             # The person says this camera's cards all lie the same way (Settings > Cameras): nothing to guess. 'nearest' then shows the other way as no match at all
             top, sims = self._nearest_rows(upright)
             return {'index': index, 'distances': upright, 'rotated': False, 'top': top, 'sims': sims, 'nearest': (int(upright.min()), image_index.HASH_BITS),
                     'both': (upright, upright), 'known_upright': True}
-        turned = index.distances(image_index.hash_card(cv2.rotate(rgb, cv2.ROTATE_180)))
+        turned_hash = reading_capture.get('hash_turned', rgb, lambda: image_index.hash_card(cv2.rotate(rgb, cv2.ROTATE_180)))
+        turned = index.distances(turned_hash)
         rotated = int(turned.min()) < int(upright.min())      # the card was put in upside down
         distances = turned if rotated else upright
         top, sims = self._nearest_rows(distances)

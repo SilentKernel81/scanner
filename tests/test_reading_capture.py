@@ -204,6 +204,48 @@ class InIdentification(unittest.TestCase):
             first['foil'] = 'foil'
             self.assertEqual(self.ident._read_card(self.image)['foil'], 'unknown')
 
+    def test_card_back_hashes_are_reused_by_printing_check_search(self):
+        from card_scanner.core import card_back, image_index, printing_check
+        card = np.random.default_rng(7).integers(0, 256, (200, 144, 3), dtype=np.uint8)
+        idx = image_index.ImageIndex(['id-1'], np.frombuffer(image_index.hash_card(card), np.uint8).reshape(1, -1))
+        check = printing_check.PrintingCheck.__new__(printing_check.PrintingCheck)
+        check.index = lambda: idx
+        check.cards_upright = None
+
+        ev = capture.CaptureEvidence()
+        with mock.patch.object(image_index, 'hash_card', wraps=image_index.hash_card) as hashed:
+            with capture.using(ev):
+                card_back.card_back_similarity(card)
+                self.assertEqual(hashed.call_count, 2)             # upright + 180° once
+                search = check._search(card)
+                self.assertIsNotNone(search)
+                self.assertEqual(hashed.call_count, 2)             # both hashes reused: zero extra DCTs
+        self.assertEqual(ev.computed.get('hash_upright'), 1)
+        self.assertEqual(ev.computed.get('hash_turned'), 1)
+
+    def test_read_card_caps_tall_images_and_keeps_small_ones_unchanged(self):
+        from card_scanner.core.card_ocr import CardOcr
+        ocr = CardOcr.__new__(CardOcr)
+        ocr.log = mock.Mock()
+        seen_shapes = []
+
+        def fake_read_lines(img):
+            seen_shapes.append(img.shape[:2])
+            h, w = img.shape[:2]
+            return [{'text': 'Lightning Bolt', 'confidence': 0.99, 'box': [[w * 0.08, h * 0.05], [w * 0.5, h * 0.05], [w * 0.5, h * 0.09], [w * 0.08, h * 0.09]]}]
+
+        ocr.read_lines = fake_read_lines
+        tall = np.zeros((1800, 1280, 3), dtype=np.uint8)
+        res_tall = ocr.read_card(tall, 'mtg')
+        self.assertEqual(res_tall['name'], 'Lightning Bolt')
+        self.assertEqual(seen_shapes[-1][0], CardOcr.MAX_CARD_HEIGHT)
+        self.assertEqual(seen_shapes[-1][1], round(1280 * CardOcr.MAX_CARD_HEIGHT / 1800))
+
+        normal = np.zeros((1000, 715, 3), dtype=np.uint8)
+        res_normal = ocr.read_card(normal, 'mtg')
+        self.assertEqual(res_normal['name'], 'Lightning Bolt')
+        self.assertEqual(seen_shapes[-1], (1000, 715))
+
 
 if __name__ == '__main__':
     unittest.main()

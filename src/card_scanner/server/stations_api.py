@@ -16,6 +16,7 @@ from pathlib import Path
 from card_scanner.config import Config
 from card_scanner import games
 from card_scanner.core import frames, image_index
+from card_scanner.core.reading import capture as reading_capture
 from card_scanner.core.stations import Stations
 
 from card_scanner.server.state import (
@@ -298,51 +299,54 @@ def station_capture(station_id):
     emit_desk('capture_received', {'url': url_for('capture_image', name=image_path.name), 'number': number})
 
     # From here on desk() is this station's (the URL names it, and it exists now).
+    # One CaptureEvidence spans the card-back check and the reading that follows (review or queued),
+    # so the two orientation hashes computed by stop_at_card_back are reused by PrintingCheck._search_now.
     # A card back stops the camera (captures.stop_at_card_back) - checked HERE, before the branch below, so that an 'auto' upload and a 'review' one (auto-capture
     # waiting for Add / Skip, a manual capture) are both covered. Only for a sender that understands the answer: a computer station (camera=1: it reads only the
     # capture's number, and its auto-capture follows the server's) or one that says so (accepts=card_back: the phone app since it knows the status - an older one maps an
     # unknown status to an error). Its outcome is remembered under the upload's key like any other, so a repeated upload gets the same answer and stops nothing twice.
-    if request.form.get('camera') == '1' or 'card_back' in (request.form.get('accepts') or '').split(','):
-        outcome = stop_at_card_back(image_path, image, foil_image, number, station)
-        if outcome is not None:
-            remember_outcome(key, outcome)
-            # ... and on record like any settled capture (settled_captures, read above by pending.settled): the lists of this run are gone after a restart,
-            # and a station that got no answer sends the same capture again - it must get this answer back, not stop the camera a second time
+    with reading_capture.using(reading_capture.CaptureEvidence()):
+        if request.form.get('camera') == '1' or 'card_back' in (request.form.get('accepts') or '').split(','):
+            outcome = stop_at_card_back(image_path, image, foil_image, number, station)
+            if outcome is not None:
+                remember_outcome(key, outcome)
+                # ... and on record like any settled capture (settled_captures, read above by pending.settled): the lists of this run are gone after a restart,
+                # and a station that got no answer sends the same capture again - it must get this answer back, not stop the camera a second time
+                try:
+                    pending.settle_unrecorded(capture_id, station_id, number, outcome)
+                except Exception as e:
+                    logger.warning(f"Card back {image_path.name}: not kept on record ({e}) - a retry after a restart would stop the camera again")
+                return capture_outcome_response(*key)
+
+        # station_client.py's mode 'review': the card is shown on the station's page, not added
+        if request.form.get('camera') == '1' and request.form.get('mode') == 'review':
+            # A manual capture, or auto scanning that waits for Add / Skip: read now and shown
+            remember_capture_id(image_path, capture_id)    # the card dropper's next card waits for this capture (desks.review_done)
+            queue_changed(+1)
             try:
-                pending.settle_unrecorded(capture_id, station_id, number, outcome)
+                card_info = identification.identify(image, foil_image)
+                outcome = announce_and_route(image_path, card_info, number, game_id)
             except Exception as e:
-                logger.warning(f"Card back {image_path.name}: not kept on record ({e}) - a retry after a restart would stop the camera again")
+                logger.exception(f"Capture {image_path.name} failed: {e}")
+                log_to_client(f"Capture error: {e}", level="error")
+                scanner.card_under_review = False  # don't hold the next capture back
+                forget_capture_id(image_path)      # ... but release no card: the person has not dealt with this one
+                outcome = {'status': 'error', 'message': str(e)}
+            finally:
+                queue_changed(-1)
+            remember_outcome(key, outcome)
             return capture_outcome_response(*key)
 
-    # station_client.py's mode 'review': the card is shown on the station's page, not added
-    if request.form.get('camera') == '1' and request.form.get('mode') == 'review':
-        # A manual capture, or auto scanning that waits for Add / Skip: read now and shown
-        remember_capture_id(image_path, capture_id)    # the card dropper's next card waits for this capture (desks.review_done)
-        queue_changed(+1)
-        try:
-            card_info = identification.identify(image, foil_image)
-            outcome = announce_and_route(image_path, card_info, number, game_id)
-        except Exception as e:
-            logger.exception(f"Capture {image_path.name} failed: {e}")
-            log_to_client(f"Capture error: {e}", level="error")
-            scanner.card_under_review = False  # don't hold the next capture back
-            forget_capture_id(image_path)      # ... but release no card: the person has not dealt with this one
-            outcome = {'status': 'error', 'message': str(e)}
-        finally:
-            queue_changed(-1)
-        remember_outcome(key, outcome)
-        return capture_outcome_response(*key)
+        foil_path = None
+        if foil_image is not None and foil_image is not image:
+            foil_path = foil_file(image_path)
+            save_upload(foil_path, foil_data, foil_image)
 
-    foil_path = None
-    if foil_image is not None and foil_image is not image:
-        foil_path = foil_file(image_path)
-        save_upload(foil_path, foil_data, foil_image)
-
-    # The capture is in the queues now, whatever happens to this request. Wait for its outcome as
-    # long as the station asked; what is known then is the answer (still being read: 202 pending)
-    done = threading.Event()
-    submit_capture(image_path, image, foil_image, number, game_id, station,
-                   on_outcome=lambda _outcome: done.set(), foil_path=foil_path, outcome_key=key, capture_id=capture_id)
+        # The capture is in the queues now, whatever happens to this request. Wait for its outcome as
+        # long as the station asked; what is known then is the answer (still being read: 202 pending)
+        done = threading.Event()
+        submit_capture(image_path, image, foil_image, number, game_id, station,
+                       on_outcome=lambda _outcome: done.set(), foil_path=foil_path, outcome_key=key, capture_id=capture_id)
     done.wait(wait)
     return capture_outcome_response(*key)
 

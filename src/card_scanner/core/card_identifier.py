@@ -315,6 +315,13 @@ class CardIdentifier:
 
         card_name = values.get('NAME', '')
         number = values.get('NUMBER', '')
+        # A token prints 'T 0001' over 'FRA • EN', and Scryfall files it under 'tfra' #1 (matching
+        # card_ocr.prints_token_letter / token_set_code - only 'T', never other rarity letters)
+        token_match = re.fullmatch(r'T(?:\.?\s+([0-9OoDBIlSZ]{1,4}[a-z]?)|([0-9OoDBIlSZ]{3,4}[a-z]?))', number.strip())
+        token_digits = (token_match.group(1) or token_match.group(2)) if token_match else ''
+        is_token = bool(token_digits and (token_digits.isdigit() or sum(c.isdigit() for c in token_digits) >= 2))
+        if is_token:
+            number = token_digits
         # A number with the set total ("016/131": games that print one) anywhere in the value
         with_total = re.search(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', number)
         collector_number = self._clean_number(with_total.group().replace(' ', '') if with_total else number)
@@ -329,6 +336,8 @@ class CardIdentifier:
         set_code = set_match.group(1).upper() if set_match else ""
         if set_code.lower() in ("unknown", "none"):
             set_code = ""
+        if is_token and set_code and not (len(set_code) >= 4 and set_code.startswith('T')):
+            set_code = 'T' + set_code
 
         # Clean up "Unknown" responses
         if card_name.lower() == "unknown":
@@ -363,10 +372,10 @@ class CardIdentifier:
         or a number with the set total ("016/131")"""
         if re.fullmatch(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', text.strip()):
             return True
-        match = re.fullmatch(r'(?:[A-Za-z]\s+)?([0-9OoDBIlSZ]{1,4})[a-z]?', text.strip())
+        match = re.fullmatch(r'(?:[A-Za-z]\s+([0-9OoDBIlSZ]{1,4})|T\.?\s*([0-9OoDBIlSZ]{3,4})|([0-9OoDBIlSZ]{1,4}))[a-z]?', text.strip())
         if not match:
             return False
-        core = match.group(1)
+        core = match.group(1) or match.group(2) or match.group(3)
         return core.isdigit() or (len(core) >= 3 and sum(c.isdigit() for c in core) >= 2)
 
     @classmethod
@@ -601,7 +610,7 @@ class CardIdentifier:
                 }
             ],
             "max_tokens": max(max_tokens, 150),
-            "temperature": 0.1
+            "temperature": 0
         }
 
         try:
@@ -613,7 +622,8 @@ class CardIdentifier:
                 self.log(f"Unexpected response format: {response_json}", level="error")
                 return None
 
-            answer = response_json['choices'][0]['message']['content'].strip()
+            content = (response_json['choices'][0].get('message') or {}).get('content')
+            answer = (content or '').strip()
             self.log(f"Local AI raw response: {answer[:200]}", level="info")
             return answer
 

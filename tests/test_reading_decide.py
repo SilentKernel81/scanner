@@ -119,6 +119,21 @@ class PurityAndTheNumber(unittest.TestCase):
                             ('IFIYW-2', 'IFIYW-2'), (10, '10'), ('007b', '7b')):
             self.assertEqual(decide.plain_number(given), want, repr(given))
 
+    def test_empty_candidate_number_does_not_match_strip_zero_and_suffix_case_folds(self):
+        # Missing/empty candidate number must not silently match collector number '0'
+        picture = {'candidates': [
+            {'id': 'a', 'similarity': 0.70, 'set': 'tst', 'number': ''},
+            {'id': 'b', 'similarity': 0.69, 'set': 'tst', 'number': None},
+        ]}
+        self.assertEqual(decide.decide_printing(picture, {'number': '0', 'set': 'tst'})['path'], 'review')
+        # Case-insensitive suffix comparison ('233A' == '233a') with lowercase strip set
+        picture2 = {'candidates': [
+            {'id': 'a', 'similarity': 0.70, 'set': 'zen', 'number': '233A'},
+            {'id': 'b', 'similarity': 0.69, 'set': 'zen', 'number': '233'},
+        ]}
+        got = decide.decide_printing(picture2, {'number': '233a', 'set': 'zen'})
+        self.assertEqual((got['path'], got['printing_id']), ('strong', 'a'))
+
 
 class Finish(unittest.TestCase):
     """decide_finish: its own rule, answered apart from rule A2. Expectations written by hand."""

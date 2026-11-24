@@ -94,6 +94,27 @@ class ParsingAndProviders(unittest.TestCase):
             parsed = self.identifier._parse_response(raw, 'test')
             self.assertEqual(parsed['set_code'], want, raw)
 
+    def test_parse_response_maps_token_t_prefix_to_token_set(self):
+        for raw, want_num, want_set in (
+            ('NAME: Treasure\nNUMBER: T 0001\nSET: FRA • EN', '0001', 'TFRA'),
+            ('NAME: Treasure\nNUMBER: T0001\nSET: FRA', '0001', 'TFRA'),
+            ('NAME: Spirit\nNUMBER: T 0004\nSET: TDC', '0004', 'TTDC'),
+            ('NAME: Treasure\nNUMBER: T 0001\nSET: TFRA', '0001', 'TFRA'),
+            ('NAME: Treasure\nNUMBER: T 018B\nSET: FRA', '0188', 'TFRA'),
+            ('Treasure\nT0001\nFRA', '0001', 'TFRA'),
+            ('NAME: Sol Ring\nNUMBER: U 0242\nSET: FRA', 'U 0242', 'FRA'),
+        ):
+            parsed = self.identifier._parse_response(raw, 'test')
+            self.assertEqual((parsed['collector_number'], parsed['set_code']), (want_num, want_set), raw)
+
+    def test_openai_compatible_handles_null_content_and_zero_temperature(self):
+        self.identifier.model = 'qwen3-vl:8b'
+        self.identifier.local_endpoint = 'http://127.0.0.1:11434/v1/chat/completions'
+        null_body = b'{"choices": [{"message": {"content": null}}]}'
+        with mock.patch.object(card_identifier.requests, 'post', return_value=answer(200, body=null_body)) as post:
+            self.assertEqual(self.identifier._ask_openai_compatible('img', 'prompt', 100), '')
+        self.assertEqual(post.call_args.kwargs['json']['temperature'], 0)
+
     def test_parse_foil_answer_does_not_invert_negated_or_conflicting_replies(self):
         parse = CardIdentifier._parse_foil_answer
         self.assertEqual(parse('star'), 'foil')
