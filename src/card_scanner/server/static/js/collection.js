@@ -88,6 +88,7 @@ async function showCollection(kind) {
     $('arena-bar').hidden = !inArena();
     selected.clear();
     spareTicked.clear();
+    spareExpanded.clear();
     if (inArena() && currentTab === 'trades') showTab('inventory');   // trades are of paper cards
     await loadArenaInfo();
     await loadInventory();
@@ -1259,10 +1260,11 @@ function renderTrades() {
 // (Not in a deck, Extra copies keep 1 / keep 4, Buylist offers, All free), search terms, minimum
 // price, location, tag and sort order.
 
-const SPARE_PAGE = 100;
-let sparePreset = 'free';    // 'free' | 'extra1' | 'extra4' | 'buylist' | 'all'
+const SPARE_PAGE = 80;
+let sparePreset = 'free';        // 'free' | 'extra1' | 'extra4' | 'buylist' | 'all'
 let sparePage = 0;
-let spareTicked = new Set(); // entry ids ticked in the list
+let spareTicked = new Set();     // entry ids ticked in the list
+let spareExpanded = new Set();   // lowercase card names unfolded to show all prints
 
 function spareKeepLimit() {
     return sparePreset === 'extra1' ? 1 : sparePreset === 'extra4' ? 4 : 0;
@@ -1271,40 +1273,30 @@ function spareKeepLimit() {
 function sparePool() {
     // Every paper entry that still has at least one copy not held in an open trade, annotated with
     // `free` (free copies of this entry), `nameFree` (free copies across all printings of the name),
-    // and `take` (copies suggested for trade under the active preset)
+    // and `take` (copies suggested for trade when this entry is selected alone)
     if (inArena()) return [];
     const entries = inventory
         .map(card => ({...card, free: card.quantity - (card.trades || []).reduce((sum, trade) => sum + trade.quantity, 0)}))
         .filter(card => card.free > 0);
     const keep = spareKeepLimit();
-    // Extra copies: `keep` copies of each NAME stay (across all its printings, the cheapest ones);
-    // the rest - priciest first - is what is offered. Decided per name, then split over its entries,
-    // so two printings of one copy each under "keep 1" offer one copy, not both
-    const byName = new Map(), takeById = new Map();
+    const byName = new Map();
     if (keep) {
         for (const card of entries) {
             const key = (card.name || '').toLowerCase();
-            if (!byName.has(key)) byName.set(key, []);
-            byName.get(key).push(card);
-        }
-        for (const group of byName.values()) {
-            let extra = group.reduce((sum, card) => sum + card.free, 0) - keep;
-            for (const card of [...group].sort((a, b) => (b.price || 0) - (a.price || 0) || b.free - a.free || a.id - b.id)) {
-                if (extra <= 0) break;
-                const take = Math.min(card.free, extra);
-                takeById.set(card.id, take);
-                extra -= take;
-            }
+            byName.set(key, (byName.get(key) || 0) + card.free);
         }
     }
     return entries.filter(card => {
-        if (keep) return takeById.has(card.id);
+        if (keep) return (byName.get((card.name || '').toLowerCase()) || 0) > keep;
         if (sparePreset === 'free') return !card.decks.length;
         if (sparePreset === 'buylist') return !!card.buylist;
         return true;
     }).map(card => {
-        const nameFree = keep ? byName.get((card.name || '').toLowerCase()).reduce((sum, item) => sum + item.free, 0) : card.free;
-        return {...card, nameFree, take: keep ? takeById.get(card.id) : card.free};
+        const nameFree = keep ? (byName.get((card.name || '').toLowerCase()) || card.free) : card.free;
+        // Set aside alone, an entry gives at most what the NAME has beyond `keep` (two printings of 3 under
+        // keep 4: 2, not 3 - the same rule spareQuantitiesFor applies to a ticked selection)
+        const take = keep ? Math.min(card.free, Math.max(0, nameFree - keep)) : card.free;
+        return {...card, nameFree, take};
     });
 }
 
@@ -1337,6 +1329,176 @@ function spareCards() {
         return b.price * b.take - a.price * a.take || a.name.localeCompare(b.name);
     });
     return filtered;
+}
+
+function spareGroups(cards) {
+    // Group matching entries by card name so duplicate printings appear under one expandable row,
+    // while also listing any other printings of the same card elsewhere in the collection
+    const allByName = new Map();
+    for (const card of inventory) {
+        const key = (card.name || '').toLowerCase();
+        if (!allByName.has(key)) allByName.set(key, []);
+        allByName.get(key).push(card);
+    }
+    const map = new Map();
+    for (const card of cards) {
+        const key = (card.name || '').toLowerCase();
+        if (!map.has(key)) map.set(key, {key, name: card.name, matches: []});
+        map.get(key).matches.push(card);
+    }
+    const keep = spareKeepLimit();
+    const groups = [...map.values()].map(group => {
+        const matchedIds = new Set(group.matches.map(card => card.id));
+        const others = (allByName.get(group.key) || [])
+            .filter(card => !matchedIds.has(card.id))
+            .sort((a, b) => b.price - a.price || (a.set_code || '').localeCompare(b.set_code || ''));
+        const totalFree = group.matches.reduce((sum, card) => sum + card.free, 0);
+        // What ticking the whole group sets aside, by the same rule as the button (spareQuantitiesFor):
+        // under keep N the name keeps N copies, the highest-value printings first
+        const qty = new Map(group.matches.map(card => [card.id, card.free]));
+        if (keep) {
+            let toKeep = Math.max(0, totalFree - Math.max(0, group.matches[0].nameFree - keep));
+            for (const card of [...group.matches].sort((a, b) => b.price - a.price || a.id - b.id)) {
+                const held = Math.min(card.free, toKeep);
+                toKeep -= held;
+                qty.set(card.id, card.free - held);
+            }
+        }
+        const extraCopies = group.matches.reduce((sum, card) => sum + qty.get(card.id), 0);
+        const totalValue = group.matches.reduce((sum, card) => sum + card.price * qty.get(card.id), 0);
+        const topPrice = Math.max(...group.matches.map(card => card.price || 0));
+        const offer = buylistTotal(group.matches.map(card => ({
+            buylist: card.buylist, buylist_as_listed: card.buylist_as_listed, quantity: qty.get(card.id),
+        })));
+        return {...group, others, totalFree, extraCopies, totalValue, topPrice, offer,
+                hasMorePrints: group.matches.length > 1 || others.length > 0};
+    });
+    const sort = $('spare-sort').value;
+    groups.sort((a, b) => {
+        if (sort === 'price_desc') return b.topPrice - a.topPrice || a.name.localeCompare(b.name);
+        if (sort === 'buylist_desc') return b.offer.value - a.offer.value || b.totalValue - a.totalValue || a.name.localeCompare(b.name);
+        if (sort === 'copies_desc') return b.extraCopies - a.extraCopies || b.totalValue - a.totalValue || a.name.localeCompare(b.name);
+        if (sort === 'name') return a.name.localeCompare(b.name) || b.totalValue - a.totalValue;
+        return b.totalValue - a.totalValue || a.name.localeCompare(b.name);
+    });
+    return groups;
+}
+
+function sparePrintMeta(card) {
+    return [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
+            card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+}
+
+function spareBadgesHtml(card, includeTrades = false) {
+    const badges = [
+        ...(card.decks.length ? [`<span class="inventory-badge deck" title="Used in: ${escapeHtml(card.decks.join(', '))}">In deck</span>`] : []),
+        ...(includeTrades ? (card.trades || []).map(trade => `<span class="inventory-badge trade">Trade: ${escapeHtml(trade.name)} ${trade.quantity}×</span>`) : []),
+        ...(card.tags || []).map(tag => `<span class="inventory-badge tag">${escapeHtml(tag)}</span>`),
+    ];
+    return badges.length ? ' ' + badges.join(' ') : '';
+}
+
+function spareBuylistBadge(card, qty) {
+    if (!card.buylist) return '';
+    return `<span class="spare-buylist" title="${BUYLIST_SHOP} buylist offer ${escapeHtml(buylistWhen())} (USD, Near Mint)${card.buylist_as_listed ? '' : ' - worn copy graded lower'}">CK ${buylistMoney(card.buylist * qty)}${card.buylist_as_listed ? '' : '*'}</span>`;
+}
+
+function spareChildRowHtml(card) {
+    const qty = spareKeepLimit() ? card.take : card.free;   // under keep N: what this printing gives alone
+    const qtyHint = card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
+    const image = cardImageUrl(card);
+    const setLabel = `${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim();
+    const rest = [card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+    const ticked = spareTicked.has(card.id);
+    return `
+        <label class="trade-row spare-row spare-child-row${ticked ? ' is-ticked' : ''}" data-id="${card.id}" data-take="${qty}"${image ? ` data-image="${escapeHtml(image)}"` : ''}>
+            <input type="checkbox" class="spare-check" ${ticked ? 'checked' : ''}>
+            <span class="trade-qty"><strong>${qty}×</strong>${qtyHint}</span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(setLabel || card.name)}</span>${rest.length ? ` <span class="result-sub">${escapeHtml(rest.join(' · '))}</span>` : ''}${spareBadgesHtml(card)}</span>
+            <span class="spare-prices"><span class="summary">${money(card.price * qty)}${qty > 1 ? ` <span class="hint">(${money(card.price)})</span>` : ''}</span>${spareBuylistBadge(card, qty)}</span>
+            <button type="button" class="btn btn-small spare-quick-add" data-spare-add="${card.id}" data-take="${qty}" title="Set ${qty}× aside for a trade">+ Trade</button>
+        </label>`;
+}
+
+function spareOtherRowHtml(card) {
+    const image = cardImageUrl(card);
+    const setLabel = `${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim();
+    const rest = [card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
+    return `
+        <div class="trade-row spare-child-row is-other"${image ? ` data-image="${escapeHtml(image)}"` : ''}>
+            <span></span>
+            <span class="trade-qty"><strong>${card.quantity}×</strong></span>
+            <span class="trade-card"><span class="result-name">${escapeHtml(setLabel || card.name)}</span>${rest.length ? ` <span class="result-sub">${escapeHtml(rest.join(' · '))}</span>` : ''}${spareBadgesHtml(card, true)}</span>
+            <span class="spare-prices"><span class="summary">${money(card.price * card.quantity)}</span>${spareBuylistBadge(card, card.quantity)}</span>
+        </div>`;
+}
+
+function spareGroupHtml(group) {
+    const keep = spareKeepLimit();
+    const expanded = group.hasMorePrints && spareExpanded.has(group.key);
+    const lead = group.matches[0];
+    const leadImage = cardImageUrl(lead);
+
+    // Case 1: Single matching entry (with optional arrow if other prints of this card exist elsewhere)
+    if (group.matches.length === 1) {
+        const card = lead;
+        const ticked = spareTicked.has(card.id);
+        const qtyHint = keep && card.take < card.free
+            ? ` <span class="hint">of ${card.free}</span>`
+            : card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
+        const otherCopies = group.others.reduce((sum, item) => sum + item.quantity, 0);
+        const moreNote = group.others.length ? ` · +${otherCopies} in ${plural(group.others.length, 'other print')}` : '';
+        const arrow = group.hasMorePrints
+            ? `<button type="button" class="spare-expand-btn${expanded ? ' is-open' : ''}" data-spare-toggle="${escapeHtml(group.key)}" aria-expanded="${expanded}" title="Show all ${group.others.length + 1} printings of ${escapeHtml(group.name)}">▸</button>`
+            : '<span class="spare-expand-spacer"></span>';
+        const children = expanded
+            ? `<div class="spare-children"><div class="spare-other-heading">Other printings in your collection</div>${group.others.map(spareOtherRowHtml).join('')}</div>`
+            : '';
+        return `
+            <div class="spare-group" data-group="${escapeHtml(group.key)}">
+                <label class="trade-row spare-row${ticked ? ' is-ticked' : ''}" data-id="${card.id}" data-take="${card.take}"${leadImage ? ` data-image="${escapeHtml(leadImage)}"` : ''}>
+                    <input type="checkbox" class="spare-check" ${ticked ? 'checked' : ''}>
+                    ${arrow}
+                    <span class="trade-qty"><strong>${card.take}×</strong>${qtyHint}</span>
+                    <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(sparePrintMeta(card).join(' · ') + moreNote)}</span>${spareBadgesHtml(card)}</span>
+                    <span class="spare-prices"><span class="summary">${money(card.price * card.take)}${card.take > 1 ? ` <span class="hint">(${money(card.price)})</span>` : ''}</span>${spareBuylistBadge(card, card.take)}</span>
+                    <button type="button" class="btn btn-small spare-quick-add" data-spare-add="${card.id}" data-take="${card.take}" title="Set ${card.take}× aside for a trade">+ Trade</button>
+                </label>
+                ${children}
+            </div>`;
+    }
+
+    // Case 2: Multiple matching printings grouped under one collapsible card line
+    const tickedCount = group.matches.filter(card => spareTicked.has(card.id)).length;
+    const allTicked = tickedCount === group.matches.length;
+    const someTicked = tickedCount > 0 && !allTicked;
+    const qtyHtml = keep
+        ? `<strong>${group.extraCopies} extra</strong> <span class="hint">of ${group.totalFree}</span>`
+        : `<strong>${group.totalFree}×</strong>`;
+    const otherCopies = group.others.reduce((sum, item) => sum + item.quantity, 0);
+    const subParts = [plural(group.matches.length, 'printing')];
+    if (group.others.length) subParts.push(`+${otherCopies} in ${plural(group.others.length, 'other print')}`);
+    const buylistHtml = group.offer.copies
+        ? `<span class="spare-buylist" title="${BUYLIST_SHOP} buylist total for Near Mint copies ${escapeHtml(buylistWhen())} (USD)">CK ${buylistMoney(group.offer.value)}</span>`
+        : '';
+    const children = expanded
+        ? `<div class="spare-children">
+               ${group.matches.map(spareChildRowHtml).join('')}
+               ${group.others.length ? `<div class="spare-other-heading">Other printings in your collection</div>${group.others.map(spareOtherRowHtml).join('')}` : ''}
+           </div>`
+        : '';
+    return `
+        <div class="spare-group" data-group="${escapeHtml(group.key)}">
+            <div class="trade-row spare-row spare-group-row${allTicked ? ' is-ticked' : ''}" data-spare-toggle="${escapeHtml(group.key)}"${leadImage ? ` data-image="${escapeHtml(leadImage)}"` : ''}>
+                <input type="checkbox" class="spare-group-check" data-group-check="${escapeHtml(group.key)}" ${allTicked ? 'checked' : ''} data-indeterminate="${someTicked ? '1' : ''}">
+                <button type="button" class="spare-expand-btn${expanded ? ' is-open' : ''}" data-spare-toggle="${escapeHtml(group.key)}" aria-expanded="${expanded}" title="Show all printings of ${escapeHtml(group.name)}">▸</button>
+                <span class="trade-qty">${qtyHtml}</span>
+                <span class="trade-card"><span class="result-name">${escapeHtml(group.name)}</span> <span class="result-sub">${escapeHtml(subParts.join(' · '))}</span></span>
+                <span class="spare-prices"><span class="summary">${money(group.totalValue)}</span>${buylistHtml}</span>
+                <button type="button" class="btn btn-small btn-ghost spare-quick-add" data-spare-toggle="${escapeHtml(group.key)}">${expanded ? 'Hide prints' : 'Show prints'}</button>
+            </div>
+            ${children}
+        </div>`;
 }
 
 function renderSpareLocations() {
@@ -1377,58 +1539,39 @@ function renderSpare() {
     $('spare-clear').hidden = !hasFilters;
 
     const cards = spareCards();
+    const groups = spareGroups(cards);
     const keep = spareKeepLimit();
     // Cards that left the filtered list leave the ticks
     spareTicked = new Set([...spareTicked].filter(id => cards.some(card => card.id === id)));
 
-    const totalCopies = cards.reduce((sum, card) => sum + card.take, 0);
-    const totalValue = cards.reduce((sum, card) => sum + card.price * card.take, 0);
-    const offer = buylistTotal(cards.map(card => ({buylist: card.buylist, buylist_as_listed: card.buylist_as_listed, quantity: card.take})));
-    $('spare-summary').innerHTML = `${plural(cards.length, 'entry', 'entries')} · ${plural(totalCopies, keep ? 'extra copy' : 'free copy', keep ? 'extra copies' : 'free copies')} · <strong>${money(totalValue)}</strong>`
+    const totalCopies = groups.reduce((sum, group) => sum + group.extraCopies, 0);
+    const totalValue = groups.reduce((sum, group) => sum + group.totalValue, 0);
+    const offer = groups.reduce((sum, group) => ({value: sum.value + group.offer.value, copies: sum.copies + group.offer.copies}), {value: 0, copies: 0});
+    $('spare-summary').innerHTML = `${plural(groups.length, 'card')} (${plural(cards.length, 'entry', 'entries')}) · ${plural(totalCopies, keep ? 'extra copy' : 'free copy', keep ? 'extra copies' : 'free copies')} · <strong>${money(totalValue)}</strong>`
         + (offer.copies ? ` · <span title="What ${BUYLIST_SHOP}'s buylist offered for Near Mint copies ${escapeHtml(buylistWhen())} (USD)">${BUYLIST_SHOP} ${buylistMoney(offer.value)}</span>` : '');
 
-    const pages = Math.max(1, Math.ceil(cards.length / SPARE_PAGE));
+    const pages = Math.max(1, Math.ceil(groups.length / SPARE_PAGE));
     sparePage = Math.max(0, Math.min(sparePage, pages - 1));
     const start = sparePage * SPARE_PAGE;
-    const visible = cards.slice(start, start + SPARE_PAGE);
+    const visible = groups.slice(start, start + SPARE_PAGE);
 
-    list.innerHTML = visible.map(card => {
-        const where = [`${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim(),
-                       card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
-        const badges = [
-            ...(card.decks.length ? [`<span class="inventory-badge deck" title="Used in: ${escapeHtml(card.decks.join(', '))}">In deck</span>`] : []),
-            ...(card.tags || []).map(tag => `<span class="inventory-badge tag">${escapeHtml(tag)}</span>`),
-        ].join(' ');
-        const qtyHint = keep && card.take < card.free
-            ? ` <span class="hint">of ${card.free}</span>`
-            : keep && card.nameFree > card.free
-                ? ` <span class="hint">(${card.nameFree} total)</span>`
-                : card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
-        const image = cardImageUrl(card);
-        const buylistHtml = card.buylist
-            ? `<span class="spare-buylist" title="${BUYLIST_SHOP} buylist offer ${escapeHtml(buylistWhen())} (USD, Near Mint)${card.buylist_as_listed ? '' : ' - worn copy graded lower'}">CK ${buylistMoney(card.buylist * card.take)}${card.buylist_as_listed ? '' : '*'}</span>`
-            : '';
-        const ticked = spareTicked.has(card.id);
-        return `
-        <label class="trade-row spare-row${ticked ? ' is-ticked' : ''}" data-id="${card.id}" data-take="${card.take}"${image ? ` data-image="${escapeHtml(image)}"` : ''}>
-            <input type="checkbox" class="spare-check" ${ticked ? 'checked' : ''}>
-            <span class="trade-qty"><strong>${card.take}×</strong>${qtyHint}</span>
-            <span class="trade-card"><span class="result-name">${escapeHtml(card.name)}</span> <span class="result-sub">${escapeHtml(where.join(' · '))}</span>${badges ? ' ' + badges : ''}</span>
-            <span class="spare-prices"><span class="summary">${money(card.price * card.take)}${card.take > 1 ? ` <span class="hint">(${money(card.price)})</span>` : ''}</span>${buylistHtml}</span>
-            <button type="button" class="btn btn-small spare-quick-add" data-spare-add="${card.id}" data-take="${card.take}" title="Set ${card.take}× aside for a trade">+ Trade</button>
-        </label>`;
-    }).join('') || '<div class="empty-state">No cards match these filters.</div>';
+    list.innerHTML = visible.map(spareGroupHtml).join('') || '<div class="empty-state">No cards match these filters.</div>';
+    list.querySelectorAll('.spare-group-check[data-indeterminate="1"]').forEach(box => { box.indeterminate = true; });
 
     const pager = $('spare-pager');
-    pager.hidden = cards.length <= SPARE_PAGE;
+    pager.hidden = groups.length <= SPARE_PAGE;
     if (!pager.hidden) {
-        $('spare-page-info').textContent = `Showing ${start + 1}–${start + visible.length} of ${cards.length.toLocaleString()}`;
+        $('spare-page-info').textContent = `Showing ${start + 1}–${start + visible.length} of ${groups.length.toLocaleString()} cards`;
         $('spare-prev').disabled = sparePage === 0;
         $('spare-next').disabled = sparePage >= pages - 1;
     }
 
-    const tickedCards = cards.filter(card => spareTicked.has(card.id));
-    const tickedValue = tickedCards.reduce((sum, card) => sum + card.price * card.take, 0);
+    const tickedQuantities = spareQuantitiesFor([...spareTicked]);
+    const tickedValue = cards.reduce((sum, card) => {
+        if (!spareTicked.has(card.id)) return sum;
+        const qty = tickedQuantities ? (tickedQuantities[card.id] || 0) : card.free;
+        return sum + card.price * qty;
+    }, 0);
     $('spare-all').checked = !!cards.length && spareTicked.size === cards.length;
     $('spare-aside').disabled = !spareTicked.size;
     $('spare-aside').textContent = spareTicked.size
@@ -1437,12 +1580,39 @@ function renderSpare() {
 }
 
 function spareQuantitiesFor(ids) {
-    // Only cap quantities when an Extra copies preset is active; other presets set aside all free copies
-    if (!spareKeepLimit()) return null;
-    const byId = new Map(sparePool().map(card => [card.id, card.take]));
-    const quantities = {};
+    // When an Extra copies preset (keep 1 / keep 4) is active, cap copies per card name so at least
+    // `keep` copies always stay in the collection (keeping the highest-value printing first if every
+    // printing of a card is ticked together). Other presets set aside all free copies.
+    const keep = spareKeepLimit();
+    if (!keep || !ids.length) return null;
+    const pool = sparePool();
+    const byId = new Map(pool.map(card => [card.id, card]));
+    const totalFreeByName = new Map();
+    for (const card of pool) {
+        const key = (card.name || '').toLowerCase();
+        totalFreeByName.set(key, (totalFreeByName.get(key) || 0) + card.free);
+    }
+    const chosenByName = new Map();
     for (const id of ids) {
-        if (byId.has(id)) quantities[id] = byId.get(id);
+        const card = byId.get(id);
+        if (!card) continue;
+        const key = (card.name || '').toLowerCase();
+        if (!chosenByName.has(key)) chosenByName.set(key, []);
+        chosenByName.get(key).push(card);
+    }
+    const quantities = {};
+    for (const [key, chosen] of chosenByName) {
+        const totalFree = totalFreeByName.get(key) || 0;
+        const maxTake = Math.max(0, totalFree - keep);
+        const chosenFree = chosen.reduce((sum, card) => sum + card.free, 0);
+        // Keep the highest-value printing(s) untouched if the selection would exceed maxTake
+        let toKeep = Math.max(0, chosenFree - maxTake);
+        const ordered = [...chosen].sort((a, b) => b.price - a.price || a.id - b.id);
+        for (const card of ordered) {
+            const held = Math.min(card.free, toKeep);
+            toKeep -= held;
+            quantities[card.id] = card.free - held;
+        }
     }
     return quantities;
 }
@@ -1484,6 +1654,14 @@ function bindSpareEvents() {
     $('spare-prev').addEventListener('click', () => { if (sparePage > 0) { sparePage--; renderSpare(); } });
     $('spare-next').addEventListener('click', () => { sparePage++; renderSpare(); });
     $('spare-list').addEventListener('change', event => {
+        if (event.target.classList.contains('spare-group-check')) {
+            const key = event.target.dataset.groupCheck;
+            const group = spareGroups(spareCards()).find(item => item.key === key);
+            if (!group) return;
+            group.matches.forEach(card => event.target.checked ? spareTicked.add(card.id) : spareTicked.delete(card.id));
+            renderSpare();
+            return;
+        }
         const row = event.target.closest('.spare-row');
         if (!row || !event.target.classList.contains('spare-check')) return;
         const id = parseInt(row.dataset.id);
@@ -1491,14 +1669,25 @@ function bindSpareEvents() {
         renderSpare();
     });
     $('spare-list').addEventListener('click', event => {
+        if (event.target.classList.contains('spare-group-check') || event.target.classList.contains('spare-check')) return;
         const addBtn = event.target.closest('[data-spare-add]');
-        if (!addBtn) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const id = parseInt(addBtn.dataset.spareAdd);
-        const card = inventory.find(item => item.id === id);
-        const take = parseInt(addBtn.dataset.take);
-        setAsideForTrade(card || null, [id], spareKeepLimit() ? {[id]: take} : null);
+        if (addBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const id = parseInt(addBtn.dataset.spareAdd);
+            const card = inventory.find(item => item.id === id);
+            const take = parseInt(addBtn.dataset.take);
+            setAsideForTrade(card || null, [id], spareKeepLimit() ? {[id]: take} : null);
+            return;
+        }
+        const toggle = event.target.closest('[data-spare-toggle]');
+        if (toggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = toggle.dataset.spareToggle;
+            if (spareExpanded.has(key)) spareExpanded.delete(key); else spareExpanded.add(key);
+            renderSpare();
+        }
     });
     $('spare-all').addEventListener('change', event => {
         spareTicked = new Set(event.target.checked ? spareCards().map(card => card.id) : []);
@@ -1508,7 +1697,8 @@ function bindSpareEvents() {
         const ids = [...spareTicked];
         const quantities = spareQuantitiesFor(ids);
         spareTicked.clear();
-        setAsideForTrade(null, ids, quantities);
+        // Printings the keep rule holds back whole (0) are left out: the server would count them as "no copy left to give"
+        setAsideForTrade(null, quantities ? ids.filter(id => quantities[id] > 0) : ids, quantities);
     });
 }
 
