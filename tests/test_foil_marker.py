@@ -201,6 +201,14 @@ class Reading(unittest.TestCase):
         self.assertEqual(marker.read(card, FakeOcr([])), ('unknown', None))
         self.assertEqual(marker.read(card, FakeOcr(self.SET_LINES[:1])), ('unknown', None))      # a collector line, no set line
 
+    def test_tiny_or_missing_card_and_empty_box_are_guarded(self):
+        marker = foil_marker.load(True)
+        ocr = FakeOcr(self.SET_LINES)
+        self.assertEqual(marker.read(None, ocr), ('unknown', None))
+        self.assertEqual(marker.read(np.zeros((1, 1, 3), np.uint8), ocr), ('unknown', None))
+        self.assertEqual(ocr.asked, [])
+        self.assertIsNone(foil_marker.set_line_crop(np.zeros((100, 100, 3), np.uint8), []))
+
 
 class FakeGame:
     """The game as _read_with_ocr uses it: it confirms every read"""

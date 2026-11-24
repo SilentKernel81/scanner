@@ -68,6 +68,17 @@ def token_set_code(set_code):
 STARS, DOTS = '*★☆', '·•.-'
 
 
+def _fix_number_digits(digits):
+    """
+    Letters misread for digits turned back into digits. A lowercase letter after FOUR characters is the printing's suffix and is kept ('0233l', '0233a');
+    anywhere else it is a misread digit ('017l' -> '0171', '012o' -> '0120'): MAGIC_NUMBER's body takes up to four characters, so a 3-digit read
+    ending in l / o comes here as four characters with no suffix.
+    """
+    if len(digits) == 5 and digits[-1].islower():
+        return digits[:4].translate(DIGIT_LOOKALIKES) + digits[-1]
+    return digits.translate(DIGIT_LOOKALIKES)
+
+
 def parse_magic(lines, width, height):
     """
     Name, collector number, set code and foil marker of a Magic card from its OCR lines
@@ -79,6 +90,9 @@ def parse_magic(lines, width, height):
     def left(line):
         return line['box'][0][0] / width
 
+    def right(line):
+        return max(p[0] for p in line['box']) / width
+
     def top(line):
         return line['box'][0][1] / height
 
@@ -86,8 +100,24 @@ def parse_magic(lines, width, height):
     title = [l for l in lines if top(l) < 0.16 and left(l) < 0.35 and re.search('[A-Za-z]{3}', l['text'])]
     if not title:
         return None
+    first = min(title, key=top)
+    # If OCR split a multi-word title horizontally into separate boxes on the same line, join
+    # adjacent word boxes left-to-right (stopping before the mana cost on the right)
+    row_parts = [first]
+    following = sorted(
+        (l for l in lines if l is not first and abs(top(l) - top(first)) < 0.02
+         and left(first) < left(l) < 0.72 and re.search('[A-Za-z]', l['text'])),
+        key=left,
+    )
+    # Joined left to right until a gap or a piece with no lowercase letter: title words are written in title case, a mana cost read as text ("2G", "R",
+    # "3WW") is not - and once something is not part of the name, nothing after it is either
+    for part in following:
+        if left(part) - right(row_parts[-1]) >= 0.06 or not any(c.islower() for c in part['text']):
+            break
+        row_parts.append(part)
     # Mana symbols at the end of the title bar come out as stray characters ("Healer **", "Healer 迷")
-    name = re.sub(r"[^A-Za-zÀ-ÿ0-9!?'’\".)]+$", '', min(title, key=top)['text']).strip()
+    raw_title = ' '.join(p['text'].strip() for p in row_parts)
+    name = re.sub(r"[^A-Za-zÀ-ÿ0-9!?'’\".)]+$", '', raw_title).strip()
     if not name:
         return None
 
@@ -102,7 +132,7 @@ def parse_magic(lines, width, height):
             match = MAGIC_NUMBER.match(text)
             digits = match and (match.group(1) or match.group(2))
             if digits and sum(c.isdigit() for c in digits) >= 2:
-                number = digits.translate(DIGIT_LOOKALIKES)
+                number = _fix_number_digits(digits)
                 token = prints_token_letter(match)
                 continue
             match = MAGIC_NUMBER_OF_TOTAL.match(text)
@@ -137,7 +167,7 @@ def parse_strip(lines):
             match = MAGIC_NUMBER.match(text)
             digits = match and (match.group(1) or match.group(2))
             if digits and sum(c.isdigit() for c in digits) >= 2:
-                number = digits.translate(DIGIT_LOOKALIKES)
+                number = _fix_number_digits(digits)
                 token = prints_token_letter(match)
                 continue
             match = MAGIC_NUMBER_OF_TOTAL.match(text)
@@ -151,7 +181,7 @@ def parse_strip(lines):
     set_code = set_code.lower()
     if token and set_code:
         set_code = token_set_code(set_code)       # a token's strip says "T 0001" over "FRA": the picture's candidate is the printing 'tfra' 1
-    return number.lstrip('0'), set_code
+    return (number.lstrip('0') or '0') if number else '', set_code
 
 
 # Game id -> parser(lines, width, height); a game without one is read by the vision AI only
@@ -179,7 +209,8 @@ class CardOcr:
 
     START_TIMEOUT = 30    # seconds for the models to load
     READ_TIMEOUT = 10     # seconds per card (measured: 0.16 s on a GPU, 0.8 s on a desktop CPU)
-    RETRY_AFTER = 60      # seconds before a failed reader is started again
+    RETRY_AFTER = 60      # maximum seconds before a failed reader is started again
+    RETRY_BACKOFF = (2, 5, 15, 60)  # exponential backoff so a single transient timeout recovers quickly
 
     def __init__(self, log_callback=None):
         self.log_callback = log_callback
@@ -189,6 +220,7 @@ class CardOcr:
         self._lock = threading.Lock()   # one request at a time; also guards start/stop
         self._next_id = 0
         self._failed_at = None
+        self._consecutive_failures = 0
 
     def log(self, message, level="info"):
         getattr(logger, level, logger.info)(message)
@@ -212,10 +244,14 @@ class CardOcr:
         with self._lock:
             return self._ensure_started()
 
+    def _retry_delay(self):
+        index = min(max(self._consecutive_failures - 1, 0), len(self.RETRY_BACKOFF) - 1)
+        return min(self.RETRY_AFTER, self.RETRY_BACKOFF[index])
+
     def _ensure_started(self):
         if self.process and self.process.poll() is None:
             return True
-        if self._failed_at and time.time() - self._failed_at < self.RETRY_AFTER:
+        if self._failed_at and time.time() - self._failed_at < self._retry_delay():
             return False
         if not self.installed():
             return False
@@ -243,6 +279,7 @@ class CardOcr:
             return self._failed(f"light-ocr did not start (needs Node.js 22 or newer; see {Config.shown('logs', 'ocr.log')})")
         self.provider = ready.get('provider')
         self._failed_at = None
+        self._consecutive_failures = 0
         self.log(f"light-ocr ready ({self.provider or 'unknown provider'})")
         return True
 
@@ -259,6 +296,7 @@ class CardOcr:
     def _failed(self, message):
         self.log(message, level="warning")
         self._stop()
+        self._consecutive_failures += 1
         self._failed_at = time.time()
         return False
 
@@ -304,7 +342,10 @@ class CardOcr:
                 self.process.stdin.flush()
                 deadline = time.time() + self.READ_TIMEOUT
                 while True:
-                    answer = self._answers.get(timeout=max(0.1, deadline - time.time()))
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        raise queue.Empty
+                    answer = self._answers.get(timeout=remaining)
                     if answer is None:
                         return self._failed(f"light-ocr stopped (see {Config.shown('logs', 'ocr.log')})") or None
                     if answer.get('id') == self._next_id:

@@ -113,6 +113,8 @@ def symbol_read(line):
 
 def set_line_crop(strip, box):
     """The set line (box: four corner points in the strip's pixels) as the network's input: grey, 32 x 128 - or None"""
+    if strip is None or strip.size == 0 or not box:
+        return None
     xs, ys = [p[0] for p in box], [p[1] for p in box]
     margin = MARGIN * (max(ys) - min(ys))
     part = strip[max(int(min(ys) - margin), 0):int(max(ys) + margin), max(int(min(xs) - margin), 0):int(max(xs) + margin)]
@@ -179,6 +181,8 @@ class FoilMarker:
         confetti-foil cards. Probability is None for such an answer. Otherwise the network is asked
         about the set line: 'unknown' when the strip has no set line, or it is not sure either way (SURE).
         """
+        if card_rgb is None or min(card_rgb.shape[:2]) < 2:
+            return 'unknown', None
         strip = strip_of(card_rgb)
         lines = ocr.read_lines(strip)
         if not lines:

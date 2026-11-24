@@ -505,6 +505,67 @@ class TheStripParse(unittest.TestCase):
         self.assertEqual(card_ocr.parse_strip([line('Illus. Somebody', 5)]), ('', ''))
         self.assertEqual(card_ocr.parse_strip([line('U 0172', 5)]), ('172', ''))
 
+    def test_letter_suffix_and_zero_collector_number_are_preserved(self):
+        from card_scanner.core import card_ocr
+        # Trailing lowercase 'l' / 'o' suffixes must not be translated as digits '1' / '0'
+        self.assertEqual(card_ocr.parse_strip([line('U 0233l', 5), line('ZEN • EN', 40)]), ('233l', 'zen'))
+        self.assertEqual(card_ocr.parse_strip([line('U 0233o', 5), line('ZEN • EN', 40)]), ('233o', 'zen'))
+        # Card numbered 0 stays '0', never ''
+        self.assertEqual(card_ocr.parse_strip([line('U 0000', 5), line('PRM • EN', 40)]), ('0', 'prm'))
+
+    def test_a_trailing_l_or_o_after_three_digits_is_a_misread_digit(self):
+        from card_scanner.core import card_ocr
+        # Only a fifth character after four digits is a suffix: "017l" is the number 0171 read with an l
+        self.assertEqual(card_ocr.parse_strip([line('U 017l', 5), line('ZEN • EN', 40)]), ('171', 'zen'))
+        self.assertEqual(card_ocr.parse_strip([line('U 012o', 5), line('ZEN • EN', 40)]), ('120', 'zen'))
+        self.assertEqual(card_ocr.parse_strip([line('U 0233a', 5), line('ZEN • EN', 40)]), ('233a', 'zen'))
+        lines = [title('Healer', 70, 200), line('U 017l', 930), line('ZEN • EN', 960)]
+        self.assertEqual(card_ocr.parse_magic(lines, 1000, 1000)['collector_number'], '0171')
+
+    def test_parse_magic_never_joins_a_mana_cost_to_the_title(self):
+        from card_scanner.core import card_ocr
+        # A mana cost read as letters right after the name ("2G", "R") has no lowercase letter: the name stops before it
+        for cost in ('2G', 'R', '3WW', '{1}{U}'):
+            lines = [title('Healer', 70, 200), title(cost, 210, 260)]
+            self.assertEqual(card_ocr.parse_magic(lines, 1000, 1000)['name'], 'Healer', cost)
+        lines = [title('Lightning', 70, 220), title('Bolt', 240, 320), title('R', 330, 360)]
+        self.assertEqual(card_ocr.parse_magic(lines, 1000, 1000)['name'], 'Lightning Bolt')
+
+    def test_parse_magic_joins_a_title_split_into_several_boxes(self):
+        from card_scanner.core import card_ocr
+        lines = [title('Gideon,', 70, 180), title('Ally of', 195, 300), title('Zendikar', 315, 450)]
+        self.assertEqual(card_ocr.parse_magic(lines, 1000, 1000)['name'], 'Gideon, Ally of Zendikar')
+        # a word far along the title bar is not part of the name
+        lines = [title('Healer', 70, 200), title('Extra', 400, 480)]
+        self.assertEqual(card_ocr.parse_magic(lines, 1000, 1000)['name'], 'Healer')
+
+    def test_parse_magic_merges_horizontally_split_title_without_mana_cost(self):
+        from card_scanner.core import card_ocr
+        lines = [
+            {'text': 'Lightning', 'confidence': 0.9, 'box': [[70, 50], [220, 50], [220, 80], [70, 80]]},
+            {'text': 'Bolt', 'confidence': 0.9, 'box': [[240, 52], [320, 52], [320, 82], [240, 82]]},
+            {'text': 'R', 'confidence': 0.9, 'box': [[860, 50], [910, 50], [910, 80], [860, 80]]},
+            {'text': 'U 0233l', 'confidence': 0.9, 'box': [[60, 930], [200, 930], [200, 950], [60, 950]]},
+            {'text': 'ZEN • EN', 'confidence': 0.9, 'box': [[60, 960], [260, 960], [260, 980], [60, 980]]},
+        ]
+        parsed = card_ocr.parse_magic(lines, 1000, 1000)
+        self.assertEqual(parsed['name'], 'Lightning Bolt')
+        self.assertEqual(parsed['collector_number'], '0233l')
+
+    def test_ocr_retry_backoff_grows_gradually_and_caps_at_retry_after(self):
+        from card_scanner.core.card_ocr import CardOcr
+        ocr = CardOcr()
+        delays = []
+        for _ in range(5):
+            ocr._consecutive_failures += 1
+            delays.append(ocr._retry_delay())
+        self.assertEqual(delays, [2, 5, 15, 60, 60])
+
+
+def title(text, x0, x1, y=50):
+    """An OCR box on the title line of a 1000 x 1000 card"""
+    return {'text': text, 'confidence': 0.9, 'box': [[x0, y], [x1, y], [x1, y + 30], [x0, y + 30]]}
+
 
 class TheNameThatWasOnlyPartlyRead(unittest.TestCase):
     """printing_check.name_only_partly_read: a name that is a fragment of the card's name, not the name, a face, a flavor name or noise"""

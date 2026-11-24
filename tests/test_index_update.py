@@ -105,6 +105,7 @@ class Downloads(unittest.TestCase):
     def test_a_stop_ends_workers_that_are_waiting_out_a_429_and_no_request_follows_it(self):
         # The review of 2026-10-20: the cancel was only looked at when a printing STARTED, so workers sleeping after a 429 (a minute or more) ignored it
         # and the page stayed on "Stopping" with the build's lock held. Here every answer is "wait ten minutes".
+        # With coordinated backoff, the first 429 pushes the shared gate forward so the other worker waits out the same cooldown instead of hammering Scryfall.
         calls = []
         cancel = threading.Event()
 
@@ -113,17 +114,72 @@ class Downloads(unittest.TestCase):
             return self.Answer(429, {'Retry-After': '600'})
         with mock.patch('requests.get', refused):
             thread, result = self.run_build(cancel)
-            for _ in range(200):                       # both workers have been told to wait (two requests, each refused)
-                if len(calls) >= 2:
+            for _ in range(200):                       # first worker got 429 and pushed the shared gate out by 600s
+                if len(calls) >= 1:
                     break
                 threading.Event().wait(0.02)
-            self.assertGreaterEqual(len(calls), 2)
+            # Give the second worker > REQUEST_GAP (0.1s) to prove it honours the shared cooldown too
+            threading.Event().wait(0.25)
+            self.assertEqual(len(calls), 1, 'second worker should wait on the shared 429 cooldown instead of hammering Scryfall')
             at_stop = len(calls)
             cancel.set()
             thread.join(5)                             # ten minutes of waiting must end in well under that
             self.assertFalse(thread.is_alive(), 'the build did not stop while its workers waited after a 429')
             self.assertEqual(len(calls), at_stop, 'a request was sent after the stop')
         self.assertEqual(result[0][1], 0)              # nothing new: it was refused throughout
+
+    def test_transient_5xx_and_connection_errors_are_retried_without_aborting_build(self):
+        import cv2
+        import numpy as np
+        import requests
+        ok, jpeg = cv2.imencode('.jpg', (np.random.default_rng(2).integers(0, 256, (680, 488, 3))).astype(np.uint8))
+        raw = jpeg.tobytes()
+        per_url = {
+            'https://cards.example/p0.jpg': [self.Answer(503), self.Answer(200, content=raw)],
+            'https://cards.example/p1.jpg': [requests.ConnectionError('reset'), self.Answer(200, content=raw)],
+            'https://cards.example/p2.jpg': [self.Answer(502), self.Answer(502), self.Answer(502)],
+        }
+        self.printings = [(f'p{n}', f'https://cards.example/p{n}.jpg') for n in range(3)]
+
+        def get(url, headers=None, timeout=None):
+            nxt = per_url[url].pop(0)
+            if isinstance(nxt, Exception):
+                raise nxt
+            return nxt
+
+        with mock.patch('requests.get', get), mock.patch.object(image_index, 'REQUEST_GAP', 0.0):
+            # Speed up transient retry sleep via stopped.wait mock? pause() uses time.monotonic; patch time.monotonic or wait briefly.
+            built = image_index.build(self.printings, self.directory, fetch=True, workers=1, log=lambda m: None)
+        self.assertEqual(built.reason, 'done')
+        self.assertEqual(tuple(built), (2, 2, 1))
+
+    def test_download_reuses_pooled_sessions_and_closes_them(self):
+        import cv2
+        import numpy as np
+        import requests
+        ok, jpeg = cv2.imencode('.jpg', (np.random.default_rng(3).integers(0, 256, (680, 488, 3))).astype(np.uint8))
+        raw = jpeg.tobytes()
+        used_sessions = []
+        closed_sessions = []
+        orig_close = requests.Session.close
+
+        def fake_get(session, url, timeout=None):
+            used_sessions.append(id(session))
+            return self.Answer(200, content=raw)
+
+        def track_close(session):
+            closed_sessions.append(id(session))
+            return orig_close(session)
+
+        self.printings = self.printings[:6]
+        with mock.patch.object(requests.Session, 'get', fake_get), \
+             mock.patch.object(requests.Session, 'close', track_close), \
+             mock.patch.object(image_index, 'REQUEST_GAP', 0.0):
+            built = image_index.build(self.printings, self.directory, fetch=True, workers=2, log=lambda m: None)
+        self.assertEqual((built.reason, tuple(built)), ('done', (6, 6, 0)))
+        self.assertEqual(len(used_sessions), 6)
+        self.assertLessEqual(len(set(used_sessions)), 2)       # reused at most `workers` sessions
+        self.assertEqual(set(used_sessions), set(closed_sessions))
 
     def test_a_stop_before_a_workers_turn_sends_nothing(self):
         calls = []

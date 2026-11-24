@@ -72,7 +72,7 @@ class CornerNet:
         prob = (flat / flat.sum(axis=1, keepdims=True)).reshape(maps.shape)
         x = (prob.sum(axis=1) * self._xs).sum(axis=1)                   # expected x of each corner
         y = (prob.sum(axis=2) * self._ys).sum(axis=1)
-        return np.stack([x, y], axis=1), 1.0 / (1.0 + np.exp(-presence))
+        return np.stack([x, y], axis=1), float(1.0 / (1.0 + np.exp(-np.clip(presence, -60.0, 60.0))))
 
     def _read(self, rgb, cx, cy, height):
         window, matrix = self._window(rgb, cx, cy, height)
@@ -80,7 +80,31 @@ class CornerNet:
         inverse = cv2.invertAffineTransform(matrix)
         return corners @ inverse[:, :2].T + inverse[:, 2], score
 
+    def _refine_window(self, rgb, quad):
+        """One Stage-2 window cut around `quad`: (corners, score), or (None, 0.0) if `quad` is degenerate."""
+        if quad.shape != (4, 2):
+            return None, 0.0
+        xs, ys = quad[:, 0], quad[:, 1]
+        # the card's height; for a quad that came out too flat, a card's shape from its width
+        card_h = max(float(ys.max() - ys.min()), float(xs.max() - xs.min()) * WINDOW_H / WINDOW_W * 0.6)
+        if not np.isfinite(card_h) or card_h < 8.0:
+            return None, 0.0
+        cx, cy = float(xs.min() + xs.max()) / 2, float(ys.min() + ys.max()) / 2
+        if not (np.isfinite(cx) and np.isfinite(cy)):
+            return None, 0.0
+        return self._read(rgb, cx, cy, card_h * ZOOM_OUT)
+
+    def refine_corners(self, rgb, corners):
+        """Run a single Stage-2 window around known `corners` on `rgb` (e.g. a full-resolution capture frame)."""
+        quad, score = self._refine_window(rgb, np.asarray(corners, np.float64))
+        if quad is None:
+            return np.asarray(corners, np.float32), 0.0
+        return quad.astype(np.float32), float(score)
+
     # ------------------------------------------------------------------
+
+    STAGE1_SKIP_REFINE = 0.02  # empty frames score ~0.0001-0.0004: skip Stage 2 when Stage 1 sees nothing
+    RETRY_SCORE = 0.5          # when following `previous` scores below this, fall back to a whole-frame search
 
     def find(self, rgb, previous=None):
         """
@@ -89,17 +113,31 @@ class CornerNet:
         is that a card is there. previous: the card's corners in an earlier frame, if known.
         """
         height, width = rgb.shape[:2]
-        if previous is None:
-            # The whole frame in one window (the window is taller than any frame: letterboxed)
-            quad, score = self._read(rgb, width / 2, height / 2, max(height, width * WINDOW_H / WINDOW_W))
-        else:
-            quad, score = np.asarray(previous, np.float64), 0.0
+        if previous is not None:
+            quad = np.asarray(previous, np.float64)
+            score = 0.0
+            valid = True
+            for _ in range(max(1, self.refine)):
+                refined, again = self._refine_window(rgb, quad)
+                if refined is None:
+                    valid = False
+                    break
+                quad, score = refined, max(score, again)
+            if valid and score >= self.RETRY_SCORE:
+                return quad.astype(np.float32), float(score)
+            # Previous outline missed (card moved, dropped elsewhere, or disappeared): search the whole frame
+
+        # Stage 1: the whole frame in one window (the window is taller than any frame: letterboxed)
+        quad, score = self._read(rgb, width / 2, height / 2, max(height, width * WINDOW_H / WINDOW_W))
+        if score < self.STAGE1_SKIP_REFINE:
+            return quad.astype(np.float32), float(score)
+        # The better of the two looks is the score, NOT the zoomed window's alone: measured 2026-11-23 on 1,600 debug frames, the zoomed window alone
+        # rejected 47 frames the whole-frame look accepted, and all of them were real cards falling into the tray, motion-blurred - not false alarms
         for _ in range(self.refine):
-            xs, ys = quad[:, 0], quad[:, 1]
-            # the card's height; for a quad that came out too flat, a card's shape from its width
-            card_h = max(ys.max() - ys.min(), (xs.max() - xs.min()) * WINDOW_H / WINDOW_W * 0.6)
-            quad, again = self._read(rgb, (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2, card_h * ZOOM_OUT)
-            score = max(score, again)
+            refined, again = self._refine_window(rgb, quad)
+            if refined is None:
+                break
+            quad, score = refined, max(score, again)
         return quad.astype(np.float32), float(score)
 
 

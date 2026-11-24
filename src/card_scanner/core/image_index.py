@@ -43,6 +43,7 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import re
 import threading
 import time
@@ -540,6 +541,9 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     log(f"{len(have)} printings already in the index, {len(todo)} to do")
     gate, next_start, stopped = threading.Lock(), [0.0], threading.Event()
     image_dir = Path(image_dir) if image_dir else None
+    session_pool = queue.LifoQueue(maxsize=max(1, workers))
+    sessions_lock = threading.Lock()
+    created_sessions = []
 
     def cancelled():
         return cancel is not None and cancel.is_set()
@@ -556,6 +560,56 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
                 return
             stopped.wait(min(0.25, left))
 
+    def claim_slot():
+        """Wait interruptibly (never holding `gate` while sleeping) until pacing and any shared 429/403 backoff allow the next request."""
+        while True:
+            if stopped.is_set() or cancelled():
+                stopped.set()
+                raise Stopped()
+            with gate:
+                now = time.monotonic()
+                wait_until = next_start[0]
+                if now >= wait_until:
+                    next_start[0] = now + REQUEST_GAP
+                    return
+            pause(wait_until - now)
+
+    def retry_after_seconds(answer):
+        retry_after = answer.headers.get('Retry-After', '')
+        if not retry_after:
+            return 0
+        try:
+            return max(0, int(retry_after))
+        except ValueError:
+            try:
+                from email.utils import parsedate_to_datetime
+                from datetime import datetime, timezone
+                when = parsedate_to_datetime(retry_after)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                return max(0, int((when - datetime.now(timezone.utc)).total_seconds()))
+            except (TypeError, ValueError):
+                return 0
+
+    def fetch_url(requests_mod, address):
+        """Fetch one image URL using a bounded Session pool for TLS keep-alive reuse (honouring `requests.get` patches in tests)."""
+        if requests_mod.get is not requests_mod.api.get:
+            return requests_mod.get(address, headers=HEADERS, timeout=60)
+        try:
+            session = session_pool.get_nowait()
+        except queue.Empty:
+            session = requests_mod.Session()
+            session.headers.update(HEADERS)
+            with sessions_lock:
+                created_sessions.append(session)
+        try:
+            return session.get(address, timeout=60)
+        finally:
+            try:
+                session_pool.put_nowait(session)
+            except queue.Full:
+                session.close()
+
     def picture(printing, address):
         """The picture's bytes: from the folder, else from Scryfall; None if there is none"""
         if image_dir and (image_dir / f'{printing}.jpg').is_file():
@@ -563,41 +617,37 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
         if not fetch or not address:
             return None
         import requests            # only to download: a build from a folder of pictures needs no network
-        for attempt in range(4):
-            if stopped.is_set() or cancelled():
-                stopped.set()
-                raise Stopped()
-            with gate:             # requests may overlap, but never two start less than REQUEST_GAP apart
-                pause(max(0.0, next_start[0] - time.monotonic()))
-                next_start[0] = time.monotonic() + REQUEST_GAP
-            if stopped.is_set() or cancelled():      # a stop that came while this one waited for its turn: no request is sent after it
-                stopped.set()
-                raise Stopped()
+        refusals = 0
+        transient = 0
+        while True:
+            claim_slot()
             try:
-                answer = requests.get(address, headers=HEADERS, timeout=60)
+                answer = fetch_url(requests, address)
             except requests.RequestException:
-                return None
+                transient += 1
+                if transient > 2:
+                    return None
+                pause(float(transient))
+                continue
             if answer.status_code in (429, 403):
-                retry_after = answer.headers.get('Retry-After', '')
-                delay = 0
-                if retry_after:
-                    try:
-                        delay = max(0, int(retry_after))
-                    except ValueError:
-                        try:
-                            from email.utils import parsedate_to_datetime
-                            from datetime import datetime, timezone
-                            when = parsedate_to_datetime(retry_after)
-                            if when.tzinfo is None:
-                                when = when.replace(tzinfo=timezone.utc)
-                            delay = max(0, int((when - datetime.now(timezone.utc)).total_seconds()))
-                        except (TypeError, ValueError):
-                            delay = 0
-                pause(delay or 60 * (attempt + 1))      # interruptible: the loop's first line then stops
+                refusals += 1
+                if refusals >= 4:
+                    stopped.set()
+                    raise Stopped()
+                delay = retry_after_seconds(answer)
+                backoff = delay or 60 * refusals
+                # Push the shared gate forward so all workers honour Scryfall's cooldown together
+                with gate:
+                    next_start[0] = max(next_start[0], time.monotonic() + backoff)
+                continue
+            if answer.status_code in (500, 502, 503, 504):
+                transient += 1
+                if transient > 2:
+                    return None
+                delay = retry_after_seconds(answer)
+                pause(min(delay, 30) if delay else float(transient))
                 continue
             return answer.content if answer.ok else None
-        stopped.set()
-        raise Stopped()
 
     def one(item):
         printing, address = item
@@ -629,11 +679,16 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
                     new += 1
                 if progress is not None:
                     progress(done, len(todo))
-                if done % 5000 == 0 and not stopped.is_set() and not cancelled():
+                if done % 1000 == 0 and not stopped.is_set() and not cancelled():
                     write(directory, *_in_order(printings, have))
                     log(f"{done} of {len(todo)} done ({new} new, {skipped} without a picture)")
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
+        for session in created_sessions:
+            try:
+                session.close()
+            except Exception:
+                pass
     ids, hashes = _in_order(printings, have)
     write(directory, ids, hashes)
     if cancel is not None and cancel.is_set():

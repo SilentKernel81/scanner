@@ -5,9 +5,11 @@ Uses Vision AI to identify Magic: The Gathering cards from images
 """
 
 import base64
+import contextlib
 import io
 import os
 import logging
+import queue
 import re
 import threading
 import time
@@ -99,6 +101,61 @@ class CardIdentifier:
                 raise ValueError(f"API key not found for {provider}. Set {provider.upper()}_API_KEY environment variable.")
             self.log(f"Card identifier initialized with {provider} ({self.model})")
 
+        # Bounded pool of requests.Session objects: each call borrows one exclusively (thread-safe
+        # across AI workers) and returns it afterwards, so short-lived threads (foil_thread, Flask
+        # review requests, prompt tests) reuse warm TLS connections and never accumulate open sessions
+        self._session_pool = queue.LifoQueue(maxsize=self.MAX_POOLED_SESSIONS)
+        self._pool_lock = threading.Lock()
+        self._closed = False
+
+    MAX_POOLED_SESSIONS = 8
+
+    @contextlib.contextmanager
+    def _http(self):
+        """Borrow a requests.Session exclusively for one request (or yield `requests` when constructed via __new__)"""
+        pool = getattr(self, '_session_pool', None)
+        if pool is None or getattr(self, '_closed', False):
+            yield requests
+            return
+        try:
+            session = pool.get_nowait()
+        except queue.Empty:
+            session = requests.Session()
+        try:
+            yield session
+        finally:
+            close_now = False
+            with self._pool_lock:
+                if self._closed:
+                    close_now = True
+                else:
+                    try:
+                        pool.put_nowait(session)
+                    except queue.Full:
+                        close_now = True
+            if close_now:
+                session.close()
+
+    def close(self):
+        """Close all pooled HTTP sessions (any in-flight session closes itself on return)"""
+        lock = getattr(self, '_pool_lock', None)
+        pool = getattr(self, '_session_pool', None)
+        if lock is None or pool is None:
+            return
+        with lock:
+            self._closed = True
+            sessions = []
+            while True:
+                try:
+                    sessions.append(pool.get_nowait())
+                except queue.Empty:
+                    break
+        for session in sessions:
+            try:
+                session.close()
+            except Exception:
+                pass
+
     # How long Ollama keeps the model loaded after a request (its default is 5 minutes)
     OLLAMA_KEEP_ALIVE = "30m"
 
@@ -186,9 +243,25 @@ class CardIdentifier:
             self.log(f"Foil check failed: {e}", level="warning")
             return None, 'unknown'
 
-        foil = 'foil' if 'star' in answer else 'non-foil' if 'dot' in answer else 'unknown'
+        foil = self._parse_foil_answer(answer)
         self.log(f"Foil marker: {answer.strip()!r} -> {foil}")
         return answer.strip(), foil
+
+    @staticmethod
+    def _parse_foil_answer(answer):
+        """Parse a model's star/dot/unclear answer without letting 'dot, not a star' invert to foil"""
+        text = (answer or '').lower()
+        has_star = bool(re.search(r'\bstar\b', text))
+        has_dot = bool(re.search(r'\bdot\b', text))
+        if has_star and not has_dot:
+            return 'foil'
+        if has_dot and not has_star:
+            return 'non-foil'
+        if has_star and has_dot:
+            lead = re.match(r'^\s*[^a-z]*(star|dot)\b', text)
+            if lead:
+                return 'foil' if lead.group(1) == 'star' else 'non-foil'
+        return 'unknown'
 
     def _image_array_to_base64(self, image_array, quality=95, max_dimension=2048):
         """Convert NumPy image array to base64 string (optimized for text readability)"""
@@ -245,10 +318,17 @@ class CardIdentifier:
         # A number with the set total ("016/131": games that print one) anywhere in the value
         with_total = re.search(r'[A-Za-z]{0,4}\d{1,4}\s*/\s*[A-Za-z]{0,4}\d{1,4}', number)
         collector_number = self._clean_number(with_total.group().replace(' ', '') if with_total else number)
-        # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"), maybe followed by the language
-        # code ("PAL EN"); anything else (e.g. "Unknown") is ignored
-        set_match = re.fullmatch(r'([A-Za-z0-9]{2,5})(?:\s+[A-Za-z]{2})?', values.get('SET', ''))
+        # Set codes are 2-5 letters/digits ("HOB", "M21", "PLST"), maybe followed by a foil marker
+        # and/or a printed language code ("PAL EN", "HOB • EN", "HOB ★ EN", "SPM·EN", "HOB • ZHS");
+        # anything else (e.g. "Unknown", "No set") is ignored
+        set_match = re.fullmatch(
+            r'([A-Za-z0-9]{2,5})(?:\s*(?:[^A-Za-z0-9\s]\s*|\s+)(?:EN|DE|FR|IT|ES|SP|PT|JP|JA|KO|KR|RU|CS|CT|ZHS|ZHT|PH))?',
+            values.get('SET', ''),
+            re.IGNORECASE,
+        )
         set_code = set_match.group(1).upper() if set_match else ""
+        if set_code.lower() in ("unknown", "none"):
+            set_code = ""
 
         # Clean up "Unknown" responses
         if card_name.lower() == "unknown":
@@ -300,8 +380,7 @@ class CardIdentifier:
     # Provider requests: send one image + prompt, return the response text
     # ------------------------------------------------------------------------
 
-    @staticmethod
-    def _local(method, url, **kwargs):
+    def _local(self, method, url, **kwargs):
         """
         A request to the local AI server, to the address its name has right now (api_keys.pinned_endpoint:
         a name whose DNS answer moved to a public server after the endpoint was saved is refused). No
@@ -311,7 +390,8 @@ class CardIdentifier:
             connect_url, headers = pinned_endpoint(url)
         except ValueError as e:
             raise requests.exceptions.ConnectionError(str(e))
-        return getattr(requests, method)(connect_url, headers={**kwargs.pop('headers', {}), **headers}, allow_redirects=False, **kwargs)
+        with self._http() as client:
+            return getattr(client, method)(connect_url, headers={**kwargs.pop('headers', {}), **headers}, allow_redirects=False, **kwargs)
 
     # A cloud provider's answer that is worth asking again: rate limit (429) and its own trouble (5xx)
     RETRY_STATUS = (429, 500, 502, 503, 504)
@@ -327,25 +407,26 @@ class CardIdentifier:
         caller raises for its status as before. Not used for a local server, which has its own fallback.
         """
         attempts = len(self.RETRY_DELAYS) + 1
-        for attempt in range(attempts):
-            wait = None
-            try:
-                response = requests.post(url, **kwargs)
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                if attempt == attempts - 1:
-                    raise
-                reason = type(e).__name__
-            else:
-                if response.status_code not in self.RETRY_STATUS or attempt == attempts - 1:
-                    return response
-                reason = f"HTTP {response.status_code}"
+        with self._http() as client:
+            for attempt in range(attempts):
+                wait = None
                 try:
-                    wait = min(float(response.headers.get('Retry-After', '')), self.RETRY_AFTER_MAX)
-                except (TypeError, ValueError):
-                    wait = None
-            delay = max(self.RETRY_DELAYS[attempt], wait or 0.0)
-            self.log(f"{self.provider}: {reason} - trying again in {delay:.0f} s ({attempt + 2}/{attempts})", level="warning")
-            time.sleep(delay)
+                    response = client.post(url, **kwargs)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    if attempt == attempts - 1:
+                        raise
+                    reason = type(e).__name__
+                else:
+                    if response.status_code not in self.RETRY_STATUS or attempt == attempts - 1:
+                        return response
+                    reason = f"HTTP {response.status_code}"
+                    try:
+                        wait = min(float(response.headers.get('Retry-After', '')), self.RETRY_AFTER_MAX)
+                    except (TypeError, ValueError):
+                        wait = None
+                delay = max(self.RETRY_DELAYS[attempt], wait or 0.0)
+                self.log(f"{self.provider}: {reason} - trying again in {delay:.0f} s ({attempt + 2}/{attempts})", level="warning")
+                time.sleep(delay)
 
     def _ask(self, base64_image, prompt, max_tokens):
         """Send an image and a prompt to the configured provider and return the text answer"""
@@ -361,6 +442,11 @@ class CardIdentifier:
 
     def _ask_gemini(self, base64_image, prompt, max_tokens):
         """Google Gemini (REST API)"""
+        generation_config = {"maxOutputTokens": max_tokens, "temperature": 0}
+        # Gemini 2.5 Flash / Flash-Lite thinking models otherwise spend maxOutputTokens reasoning
+        # (returning empty answers on small budgets like max_tokens=10 for the foil check)
+        if 'flash' in self.model.lower():
+            generation_config["thinkingConfig"] = {"thinkingBudget": 0}
         payload = {
             "contents": [{
                 "parts": [
@@ -368,7 +454,7 @@ class CardIdentifier:
                     {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}}
                 ]
             }],
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": generation_config,
         }
         response = self._post_with_retry(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
@@ -377,8 +463,9 @@ class CardIdentifier:
             timeout=30
         )
         response.raise_for_status()
-        parts = response.json()['candidates'][0]['content']['parts']
-        return ''.join(part.get('text', '') for part in parts).strip()
+        candidates = response.json().get('candidates') or []
+        parts = (candidates[0].get('content') or {}).get('parts') or [] if candidates else []
+        return ''.join(part.get('text', '') for part in parts if not part.get('thought')).strip()
 
     def _ask_openai(self, base64_image, prompt, max_tokens):
         """OpenAI chat completions"""
@@ -393,7 +480,8 @@ class CardIdentifier:
                     ]
                 }
             ],
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            "temperature": 0,
         }
         response = self._post_with_retry(
             "https://api.openai.com/v1/chat/completions",
@@ -402,13 +490,16 @@ class CardIdentifier:
             timeout=30
         )
         response.raise_for_status()
-        return response.json()['choices'][0]['message']['content'].strip()
+        choices = response.json().get('choices') or []
+        content = (choices[0].get('message') or {}).get('content') if choices else None
+        return (content or '').strip()
 
     def _ask_anthropic(self, base64_image, prompt, max_tokens):
         """Anthropic Messages API"""
         payload = {
             "model": self.model,
             "max_tokens": max_tokens,
+            "temperature": 0,
             "messages": [
                 {
                     "role": "user",
@@ -426,7 +517,8 @@ class CardIdentifier:
             timeout=30
         )
         response.raise_for_status()
-        return response.json()['content'][0]['text'].strip()
+        blocks = response.json().get('content') or []
+        return ''.join(block.get('text', '') for block in blocks if block.get('type', 'text') == 'text').strip()
 
     def _ask_local(self, base64_image, prompt, max_tokens):
         """Local vision AI server (Ollama, vLLM, LM Studio, ...)"""
