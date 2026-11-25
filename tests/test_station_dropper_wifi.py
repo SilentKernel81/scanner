@@ -268,7 +268,7 @@ class TheDropper(unittest.TestCase):
 
         self.sleeps = []
         self.dropper = Dropper(open_pin=mock.Mock(side_effect=AssertionError('no pin for a feeder')), sleep=self.sleeps.append,
-                               open_feeder=open_feeder)
+                               open_feeder=open_feeder, find_feeder=lambda: [], clock=self.clock)
 
     def test_one_pulse_is_one_card(self):
         self.dropper.configure(dict(WIFI_ON))
@@ -327,6 +327,83 @@ class TheDropper(unittest.TestCase):
 
         self.assertFalse(self.dropper.probe_wifi(http=fail_http))
         self.assertFalse(self.dropper.state()['online'])
+
+    def test_probe_wifi_auto_rediscovers_moved_ip_by_mac_and_throttles_when_offline(self):
+        moved_ip = '192.168.1.222'
+        reported = []
+        scans = []
+
+        def fake_find():
+            scans.append(self.clock.now)
+            return [
+                {'ip': '192.168.1.99', 'name': 'other', 'mac': 'aa:bb:cc:dd:ee:ff'},
+                {'ip': moved_ip, 'name': 'card-dropper-sw', 'mac': FEEDER['mac'].upper()},
+            ]
+
+        dropper = Dropper(open_feeder=lambda ip, key: WifiFeeder(ip, key, http=self.fake, clock=self.clock, sleep=self.clock.sleep),
+                          find_feeder=fake_find, on_feeder_ip_changed=reported.append, clock=self.clock)
+        dropper.configure(dict(WIFI_ON))
+
+        def http_only_new_ip(url, timeout=2):
+            if moved_ip in url:
+                return 200, {'status': {'boot': 'b2', 'sensor': {'type': 'VCNL4200', 'present': True}}}
+            raise OSError('old ip gone')
+
+        self.assertTrue(dropper.probe_wifi(http=http_only_new_ip))
+        self.assertTrue(dropper.state()['online'])
+        self.assertEqual(dropper.state()['feeder']['ip'], moved_ip)
+        self.assertEqual(dropper.state()['sensor'], {'type': 'VCNL4200', 'present': True})
+        self.assertEqual(len(reported), 1)
+        self.assertEqual(reported[0]['ip'], moved_ip)
+
+        # If the feeder later goes completely offline, rediscovery respects REDISCOVER_COOLDOWN_S
+        scans.clear()
+        dropper._find_feeder = lambda: (scans.append(self.clock.now) or [])
+        self.clock.sleep(dropper_module.REDISCOVER_COOLDOWN_S + 1)
+        self.assertFalse(dropper.probe_wifi(http=lambda url, timeout=2: (_ for _ in ()).throw(OSError('down'))))
+        self.assertEqual(len(scans), 1)
+        self.clock.sleep(5.0)
+        self.assertFalse(dropper.probe_wifi(http=lambda url, timeout=2: (_ for _ in ()).throw(OSError('down'))))
+        self.assertEqual(len(scans), 1)   # throttled until cooldown elapses
+        self.clock.sleep(dropper_module.REDISCOVER_COOLDOWN_S)
+        self.assertFalse(dropper.probe_wifi(http=lambda url, timeout=2: (_ for _ in ()).throw(OSError('down'))))
+        self.assertEqual(len(scans), 2)
+
+    def test_pulse_auto_rediscovers_moved_ip_before_failing(self):
+        moved_ip = '192.168.1.225'
+        reported = []
+        opened_ips = []
+
+        def open_only_new_ip(ip, key):
+            opened_ips.append(ip)
+            if ip != moved_ip:
+                raise RuntimeError(f'the feeder at {ip} does not answer')
+            return WifiFeeder(ip, key, http=self.fake, clock=self.clock, sleep=self.clock.sleep)
+
+        dropper = Dropper(open_feeder=open_only_new_ip,
+                          find_feeder=lambda: [{'ip': moved_ip, 'name': 'card-dropper-sw', 'mac': FEEDER['mac']}],
+                          on_feeder_ip_changed=reported.append, clock=self.clock)
+        dropper.configure(dict(WIFI_ON))
+        self.assertTrue(dropper.pulse('auto-rediscover'))
+        self.assertEqual(opened_ips, [FEEDER['ip'], moved_ip])
+        self.assertEqual(dropper.state()['feeder']['ip'], moved_ip)
+        self.assertEqual(len(self.fake.fed), 1)
+        self.assertEqual(len(reported), 1)
+
+    def test_remote_scanner_persists_rediscovered_feeder_ip_only_for_matching_mac(self):
+        from card_scanner.core.remote_scanner import RemoteScanner
+        saved = FakeSettings({'dropper': dict(DEFAULTS, **WIFI_ON)})
+        remote = RemoteScanner(mock.Mock(), saved)
+        # Wrong MAC or invalid IP is ignored
+        self.assertFalse(remote.update_feeder_ip({'mac': 'ff:ff:ff:ff:ff:ff', 'ip': '192.168.1.222'}))
+        self.assertFalse(remote.update_feeder_ip({'mac': FEEDER['mac'], 'ip': 'not-an-ip'}))
+        self.assertEqual(remote.dropper['feeder']['ip'], FEEDER['ip'])
+        # Matching MAC persists the new IP while keeping pair_key & enabled untouched
+        self.assertTrue(remote.update_feeder_ip({'mac': FEEDER['mac'].upper(), 'ip': '192.168.1.222', 'name': 'card-dropper-sw'}))
+        self.assertEqual(remote.dropper['feeder']['ip'], '192.168.1.222')
+        self.assertEqual(remote.dropper['pair_key'], KEY)
+        self.assertTrue(remote.dropper['enabled'])
+        self.assertEqual(saved.saved['dropper']['feeder']['ip'], '192.168.1.222')
 
 
 class FakeUdp:

@@ -156,6 +156,7 @@ FEEDER_TRIES = 2                # a request whose answer was lost: asked again (
 DISCOVERY_PORT = 50505          # the feeder's auto-find (tuning.py: DISCOVERY_PORT, DISCOVERY_ASK)
 DISCOVERY_ASK = b'card-dropper?'
 DISCOVERY_S = 1.5               # answers waited for after the last question
+REDISCOVER_COOLDOWN_S = 15.0    # minimum gap between automatic MAC-based IP rediscoveries when a feeder is offline
 
 
 def feeder_http(url, form=None, timeout=FEEDER_HTTP_S):
@@ -366,10 +367,14 @@ class Dropper:
     refused, never queued - one card per pulse.
     """
 
-    def __init__(self, open_pin=GpiodPin, sleep=time.sleep, open_feeder=WifiFeeder):
+    def __init__(self, open_pin=GpiodPin, sleep=time.sleep, open_feeder=WifiFeeder,
+                 find_feeder=find_feeders, on_feeder_ip_changed=None, clock=time.monotonic):
         self.config = dict(DEFAULTS)
         self._open_pin = open_pin          # tests hand in a stand-in for the pin
         self._open_feeder = open_feeder    # ... and for the feeder over Wi-Fi
+        self._find_feeder = find_feeder    # ... and for MAC-based IP rediscovery
+        self._on_feeder_ip_changed = on_feeder_ip_changed
+        self._clock = clock
         self._sleep = sleep
         self._pin = None
         self._lock = threading.Lock()      # held for the whole pulse
@@ -379,6 +384,7 @@ class Dropper:
         self.last_pulse = None             # time.time() of the last pulse sent
         self.online = None                 # True / False for Wi-Fi feeder reachability (None before first check or for GPIO)
         self.sensor = None                 # {'type': 'VCNL4200', 'present': bool} from Wi-Fi feeder /status, or None
+        self._last_rediscover = None       # monotonic timestamp of last MAC-based IP rediscovery attempt
         self._monitor_stop = None
         self._monitor_thread = None
 
@@ -396,6 +402,7 @@ class Dropper:
                 self.online = None
                 self.sensor = None
                 self.last_drop = None
+                self._last_rediscover = None
             self.config = values
             if not values['enabled']:
                 self.error = None          # an old error says nothing about a dropper that is off
@@ -429,8 +436,20 @@ class Dropper:
                     else:
                         self._pin = self._open_pin(self.config['chip'], self.config['pin'], self.config['active_low'])
                 except Exception as e:
-                    self._fail(e)
-                    return False
+                    if self.config['transport'] == 'wifi':
+                        new_ip = self._rediscover_ip(force=True, _locked=True)
+                        if new_ip:
+                            try:
+                                self._pin = self._open_feeder(new_ip, self.config['pair_key'])
+                            except Exception as e2:
+                                self._fail(e2)
+                                return False
+                        else:
+                            self._fail(e)
+                            return False
+                    else:
+                        self._fail(e)
+                        return False
             try:
                 if gate is None:
                     self._pin.set(True)
@@ -472,8 +491,73 @@ class Dropper:
         finally:
             self._lock.release()
 
+    def _rediscover_ip(self, force=False, _locked=False):
+        """Scan the LAN for the paired feeder's MAC and update its IP if DHCP moved it. Returns the new IP or None."""
+        cfg = self.config
+        feeder = cfg.get('feeder') if cfg.get('transport') == 'wifi' else None
+        mac = (feeder.get('mac') or '').strip().lower() if isinstance(feeder, dict) else ''
+        old_ip = feeder.get('ip') if isinstance(feeder, dict) else None
+        if not mac or self._find_feeder is None:
+            return None
+        now = self._clock()
+        if not force and self._last_rediscover is not None and (now - self._last_rediscover) < REDISCOVER_COOLDOWN_S:
+            return None
+        self._last_rediscover = now
+        try:
+            found = self._find_feeder() or []
+        except Exception as e:
+            logger.debug(f"Card dropper: MAC rediscovery failed ({e})")
+            return None
+        match = next((f for f in found if isinstance(f, dict) and (f.get('mac') or '').strip().lower() == mac), None)
+        if not match:
+            return None
+        new_ip = match.get('ip')
+        if not new_ip or new_ip == old_ip:
+            return None
+        try:
+            ipaddress.IPv4Address(new_ip)
+        except (ValueError, TypeError):
+            return None
+        updated_feeder = None
+
+        def _apply():
+            nonlocal updated_feeder
+            cur = self.config.get('feeder')
+            if not isinstance(cur, dict) or (cur.get('mac') or '').strip().lower() != mac:
+                return
+            updated_feeder = dict(cur, ip=new_ip)
+            if match.get('name'):
+                updated_feeder['name'] = str(match['name'])[:FEEDER_NAME_MAX]
+            self.config = dict(self.config, feeder=updated_feeder)
+            self._close_pin()
+
+        if _locked:
+            _apply()
+        else:
+            with self._lock:
+                _apply()
+        if updated_feeder is None:
+            return None
+        logger.info(f"Card dropper: feeder {mac} moved from {old_ip} to {new_ip}")
+        if self._on_feeder_ip_changed:
+            try:
+                self._on_feeder_ip_changed(dict(updated_feeder))
+            except Exception as e:
+                logger.warning(f"Card dropper: could not report new feeder IP ({e})")
+        return new_ip
+
+    def _query_status(self, ip, http):
+        code, answer = http(f'http://{ip}/status', timeout=2)
+        st = (answer or {}).get('status') if code == 200 else None
+        if not isinstance(st, dict):
+            return False
+        self.online = True
+        sn = st.get('sensor') or {}
+        self.sensor = {'type': sn.get('type'), 'present': bool(sn.get('present'))} if sn.get('type') else None
+        return True
+
     def probe_wifi(self, http=feeder_http):
-        """Lightweight non-blocking /status check for a Wi-Fi feeder; updates online & sensor without moving anything."""
+        """Lightweight non-blocking /status check for a Wi-Fi feeder; auto-rediscovers by MAC if DHCP changed its IP."""
         cfg = self.config
         if not cfg.get('enabled') or cfg.get('transport') != 'wifi' or not cfg.get('feeder'):
             return None
@@ -481,18 +565,19 @@ class Dropper:
         if not ip:
             return None
         try:
-            code, answer = http(f'http://{ip}/status', timeout=2)
-            st = (answer or {}).get('status') if code == 200 else None
-            if not isinstance(st, dict):
-                self.online = False
-                return False
-            self.online = True
-            sn = st.get('sensor') or {}
-            self.sensor = {'type': sn.get('type'), 'present': bool(sn.get('present'))} if sn.get('type') else None
-            return True
+            if self._query_status(ip, http):
+                return True
         except Exception:
-            self.online = False
-            return False
+            pass
+        new_ip = self._rediscover_ip()
+        if new_ip:
+            try:
+                if self._query_status(new_ip, http):
+                    return True
+            except Exception:
+                pass
+        self.online = False
+        return False
 
     def start_monitor(self, interval=5.0):
         """Poll Wi-Fi feeder /status in a daemon thread while enabled so the camera page shows live connection status."""

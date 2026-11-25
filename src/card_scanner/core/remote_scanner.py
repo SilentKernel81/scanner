@@ -18,6 +18,7 @@ The captured cards themselves come in over HTTP (server/stations_api.py: station
 """
 
 import hmac
+import ipaddress
 import logging
 import secrets
 import threading
@@ -343,6 +344,37 @@ class RemoteScanner:
         if data.get('key') in CAMERA_SETTINGS:
             self.settings.set(data['key'], data.get('value'))
 
+    def update_feeder_ip(self, data):
+        """Persist a Wi-Fi feeder's new DHCP IP reported by the station after MAC-based auto-rediscovery."""
+        if not isinstance(data, dict):
+            return False
+        mac = (data.get('mac') or '').strip().lower()
+        new_ip = data.get('ip')
+        if not mac or not new_ip:
+            return False
+        try:
+            ipaddress.IPv4Address(new_ip)
+        except (ValueError, TypeError):
+            return False
+        with self._revision_lock:
+            saved = self._decided.get('dropper')
+            if not isinstance(saved, dict):
+                return False
+            feeder = saved.get('feeder')
+            if not isinstance(feeder, dict) or (feeder.get('mac') or '').strip().lower() != mac:
+                return False
+            old_ip = feeder.get('ip')
+            if old_ip == new_ip:
+                return False
+            updated_feeder = dict(feeder, ip=new_ip)
+            if data.get('name') and isinstance(data['name'], str):
+                updated_feeder['name'] = data['name'][:40]
+            updated = dict(saved, feeder=updated_feeder)
+            self._decided['dropper'] = updated
+            self.settings.set('dropper', updated)
+        logger.info(f"Card dropper IP updated automatically: {old_ip} -> {new_ip} ({mac})")
+        return True
+
 
 class CameraHub:
     """The /station namespace: each connected client talks to its station's RemoteScanner"""
@@ -443,6 +475,12 @@ class CameraHub:
             scanner = self._client()
             if scanner:
                 scanner.setting(data)
+
+        @socketio.on('feeder_ip', namespace=NAMESPACE)
+        def station_feeder_ip(data):
+            scanner = self._client()
+            if scanner:
+                scanner.update_feeder_ip(data)
 
         @socketio.on('log', namespace=NAMESPACE)
         def station_log(data):
