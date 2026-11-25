@@ -132,7 +132,7 @@ class Station:
         # The card dropper (dropper.py): off until the server's settings switch it on. drop_owed: with auto-add off, (capture_id,
         # scanning session) of the capture whose next card is owed - released only when the server says THAT capture was added,
         # skipped or sent to the review queue (on_review_done), never on an error or a stop. Set, paid and cleared under release_lock
-        self.dropper = Dropper()
+        self.dropper = Dropper(on_feeder_ip_changed=self._on_feeder_ip_changed)
         self.drop_owed = None
         # The releases (release_next_card): one runs at a time (wait for the focus, then the pulse); one more asked for meanwhile is
         # kept and runs right after - a card captured while the previous pulse was still on its way owes its next card all the same
@@ -402,6 +402,11 @@ class Station:
     # ------------------------------------------------------------------------
     # The card dropper (dropper.py: what it does; here: when)
     # ------------------------------------------------------------------------
+
+    def _on_feeder_ip_changed(self, feeder):
+        """Persist a newly rediscovered Wi-Fi feeder IP back to the server without disturbing other settings."""
+        self.emit('feeder_ip', {'mac': feeder.get('mac'), 'ip': feeder.get('ip'), 'name': feeder.get('name')})
+        self.send_log(f"Card dropper moved to {feeder.get('ip')} (reconnected automatically)", level="info")
 
     def _sync_drop_gate(self):
         """Gate auto-capture on confirmed dropper release whenever the Wi-Fi feeder is active."""
