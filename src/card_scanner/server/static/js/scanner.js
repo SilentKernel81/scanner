@@ -126,6 +126,54 @@ function detectionState(status) {
             status.in_focus === false ? 'Focusing...' : `Stabilizing ${status.stable_frames}/${status.required_frames}...`, true];
 }
 
+function updateDropperStatus(dropper) {
+    const badge = $('dropper-status-badge');
+    if (!badge) return;
+    if (!dropper || !dropper.enabled) {
+        badge.hidden = true;
+        return;
+    }
+    badge.hidden = false;
+    badge.classList.remove('is-ok', 'is-busy', 'is-warn', 'is-error');
+    const pulses = Number(dropper.pulses || 0);
+    let cls = 'is-ok';
+    let label = pulses > 0 ? `Dropper · ${pulses}` : 'Dropper ready';
+    if (dropper.busy) {
+        cls = 'is-busy';
+        label = 'Dropping...';
+    } else if (dropper.online === false) {
+        cls = 'is-error';
+        label = 'Dropper offline';
+    } else if (dropper.last_drop === 'stuck') {
+        cls = 'is-warn';
+        label = 'Dropper: Stuck';
+    } else if (dropper.last_drop === 'no_card') {
+        cls = 'is-warn';
+        label = 'Dropper: Empty';
+    } else if (dropper.error) {
+        cls = 'is-error';
+        label = 'Dropper error';
+    }
+    badge.classList.add(cls);
+    badge.querySelector('.dropper-label').textContent = label;
+    const tip = [];
+    if (dropper.feeder && dropper.feeder.ip) {
+        const name = dropper.feeder.name ? `${dropper.feeder.name} (${dropper.feeder.ip})` : dropper.feeder.ip;
+        tip.push(name);
+        badge.href = `http://${dropper.feeder.ip}/`;
+    } else {
+        badge.removeAttribute('href');
+    }
+    if (dropper.sensor && dropper.sensor.type) {
+        tip.push(`Sensor: ${dropper.sensor.type}`);
+    } else if (dropper.transport === 'wifi' && dropper.online === true) {
+        tip.push('Sensor: not detected');
+    }
+    if (pulses > 0) tip.push(`${pulses} dropped`);
+    if (dropper.error) tip.push(dropper.error);
+    badge.title = tip.join(' · ') || 'Card dropper connected';
+}
+
 function updateDetectionStatus(status) {
     lastDetectionStatus = status;
     const [statusClass, icon, text, canCapture] = detectionState(status);
@@ -138,6 +186,7 @@ function updateDetectionStatus(status) {
     // Without a camera the video box says why (the server keeps looking for it)
     $('camera-missing').hidden = !status.camera_error;
     $('camera-missing-reason').textContent = status.camera_error || '';
+    updateDropperStatus(status.dropper);
 }
 
 let detectionPolling = null;

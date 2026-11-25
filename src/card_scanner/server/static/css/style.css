@@ -2134,6 +2134,52 @@ input[type="radio"] {
     color: var(--accent);
 }
 
+.dropper-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    user-select: none;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.dropper-badge[href]:hover {
+    filter: brightness(1.06);
+}
+.dropper-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.dropper-badge.is-ok {
+    border-color: var(--success);
+    background: var(--success-soft);
+    color: var(--success);
+}
+.dropper-badge.is-busy {
+    border-color: var(--info);
+    background: var(--info-soft);
+    color: var(--info);
+}
+.dropper-badge.is-warn {
+    border-color: var(--warning);
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+.dropper-badge.is-error {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
 .area-layer {
     position: absolute;
     pointer-events: none;
