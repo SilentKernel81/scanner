@@ -505,7 +505,10 @@ def get_detection_status():
     """Get current card detection status with detailed state information"""
 
     if scanner:
-        status = scanner.get_detection_status()
+        status = dict(scanner.get_detection_status())
+        ds = getattr(scanner, 'dropper_state', None)
+        if ds is not None and getattr(scanner, 'connected', True):
+            status['dropper'] = ds
         return jsonify(status)
 
     return jsonify({

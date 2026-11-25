@@ -308,6 +308,26 @@ class TheDropper(unittest.TestCase):
         self.dropper.pulse('two')
         self.assertEqual([f.key for f in self.opened], [KEY, 'p' * 32])
 
+    def test_probe_wifi_updates_online_and_sensor_in_state(self):
+        self.dropper.configure(dict(WIFI_ON))
+
+        def ok_http(url, timeout=2):
+            return 200, {'status': {'boot': 'b1', 'sensor': {'type': 'VCNL4200', 'present': False}}}
+
+        self.assertTrue(self.dropper.probe_wifi(http=ok_http))
+        st = self.dropper.state()
+        self.assertTrue(st['enabled'])
+        self.assertTrue(st['online'])
+        self.assertEqual(st['sensor'], {'type': 'VCNL4200', 'present': False})
+        self.assertEqual(st['transport'], 'wifi')
+        self.assertEqual(st['feeder']['ip'], WIFI_ON['feeder']['ip'])
+
+        def fail_http(url, timeout=2):
+            raise OSError('offline')
+
+        self.assertFalse(self.dropper.probe_wifi(http=fail_http))
+        self.assertFalse(self.dropper.state()['online'])
+
 
 class FakeUdp:
     """A UDP socket: what was asked, and the feeders' answers"""

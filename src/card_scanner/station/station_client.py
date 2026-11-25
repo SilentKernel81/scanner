@@ -418,6 +418,10 @@ class Station:
             logger.error(f"Card dropper: the server's settings are refused ({e}) - it stays as it was")
             return
         self._sync_drop_gate()
+        if values['enabled'] and values.get('transport') == 'wifi':
+            self.dropper.start_monitor()
+        else:
+            self.dropper.stop_monitor()
         if not values['enabled']:
             # Off: everything asked for before is cancelled - the debt, the release kept for later, and the one waiting for the focus
             # (a new session: _release refuses it right before its pulse). Switched on again, nothing of before can come back

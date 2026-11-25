@@ -377,6 +377,10 @@ class Dropper:
         self.error = None                  # why the last pulse could not be sent (None: it was, or none was asked for)
         self.last_drop = None              # ramp sensor verdict of last Wi-Fi feed ('dropped' | 'stuck' | 'no_card' | None)
         self.last_pulse = None             # time.time() of the last pulse sent
+        self.online = None                 # True / False for Wi-Fi feeder reachability (None before first check or for GPIO)
+        self.sensor = None                 # {'type': 'VCNL4200', 'present': bool} from Wi-Fi feeder /status, or None
+        self._monitor_stop = None
+        self._monitor_thread = None
 
     @property
     def enabled(self):
@@ -389,6 +393,9 @@ class Dropper:
             same_pin = all(values[key] == self.config[key] for key in ('transport', 'chip', 'pin', 'active_low', 'feeder', 'pair_key'))
             if not same_pin or not values['enabled']:
                 self._close_pin()
+                self.online = None
+                self.sensor = None
+                self.last_drop = None
             self.config = values
             if not values['enabled']:
                 self.error = None          # an old error says nothing about a dropper that is off
@@ -442,26 +449,94 @@ class Dropper:
                     self.last_drop = getattr(self._pin, 'last_drop', None)
                 except Exception as e:
                     self.last_drop = getattr(self._pin, 'last_drop', None)
+                    if self.config['transport'] == 'wifi' and self.last_drop is None:
+                        self.online = False
+                    elif self.config['transport'] == 'wifi':
+                        self.online = True
                     self._fail(e)
                     self._close_pin()
                     return False
             self.pulses += 1
             self.last_pulse = time.time()
             self.error = None
+            if self.config['transport'] == 'wifi':
+                self.online = True
             logger.info(f"Card dropper: card released ({reason}) - {self.pulses} since the start")
             return True
         except Exception as e:
+            if self.config['transport'] == 'wifi':
+                self.online = False
             self._fail(e)
             self._close_pin()
             return False
         finally:
             self._lock.release()
 
+    def probe_wifi(self, http=feeder_http):
+        """Lightweight non-blocking /status check for a Wi-Fi feeder; updates online & sensor without moving anything."""
+        cfg = self.config
+        if not cfg.get('enabled') or cfg.get('transport') != 'wifi' or not cfg.get('feeder'):
+            return None
+        ip = cfg['feeder'].get('ip')
+        if not ip:
+            return None
+        try:
+            code, answer = http(f'http://{ip}/status', timeout=2)
+            st = (answer or {}).get('status') if code == 200 else None
+            if not isinstance(st, dict):
+                self.online = False
+                return False
+            self.online = True
+            sn = st.get('sensor') or {}
+            self.sensor = {'type': sn.get('type'), 'present': bool(sn.get('present'))} if sn.get('type') else None
+            return True
+        except Exception:
+            self.online = False
+            return False
+
+    def start_monitor(self, interval=5.0):
+        """Poll Wi-Fi feeder /status in a daemon thread while enabled so the camera page shows live connection status."""
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            return
+        stop = threading.Event()
+        self._monitor_stop = stop
+
+        def _loop():
+            while not stop.is_set():
+                if self.enabled and self.config.get('transport') == 'wifi' and not self._lock.locked():
+                    self.probe_wifi()
+                stop.wait(interval)
+
+        t = threading.Thread(target=_loop, name='dropper-monitor', daemon=True)
+        self._monitor_thread = t
+        t.start()
+
+    def stop_monitor(self):
+        stop = self._monitor_stop
+        if stop is not None:
+            stop.set()
+            self._monitor_stop = None
+        self._monitor_thread = None
+
     def state(self):
-        """What the server shows on the Settings page"""
-        return {'enabled': self.enabled, 'pulses': self.pulses, 'error': self.error, 'last_pulse': self.last_pulse}
+        """What the server shows on the Settings and Camera pages (instant, non-blocking)."""
+        cfg = self.config
+        feeder = cfg.get('feeder')
+        return {
+            'enabled': self.enabled,
+            'pulses': self.pulses,
+            'error': self.error,
+            'last_pulse': self.last_pulse,
+            'busy': self._lock.locked(),
+            'last_drop': self.last_drop,
+            'transport': cfg.get('transport'),
+            'feeder': {'ip': feeder.get('ip'), 'name': feeder.get('name') or feeder.get('feeder')} if isinstance(feeder, dict) else None,
+            'online': self.online,
+            'sensor': self.sensor,
+        }
 
     def close(self):
+        self.stop_monitor()
         with self._lock:
             self._close_pin()
 
