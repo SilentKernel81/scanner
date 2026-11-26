@@ -76,7 +76,10 @@ game sits behind one interface (`games/`), so another could be added.
   each printing exists in (a printing that exists only in foil is known for certain). Where the
   OCR does not read the marker, a small network reads it from the set line (`foil_net.onnx`,
   since 2026-10-20) before the vision AI is asked; measured on 13 recent sets only, never tried
-  on a Pi or in the Android app.
+  on a Pi or in the Android app. Since 2026-11-25 the marker counts on every modern-frame card (2014 on), not only
+  from The Lord of the Rings on - checked on 24 of the owner's 2014 - 2023 captures, only 4 of them foils - and a ★ / •
+  the OCR read against a network sure of the opposite sends the card to review instead of filing it (the OCR read a
+  foil's ★ as a dot on 1 of 201 modern foils). Cards of the older frames print no marker: their finish still goes to review.
 - **Tokens and emblems** are in the card data (since 2026-10-20) and are matched by the `T 0001` their
   collector line prints, which Scryfall files under the token set (`tfra`); written from one scan session's
   pictures and tests on synthetic data, **never run on a real card-data download yet** (it needs a card-data
@@ -133,7 +136,7 @@ game sits behind one interface (`games/`), so another could be added.
   code with OCR off on the owner's 41 Pixel captures (28 added by the picture alone, 24 ms a card on the phone), then the vision AI - or, with the app's new
   AI switch off, review. On by default. **Not yet tried on cards with the phone** (only its parity tests); no OCR on the phone, so no collector line. The
   ★ / • foil marker IS read (since 2026-10-21): the foil network at the fixed place, as the server with OCR off - only for a card the search turned upright and
-  whose printings all print a marker (from The Lord of the Rings on, modern frame); on the 28 Pixel captures the picture adds, 17 finishes from it, the same
+  whose printings all print a marker (from The Lord of the Rings on, modern frame - the server's own strip reading counts the whole modern frame since 2026-11-25, the fixed place does not); on the 28 Pixel captures the picture adds, 17 finishes from it, the same
   as the server's code. Needs a server whose index table carries the release date and frame (this version); an older server's table: no marker reading.
 - **A printing check in shadow mode** (since 2026-10-20): a 96-byte fingerprint of every
   printing's picture (Settings > Card data, or `scripts/build_image_index.py`; about 15 MB; after a card database update the same button downloads only the new pictures) lets the server ask whether

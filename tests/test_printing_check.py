@@ -1021,10 +1021,12 @@ class TheFinishEvidence(unittest.TestCase):
                          {'number': '172', 'set': 'hob', 'symbol': 'foil', 'net': None})
         self.assertEqual(reader.calls, 1)
 
-    def test_the_network_is_asked_only_when_the_ocr_read_no_symbol(self):
+    def test_the_network_is_asked_beside_a_symbol_too(self):
+        # (since 2026-11-25: a sure network against the symbol is a conflict - decide_finish)
         net = self.FakeNet(0.97)
         read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB \u2605 EN', 40)]), self.CARD, net)
-        self.assertEqual((read['symbol'], read['net'], net.asked), ('foil', None, 0))
+        self.assertEqual((read['symbol'], read['net'], net.asked), ('foil', 0.97, 1))
+        net = self.FakeNet(0.97)
         read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB EN', 40)]), self.CARD, net)
         self.assertEqual((read['symbol'], read['net'], net.asked), ('unknown', 0.97, 1))
 

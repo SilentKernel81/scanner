@@ -98,13 +98,15 @@ def decide_finish(finishes, symbol='unknown', net=None, thresholds: Optional[dic
     """
     The finish of a card whose printing is known (phase 2b: its own rule, answered in its own field of the log - never part of rule A2's answer).
     finishes: what the printing exists in ('nonfoil', 'foil', 'etched'); symbol: the foil symbol the OCR read in the set line ('foil', 'non-foil' or
-    'unknown'); net: the foil network's probability of a foil, or None (it is asked only when the symbol was not read).
+    'unknown'); net: the foil network's probability of a foil, or None (not asked).
     In this order:
       1. a printing that exists in one finish only is certain: 'foil' (foil / etched only) or 'regular' (non-foil only) - source 'printing';
-      2. the symbol the OCR read - source 'symbol';
+      2. the symbol the OCR read - source 'symbol' - unless the network is sure of the opposite: then 'unknown', source 'conflict' (since 2026-11-25: the OCR read a
+         foil's ★ as a dot on 1 of 201 full-size captures of modern foils and on a DMR foil, the network sure of a foil both times; it never contradicted the dot of 161
+         regular copies);
       3. the network, when it is sure either way (>= sure for a foil, <= 1 - sure for a regular card) - source 'network';
       4. otherwise 'unknown', source 'none' - NOT 'regular': an unread marker says nothing (the live rule, Game.suggested_finish, files it as regular).
-    Returns {'finish': 'foil' | 'regular' | 'unknown', 'source': 'printing' | 'symbol' | 'network' | 'none'}. A surge foil is 'foil' here: the kind of foil is not decided.
+    Returns {'finish': 'foil' | 'regular' | 'unknown', 'source': 'printing' | 'symbol' | 'network' | 'conflict' | 'none'}. A surge foil is 'foil' here: the kind of foil is not decided.
     """
     sure = (thresholds or FINISH_THRESHOLDS)['sure']
     finishes = finishes or []
@@ -114,10 +116,10 @@ def decide_finish(finishes, symbol='unknown', net=None, thresholds: Optional[dic
         return {'finish': 'foil', 'source': 'printing'}
     if has_nonfoil and not has_foil:
         return {'finish': 'regular', 'source': 'printing'}
-    if symbol == 'foil':
-        return {'finish': 'foil', 'source': 'symbol'}
-    if symbol == 'non-foil':
-        return {'finish': 'regular', 'source': 'symbol'}
+    if symbol in ('foil', 'non-foil'):
+        if net is not None and (net <= 1 - sure if symbol == 'foil' else net >= sure):
+            return {'finish': 'unknown', 'source': 'conflict'}
+        return {'finish': 'foil' if symbol == 'foil' else 'regular', 'source': 'symbol'}
     if net is not None:
         if net >= sure:
             return {'finish': 'foil', 'source': 'network'}

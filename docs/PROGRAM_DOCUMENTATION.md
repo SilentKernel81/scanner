@@ -1335,7 +1335,12 @@ shown as a picker when there's more than one.
 Modern cards print a star instead of a dot between set code and language on foil copies
 (`HOB★EN` vs `HOB•EN`). **An unread finish is not regular** (since 2026-10-21): a confirmed printing made in foil and non-foil whose marker nothing read goes
 to review with its printing (`Game.finish_known`, see "Adding automatically vs. reviewing"); and in the picture + collector line path the strip's symbol and
-the network decide only for a printing that prints the marker at all (`prints_a_marker`; the reading by picture's rule (3) below). For captures found by outline detection - where the corner is known to
+the network decide only for a printing that prints the marker at all (`marker_on_line`: the modern frame; the reading by picture's rule (3) below). **A symbol the
+OCR read against a network sure of the opposite is unknown** (since 2026-11-25, `decide_finish` source `conflict`, `foil_marker.answer_with_symbol`; the network is
+asked beside every symbol the strip reads): on full-size captures the OCR read a foil's ★ as a dot on 1 of 201 modern foils and on a DMR foil, the network sure of
+a foil both times; it never contradicted the dot of 161 regular copies, nor the ★ of 205 foils and 39 surge foils (`check_foil_marker.py` after the change: held-out
+cards 393 of 400 answered, all right; the 15 Deadpool confetti foils 15 / 15). Before, the symbol always won and such a foil went in as regular. Only the strip's reading
+is checked so: the full-card OCR's own symbol (`parse_magic`) still stands alone. For captures found by outline detection - where the corner is known to
 be in the image - `read_foil_symbol()` sends the bottom-left corner (lowest 14% × left 45% of
 the flat card, enlarged 3×) and asks which symbol it is (`vision_ai.detect_foil`).
 
@@ -1643,9 +1648,12 @@ closed: a misread suffix costs a review, never a wrong printing). Checked on the
 (2) **The confirmation reads the card the way up the picture search found it**: `live_read` returns `rotated`, `_ocr_names` reads the card turned 180 degrees
 when it is set - the strip was always read so, the full card was read as given, and `parse_magic` finds the title at the top only (an upside-down card's
 decision was refused for that alone). (3) **The strip's star / dot and the foil network give the finish only on a printing that prints the marker**
-(`prints_a_marker`: The Lord of the Rings on, modern frame - the rule the fixed-place network already followed): an older line's separator is not known to
-encode the finish; the 200 station captures with a known finish all print the marker (symbol right 76, wrong 1), so nothing was measured on older cards -
-failing closed costs them the AI's foil check or a review. Left open: with OCR OFF there is nothing to agree with - the person's "picture only" configuration takes that risk knowingly; and a reprint of the SAME card in a set newer than the card data, with an unreadable
+(`marker_on_line`: the modern frame, any date - since 2026-11-25; from 2026-10-21 until then `prints_a_marker`, The Lord of the Rings on, which sent every
+2014 - 2023 card whose printing exists in both finishes to review): older frames (1993 / 1997 / 2003) print no marker and the network answered confidently on 53
+of 80 of them, so only their own finishes count - the AI's foil check or a review. **Measured for the 2014 - 2023 modern frame** on the owner's full-size captures
+(KTK, ORI, SOI, EMN, KLD, M19, GRN, M20, IKO, DMR, The List; finish confirmed by the owner): 4 foils with a ★ (the network sure of a foil on 3, the 4th's set line not found), 20 regular
+copies with a • (the network agreeing on 17, unsure on 3) - few foils: watch `reading.jsonl`. The fixed-place crop (OCR off, the phone) keeps `prints_a_marker`:
+it was measured on LTR-on cards only. Left open: with OCR OFF there is nothing to agree with - the person's "picture only" configuration takes that risk knowingly; and a reprint of the SAME card in a set newer than the card data, with an unreadable
 strip, passes the name check (the same name) and would be added as an older printing of that card. **The Scanner pages say when the index is stale or missing** (a banner under the header of the cameras' overview and of each camera's
 page, `common.js: showIndexNotice / loadIndexNotice`, from `/api/scan_settings`'s `reading.index_missing`; asked on opening, every five minutes and after a card data update). **Measured on the rehearsal server** (`scripts/experiments/image_match/rehearse_matrix.py`: a copy of the real data in a second container, the same 39 pictures - 15 Deadpool phone captures, 12 ordinary, 12 hard
 evaluation pictures - in the four configurations, each answer scored against the known one): **0 added wrong in any of them.** OCR on + AI on: 39 added, picture 18 + picture and strip 19 + AI 2 (the old order asked the AI for 20 of the same

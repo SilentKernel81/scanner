@@ -107,6 +107,7 @@ class OnTheSyntheticIndex(unittest.TestCase):
         ident.ocr_enabled = True
         ident.card_ocr = reader
         ident.foil_marker = mock.Mock()               # foil_marker.read would read the card as given: it must not be asked
+        ident.foil_marker.probability.return_value = 0.97     # the network, asked beside the star live_read's strip read, agrees
         ident.evidence = self.check
         with capture.using(capture.CaptureEvidence()):
             self.check.live_read(turned, None, reader, ident.foil_marker, False)

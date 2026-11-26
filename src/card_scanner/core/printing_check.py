@@ -248,8 +248,22 @@ def ocr_facts(read, card, printing_at, strip=None):
 
 
 def prints_a_marker(card):
-    """Whether a printing (card dict: released_at, frame) is one the foil network was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False for anything missing or unreadable."""
+    """
+    Whether a printing (card dict: released_at, frame) is one the foil network AT ITS FIXED PLACE was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False
+    for anything missing or unreadable. For the set line the OCR FOUND, the wider marker_on_line holds.
+    """
     return bool(card) and (card.get('released_at') or '') >= MARKER_FROM and card.get('frame') == MARKER_FRAME
+
+
+def marker_on_line(card):
+    """
+    Whether the ★ / • on a printing's set line says its finish, where the OCR FOUND that line (the strip's symbol, and the network cut at the OCR's own box): every printing
+    in the MARKER_FRAME frame, whatever its date - since 2026-11-25. Measured on the owner's full-size captures of 2014 - 2023 printings in that frame (KTK, ORI, SOI, EMN, KLD,
+    M19, GRN, M20, IKO, DMR, The List): 4 foils with a ★ (the network sure of a foil on 3, the 4th's set line not found), 20 regular copies with a • (the network agreeing
+on 17, unsure on 3) - few foils, so watch the reading log. Older
+    frames (1993 / 1997 / 2003) print no marker at all: only the printing's own finishes count there. The fixed-place crop (OCR off) keeps the narrower prints_a_marker.
+    """
+    return bool(card) and card.get('frame') == MARKER_FRAME
 
 
 def orientation_established(search):
@@ -274,8 +288,9 @@ def saw_a_set_line(strip):
 def read_strip_evidence(ocr, card_rgb, net=None):
     """
     The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
-    set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked only when the OCR read no symbol and there is a network (a
-    foil_marker.FoilMarker; a separate instance from the live path's) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
+    set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked whenever there is a network (a foil_marker.FoilMarker; a separate
+    instance from the live path's) and a set line, also beside a symbol the OCR read (since 2026-11-25: a sure network against the symbol makes the finish unknown,
+    decide_finish - the OCR reads a foil's ★ as a dot now and then) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
     """
     if ocr is None:
         # OCR switched off: no number, no set, no symbol - but the foil network can still be asked about the set line at its fixed place (foil_marker.FIXED_BOX)
@@ -289,7 +304,7 @@ def read_strip_evidence(ocr, card_rgb, net=None):
     line = foil_marker.set_line(lines)
     symbol = foil_marker.symbol_read(line) if line else 'unknown'
     probability = None
-    if symbol == 'unknown' and net is not None and line is not None:
+    if net is not None and line is not None:
         crop = foil_marker.set_line_crop(strip, line['box'])
         if crop is not None:
             probability = net.probability(crop)
@@ -855,10 +870,11 @@ class PrintingCheck:
             reading_record.refuse(verdict['refused'])
         if not (verdict['accepted'] or verdict['needs_ocr']):
             return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
-        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (prints_a_marker: from The Lord of
-        # the Rings on, modern frame - a Codex review of 2026-10-21: a separator on an older line is not known to encode the finish, and the network answered
-        # confidently on 53 of 80 old-frame cards); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review
-        marker = prints_a_marker(card)
+        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (marker_on_line: the modern frame - a Codex
+        # review of 2026-10-21: the network answered confidently on 53 of 80 old-frame cards, which print none; until 2026-11-25 only from The Lord of the Rings on,
+        # which sent every 2014 - 2023 card to review); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review.
+        # With OCR off the network was asked at the FIXED place, measured on LTR-on cards only: prints_a_marker there
+        marker = marker_on_line(card) if ocr is not None else prints_a_marker(card)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'] if marker else 'unknown', strip['net'] if marker else None),
                 'similarity': decision['similarity'], 'lead': decision['lead'],
@@ -868,11 +884,11 @@ class PrintingCheck:
     def finish_named_by_strip(self, strip, name):
         """
         The finish of a card whose printing was NOT decided, from its strip: 'foil', 'non-foil' or 'unknown'. Only when the strip's whole line names a printing, that printing
-        has the name the OCR read, and it prints a marker (prints_a_marker: the foil network answers confidently on older frames too, and is wrong there). The rule is the
+        has the name the OCR read, and it prints a marker (marker_on_line: the foil network answers confidently on older frames too, and is wrong there). The rule is the
         decided card's, decide_finish.
         """
         named = self._strip_printing(strip)
-        if named is NO_LINE or named is LOOKUP_FAILED or not named or not name or not prints_a_marker(named):
+        if named is NO_LINE or named is LOOKUP_FAILED or not named or not name or not marker_on_line(named):
             return 'unknown'
         if not database_names_match(name, {'name': named.get('name'), 'flavor_name': named.get('flavor_name')}):
             return 'unknown'

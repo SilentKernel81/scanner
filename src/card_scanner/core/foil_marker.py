@@ -153,6 +153,22 @@ def answer_for(probability):
     return 'unknown', probability
 
 
+def answer_with_symbol(symbol, probability):
+    """
+    The marker from the symbol the OCR read on the set line and the network's probability (None: not asked) - the rule of reading.decide.decide_finish's steps 2 - 4:
+    a symbol stands, (symbol, None) - unless the network is sure of the opposite, ('unknown', probability): the OCR reads a foil's ★ as a dot now and then (since
+    2026-11-25: 1 of 201 full-size captures of modern foils, and a DMR foil; the network was sure of a foil both times and never contradicted the dot of 161 regular
+    copies). No symbol: the network's answer at SURE (answer_for); neither: ('unknown', None).
+    """
+    if symbol in ('foil', 'non-foil'):
+        if probability is not None and answer_for(probability)[0] not in ('unknown', symbol):
+            return 'unknown', probability
+        return symbol, None
+    if probability is None:
+        return 'unknown', None
+    return answer_for(probability)
+
+
 class FoilMarker:
     """The network, loaded once. One instance serves all threads (a lock: a dnn network is not safe to run from two at once)."""
 
@@ -176,10 +192,12 @@ class FoilMarker:
         """
         The marker of a flat card: ('foil' | 'non-foil' | 'unknown', probability or None).
         ocr: the OCR reader (card_ocr.CardOcr) - asked once more, on the strip alone.
-        A symbol the OCR itself read on the strip (a star or a dot) stands, and the network is not
-        asked: it is never wrong when read (99.9%), the network on its own was wrong twice in five on
-        confetti-foil cards. Probability is None for such an answer. Otherwise the network is asked
-        about the set line: 'unknown' when the strip has no set line, or it is not sure either way (SURE).
+        A symbol the OCR itself read on the strip (a star or a dot) stands - it is right when read
+        (99.9%), the network on its own was wrong twice in five on confetti-foil cards - unless the
+        network, asked beside it, is sure of the opposite: 'unknown' then (answer_with_symbol; since
+        2026-11-25 - the OCR reads a foil's ★ as a dot now and then). Probability is None for an answer
+        that is the symbol. Otherwise the network's: 'unknown' when the strip has no set line, or it is
+        not sure either way (SURE).
         """
         if card_rgb is None or min(card_rgb.shape[:2]) < 2:
             return 'unknown', None
@@ -190,13 +208,8 @@ class FoilMarker:
         line = set_line(lines)
         if line is None:
             return 'unknown', None
-        symbol = symbol_read(line)
-        if symbol != 'unknown':
-            return symbol, None
         crop = set_line_crop(strip, line['box'])
-        if crop is None:
-            return 'unknown', None
-        return answer_for(self.probability(crop))
+        return answer_with_symbol(symbol_read(line), self.probability(crop) if crop is not None else None)
 
     def read_fixed(self, card_rgb):
         """
