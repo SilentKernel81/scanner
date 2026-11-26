@@ -158,18 +158,25 @@ class Reading(unittest.TestCase):
         marker.probability = lambda crop: probability          # the network's answer, set by the test
         return marker
 
-    def test_a_star_the_strip_ocr_read_beats_a_network_that_is_sure_it_is_regular(self):
-        # the contradiction the review of 2026-10-20 found: the second OCR request recovered a ★, the network says 0.001
-        self.assertEqual(self.marker(0.001).read(self.CARD, FakeOcr(self.WITH_STAR)), ('foil', None))
+    def test_a_symbol_the_strip_ocr_read_against_a_network_sure_of_the_opposite_is_unknown(self):
+        # until 2026-11-25 the symbol won (the contradiction the review of 2026-10-20 found: a ★ recovered, the network at 0.001). Since then a conflict is unknown -
+        # review or the AI's check: the OCR read a foil's ★ as a dot on 1 of 201 full-size captures of modern foils and on a DMR foil, the network sure of a foil both times
+        self.assertEqual(self.marker(0.001).read(self.CARD, FakeOcr(self.WITH_STAR)), ('unknown', 0.001))
+        self.assertEqual(self.marker(0.999).read(self.CARD, FakeOcr(self.WITH_DOT)), ('unknown', 0.999))
 
-    def test_a_dot_the_strip_ocr_read_beats_a_network_that_is_sure_it_is_foil(self):
-        self.assertEqual(self.marker(0.999).read(self.CARD, FakeOcr(self.WITH_DOT)), ('non-foil', None))
+    def test_a_symbol_the_ocr_read_is_the_answer_when_the_network_agrees_or_is_not_sure(self):
+        for probability in (0.98, 0.5):
+            self.assertEqual(self.marker(probability).read(self.CARD, FakeOcr(self.WITH_STAR)), ('foil', None))
+        for probability in (0.02, 0.5):
+            self.assertEqual(self.marker(probability).read(self.CARD, FakeOcr(self.WITH_DOT)), ('non-foil', None))
 
-    def test_a_symbol_the_ocr_read_is_the_answer_without_asking_the_network(self):
-        marker = foil_marker.load(True)
-        marker.probability = mock.Mock(side_effect=AssertionError('the network must not be asked'))
-        self.assertEqual(marker.read(self.CARD, FakeOcr(self.WITH_STAR))[0], 'foil')
-        self.assertEqual(marker.read(self.CARD, FakeOcr(self.WITH_DOT))[0], 'non-foil')
+    def test_answer_with_symbol_is_decide_finishs_rule_for_a_printing_in_both_finishes(self):
+        from card_scanner.core.reading.decide import decide_finish
+        word = {'foil': 'foil', 'regular': 'non-foil', 'unknown': 'unknown'}
+        for symbol in ('foil', 'non-foil', 'unknown'):
+            for probability in (None, 0.0, 0.05, 0.1, 0.5, 0.9, 0.95, 1.0):
+                self.assertEqual(foil_marker.answer_with_symbol(symbol, probability)[0],
+                                 word[decide_finish(['nonfoil', 'foil'], symbol, probability)['finish']], (symbol, probability))
 
     def test_the_symbols_ocr_gives_are_read_as_parse_magic_reads_them(self):
         for text, want in (('HOB ★ EN', 'foil'), ('HOB*EN', 'foil'), ('HOB ☆ EN', 'foil'), ('HOB·EN', 'non-foil'),

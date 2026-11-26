@@ -29,16 +29,19 @@ from test_printing_check import FakeReader, degraded, line, synthetic_card, writ
 class Cards:
     """get_card_by_id for the synthetic printings: p<n> is number n of set 'tst', in both finishes; p9 does not exist"""
 
-    def __init__(self, finishes=None, old=()):
+    def __init__(self, finishes=None, old=(), earlier=()):
         self.finishes = finishes or {}
-        self.old = old                      # printings of an older release / frame (no foil marker): '*' for all of them
+        self.old = old                      # printings of an older frame (no foil marker): '*' for all of them
+        self.earlier = earlier              # printings of the modern frame released before The Lord of the Rings (a marker on the line, not measured at the fixed place)
 
     def get_card_by_id(self, printing_id):
         if printing_id == 'p9':
             return None
         older = '*' in self.old or printing_id in self.old
+        earlier = '*' in self.earlier or printing_id in self.earlier
         return {'id': printing_id, 'name': f'Card {printing_id}', 'set_code': 'tst', 'number': printing_id[1:], 'oracle_id': f'o-{printing_id}',
-                'finishes': self.finishes.get(printing_id, ['nonfoil', 'foil']), 'frame': '2015', 'released_at': '2019-11-01' if older else '2024-05-01'}
+                'finishes': self.finishes.get(printing_id, ['nonfoil', 'foil']), 'frame': '2003' if older else '2015',
+                'released_at': '2011-09-30' if older else '2019-11-01' if earlier else '2024-05-01'}
 
     def get_card_by_set_number(self, set_code, collector_number, exact=False):
         printing_id = f'p{int(collector_number)}'
@@ -166,6 +169,15 @@ class LiveRead(unittest.TestCase):
         for unreadable in (None, {}, {'frame': '2015'}, {'released_at': None, 'frame': '2015'}):
             self.assertFalse(printing_check.prints_a_marker(unreadable))
 
+    def test_marker_on_line_is_the_modern_frame_whatever_its_date(self):
+        # (since 2026-11-25: 2014 - 2023 printings in the modern frame print the star / dot too - measured on the owner's captures; the fixed place keeps prints_a_marker)
+        for released in ('2014-09-26', '2019-07-12', '2023-01-13', printing_check.MARKER_FROM, '2026-10-02'):
+            self.assertTrue(printing_check.marker_on_line({'released_at': released, 'frame': '2015'}), released)
+        for frame in ('2003', '1997', '1993', None):
+            self.assertFalse(printing_check.marker_on_line({'released_at': '2024-05-01', 'frame': frame}), frame)
+        self.assertFalse(printing_check.marker_on_line(None))
+        self.assertFalse(printing_check.marker_on_line({}))
+
     def test_without_a_reader_the_network_is_not_asked_about_a_card_that_prints_no_marker(self):
         # (Codex review, 2026-10-20: orientation is not layout - an older frame has no star or dot, and the network would answer about whatever sits in the box)
         picture = degraded(synthetic_card(3))
@@ -183,6 +195,17 @@ class LiveRead(unittest.TestCase):
         net.probability.reset_mock()
         self.make(Cards()).live_read(picture, None, None, net, accept_image_alone=True)
         net.probability.assert_called_once()                                                   # all of them modern: asked
+
+    def test_without_a_reader_a_modern_frame_card_from_before_the_lord_of_the_rings_is_still_not_read_at_the_fixed_place(self):
+        # (2026-11-25: the strip's set line, found by the OCR, counts the whole modern frame - marker_on_line; the fixed place was measured on LTR-on cards only and
+        # keeps prints_a_marker)
+        picture = degraded(synthetic_card(3))
+        net = mock.Mock(probability=mock.Mock(return_value=0.97))
+        check = self.make(Cards(earlier={'*'}))
+        reading = check.live_read(picture, None, None, net, accept_image_alone=True)
+        net.probability.assert_not_called()
+        self.assertNotEqual(reading['finish']['source'], 'network')
+        self.assertIsNone(check.upright(picture, needs_marker=True))
 
     def test_only_the_printings_the_picture_cannot_tell_apart_from_its_best_match_count(self):
         # an older reprint that looks clearly different from the picture does not make a modern card unmarked (all five nearest would: 15% of modern cards passed) ...
@@ -461,8 +484,15 @@ class LiveRead(unittest.TestCase):
         net = mock.Mock()
         net.probability.return_value = 0.97
         self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(3, '')), net)['finish'], {'finish': 'foil', 'source': 'network'})
-        # a printing that does NOT print the marker (released before The Lord of the Rings): neither the star read nor the network says its finish - unknown,
-        # the AI's foil check or review follows (a Codex review of 2026-10-21: an older line's separator is not known to encode the finish)
+        # a sure network against the symbol read: a conflict, unknown (since 2026-11-25: the OCR reads a foil's star as a dot now and then)
+        self.assertEqual(self.check.live_read(picture, None, FakeReader(strip_lines(3, '•')), net)['finish'], {'finish': 'unknown', 'source': 'conflict'})
+        # a modern-frame printing released before The Lord of the Rings prints the marker too (marker_on_line, since 2026-11-25 - measured on 2014 - 2023 captures)
+        earlier = self.make(Cards(earlier=('p3',)))
+        self.assertEqual(earlier.live_read(picture, None, FakeReader(strip_lines(3, '•')))['finish'], {'finish': 'regular', 'source': 'symbol'})
+        self.assertEqual(earlier.live_read(picture, None, FakeReader(strip_lines(3, '★')))['finish'], {'finish': 'foil', 'source': 'symbol'})
+        self.assertEqual(earlier.live_read(picture, None, FakeReader(strip_lines(3, '')), net)['finish'], {'finish': 'foil', 'source': 'network'})
+        # a printing of an older FRAME prints no marker: neither the star read nor the network says its finish - unknown, the AI's foil check or review follows
+        # (a Codex review of 2026-10-21: the network answered confidently on 53 of 80 old-frame cards)
         older = self.make(Cards(old=('p3',)))
         self.assertEqual(older.live_read(picture, None, FakeReader(strip_lines(3, '★')))['finish'], {'finish': 'unknown', 'source': 'none'})
         self.assertEqual(older.live_read(picture, None, FakeReader(strip_lines(3, '•')))['finish'], {'finish': 'unknown', 'source': 'none'})
@@ -1132,10 +1162,24 @@ class InIdentification(unittest.TestCase):
         self.ident._ai_foil_check = lambda foil_image: True
         self.game.confirmed_card = lambda name, number=None, set_code=None: {
             'id': 'ocr-printing', 'name': name, 'flavor_name': None, 'number': number, 'set_code': set_code,
-            'finishes': ['nonfoil', 'foil'], 'released_at': '2019-11-01', 'frame': '2015'}
+            'finishes': ['nonfoil', 'foil'], 'released_at': '2011-09-30', 'frame': '2003'}
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual(task, identification.FOIL)
         self.ident.foil_marker.read.assert_not_called()
+
+    def test_a_modern_frame_ocr_confirmed_card_from_before_the_lord_of_the_rings_asks_the_foil_network(self):
+        # (since 2026-11-25: marker_on_line - a 2014 - 2023 modern-frame printing prints the star / dot)
+        self.confirmed_ocr()
+        self.ocr_read['foil'] = 'unknown'
+        self.ident.foil_marker = mock.Mock()
+        self.ident.foil_marker.read.return_value = ('foil', 0.99)
+        self.ident._ai_foil_check = lambda foil_image: True
+        self.game.confirmed_card = lambda name, number=None, set_code=None: {
+            'id': 'ocr-printing', 'name': name, 'flavor_name': None, 'number': number, 'set_code': set_code,
+            'finishes': ['nonfoil', 'foil'], 'released_at': '2019-11-01', 'frame': '2015'}
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertIsNone(task)
+        self.assertEqual(info['foil'], 'foil')
 
     def test_without_the_printing_check_or_in_cascade_the_ocr_read_is_not_questioned(self):
         self.confirmed_ocr()

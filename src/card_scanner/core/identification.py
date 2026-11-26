@@ -32,7 +32,7 @@ from card_scanner import games
 from card_scanner.core import foil_marker, prompts
 from card_scanner.core.card_identifier import CardIdentifier
 from card_scanner.core.card_ocr import CardOcr
-from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, name_only_partly_read, ocr_facts, printing_named_by_line, prints_a_marker
+from card_scanner.core.printing_check import EVIDENCE_READER, PICTURE_READER, marker_on_line, name_only_partly_read, ocr_facts, printing_named_by_line, prints_a_marker
 from card_scanner.core.reading.decide import confirm_by_ocr
 from card_scanner.core.reading import capture as reading_capture, record as reading_record
 from card_scanner.config import Config
@@ -296,14 +296,11 @@ class Identification:
     @staticmethod
     def _foil_of_strip(strip):
         """
-        The marker from the strip's evidence (printing_check.read_strip_evidence), exactly as foil_marker.read answers from the same read: the symbol the OCR read
-        stands (probability None); otherwise the network's probability, believed one way or the other at foil_marker.SURE; nothing: 'unknown'
+        The marker from the strip's evidence (printing_check.read_strip_evidence), exactly as foil_marker.read answers from the same read (foil_marker.answer_with_symbol):
+        the symbol the OCR read stands (probability None) unless the network is sure of the opposite ('unknown'); otherwise the network's probability, believed one way
+        or the other at foil_marker.SURE; nothing: 'unknown'
         """
-        if strip['symbol'] != 'unknown':
-            return strip['symbol'], None
-        if strip['net'] is None:
-            return 'unknown', None
-        return foil_marker.answer_for(strip['net'])
+        return foil_marker.answer_with_symbol(strip['symbol'], strip['net'])
 
     def _foil_of_unconfirmed_read(self, image, foil_image, ocr_info):
         """
@@ -526,9 +523,10 @@ class Identification:
                 finishes = (ocr_card or {}).get('finishes') or []
                 needs_foil = not finishes or (('foil' in finishes or 'etched' in finishes) and 'nonfoil' in finishes)
                 # OCR misses the marker on about a third of the foils: the small network reads it
-                # from the set line first (when the printing prints a marker); only what it is not sure of is asked of the AI
+                # from the set line first (when the printing prints a marker - marker_on_line: the OCR is on here, so the line is the one it finds); only what it is not
+                # sure of is asked of the AI
                 if ocr_info['foil'] == 'unknown' and needs_foil:
-                    if ocr_card is None or not ocr_card.get('released_at') or prints_a_marker(ocr_card):
+                    if ocr_card is None or not ocr_card.get('released_at') or marker_on_line(ocr_card):
                         ocr_info['foil'] = self._read_foil_locally(image, foil_image)
                 if ocr_info['foil'] == 'unknown' and needs_foil and self._ai_foil_check(foil_image):
                     return ocr_info, FOIL

@@ -174,6 +174,10 @@ def feeder_http(url, form=None, timeout=FEEDER_HTTP_S):
         raise OSError(f'not a feeder\'s answer ({e})') from None
 
 
+class FeederUnreachableError(RuntimeError):
+    """The Wi-Fi feeder did not answer over the network (offline or moved to a new DHCP IP)."""
+
+
 class WifiFeeder:
     """
     A feeder on the network, as a pin: set(True) asks it for one card (the card is on its way once it took the request),
@@ -195,7 +199,7 @@ class WifiFeeder:
             code, answer = self._http(self.base + '/status')
             return answer['status']['boot']
         except (OSError, KeyError, TypeError) as e:
-            raise RuntimeError(f'the feeder at {self.ip} does not answer ({e})') from None
+            raise FeederUnreachableError(f'the feeder at {self.ip} does not answer ({e})') from None
 
     def set(self, active):
         if active:
@@ -227,7 +231,7 @@ class WifiFeeder:
                 if code == 200:
                     self.under_way = n
                     return
-                raise RuntimeError(f'the feeder at {self.ip} did not answer the request ({e})') from None
+                raise FeederUnreachableError(f'the feeder at {self.ip} did not answer the request ({e})') from None
             if code in (200, 202):        # taken now, or taken before (a retry): set(False) waits for it, or says it failed
                 self.under_way = n
                 return
@@ -380,11 +384,15 @@ class Dropper:
         self._lock = threading.Lock()      # held for the whole pulse
         self.pulses = 0                    # cards released since the station started
         self.error = None                  # why the last pulse could not be sent (None: it was, or none was asked for)
+        self._error_is_offline = False     # True when self.error came from network unreachability (auto-clears on reconnect)
         self.last_drop = None              # ramp sensor verdict of last Wi-Fi feed ('dropped' | 'stuck' | 'no_card' | None)
         self.last_pulse = None             # time.time() of the last pulse sent
         self.online = None                 # True / False for Wi-Fi feeder reachability (None before first check or for GPIO)
         self.sensor = None                 # {'type': 'VCNL4200', 'present': bool} from Wi-Fi feeder /status, or None
         self._last_rediscover = None       # monotonic timestamp of last MAC-based IP rediscovery attempt
+        self._last_feed_number = 0         # highest WifiFeeder request number seen, so re-opening never reuses a number
+        self._config_gen = 0               # bumped on feeder/enabled change so in-flight probes cannot write stale status
+        self._status_gen = 0               # bumped on configure and pulse so in-flight probes cannot clobber fresher pulse status
         self._monitor_stop = None
         self._monitor_thread = None
 
@@ -403,10 +411,31 @@ class Dropper:
                 self.sensor = None
                 self.last_drop = None
                 self._last_rediscover = None
+                self._config_gen += 1
+                self._status_gen += 1
             self.config = values
             if not values['enabled']:
                 self.error = None          # an old error says nothing about a dropper that is off
+                self._error_is_offline = False
         return values
+
+    def _open_wifi_pin(self, ip):
+        pin = self._open_feeder(ip, self.config['pair_key'])
+        if hasattr(pin, 'number'):
+            pin.number = max(pin.number, self._last_feed_number)
+        return pin
+
+    def _activate_pin(self, gate, reason):
+        """Run the caller's gate (if any) and activate self._pin inside it. Returns False when gate declined."""
+        if gate is None:
+            self._pin.set(True)
+            return True
+        with gate() as wanted:
+            if not wanted:
+                logger.info(f"Card dropper: no longer wanted at the last moment - no card released ({reason})")
+                return False
+            self._pin.set(True)
+            return True
 
     def pulse(self, reason='', gate=None):
         """
@@ -429,10 +458,11 @@ class Dropper:
             # nothing is opened or activated (a Codex review of 2026-10-22). From here on the settings cannot change
             if not self.config['enabled']:
                 return False
-            if self._pin is None:
+            opened_fresh = self._pin is None
+            if opened_fresh:
                 try:
                     if self.config['transport'] == 'wifi':
-                        self._pin = self._open_feeder(self.config['feeder']['ip'], self.config['pair_key'])
+                        self._pin = self._open_wifi_pin(self.config['feeder']['ip'])
                     else:
                         self._pin = self._open_pin(self.config['chip'], self.config['pin'], self.config['active_low'])
                 except Exception as e:
@@ -440,55 +470,76 @@ class Dropper:
                         new_ip = self._rediscover_ip(force=True, _locked=True)
                         if new_ip:
                             try:
-                                self._pin = self._open_feeder(new_ip, self.config['pair_key'])
+                                self._pin = self._open_wifi_pin(new_ip)
                             except Exception as e2:
-                                self._fail(e2)
+                                self.online = False
+                                self._fail(e2, offline=True)
                                 return False
                         else:
-                            self._fail(e)
+                            self.online = False
+                            self._fail(e, offline=True)
                             return False
                     else:
                         self._fail(e)
                         return False
             try:
-                if gate is None:
-                    self._pin.set(True)
-                else:
-                    with gate() as wanted:
-                        if not wanted:
-                            logger.info(f"Card dropper: no longer wanted at the last moment - no card released ({reason})")
-                            return False          # (the finally below sets the pin inactive: it already is - harmless)
-                        self._pin.set(True)
+                try:
+                    if not self._activate_pin(gate, reason):
+                        return False      # (the finally below sets the pin inactive: it already is - harmless)
+                except (FeederUnreachableError, OSError):
+                    # Cached WifiFeeder failed to reach its old IP before taking the card (gate has already exited):
+                    # look for its MAC on the LAN and retry once on the new IP before failing this release
+                    if (self.config['transport'] == 'wifi' and not opened_fresh
+                            and getattr(self._pin, 'under_way', None) is None):
+                        new_ip = self._rediscover_ip(force=True, _locked=True)
+                        if new_ip:
+                            self._close_pin()     # the pin of the old IP: closed, and its last request number kept for the new one
+                            self._pin = self._open_wifi_pin(new_ip)
+                            if not self._activate_pin(gate, reason):
+                                return False
+                        else:
+                            raise
+                    else:
+                        raise
                 if self.config['transport'] == 'gpio':
                     self._sleep(self.config['pulse_ms'] / 1000)   # (a feeder: set(False) below waits until the card is done)
             finally:
                 # Inactive again whatever happened: a pin left active would hold the mechanism open
-                try:
-                    self._pin.set(False)
-                    self.last_drop = getattr(self._pin, 'last_drop', None)
-                except Exception as e:
-                    self.last_drop = getattr(self._pin, 'last_drop', None)
-                    if self.config['transport'] == 'wifi' and self.last_drop is None:
-                        self.online = False
-                    elif self.config['transport'] == 'wifi':
-                        self.online = True
-                    self._fail(e)
-                    self._close_pin()
-                    return False
+                if self._pin is not None:
+                    try:
+                        self._pin.set(False)
+                        self.last_drop = getattr(self._pin, 'last_drop', None)
+                    except Exception as e:
+                        self.last_drop = getattr(self._pin, 'last_drop', None)
+                        if self.config['transport'] == 'wifi' and self.last_drop is None:
+                            self.online = False
+                            self._fail(e, offline=True)
+                        elif self.config['transport'] == 'wifi':
+                            self.online = True
+                            self._fail(e)
+                        else:
+                            self._fail(e)
+                        self._close_pin()
+                        return False
             self.pulses += 1
             self.last_pulse = time.time()
             self.error = None
+            self._error_is_offline = False
             if self.config['transport'] == 'wifi':
                 self.online = True
             logger.info(f"Card dropper: card released ({reason}) - {self.pulses} since the start")
             return True
         except Exception as e:
             if self.config['transport'] == 'wifi':
-                self.online = False
-            self._fail(e)
+                is_offline = isinstance(e, (FeederUnreachableError, OSError))
+                self.online = not is_offline
+                self._fail(e, offline=is_offline)
+            else:
+                self._fail(e)
             self._close_pin()
             return False
         finally:
+            self._status_gen += 1
             self._lock.release()
 
     def _rediscover_ip(self, force=False, _locked=False):
@@ -546,37 +597,47 @@ class Dropper:
                 logger.warning(f"Card dropper: could not report new feeder IP ({e})")
         return new_ip
 
-    def _query_status(self, ip, http):
+    def _query_status(self, ip, http, cfg_gen=None, status_gen=None):
         code, answer = http(f'http://{ip}/status', timeout=2)
         st = (answer or {}).get('status') if code == 200 else None
         if not isinstance(st, dict):
             return False
-        self.online = True
         sn = st.get('sensor') or {}
-        self.sensor = {'type': sn.get('type'), 'present': bool(sn.get('present'))} if sn.get('type') else None
+        sensor = {'type': sn.get('type'), 'present': bool(sn.get('present'))} if sn.get('type') else None
+        if cfg_gen is not None and (self._config_gen != cfg_gen or self._status_gen != status_gen):
+            return True
+        self.online = True
+        self.sensor = sensor
+        if self._error_is_offline:
+            self.error = None
+            self._error_is_offline = False
         return True
 
     def probe_wifi(self, http=feeder_http):
         """Lightweight non-blocking /status check for a Wi-Fi feeder; auto-rediscovers by MAC if DHCP changed its IP."""
         cfg = self.config
+        cfg_gen, status_gen = self._config_gen, self._status_gen
         if not cfg.get('enabled') or cfg.get('transport') != 'wifi' or not cfg.get('feeder'):
             return None
         ip = cfg['feeder'].get('ip')
         if not ip:
             return None
         try:
-            if self._query_status(ip, http):
+            if self._query_status(ip, http, cfg_gen, status_gen):
                 return True
         except Exception:
             pass
+        if self._config_gen != cfg_gen:
+            return None
         new_ip = self._rediscover_ip()
         if new_ip:
             try:
-                if self._query_status(new_ip, http):
+                if self._query_status(new_ip, http, cfg_gen, status_gen):
                     return True
             except Exception:
                 pass
-        self.online = False
+        if self._config_gen == cfg_gen and self._status_gen == status_gen:
+            self.online = False
         return False
 
     def start_monitor(self, interval=5.0):
@@ -587,7 +648,7 @@ class Dropper:
         self._monitor_stop = stop
 
         def _loop():
-            while not stop.is_set():
+            while not stop.is_set() and self._monitor_stop is stop:
                 if self.enabled and self.config.get('transport') == 'wifi' and not self._lock.locked():
                     self.probe_wifi()
                 stop.wait(interval)
@@ -627,13 +688,15 @@ class Dropper:
 
     # -- inside ---------------------------------------------------------------------------------------------------------------
 
-    def _fail(self, error):
+    def _fail(self, error, offline=False):
         message = str(error) or error.__class__.__name__
         if message != self.error:          # said once, not at every card
             logger.error(f"Card dropper: {message}")
         self.error = message
+        self._error_is_offline = bool(offline)
 
     def _close_pin(self):
         if self._pin is not None:
+            self._last_feed_number = max(self._last_feed_number, getattr(self._pin, 'number', 0) or 0)
             self._pin.close()
             self._pin = None

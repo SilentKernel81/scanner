@@ -153,9 +153,12 @@ class Finish(unittest.TestCase):
         self.assertEqual(decide.decide_finish(['etched']), {'finish': 'foil', 'source': 'printing'})
         self.assertEqual(decide.decide_finish(['nonfoil'], 'foil', 0.99), {'finish': 'regular', 'source': 'printing'})
 
-    def test_a_symbol_the_ocr_read_stands_over_the_network(self):
-        self.assertEqual(decide.decide_finish(self.BOTH, 'foil', 0.01), {'finish': 'foil', 'source': 'symbol'})
-        self.assertEqual(decide.decide_finish(self.BOTH, 'non-foil', 0.99), {'finish': 'regular', 'source': 'symbol'})
+    def test_a_symbol_the_ocr_read_stands_unless_the_network_is_sure_of_the_opposite(self):
+        self.assertEqual(decide.decide_finish(self.BOTH, 'foil', 0.6), {'finish': 'foil', 'source': 'symbol'})
+        self.assertEqual(decide.decide_finish(self.BOTH, 'non-foil', 0.02), {'finish': 'regular', 'source': 'symbol'})
+        # since 2026-11-25: a conflict is unknown - the OCR reads a foil's star as a dot now and then
+        self.assertEqual(decide.decide_finish(self.BOTH, 'foil', 0.01), {'finish': 'unknown', 'source': 'conflict'})
+        self.assertEqual(decide.decide_finish(self.BOTH, 'non-foil', 0.99), {'finish': 'unknown', 'source': 'conflict'})
 
     def test_the_network_is_believed_only_when_sure(self):
         self.assertEqual(decide.decide_finish(self.BOTH, 'unknown', 0.95), {'finish': 'foil', 'source': 'network'})

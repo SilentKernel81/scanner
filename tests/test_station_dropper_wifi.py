@@ -8,6 +8,7 @@ No network is touched.
 
     venv/bin/python -m unittest discover tests -p test_station_dropper_wifi.py
 """
+import contextlib
 import json
 import sys
 import unittest
@@ -390,13 +391,78 @@ class TheDropper(unittest.TestCase):
         self.assertEqual(len(self.fake.fed), 1)
         self.assertEqual(len(reported), 1)
 
+    def test_pulse_rediscovers_moved_ip_even_when_feeder_was_already_opened(self):
+        moved_ip = '192.168.1.226'
+        reported = []
+        active_ip = [FEEDER['ip']]
+        gate_calls = []
+
+        @contextlib.contextmanager
+        def gate():
+            gate_calls.append(True)
+            yield True
+
+        def open_feeder(ip, key):
+            def routed_http(url, form=None, timeout=2):
+                if f'http://{active_ip[0]}/' not in url:
+                    raise OSError(f'old ip {ip} unreachable')
+                return self.fake(url, form, timeout)
+            return WifiFeeder(ip, key, http=routed_http, clock=self.clock, sleep=self.clock.sleep)
+
+        dropper = Dropper(open_feeder=open_feeder,
+                          find_feeder=lambda: [{'ip': active_ip[0], 'name': 'card-dropper-sw', 'mac': FEEDER['mac']}],
+                          on_feeder_ip_changed=reported.append, clock=self.clock)
+        dropper.configure(dict(WIFI_ON))
+        # First pulse succeeds and caches self._pin bound to the old IP
+        self.assertTrue(dropper.pulse('first', gate=gate))
+        self.assertEqual(len(self.fake.fed), 1)
+        # DHCP moves the feeder while self._pin is still cached -> second pulse must still succeed on the first try
+        active_ip[0] = moved_ip
+        self.assertTrue(dropper.pulse('second-after-dhcp', gate=gate))
+        self.assertEqual(len(self.fake.fed), 2)
+        self.assertEqual(dropper.state()['feeder']['ip'], moved_ip)
+        self.assertTrue(dropper.state()['online'])
+        self.assertEqual(len(reported), 1)
+        self.assertEqual(reported[0]['ip'], moved_ip)
+        self.assertEqual(len(gate_calls), 3)  # 1st pulse, failed attempt on old IP, retry on new IP
+
+    def test_pulse_http_refusal_keeps_online_true_and_offline_error_clears_on_reconnect(self):
+        self.dropper.configure(dict(WIFI_ON))
+        # 403 refusal: the feeder answered, so online stays True while error is recorded
+        self.fake.key = 'wrong-key-on-feeder'
+        self.assertFalse(self.dropper.pulse('bad-key'))
+        self.assertTrue(self.dropper.state()['online'])
+        self.assertIn('refused', self.dropper.state()['error'])
+
+        # Network outage sets online=False and an offline error; probe_wifi reconnecting clears the stale offline error
+        self.fake.key = KEY
+        self.fake.down = True
+        self.assertFalse(self.dropper.pulse('offline'))
+        self.assertFalse(self.dropper.state()['online'])
+        self.assertIn('does not answer', self.dropper.state()['error'])
+        self.assertTrue(self.dropper.probe_wifi(http=lambda url, timeout=2: (200, {'status': {'boot': 'b1'}})))
+        self.assertTrue(self.dropper.state()['online'])
+        self.assertIsNone(self.dropper.state()['error'])
+
+    def test_probe_wifi_does_not_clobber_state_after_concurrent_configure(self):
+        self.dropper.configure(dict(WIFI_ON))
+
+        def slow_fail_http(url, timeout=2):
+            # Dropper is switched off mid-probe; the finishing probe must not write online=False onto the new config
+            self.dropper.configure(dict(WIFI_ON, enabled=False))
+            raise OSError('timed out')
+
+        self.assertIsNone(self.dropper.probe_wifi(http=slow_fail_http))
+        self.assertIsNone(self.dropper.state()['online'])
+
     def test_remote_scanner_persists_rediscovered_feeder_ip_only_for_matching_mac(self):
         from card_scanner.core.remote_scanner import RemoteScanner
         saved = FakeSettings({'dropper': dict(DEFAULTS, **WIFI_ON)})
         remote = RemoteScanner(mock.Mock(), saved)
-        # Wrong MAC or invalid IP is ignored
+        # Wrong MAC, invalid IP, or non-string IP (e.g. integer accepted by IPv4Address) is ignored
         self.assertFalse(remote.update_feeder_ip({'mac': 'ff:ff:ff:ff:ff:ff', 'ip': '192.168.1.222'}))
         self.assertFalse(remote.update_feeder_ip({'mac': FEEDER['mac'], 'ip': 'not-an-ip'}))
+        self.assertFalse(remote.update_feeder_ip({'mac': FEEDER['mac'], 'ip': 3232235998}))
         self.assertEqual(remote.dropper['feeder']['ip'], FEEDER['ip'])
         # Matching MAC persists the new IP while keeping pair_key & enabled untouched
         self.assertTrue(remote.update_feeder_ip({'mac': FEEDER['mac'].upper(), 'ip': '192.168.1.222', 'name': 'card-dropper-sw'}))

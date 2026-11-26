@@ -1,6 +1,7 @@
 """Tests for the optional v2 visual embedding sidecar (core/visual_embed.py, image_index sidecar, PrintingCheck Cascade -> Fusion)."""
 import io
 import json
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -8,6 +9,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
 from card_scanner.core import image_index, printing_check, visual_embed
 from card_scanner.core.reading import record as reading_record
@@ -104,7 +107,7 @@ class VisualEmbedMathTests(unittest.TestCase):
             self.assertIsNone(visual_embed.load(corrupt))
 
     def test_real_ft_onnx_smoke_if_cached(self):
-        cached = Path('/home/fsibinel/.cache/mtg-image-match/out/ft.onnx')
+        cached = Path.home() / '.cache' / 'mtg-image-match' / 'out' / 'ft.onnx'
         if not cached.is_file():
             self.skipTest("cached ft.onnx not present on this machine")
         embedder = visual_embed.load(cached)
@@ -222,6 +225,49 @@ class ImageIndexSidecarTests(unittest.TestCase):
         self.assertEqual(len(idx), 4)
         self.assertEqual(fake.calls, 4)
 
+    def test_partial_backfill_persists_progress_and_resumes_without_losing_work(self):
+        pics = self.root / 'pics'
+        pics.mkdir()
+        for i, pid in enumerate(self.ids):
+            cv2.imwrite(str(pics / f'{pid}.jpg'), cv2.cvtColor(_card_rgb(i + 20), cv2.COLOR_RGB2BGR))
+        folder = self.root / 'idx'
+        all_printings = [(pid, None) for pid in self.ids]
+
+        # Build v1 for all 4 printings first
+        image_index.build(all_printings, folder, image_dir=pics, fetch=False, workers=1, log=lambda m: None)
+        # Backfill only 2 printings (simulating --limit / cancel / 429)
+        fake = FakeEmbedder()
+        image_index.build(all_printings, folder, image_dir=pics, fetch=False, workers=1, limit=2,
+                          log=lambda m: None, embedder=fake, rebuild_sidecar=True)
+        self.assertEqual(fake.calls, 2)
+        partial = image_index.ImageIndex.load(folder)
+        self.assertIsNotNone(partial.embeds)
+        self.assertFalse(partial.has_embeddings)  # partial checkpoint must not activate live fusion yet
+
+        # Resume backfill: only the remaining 2 printings are embedded, and now the sidecar activates
+        image_index.build(all_printings, folder, image_dir=pics, fetch=False, workers=1,
+                          log=lambda m: None, embedder=fake, rebuild_sidecar=True)
+        self.assertEqual(fake.calls, 4)
+        complete = image_index.ImageIndex.load(folder)
+        self.assertTrue(complete.has_embeddings)
+
+    def test_incremental_update_without_embedder_preserves_existing_sidecar(self):
+        pics = self.root / 'pics'
+        pics.mkdir()
+        for i, pid in enumerate(self.ids):
+            cv2.imwrite(str(pics / f'{pid}.jpg'), cv2.cvtColor(_card_rgb(i + 30), cv2.COLOR_RGB2BGR))
+        folder = self.root / 'idx'
+        fake = FakeEmbedder()
+        image_index.build([(pid, None) for pid in self.ids[:3]], folder, image_dir=pics, fetch=False, workers=1,
+                          log=lambda m: None, embedder=fake, rebuild_sidecar=True)
+        # Add the 4th printing without an embedder: existing 3 embeddings must stay saved on disk
+        image_index.build([(pid, None) for pid in self.ids], folder, image_dir=pics, fetch=False, workers=1,
+                          log=lambda m: None, embedder=None)
+        idx = image_index.ImageIndex.load(folder)
+        self.assertIsNotNone(idx.embeds)
+        self.assertFalse(idx.has_embeddings)  # 4th printing lacks an embedding until backfilled
+        self.assertEqual(sum(1 for row in idx.embeds if row.any()), 3)
+
 
 class CascadeFusionLiveReadTests(unittest.TestCase):
     def setUp(self):
@@ -324,6 +370,68 @@ class CascadeFusionLiveReadTests(unittest.TestCase):
         embedder = FakeEmbedder(mapping={int(query_img[50, 50, 0]): weak_v})
         checker = printing_check.PrintingCheck(self.db, folder, self.root / 'shadow.jsonl', mode='off', embedder=embedder)
         self.assertIsNone(checker.live_read(query_img, query_img, ocr=None, accept_image_alone=True))
+
+    def test_fusion_orientation_flip_uses_flipped_strip_and_updates_capture_evidence(self):
+        from card_scanner.core.reading import capture as reading_capture
+        # Build a 180°-symmetric image so phash has equal distance upright and turned (orientation_established == False,
+        # phash ties cards 0 & 1 -> 'review'), while v2 only matches the 180°-rotated orientation.
+        half = _card_rgb(240, height=156, width=224)
+        sym_img = np.vstack([half, cv2.rotate(half, cv2.ROTATE_180)])
+        # Perturb one corner pixel slightly so upright and rotated have distinct keys in FakeEmbedder while phash stays tied
+        sym_img[50, 50, 0] = 10
+        sym_img[311 - 50, 223 - 50, 0] = 240
+        other_img = _card_rgb(241)
+        hashes = [image_index.hash_card(sym_img), image_index.hash_card(sym_img), image_index.hash_card(other_img)]
+        embeds = [visual_embed.quantize_int8(self._unit(0)),
+                  visual_embed.quantize_int8(self._unit(1)),
+                  visual_embed.quantize_int8(self._unit(2))]
+        folder = self.root / 'idx'
+        image_index.write(folder, [c['id'] for c in self.cards], hashes, embeds=embeds)
+
+        embedder = FakeEmbedder(mapping={
+            10: self._unit(50),    # upright: orthogonal
+            240: self._unit(0),    # rotated 180°: matches card 0
+        })
+
+        class WrongEndNumberOcr:
+            # 1st call (upright, wrong end) returns a stray number without a set line; 2nd call (turned) returns []
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, _rgb):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{'text': 'R 0149', 'box': [[0, 0], [40, 0], [40, 12], [0, 12]]}]
+                return []
+
+        checker = printing_check.PrintingCheck(self.db, folder, self.root / 'shadow.jsonl', mode='off', embedder=embedder)
+        ev = reading_capture.CaptureEvidence()
+        with reading_capture.using(ev):
+            result = checker.live_read(sym_img, sym_img, ocr=WrongEndNumberOcr(), accept_image_alone=True)
+            kept_rot, rotated = reading_capture.recall('rotated', sym_img)
+            kept_strip, kept_strip_val = reading_capture.recall('strip', sym_img)
+        self.assertIsNotNone(result)
+        self.assertTrue(result['rotated'])
+        self.assertEqual(result['card']['id'], self.cards[0]['id'])
+        # CaptureEvidence records the post-fusion orientation (rotated=True) and the flipped orientation's strip
+        self.assertTrue(kept_rot)
+        self.assertTrue(rotated)
+        self.assertTrue(kept_strip)
+        self.assertEqual(kept_strip_val['number'], '')
+        self.assertEqual(result['strip'], {'number': '', 'set': ''})
+
+    def test_fusion_skipped_when_image_alone_off_and_no_strip(self):
+        shared_img = _card_rgb(250)
+        other_img = _card_rgb(251)
+        hashes = [image_index.hash_card(shared_img), image_index.hash_card(shared_img), image_index.hash_card(other_img)]
+        embeds = [visual_embed.quantize_int8(self._unit(i)) for i in range(3)]
+        folder = self.root / 'idx'
+        image_index.write(folder, [c['id'] for c in self.cards], hashes, embeds=embeds)
+
+        embedder = FakeEmbedder()
+        checker = printing_check.PrintingCheck(self.db, folder, self.root / 'shadow.jsonl', mode='off', embedder=embedder)
+        self.assertIsNone(checker.live_read(shared_img, shared_img, ocr=None, accept_image_alone=False))
+        self.assertEqual(embedder.calls, 0)
 
 
 if __name__ == '__main__':

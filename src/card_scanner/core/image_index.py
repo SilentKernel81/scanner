@@ -129,7 +129,7 @@ def similarity(distance):
 class ImageIndex:
     """All the fingerprints in memory (~11 MB for the whole card database): `distances` of one to all of them in a few ms"""
 
-    def __init__(self, ids, hashes, built=None, embeds=None):
+    def __init__(self, ids, hashes, built=None, embeds=None, embeds_complete=True):
         self.ids = ids                                             # Scryfall ids, in the order of the rows
         self.hashes = hashes                                       # (n, 96) uint8
         self.built = built
@@ -139,17 +139,20 @@ class ImageIndex:
         # Optional v2 learned embedding sidecar: (n, 128) int8 + precomputed 1/||row||_2 (float32)
         self.embeds = None
         self._embed_inv_norms = None
+        self._embeds_complete = False
         if embeds is not None and len(ids) > 0:
             from card_scanner.core import visual_embed
             arr = np.asarray(embeds, dtype=np.int8)
             if arr.shape == (len(ids), visual_embed.DIMS):
                 self.embeds = np.ascontiguousarray(arr)
                 self._embed_inv_norms = visual_embed.row_inv_norms(self.embeds)
+                self._embeds_complete = bool(embeds_complete)
 
     @property
     def has_embeddings(self):
-        """Whether this index has a loaded v2 int8 embedding sidecar aligned with its rows."""
-        return self.embeds is not None and len(self.embeds) == len(self.ids) and len(self.ids) > 0
+        """Whether this index has a complete v2 int8 embedding sidecar ready for live fusion."""
+        return (self.embeds is not None and self._embeds_complete
+                and len(self.embeds) == len(self.ids) and len(self.ids) > 0)
 
     def __len__(self):
         return len(self.ids)
@@ -201,6 +204,7 @@ class ImageIndex:
                            " - build it again")
             return None
         embeds = None
+        embeds_complete = True
         sidecar = manifest.get('sidecar')
         if isinstance(sidecar, dict) and len(ids) > 0:
             from card_scanner.core import visual_embed
@@ -214,9 +218,11 @@ class ImageIndex:
                         or sidecar.get('embeds_sha256') != hashlib.sha256(embeds_bytes).hexdigest()):
                     raise ValueError("sidecar size or checksum mismatch")
                 embeds = np.frombuffer(embeds_bytes, np.int8).reshape(-1, visual_embed.DIMS)
+                embeds_complete = bool(sidecar.get('complete', True))
             except (OSError, ValueError, TypeError) as e:
                 logger.warning(f"Image index sidecar in {directory} is not usable ({e}) - continuing with colour hash alone")
-        return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'), embeds=embeds)
+        return cls(ids, np.frombuffer(hashes_bytes, np.uint8).reshape(-1, HASH_BYTES), manifest.get('built'),
+                   embeds=embeds, embeds_complete=embeds_complete)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -343,13 +349,14 @@ def _generation_of(name):
     return (match.group(1) or match.group(2) or match.group(3)) if match else None
 
 
-def write(directory, ids, hashes, built=None, embeds=None):
+def write(directory, ids, hashes, built=None, embeds=None, embeds_complete=True):
     """
     Publishes an index as a new generation: its files first (each whole or not at all, nothing points at them yet), then the manifest
     - one rename, the only step that publishes. Whatever happens before that rename leaves the previous generation current and whole.
     Afterwards everything except this generation and the one before it is removed: what an interrupted earlier build left, and the
     files of the older format (hashes.bin, ids.txt, meta.json). built: when the index was built, for one imported from elsewhere (default: now).
     embeds: optional v2 int8 embeddings aligned with `ids` (sequence of 128-byte items or (len(ids), 128) int8 ndarray).
+    embeds_complete: False when writing a partial sidecar checkpoint so progress is preserved on disk for resume without activating live fusion.
     """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -378,7 +385,7 @@ def write(directory, ids, hashes, built=None, embeds=None):
             embed_name = f'embeds-{generation}.bin'
             _put(directory / embed_name, embeds_bytes)
             sidecar_meta = {'descriptor': visual_embed.DESCRIPTOR, 'dims': visual_embed.DIMS, 'embeds': embed_name,
-                            'embeds_sha256': hashlib.sha256(embeds_bytes).hexdigest()}
+                            'embeds_sha256': hashlib.sha256(embeds_bytes).hexdigest(), 'complete': bool(embeds_complete)}
         manifest = {'descriptor': DESCRIPTOR, 'count': len(ids), 'hash_bytes': HASH_BYTES, 'built': built or time.strftime('%Y-%m-%d %H:%M:%S'),
                     'generation': generation, 'hashes': f'hashes-{generation}.bin', 'ids': f'ids-{generation}.txt',
                     'hashes_sha256': hashlib.sha256(hashes_bytes).hexdigest(), 'ids_sha256': hashlib.sha256(ids_bytes).hexdigest()}
@@ -599,7 +606,9 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
     """
     existing = ImageIndex.load(directory)
     have = dict(zip(existing.ids, existing.hashes)) if existing else {}
-    have_embeds = dict(zip(existing.ids, existing.embeds)) if (existing and existing.has_embeddings) else {}
+    # Load any existing non-zero embeddings (including from an incomplete backfill checkpoint) so work resumes
+    have_embeds = ({printing: row for printing, row in zip(existing.ids, existing.embeds) if row.any()}
+                   if (existing and existing.embeds is not None) else {})
     if embedder is not None and rebuild_sidecar:
         todo = [(printing, address) for printing, address in printings if printing not in have or printing not in have_embeds]
     else:
@@ -719,7 +728,7 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             return answer.content if answer.ok else None
 
     def one(item):
-        printing, address = item
+        printing, address, existing_hash = item
         if stopped.is_set() or cancelled():
             stopped.set()                  # asked to stop: nothing more is fetched, and what is done is written below
             return printing, None, None
@@ -731,14 +740,23 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
         if image is None:
             return printing, None, None
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        fingerprint = have[printing] if printing in have else np.frombuffer(hash_card(rgb), np.uint8)
+        fingerprint = existing_hash if existing_hash is not None else np.frombuffer(hash_card(rgb), np.uint8)
         embedding = embedder.embed_int8(rgb) if embedder is not None else None
         return printing, fingerprint, embedding
 
-    def _ordered_embeds(ids):
-        if ids and have_embeds and all(printing in have_embeds for printing in ids):
-            return [bytes(have_embeds[printing]) for printing in ids]
-        return None
+    def _ordered_embeds(ids, finished=False):
+        if not ids or not have_embeds:
+            return None, False
+        from card_scanner.core import visual_embed
+        zero = bytes(visual_embed.DIMS)
+        covered = sum(1 for printing in ids if printing in have_embeds)
+        if covered == 0:
+            return None, False
+        rows = [bytes(have_embeds[printing]) if printing in have_embeds else zero for printing in ids]
+        # Complete when every row has an embedding, or a full (un-limited, un-cancelled) v2 run covered >= 99%
+        # (tolerating the rare retired/missing Scryfall image without blocking activation forever)
+        complete = (covered == len(ids)) or (finished and embedder is not None and not limit and covered >= 0.99 * len(ids))
+        return rows, complete
 
     new = skipped = done = 0
     chunk_size = max(workers * 16, 64)
@@ -747,7 +765,7 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
         for start in range(0, len(todo), chunk_size):
             if stopped.is_set() or cancelled():
                 break
-            chunk = todo[start:start + chunk_size]
+            chunk = [(printing, address, have.get(printing)) for printing, address in todo[start:start + chunk_size]]
             for printing, fingerprint, embedding in pool.map(one, chunk):
                 done += 1
                 if fingerprint is None:
@@ -764,7 +782,8 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
                     progress(done, len(todo))
                 if done % 1000 == 0 and not stopped.is_set() and not cancelled():
                     ckpt_ids, ckpt_hashes = _in_order(printings, have)
-                    write(directory, ckpt_ids, ckpt_hashes, embeds=_ordered_embeds(ckpt_ids))
+                    ckpt_embeds, ckpt_complete = _ordered_embeds(ckpt_ids, finished=False)
+                    write(directory, ckpt_ids, ckpt_hashes, embeds=ckpt_embeds, embeds_complete=ckpt_complete)
                     log(f"{done} of {len(todo)} done ({new} new, {skipped} without a picture)")
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
@@ -774,16 +793,18 @@ def build(printings, directory, image_dir=None, fetch=True, workers=8, limit=Non
             except Exception:
                 pass
     ids, hashes = _in_order(printings, have)
-    embeds = _ordered_embeds(ids)
-    write(directory, ids, hashes, embeds=embeds)
+    reason = 'cancelled' if cancelled() else 'refused' if stopped.is_set() else 'done'
+    embeds, embeds_complete = _ordered_embeds(ids, finished=(reason == 'done'))
+    write(directory, ids, hashes, embeds=embeds, embeds_complete=embeds_complete)
     if cancel is not None and cancel.is_set():
         log("Stopped on request. What was done is written; run it again and it resumes")
     elif stopped.is_set():
         log("Scryfall kept refusing: stopped. What was done is written; run it again later, it resumes")
-    log(f"Index written: {len(ids)} printings ({new} new, {skipped} left out for want of a picture)"
-        + (" + v2 sidecar" if embeds is not None else ""))
+    sidecar_log = (" + v2 sidecar" if (embeds is not None and embeds_complete)
+                   else " + partial v2 sidecar (resumable)" if embeds is not None else "")
+    log(f"Index written: {len(ids)} printings ({new} new, {skipped} left out for want of a picture){sidecar_log}")
     result = BuildResult((len(ids), new, skipped))
-    result.reason = 'cancelled' if cancelled() else 'refused' if stopped.is_set() else 'done'
+    result.reason = reason
     return result
 
 

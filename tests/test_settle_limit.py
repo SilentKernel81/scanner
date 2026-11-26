@@ -248,6 +248,44 @@ class Settled(unittest.TestCase):
         cam._fixed_area_step(scene, None, scene.copy())                     # the next still frame is the photo
         cam._trigger_auto_capture.assert_called_once()
 
+    def test_minor_hiccup_does_not_poison_interior_prev_or_sharpness_box(self):
+        cam = bare_scanner()
+        scene = framed_card_scene()
+        for _ in range(4):
+            self.step(cam, scene, CARD)
+        self.assertEqual(cam.stable_frames, 3)
+        saved_prev = cam._interior_prev.copy()
+        saved_box = cam._sharpness_box
+
+        # A blurred hiccup frame must hold without overwriting _interior_prev or _sharpness_box
+        slightly_soft = cv2.GaussianBlur(scene, (5, 5), 0.9)
+        self.step(cam, slightly_soft, CARD)
+        self.assertEqual(cam.last_settle_outcome, 'hiccup')
+        self.assertEqual(cam._sharpness_box, saved_box)
+        np.testing.assert_array_equal(cam._interior_prev, saved_prev)
+
+    def test_relocked_sharpness_box_reanchors_interior_anchor_in_matching_coordinates(self):
+        # Frame 0 starts +1.6% shifted on corner 0, frames 1-3 settle at 0% (within 3% of box_corners),
+        # frame 4 shifts corner 0 to -1.6% (>3% from box_corners, triggering box re-lock) -> must not
+        # leave _interior_anchor from the old box coordinates to cause false drift on frame 5
+        cam = bare_scanner()
+        scene = framed_card_scene()
+        diag = self.diagonal()
+        offset_pos = np.array([[diag * 0.016, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], np.float32)
+        offset_neg = np.array([[-diag * 0.016, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], np.float32)
+        self.step(cam, scene, CARD + offset_pos)
+        for _ in range(3):
+            self.step(cam, scene, CARD)
+        self.assertEqual(cam.stable_frames, 3)
+        self.step(cam, scene, CARD + offset_neg)
+        # If box re-locked during a settled frame, _interior_anchor must match the current box's patch
+        expected_patch = cam._box_patch(scene, cam._sharpness_box)
+        if cam.last_settle_outcome == 'settled':
+            self.assertLess(cam._gain_adjusted_difference(expected_patch, cam._interior_anchor), 1.0)
+        # Next crisp frame at CARD must settle cleanly without bogus coordinate-mismatch drift
+        self.step(cam, scene, CARD)
+        self.assertEqual(cam.last_settle_outcome, 'settled')
+
 
 if __name__ == '__main__':
     unittest.main()

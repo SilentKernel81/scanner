@@ -156,7 +156,20 @@ class StripFinish(unittest.TestCase):
         self.assertEqual(self.finish(net=0.9995), 'foil')
 
     def test_a_symbol_read_stands(self):
-        self.assertEqual(self.finish(symbol='foil', net=0.0), 'foil')
+        self.assertEqual(self.finish(symbol='foil', net=0.97), 'foil')
+        self.assertEqual(self.finish(symbol='foil', net=0.5), 'foil')
+        self.assertEqual(self.finish(symbol='foil'), 'foil')
+
+    def test_a_symbol_against_a_sure_network_says_nothing(self):
+        # (since 2026-11-25: the OCR reads a foil's star as a dot now and then - decide_finish's conflict)
+        self.assertEqual(self.finish(symbol='foil', net=0.0), 'unknown')
+        self.assertEqual(self.finish(symbol='non-foil', net=0.99), 'unknown')
+
+    def test_a_modern_frame_printing_from_before_the_lord_of_the_rings_says_its_marker_too(self):
+        self.card = {**LTR, 'released_at': '2019-07-12'}
+        self.assertEqual(self.finish(symbol='non-foil'), 'non-foil')
+        self.card = {**LTR, 'released_at': '2011-09-30', 'frame': '2003'}
+        self.assertEqual(self.finish(symbol='non-foil'), 'unknown')
 
     def test_an_unsure_network_says_nothing(self):
         self.assertEqual(self.finish(net=0.28), 'unknown')                # capture 46

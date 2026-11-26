@@ -248,8 +248,22 @@ def ocr_facts(read, card, printing_at, strip=None):
 
 
 def prints_a_marker(card):
-    """Whether a printing (card dict: released_at, frame) is one the foil network was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False for anything missing or unreadable."""
+    """
+    Whether a printing (card dict: released_at, frame) is one the foil network AT ITS FIXED PLACE was measured on: released from MARKER_FROM on, in the MARKER_FRAME frame. False
+    for anything missing or unreadable. For the set line the OCR FOUND, the wider marker_on_line holds.
+    """
     return bool(card) and (card.get('released_at') or '') >= MARKER_FROM and card.get('frame') == MARKER_FRAME
+
+
+def marker_on_line(card):
+    """
+    Whether the ★ / • on a printing's set line says its finish, where the OCR FOUND that line (the strip's symbol, and the network cut at the OCR's own box): every printing
+    in the MARKER_FRAME frame, whatever its date - since 2026-11-25. Measured on the owner's full-size captures of 2014 - 2023 printings in that frame (KTK, ORI, SOI, EMN, KLD,
+    M19, GRN, M20, IKO, DMR, The List): 4 foils with a ★ (the network sure of a foil on 3, the 4th's set line not found), 20 regular copies with a • (the network agreeing
+on 17, unsure on 3) - few foils, so watch the reading log. Older
+    frames (1993 / 1997 / 2003) print no marker at all: only the printing's own finishes count there. The fixed-place crop (OCR off) keeps the narrower prints_a_marker.
+    """
+    return bool(card) and card.get('frame') == MARKER_FRAME
 
 
 def orientation_established(search):
@@ -274,8 +288,9 @@ def saw_a_set_line(strip):
 def read_strip_evidence(ocr, card_rgb, net=None):
     """
     The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
-    set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked only when the OCR read no symbol and there is a network (a
-    foil_marker.FoilMarker; a separate instance from the live path's) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
+    set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked whenever there is a network (a foil_marker.FoilMarker; a separate
+    instance from the live path's) and a set line, also beside a symbol the OCR read (since 2026-11-25: a sure network against the symbol makes the finish unknown,
+    decide_finish - the OCR reads a foil's ★ as a dot now and then) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
     """
     if ocr is None:
         # OCR switched off: no number, no set, no symbol - but the foil network can still be asked about the set line at its fixed place (foil_marker.FIXED_BOX)
@@ -289,7 +304,7 @@ def read_strip_evidence(ocr, card_rgb, net=None):
     line = foil_marker.set_line(lines)
     symbol = foil_marker.symbol_read(line) if line else 'unknown'
     probability = None
-    if symbol == 'unknown' and net is not None and line is not None:
+    if net is not None and line is not None:
         crop = foil_marker.set_line_crop(strip, line['box'])
         if crop is not None:
             probability = net.probability(crop)
@@ -789,10 +804,13 @@ class PrintingCheck:
         # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
         net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
         strip = read_strip_evidence(ocr, as_read(read_turned), net_at_a_fixed_place)
+        other_strip = None
         if ocr is not None and not search.get('known_upright') and not saw_a_set_line(strip):
             other_way = read_strip_evidence(ocr, as_read(not read_turned), net_at_a_fixed_place)
             if saw_a_set_line(other_way):
-                strip, read_turned = other_way, not read_turned
+                other_strip, strip, read_turned = strip, other_way, not read_turned
+            else:
+                other_strip = other_way
         search = self._oriented(search, read_turned)
         # Keep the oriented search in CaptureEvidence so subsequent checks (contradicts, disagrees, verdict_of) use the confirmed orientation
         reading_capture.remember('search', card_image, search)
@@ -824,7 +842,9 @@ class PrintingCheck:
                  'strip_names': self._strip_names(search['index'], strip, decision['printing_id']) if alone and accept_image_alone and card else None}
         verdict = accept_printing(decision, facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
         # v2 Cascade -> Fusion: only when phash_rgb_v1 alone could not accept/confirm (~2% of cards) AND a v2 sidecar is loaded
-        if not (verdict['accepted'] or verdict['needs_ocr']) and getattr(search['index'], 'has_embeddings', False):
+        # Skip when accept_image_alone is off and the strip has no number+set (fusion could only return 'image'/'review', both refused)
+        can_rescue = bool(accept_image_alone) or bool(strip['number'] and strip['set'])
+        if not (verdict['accepted'] or verdict['needs_ocr']) and can_rescue and getattr(search['index'], 'has_embeddings', False):
             try:
                 fused = self._search_fused(card_image, search)
             except Exception as e:
@@ -835,15 +855,27 @@ class PrintingCheck:
                     fused = self._oriented_fused(fused, False)
                 elif ocr is not None and saw_a_set_line(strip):
                     fused = self._oriented_fused(fused, read_turned)
+                elif ocr is None and orientation_established(search):
+                    fused = self._oriented_fused(fused, read_turned)
+                fused_rotated = bool(fused['rotated'])
+                # If fusion flipped orientation from where the strip/foil box was read, use the other orientation's
+                # already-read strip (when OCR is on) or clear it so wrong-end foil evidence is never applied
+                if fused_rotated != read_turned:
+                    fused_strip = other_strip if other_strip is not None else {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+                else:
+                    fused_strip = strip
                 fused_picture, fused_cards = self._picture_evidence(fused)
-                fused_decision = decide_printing(fused_picture, {'number': strip['number'], 'set': strip['set']})
+                fused_decision = decide_printing(fused_picture, {'number': fused_strip['number'], 'set': fused_strip['set']})
                 fused_card = fused_cards.get(fused_decision['printing_id']) if fused_decision['printing_id'] is not None else None
                 fused_alone = fused_decision['path'] == 'image'
                 fused_facts = {'accept_image_alone': bool(accept_image_alone), 'index_covers': True, 'in_data': bool(fused_card), 'ocr_on': ocr is not None,
-                               'strip_names': self._strip_names(fused['index'], strip, fused_decision['printing_id']) if fused_alone and accept_image_alone and fused_card else None}
+                               'strip_names': self._strip_names(fused['index'], fused_strip, fused_decision['printing_id']) if fused_alone and accept_image_alone and fused_card else None}
                 fused_verdict = accept_printing(fused_decision, fused_facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
                 if fused_verdict['accepted'] or fused_verdict['needs_ocr']:
-                    search, picture, cards, decision, card, verdict = fused, fused_picture, fused_cards, fused_decision, fused_card, fused_verdict
+                    search, strip, picture, cards, decision, card, verdict = fused, fused_strip, fused_picture, fused_cards, fused_decision, fused_card, fused_verdict
+                    reading_capture.remember('rotated', card_image, bool(search['rotated']))
+                    if ocr is not None and fused_rotated != read_turned:
+                        reading_capture.remember('strip', card_image, strip)
                     fused_lead = None if decision['lead'] is None else round(float(decision['lead']), 4)
                     reading_record.note('picture', rotated=bool(search['rotated']), lead=fused_lead, v2_fused=True,
                                         candidates=[{'id': c['id'], 'set': c['set'], 'number': c['number'], 'similarity': round(c['similarity'], 4)} for c in picture['candidates']])
@@ -855,10 +887,11 @@ class PrintingCheck:
             reading_record.refuse(verdict['refused'])
         if not (verdict['accepted'] or verdict['needs_ocr']):
             return None             # review, or a guard refused it; needs_ocr: the picture alone with OCR on - Identification._read_by_picture asks the full-card OCR (confirm_by_ocr)
-        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (prints_a_marker: from The Lord of
-        # the Rings on, modern frame - a Codex review of 2026-10-21: a separator on an older line is not known to encode the finish, and the network answered
-        # confidently on 53 of 80 old-frame cards); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review
-        marker = prints_a_marker(card)
+        # The star / dot read in the strip, and the foil network, say the finish only on a printing that PRINTS the marker (marker_on_line: the modern frame - a Codex
+        # review of 2026-10-21: the network answered confidently on 53 of 80 old-frame cards, which print none; until 2026-11-25 only from The Lord of the Rings on,
+        # which sent every 2014 - 2023 card to review); on another printing only its own finishes count - unknown goes on to the AI's foil check, or review.
+        # With OCR off the network was asked at the FIXED place, measured on LTR-on cards only: prints_a_marker there
+        marker = marker_on_line(card) if ocr is not None else prints_a_marker(card)
         return {'path': decision['path'], 'card': card, 'strip': {'number': strip['number'], 'set': strip['set']},
                 'finish': decide_finish(card.get('finishes'), strip['symbol'] if marker else 'unknown', strip['net'] if marker else None),
                 'similarity': decision['similarity'], 'lead': decision['lead'],
@@ -868,11 +901,11 @@ class PrintingCheck:
     def finish_named_by_strip(self, strip, name):
         """
         The finish of a card whose printing was NOT decided, from its strip: 'foil', 'non-foil' or 'unknown'. Only when the strip's whole line names a printing, that printing
-        has the name the OCR read, and it prints a marker (prints_a_marker: the foil network answers confidently on older frames too, and is wrong there). The rule is the
+        has the name the OCR read, and it prints a marker (marker_on_line: the foil network answers confidently on older frames too, and is wrong there). The rule is the
         decided card's, decide_finish.
         """
         named = self._strip_printing(strip)
-        if named is NO_LINE or named is LOOKUP_FAILED or not named or not name or not prints_a_marker(named):
+        if named is NO_LINE or named is LOOKUP_FAILED or not named or not name or not marker_on_line(named):
             return 'unknown'
         if not database_names_match(name, {'name': named.get('name'), 'flavor_name': named.get('flavor_name')}):
             return 'unknown'

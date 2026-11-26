@@ -1404,8 +1404,11 @@ function spareBuylistBadge(card, qty) {
 }
 
 function spareChildRowHtml(card) {
-    const qty = spareKeepLimit() ? card.take : card.free;   // under keep N: what this printing gives alone
-    const qtyHint = card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
+    const keep = spareKeepLimit();
+    const qty = keep ? card.take : card.free;   // under keep N: what this printing gives alone
+    const qtyHint = keep && qty < card.free
+        ? ` <span class="hint">of ${card.free}</span>`
+        : card.free < card.quantity ? ` <span class="hint">of ${card.quantity}</span>` : '';
     const image = cardImageUrl(card);
     const setLabel = `${(card.set_code || card.set_name).toUpperCase()} ${card.number ? '#' + card.number : ''}`.trim();
     const rest = [card.finish !== defaultFinish() ? finishLabel(card.finish) : '', card.condition, card.location].filter(Boolean);
@@ -1567,15 +1570,17 @@ function renderSpare() {
     }
 
     const tickedQuantities = spareQuantitiesFor([...spareTicked]);
-    const tickedValue = cards.reduce((sum, card) => {
-        if (!spareTicked.has(card.id)) return sum;
+    let tickedEntries = 0, tickedValue = 0;
+    for (const card of cards) {
+        if (!spareTicked.has(card.id)) continue;
         const qty = tickedQuantities ? (tickedQuantities[card.id] || 0) : card.free;
-        return sum + card.price * qty;
-    }, 0);
+        if (qty > 0) tickedEntries++;
+        tickedValue += card.price * qty;
+    }
     $('spare-all').checked = !!cards.length && spareTicked.size === cards.length;
-    $('spare-aside').disabled = !spareTicked.size;
-    $('spare-aside').textContent = spareTicked.size
-        ? `Set ${plural(spareTicked.size, 'entry', 'entries')} (${money(tickedValue)}) aside for a trade`
+    $('spare-aside').disabled = !tickedEntries;
+    $('spare-aside').textContent = tickedEntries
+        ? `Set ${plural(tickedEntries, 'entry', 'entries')} (${money(tickedValue)}) aside for a trade`
         : 'Set aside for a trade';
 }
 
@@ -1693,33 +1698,38 @@ function bindSpareEvents() {
         spareTicked = new Set(event.target.checked ? spareCards().map(card => card.id) : []);
         renderSpare();
     });
-    $('spare-aside').addEventListener('click', () => {
+    $('spare-aside').addEventListener('click', async () => {
         const ids = [...spareTicked];
         const quantities = spareQuantitiesFor(ids);
-        spareTicked.clear();
         // Printings the keep rule holds back whole (0) are left out: the server would count them as "no copy left to give"
-        setAsideForTrade(null, quantities ? ids.filter(id => quantities[id] > 0) : ids, quantities);
+        const sendIds = quantities ? ids.filter(id => quantities[id] > 0) : ids;
+        if (!sendIds.length) return;
+        if (await setAsideForTrade(null, sendIds, quantities)) {
+            spareTicked.clear();
+            renderSpare();
+        }
     });
 }
 
 async function setAsideForTrade(card = null, chosen = null, quantities = null) {
     // Every free copy of the selected entries (or capped by `quantities`, e.g. from Extra copies)
-    if (inArena()) return;   // a trade is of paper cards: an Arena entry's id means another card there
+    if (inArena()) return false;   // a trade is of paper cards: an Arena entry's id means another card there
     // chosen: the ids ticked in the Trades tab's card finder (it leaves the Inventory's ticks alone)
     const ids = chosen || (card ? [card.id] : [...selected]);
     const open = trades.filter(trade => trade.status === 'open').map(trade => trade.name);
     const name = await valueDialog({title: `Set ${card ? card.name : entriesText(ids.length)} aside for a trade`,
         label: open.length ? 'Trade (one of the open ones, or a new name)' : 'Name of the trade (who it is with)',
         options: open, value: open.length === 1 ? open[0] : ''});
-    if (!name) return;
+    if (!name) return false;
     const body = quantities ? {name, ids, quantities} : {name, ids};
     const data = await api('/api/trades', {method: 'POST', body});
-    if (!data) return;
+    if (!data) return false;
     notify(`${plural(data.cards, 'card')} set aside for "${data.name}"`
         + (data.skipped ? ` - ${entriesText(data.skipped)} had no copy left to give` : ''), data.cards ? 'success' : 'warning');
     if (!card && !chosen) selected.clear();  // a row's button leaves what is ticked alone
     loadInventory();
     loadTrades();
+    return true;
 }
 
 async function tradeAction(trade, action) {
