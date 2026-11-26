@@ -50,4 +50,4 @@ class PrintingDecision(TypedDict):
 class FinishDecision(TypedDict):
     """What decide_finish answers (phase 2b); its own rule, never part of rule A2's answer"""
     finish: str                   # 'foil', 'regular' or 'unknown' (an unread marker is not 'regular')
-    source: str                   # 'printing' (it exists in one finish), 'symbol' (the OCR read it), 'network' (the foil network was sure) or 'none'
+    source: str                   # 'printing' (it exists in one finish), 'symbol' (the OCR read it), 'network' (the foil network was sure), 'conflict' (symbol against a sure network) or 'none'

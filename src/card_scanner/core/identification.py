@@ -526,7 +526,7 @@ class Identification:
                 # from the set line first (when the printing prints a marker - marker_on_line: the OCR is on here, so the line is the one it finds); only what it is not
                 # sure of is asked of the AI
                 if ocr_info['foil'] == 'unknown' and needs_foil:
-                    if ocr_card is None or not ocr_card.get('released_at') or marker_on_line(ocr_card):
+                    if ocr_card is None or not ocr_card.get('frame') or marker_on_line(ocr_card):
                         ocr_info['foil'] = self._read_foil_locally(image, foil_image)
                 if ocr_info['foil'] == 'unknown' and needs_foil and self._ai_foil_check(foil_image):
                     return ocr_info, FOIL

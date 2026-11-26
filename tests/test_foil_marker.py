@@ -216,6 +216,14 @@ class Reading(unittest.TestCase):
         self.assertEqual(ocr.asked, [])
         self.assertIsNone(foil_marker.set_line_crop(np.zeros((100, 100, 3), np.uint8), []))
 
+    def test_a_failing_network_keeps_an_ocr_read_symbol(self):
+        marker = foil_marker.load(True)
+        marker.probability = mock.Mock(side_effect=RuntimeError('dnn exploded'))
+        self.assertEqual(marker.read(self.CARD, FakeOcr(self.WITH_STAR)), ('foil', None))
+        self.assertEqual(marker.read(self.CARD, FakeOcr(self.WITH_DOT)), ('non-foil', None))
+        with self.assertRaises(RuntimeError):
+            marker.read(self.CARD, FakeOcr(self.SET_LINES))
+
 
 class FakeGame:
     """The game as _read_with_ocr uses it: it confirms every read"""

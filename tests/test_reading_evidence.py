@@ -1166,6 +1166,13 @@ class InIdentification(unittest.TestCase):
         info, task = self.ident._read_with_ocr(self.image, self.image)
         self.assertEqual(task, identification.FOIL)
         self.ident.foil_marker.read.assert_not_called()
+        # Same even when released_at is absent: marker_on_line gates on frame, not release date
+        self.game.confirmed_card = lambda name, number=None, set_code=None: {
+            'id': 'ocr-printing', 'name': name, 'flavor_name': None, 'number': number, 'set_code': set_code,
+            'finishes': ['nonfoil', 'foil'], 'released_at': '', 'frame': '2003'}
+        info, task = self.ident._read_with_ocr(self.image, self.image)
+        self.assertEqual(task, identification.FOIL)
+        self.ident.foil_marker.read.assert_not_called()
 
     def test_a_modern_frame_ocr_confirmed_card_from_before_the_lord_of_the_rings_asks_the_foil_network(self):
         # (since 2026-11-25: marker_on_line - a 2014 - 2023 modern-frame printing prints the star / dot)

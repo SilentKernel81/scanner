@@ -260,7 +260,7 @@ def marker_on_line(card):
     Whether the ★ / • on a printing's set line says its finish, where the OCR FOUND that line (the strip's symbol, and the network cut at the OCR's own box): every printing
     in the MARKER_FRAME frame, whatever its date - since 2026-11-25. Measured on the owner's full-size captures of 2014 - 2023 printings in that frame (KTK, ORI, SOI, EMN, KLD,
     M19, GRN, M20, IKO, DMR, The List): 4 foils with a ★ (the network sure of a foil on 3, the 4th's set line not found), 20 regular copies with a • (the network agreeing
-on 17, unsure on 3) - few foils, so watch the reading log. Older
+    on 17, unsure on 3) - few foils, so watch the reading log. Older
     frames (1993 / 1997 / 2003) print no marker at all: only the printing's own finishes count there. The fixed-place crop (OCR off) keeps the narrower prints_a_marker.
     """
     return bool(card) and card.get('frame') == MARKER_FRAME
