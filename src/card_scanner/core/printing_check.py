@@ -290,7 +290,9 @@ def read_strip_evidence(ocr, card_rgb, net=None):
     The strip's evidence in full (phase 2b): {'number', 'set', 'symbol', 'net'} from ONE read of the bottom-left strip. symbol: the foil symbol the OCR read in the
     set line ('foil', 'non-foil', 'unknown'); net: the foil network's probability of a foil - asked whenever there is a network (a foil_marker.FoilMarker; a separate
     instance from the live path's) and a set line, also beside a symbol the OCR read (since 2026-11-25: a sure network against the symbol makes the finish unknown,
-    decide_finish - the OCR reads a foil's ★ as a dot now and then) - else None. Uses foil_marker's helpers, and leaves foil_marker.read (the live path) alone.
+    decide_finish - the OCR reads a foil's ★ as a dot now and then) - else None. A network that fails beside a symbol the OCR read leaves net None (the symbol
+    stands, as it did before the network was asked there); without a symbol its failure is raised, as always. Uses foil_marker's helpers, and leaves
+    foil_marker.read (the live path) alone.
     """
     if ocr is None:
         # OCR switched off: no number, no set, no symbol - but the foil network can still be asked about the set line at its fixed place (foil_marker.FIXED_BOX)
@@ -307,7 +309,11 @@ def read_strip_evidence(ocr, card_rgb, net=None):
     if net is not None and line is not None:
         crop = foil_marker.set_line_crop(strip, line['box'])
         if crop is not None:
-            probability = net.probability(crop)
+            try:
+                probability = net.probability(crop)
+            except Exception:
+                if symbol == 'unknown':
+                    raise
     return {'number': number, 'set': set_code, 'symbol': symbol, 'net': probability}
 
 

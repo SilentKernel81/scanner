@@ -1030,6 +1030,15 @@ class TheFinishEvidence(unittest.TestCase):
         read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB EN', 40)]), self.CARD, net)
         self.assertEqual((read['symbol'], read['net'], net.asked), ('unknown', 0.97, 1))
 
+    def test_a_failing_network_beside_a_symbol_leaves_the_symbol(self):
+        class Failing:
+            def probability(self, crop):
+                raise RuntimeError('dnn exploded')
+        read = printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB \u2605 EN', 40)]), self.CARD, Failing())
+        self.assertEqual((read['symbol'], read['net']), ('foil', None))
+        with self.assertRaises(RuntimeError):
+            printing_check.read_strip_evidence(FakeReader([line('U 0172', 5), line('HOB EN', 40)]), self.CARD, Failing())
+
     def test_nothing_read_is_unknown_evidence(self):
         self.assertEqual(printing_check.read_strip_evidence(FakeReader([]), self.CARD),
                          {'number': '', 'set': '', 'symbol': 'unknown', 'net': None})
