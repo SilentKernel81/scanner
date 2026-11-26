@@ -208,8 +208,16 @@ class FoilMarker:
         line = set_line(lines)
         if line is None:
             return 'unknown', None
+        symbol = symbol_read(line)
         crop = set_line_crop(strip, line['box'])
-        return answer_with_symbol(symbol_read(line), self.probability(crop) if crop is not None else None)
+        probability = None
+        if crop is not None:
+            try:
+                probability = self.probability(crop)
+            except Exception:
+                if symbol == 'unknown':
+                    raise
+        return answer_with_symbol(symbol, probability)
 
     def read_fixed(self, card_rgb):
         """
