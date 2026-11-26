@@ -350,7 +350,7 @@ class RemoteScanner:
             return False
         mac = (data.get('mac') or '').strip().lower()
         new_ip = data.get('ip')
-        if not mac or not new_ip:
+        if not mac or not isinstance(new_ip, str) or not new_ip:
             return False
         try:
             ipaddress.IPv4Address(new_ip)

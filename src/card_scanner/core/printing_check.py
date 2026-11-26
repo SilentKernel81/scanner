@@ -804,10 +804,13 @@ class PrintingCheck:
         # ... and only for a card that prints a marker at all (marker_expected): the network answers foil / non-foil about whatever is in the box
         net_at_a_fixed_place = foil_net if ocr is not None or (orientation_established(search) and self.marker_expected(search)) else None
         strip = read_strip_evidence(ocr, as_read(read_turned), net_at_a_fixed_place)
+        other_strip = None
         if ocr is not None and not search.get('known_upright') and not saw_a_set_line(strip):
             other_way = read_strip_evidence(ocr, as_read(not read_turned), net_at_a_fixed_place)
             if saw_a_set_line(other_way):
-                strip, read_turned = other_way, not read_turned
+                other_strip, strip, read_turned = strip, other_way, not read_turned
+            else:
+                other_strip = other_way
         search = self._oriented(search, read_turned)
         # Keep the oriented search in CaptureEvidence so subsequent checks (contradicts, disagrees, verdict_of) use the confirmed orientation
         reading_capture.remember('search', card_image, search)
@@ -839,7 +842,9 @@ class PrintingCheck:
                  'strip_names': self._strip_names(search['index'], strip, decision['printing_id']) if alone and accept_image_alone and card else None}
         verdict = accept_printing(decision, facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
         # v2 Cascade -> Fusion: only when phash_rgb_v1 alone could not accept/confirm (~2% of cards) AND a v2 sidecar is loaded
-        if not (verdict['accepted'] or verdict['needs_ocr']) and getattr(search['index'], 'has_embeddings', False):
+        # Skip when accept_image_alone is off and the strip has no number+set (fusion could only return 'image'/'review', both refused)
+        can_rescue = bool(accept_image_alone) or bool(strip['number'] and strip['set'])
+        if not (verdict['accepted'] or verdict['needs_ocr']) and can_rescue and getattr(search['index'], 'has_embeddings', False):
             try:
                 fused = self._search_fused(card_image, search)
             except Exception as e:
@@ -850,15 +855,27 @@ class PrintingCheck:
                     fused = self._oriented_fused(fused, False)
                 elif ocr is not None and saw_a_set_line(strip):
                     fused = self._oriented_fused(fused, read_turned)
+                elif ocr is None and orientation_established(search):
+                    fused = self._oriented_fused(fused, read_turned)
+                fused_rotated = bool(fused['rotated'])
+                # If fusion flipped orientation from where the strip/foil box was read, use the other orientation's
+                # already-read strip (when OCR is on) or clear it so wrong-end foil evidence is never applied
+                if fused_rotated != read_turned:
+                    fused_strip = other_strip if other_strip is not None else {'number': '', 'set': '', 'symbol': 'unknown', 'net': None}
+                else:
+                    fused_strip = strip
                 fused_picture, fused_cards = self._picture_evidence(fused)
-                fused_decision = decide_printing(fused_picture, {'number': strip['number'], 'set': strip['set']})
+                fused_decision = decide_printing(fused_picture, {'number': fused_strip['number'], 'set': fused_strip['set']})
                 fused_card = fused_cards.get(fused_decision['printing_id']) if fused_decision['printing_id'] is not None else None
                 fused_alone = fused_decision['path'] == 'image'
                 fused_facts = {'accept_image_alone': bool(accept_image_alone), 'index_covers': True, 'in_data': bool(fused_card), 'ocr_on': ocr is not None,
-                               'strip_names': self._strip_names(fused['index'], strip, fused_decision['printing_id']) if fused_alone and accept_image_alone and fused_card else None}
+                               'strip_names': self._strip_names(fused['index'], fused_strip, fused_decision['printing_id']) if fused_alone and accept_image_alone and fused_card else None}
                 fused_verdict = accept_printing(fused_decision, fused_facts, {'image_min_similarity': IMAGE_MIN_SIMILARITY, 'strong_min_similarity': STRONG_MIN_SIMILARITY})
                 if fused_verdict['accepted'] or fused_verdict['needs_ocr']:
-                    search, picture, cards, decision, card, verdict = fused, fused_picture, fused_cards, fused_decision, fused_card, fused_verdict
+                    search, strip, picture, cards, decision, card, verdict = fused, fused_strip, fused_picture, fused_cards, fused_decision, fused_card, fused_verdict
+                    reading_capture.remember('rotated', card_image, bool(search['rotated']))
+                    if ocr is not None and fused_rotated != read_turned:
+                        reading_capture.remember('strip', card_image, strip)
                     fused_lead = None if decision['lead'] is None else round(float(decision['lead']), 4)
                     reading_record.note('picture', rotated=bool(search['rotated']), lead=fused_lead, v2_fused=True,
                                         candidates=[{'id': c['id'], 'set': c['set'], 'number': c['number'], 'similarity': round(c['similarity'], 4)} for c in picture['candidates']])

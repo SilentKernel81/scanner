@@ -448,7 +448,6 @@ class CardScanner:
         if patch is None or self._gain_adjusted_difference(patch, prev_patch) >= self.INTERIOR_PIXEL_STILL:
             return False
         self._settle_hiccups = getattr(self, '_settle_hiccups', 0) + 1
-        self._interior_prev = patch
         return True
 
     def _is_card_settled(self, frame, points):
@@ -480,8 +479,6 @@ class CardScanner:
             box_reused = True
         else:
             box = self._inset_box(frame.shape, points)
-            self._sharpness_box = box
-            self._sharpness_box_corners = points.copy()
 
         sharpness = self._box_sharpness(frame, box)
         if sharpness is None:
@@ -499,6 +496,8 @@ class CardScanner:
         # Always keep the latest thumbnail so _new_card_arrived sees genuine card swaps even after a hiccup
         self.previous_thumbnail = thumbnail
         if previous_points is None or previous_sharpness is None:
+            self._sharpness_box = box
+            self._sharpness_box_corners = points.copy()
             self.previous_card_points, self.previous_sharpness = points, sharpness
             self._interior_prev = patch
             self._pixel_still_streak = 0
@@ -556,12 +555,18 @@ class CardScanner:
 
         if settled:
             self._settle_hiccups = 0
+            if not box_reused:
+                self._sharpness_box = box
+                self._sharpness_box_corners = points.copy()
+                # Re-anchor interior pixels to the newly locked ROI so later frames never compare mismatched boxes
+                self._interior_anchor = patch
+                self._interior_anchor_samples = 1 if patch is not None else 0
             # Average the first two still frames into the anchor (cuts frame-0 jitter noise by sqrt(2)
             # without letting a slow slide drag the anchor along)
             if getattr(self, '_settle_anchor_samples', 1) == 1 and self.stable_frames >= 1:
                 self.settle_anchor = 0.5 * (self.settle_anchor + points)
                 self._settle_anchor_samples = 2
-                if interior_anchor is not None and patch is not None:
+                if box_reused and interior_anchor is not None and patch is not None:
                     self._interior_anchor = 0.5 * (interior_anchor + patch)
                     self._interior_anchor_samples = 2
             self.previous_card_points, self.previous_sharpness = points, sharpness
@@ -570,7 +575,7 @@ class CardScanner:
             return True
 
         # Tolerate a single isolated minor glitch frame during an active still streak without
-        # wiping stable_frames or poisoning previous_card_points / settle_anchor
+        # wiping stable_frames or poisoning previous_card_points / settle_anchor / _sharpness_box / _interior_prev
         minor_hiccup = (self.stable_frames > 0
                         and self.card_in_focus
                         and not self.card_disturbed
@@ -579,11 +584,13 @@ class CardScanner:
                         and (pixel_drift is None or pixel_drift < self.INTERIOR_PIXEL_DRIFT))
         if minor_hiccup:
             self._settle_hiccups = getattr(self, '_settle_hiccups', 0) + 1
-            self._interior_prev = patch
             self.last_settle_outcome = 'hiccup'
             return False
 
         self._settle_hiccups = 0
+        if not box_reused:
+            self._sharpness_box = box
+            self._sharpness_box_corners = points.copy()
         self.settle_anchor = points.copy()
         self._settle_anchor_samples = 1
         self._interior_anchor = patch

@@ -627,7 +627,7 @@ def start_index_update(on_done=None):
         try:
             logger.info("Picture index: extending it from Scryfall's pictures")
             existing_index = printing_check.index() if printing_check else None
-            embedder = visual_embed.load() if getattr(existing_index, 'has_embeddings', False) else None
+            embedder = visual_embed.load() if getattr(existing_index, 'embeds', None) is not None else None
             extra = {'embedder': embedder} if embedder is not None else {}
             built = image_index.build(database.printing_images(), printing_check.index_folder, fetch=True, log=logger.info,
                                       progress=progress, cancel=index_cancel, **extra)
