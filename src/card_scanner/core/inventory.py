@@ -808,18 +808,23 @@ class InventoryManager(storage.Transactional):
         else:
             self.conn.execute('DELETE FROM inventory_sources WHERE inventory_id = ? AND station = ?', (row_id, station))
 
-    def _station_rows(self, game, station):
+    def _station_rows(self, game, station, limit=None):
         """
         [(inventory row, copies)] of a game's entries a station added copies of: as many as it
         added, at most what the entry still has (copies removed since are nobody's). Only reads:
         a DELETE of leftovers here once left every filtered list holding a write transaction,
         and another connection's write failed with "database is locked".
         """
-        return [(row, min(row['station_copies'], row['quantity'])) for row in self.conn.execute(
-            '''SELECT i.*, s.quantity AS station_copies FROM inventory i
-               JOIN inventory_sources s ON s.inventory_id = i.id
-               WHERE i.game = ? AND s.station = ? AND s.quantity > 0 AND i.quantity > 0
-               ORDER BY i.timestamp DESC, i.id DESC''', (game, station)).fetchall()]
+        sql = '''SELECT i.*, s.quantity AS station_copies FROM inventory i
+                 JOIN inventory_sources s ON s.inventory_id = i.id
+                 WHERE i.game = ? AND s.station = ? AND s.quantity > 0 AND i.quantity > 0
+                 ORDER BY i.timestamp DESC, i.id DESC'''
+        params = (game, station)
+        if limit is not None:
+            sql += ' LIMIT ?'
+            params = (*params, limit)
+        return [(row, min(row['station_copies'], row['quantity']))
+                for row in self.conn.execute(sql, params).fetchall()]
 
     def stations_by_entry(self, game):
         """{inventory id: {station id: copies it added}} of a game's entries"""
@@ -889,9 +894,14 @@ class InventoryManager(storage.Transactional):
         if known > quantity:
             self._take_from_batches(row_id, known - quantity)
 
-    def batches_by_entry(self, game=None):
+    def batches_by_entry(self, game=None, entry_ids=None):
         """{inventory id: its inventory_batches rows, newest first}"""
-        where, params = ('WHERE i.game = ?', (game,)) if game else ('', ())
+        if entry_ids is not None and not entry_ids:
+            return {}
+        where, params = ('WHERE i.game = ?', (game,)) if game else ('WHERE 1', ())
+        if entry_ids is not None:
+            placeholders = ','.join('?' * len(entry_ids))
+            where, params = where + f' AND b.inventory_id IN ({placeholders})', params + tuple(entry_ids)
         result = {}
         with self._lock:
             for row in self.conn.execute(f'''
@@ -1014,11 +1024,16 @@ class InventoryManager(storage.Transactional):
         self._delete_captures('''inventory_id = ? AND id NOT IN (SELECT id FROM inventory_captures
                                  WHERE inventory_id = ? ORDER BY id LIMIT ?)''', (row_id, row_id, quantity))
 
-    def captures_by_entry(self, game=None, station=None):
+    def captures_by_entry(self, game=None, station=None, entry_ids=None):
         """{inventory id: [{'url', 'captured_at'}, ...] newest first} - with a station, only its captures"""
+        if entry_ids is not None and not entry_ids:
+            return {}
         where, params = ('WHERE i.game = ?', (game,)) if game else ('WHERE 1', ())
         if station:
             where, params = where + ' AND c.station = ?', params + (station,)
+        if entry_ids is not None:
+            placeholders = ','.join('?' * len(entry_ids))
+            where, params = where + f' AND c.inventory_id IN ({placeholders})', params + tuple(entry_ids)
         result = {}
         with self._lock:
             for row in self.conn.execute(f'''
@@ -1218,6 +1233,65 @@ class InventoryManager(storage.Transactional):
         self.log(f"Undid add: {quantity}x {row['card_name']}")
         return row['card_name']
 
+    def capture_file_for(self, capture_id):
+        """Best picture Path on disk (large copy if kept, else thumbnail) for an inventory_captures row, or None"""
+        if capture_id is None:
+            return None
+        with self._lock:
+            row = self.conn.execute('SELECT file FROM inventory_captures WHERE id = ?', (capture_id,)).fetchone()
+        if not row:
+            return None
+        for folder in (FULL_CAPTURES_DIR, CAPTURES_DIR):
+            path = self._safe_capture_path(folder, row['file'])
+            if path is not None and path.exists():
+                return path
+        return None
+
+    @_writes
+    def revert_added_entries(self, entries, capture_key=None):
+        """
+        Take back all copies added by one review resolution (possibly several finishes) in a single
+        transaction, and clear capture_key from applied_captures / unfollowed_captures so the
+        restored review item keeps its original capture identity for phone sync.
+        entries: [(row_id, quantity, capture_id, batch, source), ...].
+        Raises ValueError if any entry or capture was already changed or moved.
+        """
+        if not entries:
+            raise ValueError('Nothing to undo')
+        with self._lock:
+            # Check every entry first so a partial change never happens
+            needed = {}
+            for row_id, quantity, capture_id, _batch, _source in entries:
+                needed[row_id] = needed.get(row_id, 0) + quantity
+                if capture_id is not None:
+                    cap = self.conn.execute('SELECT inventory_id FROM inventory_captures WHERE id = ?',
+                                            (capture_id,)).fetchone()
+                    if cap is None or cap['inventory_id'] != row_id:
+                        raise ValueError('The card was already changed or moved')
+            name = None
+            for row_id, total_qty in needed.items():
+                row = self.conn.execute('SELECT card_name, quantity FROM inventory WHERE id = ?', (row_id,)).fetchone()
+                if row is None or row['quantity'] < total_qty:
+                    raise ValueError('The card was already changed or moved')
+                if name is None:
+                    name = row['card_name']
+            for row_id, quantity, capture_id, batch, source in entries:
+                if source:
+                    had = self.conn.execute(
+                        'SELECT quantity FROM inventory_sources WHERE inventory_id = ? AND station = ?',
+                        (row_id, source)).fetchone()
+                    self._set_source(row_id, source, (had['quantity'] if had else 0) - quantity)
+                if capture_id is not None:
+                    self._delete_captures('id = ?', (capture_id,))
+                self._take_copies(row_id, quantity, batch=batch)
+                self._invalidate_last_added(row_id)
+            if capture_key:
+                self.conn.execute('DELETE FROM applied_captures WHERE key = ?', (capture_key,))
+                self.conn.execute('DELETE FROM unfollowed_captures WHERE key = ?', (capture_key,))
+            self._commit()
+        self.log(f"Undid review add: {name}")
+        return name
+
     def _invalidate_last_added(self, row_id):
         """Drop any station Undo pointer referencing an entry that was split, merged, or reduced."""
         for source, entry in list(self.last_added.items()):
@@ -1397,29 +1471,35 @@ class InventoryManager(storage.Transactional):
     # Reading
     # ------------------------------------------------------------------------
 
-    def get_all_cards(self, game=None, station=None):
+    def get_all_cards(self, game=None, station=None, limit=None):
         """
-        Inventory rows (newest first), optionally only one game's. With a station (the scanned
-        cards' camera filter): only what that station scanned - its copies of each entry (as
-        'quantity') and its captures.
+        Inventory rows (newest first), optionally only one game's and/or capped at `limit` rows.
+        With a station (the scanned cards' camera filter): only what that station scanned - its
+        copies of each entry (as 'quantity') and its captures.
         """
         if station:
             with self._lock:
-                rows = self._station_rows(game, station)
+                rows = self._station_rows(game, station, limit=limit)
                 withheld = self.prices_withheld()      # with the rows, under the lock a repricing holds
-            captures = self.captures_by_entry(game, station)
+            ids = [row['id'] for row, _ in rows] if limit is not None else None
+            captures = self.captures_by_entry(game, station, entry_ids=ids)
             # 'shared': another camera (or a manual add) has copies in the same entry - the page
             # then offers no edit / delete, which would act on the whole entry
-            batches = self.batches_by_entry(game)
+            batches = self.batches_by_entry(game, entry_ids=ids)
             return [{**_row_dict(row, batches.get(row['id'], ()), withheld), 'quantity': copies, 'entry_quantity': row['quantity'],
                      'shared': copies != row['quantity'], 'captures': captures.get(row['id'], [])}
                     for row, copies in rows]
         where, params = ('WHERE game = ?', (game,)) if game else ('', ())
+        sql = f'SELECT * FROM inventory {where} ORDER BY timestamp DESC, id DESC'
+        if limit is not None:
+            sql += ' LIMIT ?'
+            params = (*params, limit)
         with self._lock:
-            rows = self.conn.execute(f'SELECT * FROM inventory {where} ORDER BY timestamp DESC, id DESC', params).fetchall()
+            rows = self.conn.execute(sql, params).fetchall()
             withheld = self.prices_withheld()          # with the rows, under the lock a repricing holds
-        captures = self.captures_by_entry(game)
-        batches = self.batches_by_entry(game)
+        ids = [row['id'] for row in rows] if limit is not None else None
+        captures = self.captures_by_entry(game, entry_ids=ids)
+        batches = self.batches_by_entry(game, entry_ids=ids)
         return [{**_row_dict(row, batches.get(row['id'], ()), withheld), 'captures': captures.get(row['id'], [])} for row in rows]
 
     def owned_by_name(self, game):

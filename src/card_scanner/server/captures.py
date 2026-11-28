@@ -65,13 +65,13 @@ def queue_for_review(game, image_path, name='', number='', set_code='', foil='un
     station: the stations.py station it came from (None: the scanner page's camera).
     Returns why it was queued.
     """
-    review.add(game.id, image_path, name, number, set_code, foil, card, station=desk().id, capture_key=capture_key())
     if card:
         why = why or 'printing not confirmed'
         what = f"{card['name']} ({why})"
     else:
         why = 'not found' if name else 'not read'
         what = f"'{name}' (not found)" if name else "a card the AI couldn't read"
+    review.add(game.id, image_path, name, number, set_code, foil, card, station=desk().id, capture_key=capture_key(), reason=why)
     log_to_client(f"{station_prefix(station)}Queued for review: {what}", level="warning")
     # queued: a card was just added to the queue (the page plays the queue alert)
     emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter), 'queued': True})
@@ -102,7 +102,7 @@ def route_identified(image_path, card_name, collector_number, set_code, processi
         # The game was switched while this capture waited for (or was with) the AI: it is not
         # looked up as a card of the other game - it waits in its own game's review queue,
         # without what was read (the prompt and parser may have been the other game's)
-        review.add(game_id, image_path, foil=foil, station=desk().id, capture_key=capture_key())
+        review.add(game_id, image_path, foil=foil, station=desk().id, capture_key=capture_key(), reason='game switched')
         log_to_client(f"{station_prefix(station)}Captured before the game was switched: kept in the "
                       f"{games.get(game_id).label} review queue", level="warning")
         if scanner:
@@ -130,6 +130,14 @@ def added_payload(game, card, finish, quantity):
     """What an inventory_updated event says was added (the page shows it with an Undo)"""
     return {'name': card['name'], 'set': card['set'], 'number': card['number'],
             'finish': game.finishes[finish], 'quantity': quantity}
+
+
+def added_card_event(game, card, finish, quantity, row_id=None):
+    """Scanner page payload for inventory_updated: adds artwork, price and row id without changing ServerOutcome"""
+    payload = added_payload(game, card, finish, quantity)
+    fields = game.inventory_fields(card, finish)
+    return {**payload, 'id': row_id, 'finish_key': finish, 'set_code': card.get('set_code') or '',
+            'rarity': card.get('rarity') or '', 'image_uri': card.get('image_uri') or '', 'price': fields['price']}
 
 
 def scan_stats(game_id):
@@ -164,7 +172,8 @@ def add_automatically(game, card, image_path, foil, station=None, captured_at=No
                                      capture=image_path, location=scan_location(), when=captured_at,
                                      source=desk().id, capture_key=capture_key())
     added = added_payload(game, card, finish, 1)
-    emit_desk('inventory_updated', {'auto': True, 'stats': scan_stats(game.id), 'added': added})
+    emit_desk('inventory_updated', {'auto': True, 'stats': scan_stats(game.id),
+                                    'added': added_card_event(game, card, finish, 1, row_id=row_id)})
     start_price_update(game, card, [row_id])
     return added
 

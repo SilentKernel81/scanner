@@ -12,7 +12,7 @@ from card_scanner.core.review import REVIEW_DIR
 from card_scanner.server.state import app, database, identification, inventory, maintenance_barrier, printing_check, review, scan_inventory, socketio, stations
 from card_scanner.server.logs import logger
 from card_scanner.server.desks import GENERAL_ROOM, desk, desk_for, emit_desk, log_to_client, page_stations, review_done, scanner
-from card_scanner.server.captures import added_payload, scan_location, scan_stats, set_pending_capture, start_price_update
+from card_scanner.server.captures import added_card_event, scan_location, scan_stats, set_pending_capture, start_price_update
 from card_scanner.server.stations_api import undo_station_add
 
 
@@ -187,6 +187,7 @@ def add_selected_card(data):
         # it can still ask about it and remove it. A card added by hand is the page's own.
         source = reviewed['station'] if reviewed and reviewed.get('station') else desk().id
 
+        added_entries = []
         for item in items:
             finish = item.get('finish') or game.default_finish
             try:
@@ -194,16 +195,24 @@ def add_selected_card(data):
             except (ValueError, TypeError):
                 quantity = 1
             logger.info(f"Adding card to inventory: {quantity}x {card['name']} ({condition}, {finish})")
-            added_rows.append(scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish,
-                                                      condition, quantity, capture=capture,
-                                                      location=scan_location(), source=source,
-                                                      capture_key=sync_key))
+            row_id = scan_inventory.add_card(game.inventory_fields(card, finish), game.id, finish,
+                                             condition, quantity, capture=capture,
+                                             location=scan_location(), source=source,
+                                             capture_key=sync_key)
+            added_rows.append(row_id)
+            last = scan_inventory.last_added.get(source)
+            if last and last[0] == row_id:
+                added_entries.append((row_id, last[1], last[2], last[3], source))
             capture = None
             sync_key = None
 
             # Send updated stats and what was added (the page offers an Undo)
-            emit('inventory_updated', {'auto': False, 'stats': scan_stats(game.id),
-                                       'added': added_payload(game, card, finish, quantity)})
+            emit('inventory_updated', {
+                'auto': False,
+                'from_review': desk().current_review_id is not None,
+                'stats': scan_stats(game.id),
+                'added': added_card_event(game, card, finish, quantity, row_id=row_id),
+            })
 
         logger.info("Card added to inventory successfully")
         start_price_update(game, card, added_rows)
@@ -215,11 +224,14 @@ def add_selected_card(data):
                 identification.reading_log.review_pick(reviewed.get('file'), card.get('id'), desk().review_candidates,
                                                        station=reviewed.get('station'), capture_key=reviewed.get('capture_key'))
             desk().review_candidates = []
-            # Reviewed: resolve the item and open the next one
-            review.remove(desk().current_review_id)
+            # Reviewed: remember the original item so Undo restores it with its capture_key intact
+            desk().last_review_add = {'reviewed': dict(reviewed), 'entries': added_entries, 'name': card['name']} if reviewed and added_entries else None
+            resolved_id = desk().current_review_id
+            next_id = review.next_after(game.id, desk().review_filter, resolved_id)
+            review.remove(resolved_id)
             desk().current_review_id = None
             emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter)})
-            handle_review_open()
+            handle_review_open({'id': next_id} if next_id is not None else None)
 
         # Clear the review flag to allow next auto-capture
         if scanner:
@@ -239,9 +251,22 @@ def add_selected_card(data):
 
 @socketio.on('review_open')
 def handle_review_open(data=None):
-    """Open the oldest item of the review queue (or say it is empty)"""
+    """Open the oldest item of the review queue, jump to data['id'], or step by data['step'] (+1 / -1)"""
     game = games.active()
-    item, total = review.first(game.id, desk().review_filter)
+    payload = data if isinstance(data, dict) else {}
+    try:
+        target_id = int(payload['id']) if payload.get('id') is not None else None
+        step = int(payload.get('step') or 0)
+    except (TypeError, ValueError):
+        emit('error', {'message': 'Invalid review navigation parameters'})
+        return
+    if target_id is not None:
+        item, position, total = review.open_id(game.id, desk().review_filter, target_id)
+    elif step:
+        item, position, total = review.step(game.id, desk().review_filter, desk().current_review_id, step)
+    else:
+        item, total = review.first(game.id, desk().review_filter)
+        position = 1 if item else 0
     desk().current_review_id = item['id'] if item else None
     desk().review_sid = request.sid if item else None
     if not item:
@@ -261,28 +286,56 @@ def handle_review_open(data=None):
         logger.debug(f"Review item {item['id']}: no candidates ({e})")
         candidates = []
     desk().review_candidates = [c['id'] for c in candidates]     # what the person is shown: the reading log notes which one is picked
+    reason = item.get('reason') or ''
+    if not reason:
+        if item.get('match') == 'sent back':
+            reason = 'sent back to review'
+        elif card and game.is_confirmed(card) and not game.finish_known(card, item.get('foil') or 'unknown'):
+            reason = 'finish not read (printed in foil and non-foil)'
+        elif card:
+            reason = 'printing not confirmed'
+        elif item.get('ai_name'):
+            reason = 'not found'
+        else:
+            reason = 'not read'
+    # Lightweight thumbnail strip of the queue for the full-width review workspace
+    queue_items = [
+        {
+            'id': q['id'],
+            'name': q.get('ai_name') or '',
+            'image_url': f"/review_images/{q['file']}" if q.get('file') else None,
+            'reason': q.get('reason') or ('sent back' if q.get('match') == 'sent back' else ''),
+            'foil': q.get('foil') or 'unknown',
+        }
+        for q in review.list_items(game.id, desk().review_filter)
+    ]
     emit('review_item', {
         'id': item['id'],
+        'position': position,
         'total': total,
+        'reason': reason,
         'image_url': f"/review_images/{item['file']}" if item['file'] else None,
         'ai': {'name': item['ai_name'], 'number': item['ai_number'], 'set': item['ai_set'], 'foil': item['foil']},
         'captured_at': item['created_at'],
         'station': (stations.get(item['station']) or {'name': item['station']})['name'] if item.get('station') else None,
         'card': game.card_payload(card) if card else None,
         'candidates': candidates,
+        'queue': queue_items,
     })
 
 
 @socketio.on('review_skip')
 def handle_review_skip(data=None):
     """Drop the open review item without adding anything"""
+    next_id = None
     if desk().current_review_id is not None:
         with maintenance_barrier:  # not in the middle of a card being sent back to review (inventory_api.py)
+            next_id = review.next_after(games.active_id(), desk().review_filter, desk().current_review_id)
             review.remove(desk().current_review_id)
     desk().current_review_id = desk().current_card_info = desk().review_sid = None
     set_pending_capture(None)
     emit_desk('review_queue_update', {'count': review.count(games.active_id(), desk().review_filter)})
-    handle_review_open()  # the next one
+    handle_review_open({'id': next_id} if next_id is not None else None)  # the next one in line
 
 
 @socketio.on('review_close')
@@ -309,11 +362,48 @@ def review_image(name):
     return send_from_directory(REVIEW_DIR, name)
 
 
+def undo_last_review_add():
+    """Restore the most recently resolved review item on this desk with its original metadata and capture_key."""
+    game = games.active()
+    with maintenance_barrier:
+        record = desk().last_review_add
+        if not record or record['reviewed'].get('game') != game.id:
+            emit('error', {'message': 'Nothing to undo'})
+            return
+        reviewed = record['reviewed']
+        entries = record['entries']
+        capture_id = next((entry[2] for entry in entries if entry[2] is not None), None)
+        image_path = scan_inventory.capture_file_for(capture_id) if capture_id is not None else None
+        if capture_id is not None and image_path is None:
+            desk().last_review_add = None
+            emit('error', {'message': 'Cannot undo: the card was already changed or moved'})
+            return
+        transfer = f"scan:{image_path.name}" if image_path else None
+        restored_id = review.restore(reviewed, image_path, transfer=transfer)
+        try:
+            scan_inventory.revert_added_entries(entries, capture_key=reviewed.get('capture_key'))
+        except Exception as e:
+            review.remove(restored_id)
+            desk().last_review_add = None
+            emit('error', {'message': f'Cannot undo: {e}'})
+            return
+        if transfer:
+            review.confirm_transfer(restored_id)
+        desk().last_review_add = None
+    emit_desk('review_queue_update', {'count': review.count(game.id, desk().review_filter)})
+    emit('inventory_updated', {'auto': False, 'undone': record['name'], 'stats': scan_stats(game.id)})
+    handle_review_open({'id': restored_id})
+
+
 @socketio.on('undo_last_add')
 def handle_undo_last_add(data=None):
-    """Take back the most recent add to the inventory - with data['station'], that station's"""
+    """Take back the most recent add to the inventory - with data['station'], that station's; with data['review'], restore the original review item"""
     if not inventory:
         emit('error', {'message': 'Inventory not initialized'})
+        return
+
+    if (data or {}).get('review'):
+        undo_last_review_add()
         return
 
     station_id = (data or {}).get('station')

@@ -81,9 +81,16 @@ def get_inventory():
     if inventory:
         try:
             game = games.active()
-            # The scanned cards can be narrowed to one camera's (?camera=)
+            # The scanned cards can be narrowed to one camera's (?camera=) and capped (?limit=N, for the scanner's recent scans)
             camera = scan_camera() if inventory_area() is scan_inventory else None
-            cards = inventory_area().get_all_cards(game.id, camera)
+            raw_limit = request.args.get('limit')
+            try:
+                limit = int(raw_limit) if raw_limit is not None else None
+            except ValueError:
+                limit = None
+            if limit is not None and limit <= 0:
+                limit = None
+            cards = inventory_area().get_all_cards(game.id, camera, limit=limit)
             if inventory_area() is scan_inventory and not camera:
                 # Who scanned each entry: {station name: copies}
                 names = {station['id']: station['name'] for station in stations.all()}
@@ -188,9 +195,10 @@ def send_inventory_card_to_review(row_id):
         # transfer: the item stays out of the queue until the copy has left (confirmed below) and,
         # when the program stops in between, the next start settles it (finish_interrupted_sends)
         area_name = 'scan' if area is scan_inventory else 'collection'
+        sent_reason = 'sent back from scanned cards' if area_name == 'scan' else 'sent back from collection'
         item_id = review.add(game.id, candidate['file'], entry['card_name'], entry['card_number'] or '',
                              entry['set_code'] or '', foil, card, station=station,
-                             transfer=f"{area_name}:{candidate['row']['file']}")
+                             transfer=f"{area_name}:{candidate['row']['file']}", reason=sent_reason)
         # The item must hold its own copy of the picture: review.add keeps an item without one
         # when the copy fails (full disk), and the original goes with the entry's copy
         kept = review.get(item_id) if item_id is not None else None

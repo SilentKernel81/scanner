@@ -45,7 +45,8 @@ class ReviewQueue:
                     created_at TEXT NOT NULL,
                     station TEXT,           -- stations.py id the capture came from (NULL: nobody's - see _of)
                     capture_key TEXT,       -- the uid of the capture it is (pending.py); see by_capture
-                    transfer TEXT           -- a card sent back from an inventory: which copy, until it has left (see add)
+                    transfer TEXT,          -- a card sent back from an inventory: which copy, until it has left (see add)
+                    reason TEXT             -- why the capture landed in review (shown as a badge in the UI)
                 )''')
             columns = {row['name'] for row in self.conn.execute('PRAGMA table_info(review_queue)')}
             if 'station' not in columns:
@@ -60,6 +61,8 @@ class ReviewQueue:
             # next start if the program stopped in between (server/inventory_api.py)
             if 'transfer' not in columns:
                 self.conn.execute('ALTER TABLE review_queue ADD COLUMN transfer TEXT')
+            if 'reason' not in columns:
+                self.conn.execute('ALTER TABLE review_queue ADD COLUMN reason TEXT')
             self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_review_capture_key '
                               'ON review_queue(capture_key) WHERE capture_key IS NOT NULL')
             # Captures that were queued here already (add's capture_key; pending.py)
@@ -68,7 +71,7 @@ class ReviewQueue:
             self.conn.commit()
 
     def add(self, game, image_path, name='', number='', set_code='', foil='unknown', card=None, station=None,
-            capture_key=None, transfer=None):
+            capture_key=None, transfer=None, reason=None):
         """Queue a capture; returns the item id. capture_key: the capture's uid (pending.py) -
         noted in the same commit; a capture queued here before is not queued again (None).
         transfer: the item is a card sent back from an inventory, and names its copy there
@@ -114,10 +117,10 @@ class ReviewQueue:
                 try:
                     item_id = self.conn.execute(
                         'INSERT INTO review_queue (game, file, ai_name, ai_number, ai_set, foil, card_id, match, created_at, '
-                        'station, capture_key, transfer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        'station, capture_key, transfer, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         (game, file, name or '', number or '', set_code or '', foil or 'unknown',
                          card['id'] if card else None, card.get('match') if card else None,
-                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key, transfer)).lastrowid
+                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'), station, capture_key, transfer, reason)).lastrowid
                     if capture_key:
                         self.conn.execute('INSERT INTO applied_captures (key, target, applied_at) VALUES (?, ?, ?)',
                                           (capture_key, f'review:{item_id}', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -182,6 +185,52 @@ class ReviewQueue:
             total = self.conn.execute(f'SELECT COUNT(*) FROM review_queue WHERE {where}', values).fetchone()[0]
         return (dict(row) if row else None), total
 
+    def step(self, game, station=ANY, current_id=None, delta=1):
+        """Move through the queue without deleting items: (item dict or None, 1-based position, total)"""
+        where, values = self._of(game, station)
+        with self._lock:
+            ids = [r['id'] for r in self.conn.execute(f'SELECT id FROM review_queue WHERE {where} ORDER BY id', values)]
+            if not ids:
+                return None, 0, 0
+            if current_id in ids:
+                index = (ids.index(current_id) + delta) % len(ids)
+            else:
+                index = 0 if delta >= 0 else len(ids) - 1
+            row = self.conn.execute('SELECT * FROM review_queue WHERE id = ?', (ids[index],)).fetchone()
+        return (dict(row) if row else None), index + 1, len(ids)
+
+    def open_id(self, game, station=ANY, item_id=None):
+        """Open a specific queued item by id (falling back to the first item if gone): (item or None, 1-based position, total)"""
+        where, values = self._of(game, station)
+        with self._lock:
+            ids = [r['id'] for r in self.conn.execute(f'SELECT id FROM review_queue WHERE {where} ORDER BY id', values)]
+            if not ids:
+                return None, 0, 0
+            index = ids.index(item_id) if item_id in ids else 0
+            row = self.conn.execute('SELECT * FROM review_queue WHERE id = ?', (ids[index],)).fetchone()
+        return (dict(row) if row else None), index + 1, len(ids)
+
+    def list_items(self, game, station=ANY, limit=60):
+        """Lightweight summary of queued items (oldest first) for the review workspace's thumbnail strip"""
+        where, values = self._of(game, station)
+        with self._lock:
+            rows = self.conn.execute(
+                f'SELECT id, file, ai_name, ai_number, ai_set, foil, card_id, match, reason, created_at '
+                f'FROM review_queue WHERE {where} ORDER BY id LIMIT ?',
+                (*values, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def next_after(self, game, station=ANY, current_id=None):
+        """Id of the item right after current_id (for staying in place after resolving/deleting an item), or None"""
+        if current_id is None:
+            return None
+        where, values = self._of(game, station)
+        with self._lock:
+            row = self.conn.execute(
+                f'SELECT id FROM review_queue WHERE {where} AND id > ? ORDER BY id LIMIT 1',
+                (*values, current_id)).fetchone()
+        return row['id'] if row else None
+
     def get(self, item_id):
         with self._lock:
             row = self.conn.execute('SELECT * FROM review_queue WHERE id = ?', (item_id,)).fetchone()
@@ -228,6 +277,53 @@ class ReviewQueue:
         with self._lock:
             row = self.conn.execute('SELECT * FROM review_queue WHERE capture_key = ?', (capture_key,)).fetchone()
         return dict(row) if row else None
+
+    def restore(self, item, image_path=None, transfer=None):
+        """
+        Put an undone review item back into review_queue with its original id, metadata, reason,
+        timestamp and capture_key (so a phone keeps tracking the capture). Bypasses applied_captures
+        because this restores an existing item rather than queueing a repeat upload.
+        """
+        file = None
+        if image_path:
+            try:
+                missing = [folder for folder in (REVIEW_DIR, *REVIEW_DIR.parents) if not folder.exists()]
+                REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+                file = f"{uuid.uuid4().hex}.jpg"
+                shutil.copyfile(image_path, REVIEW_DIR / file)
+                if transfer:
+                    self._flush(REVIEW_DIR / file)
+                    for folder in missing:
+                        self._flush_folder(folder.parent)
+            except OSError as e:
+                logger.warning(f"Could not restore the capture for review: {e}")
+                file = None
+        committed = False
+        try:
+            with self._lock:
+                if transfer:
+                    self.conn.execute('PRAGMA synchronous = FULL')
+                try:
+                    item_id = self.conn.execute(
+                        'INSERT INTO review_queue (id, game, file, ai_name, ai_number, ai_set, foil, card_id, match, '
+                        'created_at, station, capture_key, transfer, reason) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        (item.get('id'), item['game'], file, item.get('ai_name') or '', item.get('ai_number') or '',
+                         item.get('ai_set') or '', item.get('foil') or 'unknown', item.get('card_id'),
+                         item.get('match'), item.get('created_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                         item.get('station'), item.get('capture_key'), transfer, item.get('reason'))).lastrowid
+                    self.conn.commit()
+                    committed = True
+                except BaseException:
+                    self.conn.rollback()
+                    raise
+                finally:
+                    if transfer:
+                        self.conn.execute('PRAGMA synchronous = NORMAL')
+            return item_id
+        finally:
+            if file and not committed:
+                (REVIEW_DIR / file).unlink(missing_ok=True)
 
     def remove(self, item_id):
         """Resolve an item (added or skipped): delete it and its capture copy"""

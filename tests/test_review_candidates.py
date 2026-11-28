@@ -84,6 +84,7 @@ class TheEvent(unittest.TestCase):
         self.game.get_card.return_value = None
         self.review = mock.Mock()
         self.review.first.return_value = (dict(self.ITEM), 1)
+        self.review.list_items.return_value = []
         self.review.image_path.return_value = Path('/nonexistent/x.jpg')
         self.check = mock.Mock()
         self.check.candidates.return_value = [{'id': 'p3', 'name': 'Card p3', 'similarity': 0.9}]
@@ -120,6 +121,111 @@ class TheEvent(unittest.TestCase):
         item = [e['args'][0] for e in self.client.get_received() if e['name'] == 'review_item'][0]
         self.assertEqual(item, {'id': None, 'total': 0})
         self.check.candidates.assert_not_called()
+
+    def test_stepping_through_review_items_keeps_them_in_queue(self):
+        second = dict(self.ITEM, id=8, reason='finish not read (printed in foil and non-foil)')
+        self.review.step.return_value = (second, 2, 3)
+        self.client.emit('review_open', {'step': 1})
+        item = [e['args'][0] for e in self.client.get_received() if e['name'] == 'review_item'][0]
+        self.assertEqual((item['id'], item['position'], item['total']), (8, 2, 3))
+        self.assertEqual(item['reason'], 'finish not read (printed in foil and non-foil)')
+
+    def test_review_queue_persists_reason_and_steps_without_deleting(self):
+        from card_scanner.core.review import ReviewQueue
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        queue = ReviewQueue(Path(folder.name) / 'review.db')
+        id1 = queue.add('mtg', None, 'First', reason='not found')
+        id2 = queue.add('mtg', None, 'Second', reason='printing not confirmed')
+        id3 = queue.add('mtg', None, 'Third', reason='finish not read')
+        item, pos, total = queue.step('mtg', current_id=id1, delta=1)
+        self.assertEqual((item['id'], item['reason'], pos, total), (id2, 'printing not confirmed', 2, 3))
+        item, pos, total = queue.step('mtg', current_id=id3, delta=1)
+        self.assertEqual((item['id'], item['reason'], pos, total), (id1, 'not found', 1, 3))
+        item, pos, total = queue.step('mtg', current_id=id1, delta=-1)
+        self.assertEqual((item['id'], item['reason'], pos, total), (id3, 'finish not read', 3, 3))
+        item, pos, total = queue.open_id('mtg', item_id=id2)
+        self.assertEqual((item['id'], pos, total), (id2, 2, 3))
+        self.assertEqual(queue.next_after('mtg', current_id=id2), id3)
+        self.assertIsNone(queue.next_after('mtg', current_id=id3))
+        self.assertEqual([r['id'] for r in queue.list_items('mtg')], [id1, id2, id3])
+        self.assertEqual(queue.count('mtg'), 3)
+
+    def test_jumping_to_specific_review_item_by_id(self):
+        second = dict(self.ITEM, id=9, reason='printing not confirmed')
+        self.review.open_id.return_value = (second, 2, 4)
+        self.review.list_items.return_value = [dict(self.ITEM, id=7), second]
+        self.client.emit('review_open', {'id': 9})
+        item = [e['args'][0] for e in self.client.get_received() if e['name'] == 'review_item'][0]
+        self.assertEqual((item['id'], item['position'], item['total']), (9, 2, 4))
+        self.assertEqual([q['id'] for q in item['queue']], [7, 9])
+
+    def test_malformed_review_open_parameters_return_error(self):
+        self.client.emit('review_open', {'id': 'not-an-int'})
+        errors = [e['args'][0] for e in self.client.get_received() if e['name'] == 'error']
+        self.assertEqual(len(errors), 1)
+        self.client.emit('review_open', {'step': 'bad'})
+        errors = [e['args'][0] for e in self.client.get_received() if e['name'] == 'error']
+        self.assertEqual(len(errors), 1)
+
+    def test_undo_review_add_restores_original_item_and_capture_key_and_multi_finish(self):
+        from card_scanner.core.inventory import InventoryManager
+        from card_scanner.core.review import ReviewQueue
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = Path(folder.name)
+        photo = root / 'orig.jpg'
+        cv2.imwrite(str(photo), cv2.cvtColor(synthetic_card(1), cv2.COLOR_RGB2BGR))
+
+        inv = InventoryManager(root / 'scan.db')
+        queue = ReviewQueue(root / 'review.db')
+        cap_dir, full_dir = root / 'caps', root / 'caps_full'
+        rev_dir = root / 'rev_imgs'
+        with mock.patch('card_scanner.core.inventory.CAPTURES_DIR', cap_dir), \
+                mock.patch('card_scanner.core.inventory.FULL_CAPTURES_DIR', full_dir), \
+                mock.patch('card_scanner.core.review.REVIEW_DIR', rev_dir):
+            orig_id = queue.add('mtg', photo, 'Test Card', '12', 'tst', 'unknown',
+                                station='phone-1', capture_key='cap-uid-1', reason='finish not read')
+            orig = queue.get(orig_id)
+            self.assertEqual(queue.by_capture('cap-uid-1')['id'], orig_id)
+
+            # Simulate adding 1 regular + 1 foil from the review item (with capture_key on the first finish)
+            fields = {'card_id': 'p1', 'name': 'Test Card', 'set_name': 'Test Set', 'set_code': 'tst', 'number': '12', 'price': 1.0}
+            r1 = inv.add_card(fields, 'mtg', 'regular', 'Near Mint', 1, capture=queue.image_path(orig),
+                              source='phone-1', capture_key='cap-uid-1')
+            e1 = (*inv.last_added['phone-1'], 'phone-1')
+            r2 = inv.add_card(fields, 'mtg', 'foil', 'Near Mint', 1, capture=None,
+                              source='phone-1', capture_key=None)
+            e2 = (*inv.last_added['phone-1'], 'phone-1')
+            queue.remove(orig_id)
+
+            self.assertEqual(inv.captured_copy('cap-uid-1', 'phone-1')[0], 'scanned')
+            self.assertIsNone(queue.by_capture('cap-uid-1'))
+
+            # Undo: restore original review row (same id, reason, capture_key) and revert both finishes
+            img_path = inv.capture_file_for(e1[2])
+            self.assertIsNotNone(img_path)
+            restored_id = queue.restore(orig, img_path, transfer='undo')
+            inv.revert_added_entries([e1, e2], capture_key='cap-uid-1')
+            queue.confirm_transfer(restored_id)
+
+            self.assertEqual(restored_id, orig_id)
+            restored = queue.by_capture('cap-uid-1')
+            self.assertIsNotNone(restored)
+            self.assertEqual((restored['id'], restored['reason'], restored['ai_name'], restored['station']),
+                             (orig_id, 'finish not read', 'Test Card', 'phone-1'))
+            self.assertEqual(inv.get_all_cards('mtg'), [])
+            self.assertEqual(inv.captured_copy('cap-uid-1', 'phone-1'), (None, None))  # NOT unfollowed!
+
+            # Re-adding after undo still accepts the original capture_key cleanly
+            r3 = inv.add_card(fields, 'mtg', 'foil', 'Near Mint', 1, capture=queue.image_path(restored),
+                              source='phone-1', capture_key='cap-uid-1')
+            self.assertIsNotNone(r3)
+            self.assertEqual(inv.captured_copy('cap-uid-1', 'phone-1')[0], 'scanned')
+            # Limit query returns only the requested number of newest rows
+            inv.add_card({**fields, 'card_id': 'p2', 'name': 'Second Card', 'number': '13'}, 'mtg', 'regular', 'Near Mint', 1, source='phone-1')
+            self.assertEqual(len(inv.get_all_cards('mtg', limit=1)), 1)
+            self.assertEqual(len(inv.get_all_cards('mtg', station='phone-1', limit=1)), 1)
 
 
 if __name__ == '__main__':
