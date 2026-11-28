@@ -81,7 +81,7 @@ def handle_set_game(data):
     # The game is everyone's: every camera stops scanning and every page drops its card
     for target in [services.default_desk, *list(desks.values())]:
         with in_desk(target):
-            target.current_card_info = target.current_review_id = target.review_sid = None
+            target.current_card_info = target.current_review_id = target.review_sid = target.last_review_add = None
             set_pending_capture(None)
             if scanner and scanner.auto_capture_enabled:
                 scanner.auto_capture_enabled = False

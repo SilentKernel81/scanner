@@ -18,10 +18,16 @@ const $ = id => document.getElementById(id);
 
 let cardNumber = 1;
 let currentCard = null;
+let lastPrintings = null;  // {name, cards} from the most recent multi-printing search, for "Back to printings"
+let recentScans = [];      // latest scanned entries for this camera (shown in the Card panel during scanning)
+let recentScansRequestOpen = false;
+let lastAddedEntry = null; // most recently added card shown in the hero card
+let openReviewOnConnect = false;
 let lastDetectionStatus = {detected: false, stable_frames: 0, required_frames: 0, is_stable: false};  // from /api/detection_status
 let detectionEnabled = true;
 let autoScanningEnabled = false;
 let fastScanMode = true;  // "Add cards automatically" - loaded from /api/scan_settings
+let currentScanLocation = '';
 let detectedFoilStatus = 'unknown';  // Foil marker read by the AI on the last capture: 'foil' | 'non-foil' | 'unknown'
 
 function isOpen(id) {
@@ -45,11 +51,15 @@ function setButton(id, text, disabled = false) {
 socket.on('connect', function() {
     audioManager.ensureAudioContext();
     loadStats();
+    loadRecentScans();
     if (STATION && !STATION.camera) {
         fetch('/api/last_capture').then(r => r.json()).then(d => showLastCapture(d.url)).catch(() => {});
     }
-    // The server closes a review when its page disconnects: open it again
-    if (reviewItem) openReview();
+    // The server closes a review when its page disconnects: open it again (or open via #review link)
+    if (reviewItem || openReviewOnConnect) {
+        openReviewOnConnect = false;
+        openReview();
+    }
     startDetectionPolling();
     loadScanSettings();
 });
@@ -98,10 +108,39 @@ function addLog(timestamp, level, message) {
     logContainer.appendChild(logEntry);
     logContainer.scrollTop = logContainer.scrollHeight;
 
+    const preview = $('log-preview');
+    if (preview) preview.textContent = `[${timestamp ?? ''}] ${String(message ?? '')}`;
+
     // Keep only last 100 log entries
     while (logContainer.children.length > 100) {
         logContainer.removeChild(logContainer.firstChild);
     }
+}
+
+const LOG_COLLAPSED_KEY = 'scannerLogCollapsed';
+
+function applyActivityLogCollapsed(collapsed) {
+    const section = $('log-section');
+    if (!section) return;
+    section.classList.toggle('is-collapsed', collapsed);
+    const toggle = $('log-toggle-btn');
+    if (toggle) toggle.textContent = collapsed ? 'Show' : 'Hide';
+    const preview = $('log-preview');
+    if (preview) preview.hidden = !collapsed;
+}
+
+function toggleActivityLog() {
+    const section = $('log-section');
+    if (!section) return;
+    const collapsed = !section.classList.contains('is-collapsed');
+    applyActivityLogCollapsed(collapsed);
+    try { localStorage.setItem(LOG_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) { /* storage blocked */ }
+}
+
+function clearActivityLog() {
+    $('log-container').innerHTML = '';
+    const preview = $('log-preview');
+    if (preview) preview.textContent = '';
 }
 
 // ============================================================================
@@ -187,6 +226,7 @@ function updateDetectionStatus(status) {
     $('camera-missing').hidden = !status.camera_error;
     $('camera-missing-reason').textContent = status.camera_error || '';
     updateDropperStatus(status.dropper);
+    updateReviewLiveBar();
 }
 
 let detectionPolling = null;
@@ -222,7 +262,11 @@ document.addEventListener('click', event => {
     const printing = event.target.closest('[data-printing]');
     if (printing) return selectPrinting(printing.dataset.printing);
     const similar = event.target.closest('[data-similar]');
-    if (similar) selectSimilarCard(similar.dataset.similar);
+    if (similar) return selectSimilarCard(similar.dataset.similar);
+    const allPrintings = event.target.closest('[data-all-printings]');
+    if (allPrintings) return searchAllPrintings(allPrintings.dataset.allPrintings);
+    const queueThumb = event.target.closest('[data-review-id]');
+    if (queueThumb) openReviewItem(parseInt(queueThumb.dataset.reviewId));
 });
 
 // ============================================================================
@@ -273,8 +317,26 @@ function showAutoScanning(enabled) {
     const hint = $('auto-scan-hint');
     btn.classList.toggle('is-active', autoScanningEnabled);
     hint.classList.toggle('is-active', autoScanningEnabled);
-    btn.innerHTML = `<svg class="icon"><use href="#i-play"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
+    const icon = autoScanningEnabled ? 'i-stop' : 'i-play';
+    btn.innerHTML = `<svg class="icon"><use href="#${icon}"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
     hint.textContent = autoScanningEnabled ? autoScanHint() : 'Click to start automatic card scanning';
+    updateReviewLiveBar();
+}
+
+function updateScanMeta() {
+    const modePill = $('scan-mode-pill');
+    if (modePill) {
+        modePill.textContent = fastScanMode ? 'Auto-add' : 'Confirm each card';
+        modePill.classList.toggle('is-manual', !fastScanMode);
+    }
+    const locPill = $('scan-location-pill');
+    if (locPill) {
+        locPill.textContent = currentScanLocation ? `Into: ${currentScanLocation}` : '';
+        locPill.hidden = !currentScanLocation;
+    }
+    if (autoScanningEnabled) {
+        $('auto-scan-hint').textContent = autoScanHint();
+    }
 }
 
 // The server switched this camera's auto-capture on or off (it also answers the page's own toggle with it: then nothing changes)
@@ -292,9 +354,9 @@ socket.on('card_back_seen', function(data) {
 
 socket.on('processing_queue_update', function(data) {
     const queueCount = data.queue_count || 0;
-    // Always shown (0 = nothing waiting); highlighted only when a backlog builds up
+    // Always shown (0 = nothing waiting); blue info tint while active so it stays distinct from Review
     $('processing-queue').textContent = queueCount;
-    $('processing-queue-box').classList.toggle('is-busy', queueCount >= 3);
+    $('processing-queue-box').classList.toggle('is-processing', queueCount > 0);
 });
 
 function resetFocus() {
@@ -385,6 +447,8 @@ socket.on('card_not_found', function(data) {
             <span class="hint">${data.message ? 'Try a different treatment filter.' : 'Try a different name or check spelling.'}</span>
         </div>
     `);
+    // Never auto-dismiss while reviewing: a typo in manual review search shouldn't clear the desk state
+    if (reviewItem) return;
     // Auto-dismiss after card not found to allow next auto-capture; the capture is kept for
     // a manual search
     notFoundTimer = setTimeout(function() {
@@ -396,13 +460,48 @@ socket.on('card_not_found', function(data) {
 socket.on('card_printings', function(data) {
     cancelNotFoundDismiss();
     currentCard = null;
+    lastPrintings = {name: data.name, cards: data.cards};
     displayPrintings(data.name, data.cards);
 });
 
 socket.on('similar_cards', function(data) {
     cancelNotFoundDismiss();
+    lastPrintings = null;
     displaySimilarCards(data.cards);
 });
+
+function renderLastAddedCard(added) {
+    if (!added) {
+        setCardPanel('<div class="empty-state is-success">✓ Added to inventory<span class="hint">Ready for the next card.</span></div>');
+        return;
+    }
+    const matchingRecent = recentScans.find(c => (added.id && c.id === added.id) || (c.name === added.name && String(c.number || '') === String(added.number || '')));
+    const captureUrl = matchingRecent && matchingRecent.captures && matchingRecent.captures.length ? matchingRecent.captures[0].url : '';
+    const thumbSrc = added.image_uri || captureUrl;
+    const price = Number(added.price || (matchingRecent && matchingRecent.price) || 0);
+    const finishClass = added.finish_key && added.finish_key !== defaultFinish() ? added.finish_key : '';
+    const sendReviewBtn = matchingRecent && captureUrl
+        ? `<button class="btn btn-small btn-ghost" onclick="sendRecentToReview(${matchingRecent.id})" title="Wrong card or printing? Send back to review">Send to review</button>`
+        : '';
+    setCardPanel(`
+        <div class="last-added-card">
+            ${thumbSrc ? `<img class="last-added-img" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(added.name)}">` : ''}
+            <div class="last-added-body">
+                <div class="last-added-badge">✓ Added to scanned cards</div>
+                <div class="last-added-name">${added.quantity > 1 ? `${added.quantity}× ` : ''}${escapeHtml(added.name)}</div>
+                <div class="last-added-meta">
+                    <span>${escapeHtml(added.set)} · #${escapeHtml(added.number)}</span>
+                    <span class="inventory-badge ${escapeHtml(finishClass)}">${escapeHtml(added.finish)}</span>
+                    ${price > 0 ? `<span class="recent-scan-price">${formatPrice(price)}</span>` : ''}
+                </div>
+                <div class="last-added-actions">
+                    <button class="btn btn-small" onclick="undoLastAdd()">Undo</button>
+                    ${sendReviewBtn}
+                </div>
+            </div>
+        </div>
+    `);
+}
 
 socket.on('inventory_updated', function(data) {
     const added = data.added;
@@ -410,12 +509,23 @@ socket.on('inventory_updated', function(data) {
 
     if (data.cleared) {
         // Scanned cards were cleared (a camera's, or all): the counters above are reloaded, nothing was added
+        lastAddedEntry = null;
+        if (!reviewItem && !currentCard && !lastPrintings) {
+            setCardPanel('<div class="empty-state"><svg class="icon"><use href="#i-card"/></svg>No card scanned yet.<br>Capture or search for a card to begin.</div>');
+        }
+        loadRecentScans();
         if (isOpen('inventory-modal')) loadInventory();
         return;
     }
     if (data.undone) {
-        // This station's last card taken back (Settings -> Cameras, or the station itself)
+        // This station's last card taken back (Settings -> Cameras, station undo, or review undo)
         addLog(timeNow(), 'warning', `Removed ${data.undone} from the inventory (undo)`);
+        lastAddedEntry = null;
+        if (reviewItem) {
+            reviewSessionResolved = Math.max(0, reviewSessionResolved - 1);
+            updateReviewSessionPill();
+        }
+        loadRecentScans();
         if (isOpen('inventory-modal')) loadInventory();
         return;
     }
@@ -424,30 +534,32 @@ socket.on('inventory_updated', function(data) {
         // An automatic add while reviewing, or the reviewed card (the next item follows)
         if (added) addLog(timeNow(), 'success', `Added ${added.quantity}× ${added.name} (${added.finish})`);
         if (!data.auto) audioManager.playAdded();
+        if (data.from_review && added) {
+            reviewSessionResolved++;
+            updateReviewSessionPill();
+            showReviewUndoToast(added);
+        }
+        loadRecentScans();
         return;
     }
 
     // The drop signal is the capture beep; adding (1-2 s later, after the AI) just dings
     audioManager.playAdded();
 
-    setCardPanel(`
-        <div class="empty-state is-success">
-            ✓ Added to inventory
-            ${added ? `<div class="added-card">${added.quantity > 1 ? added.quantity + '× ' : ''}<strong>${escapeHtml(added.name)}</strong>
-                <span class="hint">${escapeHtml(added.set)} · #${escapeHtml(added.number)} · ${added.finish}</span></div>
-                <button class="btn btn-small" onclick="undoLastAdd()">Undo</button>` : ''}
-            <span class="hint">Ready for the next card.</span>
-        </div>
-    `);
+    lastAddedEntry = added || null;
+    lastPrintings = null;
+    currentCard = null;
+    renderLastAddedCard(added);
     clearSearchFields();
     detectedFoilStatus = 'unknown';
-    currentCard = null;
+    loadRecentScans();
 });
 
 // Prices fetched after an add (games with Game.fetches_prices), or priced again (a card data update, another price source):
 // new totals, and the list if it is open
 socket.on('inventory_prices_updated', function() {
     loadStats();
+    loadRecentScans();
     if (isOpen('inventory-modal')) loadInventory();
 });
 
@@ -455,11 +567,13 @@ socket.on('inventory_prices_updated', function() {
 socket.on('price_source_changed', function(data) {
     window.PRICE_SYMBOL = data.symbol;
     loadStats();
+    loadRecentScans();
     if (isOpen('inventory-modal')) loadInventory();
 });
 
 socket.on('inventory_undone', function(data) {
     loadStats();
+    lastAddedEntry = null;
     addLog(timeNow(), 'warning', `Removed ${data.name} from the inventory (undo)`);
     setCardPanel(`
         <div class="empty-state">
@@ -467,6 +581,7 @@ socket.on('inventory_undone', function(data) {
             <span class="hint">Ready for the next card.</span>
         </div>
     `);
+    loadRecentScans();
 });
 
 function undoLastAdd() {
@@ -509,20 +624,41 @@ function treatmentTagsHtml(treatments) {
 
 function quantityCell(id, label, kind, value = 0) {
     return `
-        <div class="qty-cell ${kind}">
-            <span class="qty-label"><span class="qty-dot"></span>${label}</span>
+        <div class="qty-cell ${kind}${value > 0 ? ' is-active' : ''}" data-finish="${escapeHtml(kind)}">
+            <button type="button" class="qty-pick" onclick="pickSingleFinish('${escapeHtml(kind)}')" title="Click to select 1 ${escapeHtml(label)}">
+                <span class="qty-dot"></span>${escapeHtml(label)}
+            </button>
             <div class="qty-stepper">
-                <button onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease ${label}">−</button>
-                <input type="number" id="${id}" value="${value}" min="0" max="999" aria-label="${label} quantity">
-                <button onclick="adjustQtyInput('${id}', 1)" aria-label="Increase ${label}">+</button>
+                <button type="button" onclick="adjustQtyInput('${id}', -1)" aria-label="Decrease ${escapeHtml(label)}">−</button>
+                <input type="number" id="${id}" value="${value}" min="0" max="999" aria-label="${escapeHtml(label)} quantity" oninput="syncQtyCellState('${id}')">
+                <button type="button" onclick="adjustQtyInput('${id}', 1)" aria-label="Increase ${escapeHtml(label)}">+</button>
             </div>
         </div>
     `;
 }
 
+function syncQtyCellState(inputId) {
+    const input = $(inputId);
+    if (!input) return;
+    const cell = input.closest('.qty-cell');
+    if (cell) cell.classList.toggle('is-active', (parseInt(input.value) || 0) > 0);
+}
+
 function adjustQtyInput(inputId, delta) {
     const input = $(inputId);
-    input.value = Math.max(0, Math.min(999, (parseInt(input.value) || 0) + delta));
+    const min = input.min === '' ? 0 : (parseInt(input.min) || 0);
+    input.value = Math.max(min, Math.min(999, (parseInt(input.value) || 0) + delta));
+    syncQtyCellState(inputId);
+}
+
+function pickSingleFinish(kind) {
+    if (!currentCard) return;
+    cardFinishes(currentCard).forEach(([key]) => {
+        const input = $(`qty-${key}`);
+        if (!input) return;
+        input.value = key === kind ? 1 : 0;
+        syncQtyCellState(`qty-${key}`);
+    });
 }
 
 function cardPricesHtml(card) {
@@ -549,14 +685,73 @@ function cardPricesHtml(card) {
     return prices.join('<span class="price-sep">·</span>');
 }
 
+function searchAllPrintings(cardName) {
+    if (!cardName) return;
+    if (reviewItem) {
+        if ($('review-name')) $('review-name').value = cardName;
+        if ($('review-set')) $('review-set').value = '';
+        if ($('review-number')) $('review-number').value = '';
+        if ($('review-treatment')) $('review-treatment').value = '';
+        reviewSearch();
+    } else {
+        $('card-name').value = cardName;
+        $('set-code').value = '';
+        $('collector-number').value = '';
+        $('card-treatment').value = '';
+        $('search-btn').disabled = false;
+        searchCard();
+    }
+}
+
+function backToPrintings() {
+    if (!lastPrintings) return;
+    currentCard = null;
+    displayPrintings(lastPrintings.name, lastPrintings.cards);
+}
+
 function displayCard(card) {
     const suggestion = suggestedFinish(card);
+    const finishes = cardFinishes(card);
+    const backBar = lastPrintings && lastPrintings.cards && lastPrintings.cards.length > 1
+        ? `<div class="card-back-bar">
+               <button type="button" class="btn btn-small btn-ghost" onclick="backToPrintings()">
+                   <svg class="icon"><use href="#i-back"/></svg> All ${lastPrintings.cards.length} printings
+               </button>
+           </div>`
+        : '';
+
+    const quantitySection = `
+        <div class="input-group">
+            <span class="field-label">Quantity <span class="hint">(click a finish name for 1 copy, or set several)</span></span>
+            <div class="qty-grid">
+                ${finishes.map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
+            </div>
+            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
+        </div>
+    `;
+
+    const actionsHtml = reviewItem ? `
+        <div class="card-actions">
+            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
+            ${reviewItem.total > 1 ? '<button class="btn" onclick="stepReview(1)" title="Move to the next review item without deleting this one">Next &rsaquo;</button>' : ''}
+        </div>
+    ` : `
+        <div class="card-actions">
+            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
+            <button class="btn" onclick="dismissCard()">Skip</button>
+        </div>
+    `;
+
     setCardPanel(`
+        ${backBar}
         <div class="card-summary">
             ${card.image_uri ? `<img src="${escapeHtml(card.image_uri)}" alt="${escapeHtml(card.name)}" class="card-image">` : ''}
             <div class="card-facts">
                 <div class="card-title">${escapeHtml(card.name)}</div>
-                <div class="card-meta">${escapeHtml(card.set)} · #${escapeHtml(card.number)}</div>
+                <div class="card-meta card-meta-row">
+                    <span>${escapeHtml(card.set)} · #${escapeHtml(card.number)}</span>
+                    <button type="button" class="btn-link-inline" data-all-printings="${escapeHtml(card.name)}" title="Show every printing of this card">All printings</button>
+                </div>
                 <div class="card-meta"><span class="card-rarity">${escapeHtml(card.rarity)}</span> · ${escapeHtml(card.type)}</div>
                 ${card.treatments && card.treatments.length ? treatmentTagsHtml(card.treatments) : ''}
                 ${card.confirmed === false ? '<div class="card-warning">Printing not confirmed - check the set and number</div>' : ''}
@@ -576,19 +771,10 @@ function displayCard(card) {
             </select>
         </div>
 
-        <div class="input-group">
-            <span class="field-label">Quantity</span>
-            <div class="qty-grid">
-                ${cardFinishes(card).map(([key, label]) => quantityCell(`qty-${key}`, label, key, suggestion.finish === key ? 1 : 0)).join('')}
-            </div>
-            ${suggestion.reason ? `<div class="finish-hint ${suggestion.finish}">${finishLabel(suggestion.finish)}: ${suggestion.reason}</div>` : ''}
-        </div>
-
-        <div class="card-actions">
-            <button class="btn btn-success" onclick="addToInventoryBoth()">Add to inventory</button>
-            <button class="btn" onclick="dismissCard()">Skip</button>
-        </div>
+        ${quantitySection}
+        ${actionsHtml}
     `);
+    renderRecentScans();
 }
 
 function displayPrintings(cardName, cards) {
@@ -609,6 +795,7 @@ function displayPrintings(cardName, cards) {
     setCardPanel(`<div class="similar-cards"><div class="list-heading">${escapeHtml(cardName)}</div>
         <div class="list-subheading">${cards.length} printings - pick the one you have</div>
         <div class="printing-grid">${printings.join('')}</div></div>`);
+    renderRecentScans();
 }
 
 function selectPrinting(cardId) {
@@ -625,6 +812,7 @@ function displaySimilarCards(cards) {
     setCardPanel('<div class="similar-cards"><div class="list-heading">No exact match</div><div class="list-subheading">Did you mean:</div>'
         + (similar.length ? similar.join('') : '<div class="empty-state">No similar cards found.</div>')
         + '</div>');
+    renderRecentScans();
 }
 
 function selectSimilarCard(cardName) {
@@ -643,7 +831,7 @@ function addToInventoryBoth() {
         return;
     }
 
-    // One entry per finish with a quantity, sent together
+    // One entry per finish with a quantity, sent together (works for both live adds and review)
     const items = cardFinishes(currentCard)
         .map(([finish]) => ({finish, quantity: parseInt($(`qty-${finish}`).value) || 0}))
         .filter(item => item.quantity > 0);
@@ -656,10 +844,11 @@ function addToInventoryBoth() {
 
 function dismissCard() {
     if (reviewItem) {
-        socket.emit('review_skip');  // drops the item; the next one follows
+        stepReview(1);
         return;
     }
     currentCard = null;
+    lastPrintings = null;
     detectedFoilStatus = 'unknown';
 
     // The server re-enables auto-capture
@@ -672,13 +861,16 @@ function dismissCard() {
         </div>
     `);
     addLog(timeNow(), 'info', 'Card dismissed - ready for next card');
+    renderRecentScans();
 }
 
 // ============================================================================
 // Review queue: cards not added automatically, reviewed one by one at the end
 // ============================================================================
 
-let reviewItem = null;  // the item open in the card panel
+let reviewItem = null;  // the item open in the review workspace
+let reviewRotated = false;
+let reviewSessionResolved = 0;
 
 function setReviewCount(count) {
     $('review-count').textContent = count;
@@ -687,6 +879,139 @@ function setReviewCount(count) {
 
 function openReview() {
     socket.emit('review_open');
+}
+
+function openReviewItem(itemId) {
+    if (!itemId || (reviewItem && reviewItem.id === itemId)) return;
+    socket.emit('review_open', {id: itemId});
+}
+
+function toggleReview() {
+    if (reviewItem) {
+        closeReview();
+    } else {
+        openReview();
+    }
+}
+
+function stepReview(delta) {
+    if (!reviewItem || reviewItem.total <= 1) return;
+    socket.emit('review_open', {step: delta});
+}
+
+function toggleReviewRotate() {
+    reviewRotated = !reviewRotated;
+    const capture = $('review-capture-img');
+    const corner = $('review-corner-img');
+    if (capture) capture.classList.toggle('is-rotated', reviewRotated);
+    if (corner) corner.classList.toggle('is-rotated', reviewRotated);
+}
+
+function updateReviewSessionPill() {
+    const pill = $('review-session-pill');
+    if (!pill) return;
+    pill.textContent = `${reviewSessionResolved} resolved`;
+    pill.hidden = reviewSessionResolved <= 0;
+}
+
+function updateReviewLiveBar() {
+    const bar = $('review-live-bar');
+    if (!bar || bar.hidden) return;
+    const hasCamera = !STATION || Boolean(STATION.camera);
+    const camStatus = $('review-cam-status');
+    const camText = $('review-cam-status-text');
+    const scanBtn = $('review-autoscan-btn');
+    if (camStatus && camText) {
+        camStatus.hidden = !hasCamera;
+        if (hasCamera) {
+            const [, , stateText] = detectionState(lastDetectionStatus);
+            const label = STATION ? `${STATION.name} · ` : '';
+            camText.textContent = `${label}${autoScanningEnabled ? 'Scanning' : stateText}`;
+            camStatus.classList.toggle('is-scanning', autoScanningEnabled);
+        }
+    }
+    if (scanBtn) {
+        scanBtn.hidden = !hasCamera;
+        scanBtn.classList.toggle('is-active', autoScanningEnabled);
+        const icon = autoScanningEnabled ? 'i-stop' : 'i-play';
+        scanBtn.innerHTML = `<svg class="icon"><use href="#${icon}"/></svg> ${autoScanningEnabled ? 'Stop' : 'Start'} auto scanning`;
+    }
+    updateReviewSessionPill();
+}
+
+function showReviewUndoToast(added) {
+    const container = $('toast-container');
+    if (!container) return;
+    // Only the latest review add can be undone via desk().last_review_add; replace any earlier Undo toast
+    container.querySelectorAll('.toast.is-review-undo').forEach(el => el.remove());
+    const toast = document.createElement('div');
+    toast.className = 'toast success has-action is-review-undo';
+    const label = document.createElement('span');
+    label.textContent = `Added ${added.quantity > 1 ? added.quantity + '× ' : ''}${added.name} (${added.finish})`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-btn';
+    btn.textContent = 'Undo';
+    let dismissed = false;
+    const timer = setTimeout(() => { dismissed = true; toast.remove(); }, 8000);
+    btn.onclick = () => {
+        if (dismissed) return;
+        dismissed = true;
+        clearTimeout(timer);
+        toast.remove();
+        socket.emit('undo_last_add', {review: true});
+    };
+    toast.append(label, btn);
+    container.appendChild(toast);
+}
+
+function reviewReasonClass(reason) {
+    const raw = (reason || '').toLowerCase();
+    if (raw.includes('finish')) return 'is-finish';
+    if (raw.includes('sent back') || raw.includes('game switched') || raw.includes('captured during')) return 'is-info';
+    if (raw.includes('not read') || raw.includes('not found')) return 'is-error';
+    return '';
+}
+
+function reviewReasonInfo(item) {
+    const raw = (item.reason || '').toLowerCase();
+    if (raw.includes('finish')) return {label: 'Check finish (foil ★ / non-foil • not read)', cls: 'is-finish'};
+    if (raw.includes('sent back')) return {label: item.reason.charAt(0).toUpperCase() + item.reason.slice(1), cls: 'is-info'};
+    if (raw.includes('not read')) return {label: 'Card could not be read — search or pick below', cls: 'is-error'};
+    if (raw.includes('not found')) return {label: 'Name not found in database — check spelling', cls: 'is-error'};
+    if (raw.includes('game switched')) return {label: 'Captured before game switch', cls: 'is-info'};
+    if (raw.includes('captured during')) return {label: 'Captured while reviewing another card', cls: 'is-info'};
+    if (raw) return {label: item.reason.charAt(0).toUpperCase() + item.reason.slice(1), cls: ''};
+    return null;
+}
+
+function renderReviewQueueStrip(item) {
+    const strip = $('review-queue-strip');
+    if (!strip) return;
+    const queue = item.queue || [];
+    if (queue.length <= 1) {
+        strip.hidden = true;
+        strip.innerHTML = '';
+        return;
+    }
+    const thumbs = queue.map((q, idx) => {
+        const current = q.id === item.id;
+        const dotCls = reviewReasonClass(q.reason);
+        const title = `#${idx + 1}: ${q.name || 'Unread card'}${q.reason ? ' — ' + q.reason : ''}`;
+        return `
+            <button type="button" class="review-queue-thumb${current ? ' is-current' : ''}"
+                    data-review-id="${q.id}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">
+                ${q.image_url ? `<img src="${escapeHtml(q.image_url)}" alt="" loading="lazy">`
+                              : '<div class="review-queue-thumb-empty">?</div>'}
+                <span class="review-queue-num">${idx + 1}</span>
+                <span class="review-queue-dot ${dotCls}"></span>
+            </button>`;
+    }).join('');
+    const more = item.total > queue.length ? `<span class="review-queue-more">+${item.total - queue.length} more</span>` : '';
+    strip.innerHTML = thumbs + more;
+    strip.hidden = false;
+    const active = strip.querySelector('.review-queue-thumb.is-current');
+    if (active && active.scrollIntoView) active.scrollIntoView({block: 'nearest', inline: 'center'});
 }
 
 socket.on('review_queue_update', function(data) {
@@ -700,18 +1025,19 @@ socket.on('review_item', function(data) {
         const wasReviewing = !!reviewItem;
         hideReviewPanel();
         if (wasReviewing) {
-            setCardPanel('<div class="empty-state is-success">✓ Review queue done.<br><span class="hint">Every card was added or skipped.</span></div>');
+            setCardPanel('<div class="empty-state is-success">✓ Review queue done.<br><span class="hint">Every card was added or removed.</span></div>');
         } else {
             notify('Nothing to review', 'info');
         }
         setReviewCount(0);
+        renderRecentScans();
         return;
     }
     renderReview(data);
 });
 
 // What the picture looks like (the server's image index): the nearest printings, as tiles that pick the printing when clicked (the page's one
-// [data-printing] handler). Beside what the AI read, never instead of it; absent without an image index.
+// [data-printing] handler). Beside what was read, never instead of it; absent without an image index.
 function reviewCandidatesHtml(item) {
     const candidates = item.candidates || [];
     if (!candidates.length) return '';
@@ -731,34 +1057,76 @@ function reviewCandidatesHtml(item) {
     return `<div class="review-candidates"><div class="field-label">The picture looks like</div><div class="printing-grid">${tiles}</div></div>`;
 }
 
+function reviewTreatmentOptionsHtml() {
+    const main = $('card-treatment');
+    return main ? main.innerHTML : '<option value="">Any treatment</option>';
+}
+
 function renderReview(item) {
+    if (!reviewItem) reviewSessionResolved = 0;
     reviewItem = item;
+    reviewRotated = false;
+    lastPrintings = null;
     setReviewCount(item.total);
+    $('review-box').classList.add('is-open');
+    if ($('main-content')) $('main-content').classList.add('is-reviewing');
+    if ($('search-panel')) $('search-panel').hidden = true;
+    if ($('review-live-bar')) $('review-live-bar').hidden = false;
+    if ($('review-shortcuts-bar')) $('review-shortcuts-bar').hidden = false;
+    if ($('card-panel-title')) $('card-panel-title').innerHTML = '<svg class="icon"><use href="#i-card"/></svg> Review workspace';
+    updateReviewLiveBar();
+    renderReviewQueueStrip(item);
+
     const ai = item.ai;
     const read = [ai.name || 'no name', ai.number ? '#' + ai.number : '', ai.set,
                   ai.foil === 'foil' ? '★' : ai.foil === 'non-foil' ? '•' : ''].filter(Boolean).join(' · ');
+    const position = item.position || 1;
+    const reasonInfo = reviewReasonInfo(item);
+    const hasTreatments = !gameInfo || gameInfo.has_treatments;
     const panel = $('review-panel');
     panel.innerHTML = `
         <div class="review-header">
-            <strong>Review</strong> <span class="hint">1 of ${item.total}</span>
+            <strong>Capture</strong>
+            <span class="review-nav">
+                ${item.total > 1 ? `<button type="button" class="review-nav-btn" onclick="stepReview(-1)" title="Previous review item (←)" aria-label="Previous item">&lsaquo;</button>` : ''}
+                <span>${position} of ${item.total}</span>
+                ${item.total > 1 ? `<button type="button" class="review-nav-btn" onclick="stepReview(1)" title="Next review item without deleting (→)" aria-label="Next item">&rsaquo;</button>` : ''}
+            </span>
             <div class="review-actions">
-                <button class="btn btn-small btn-danger" onclick="deleteReviewItem()" title="Remove this card from the queue without adding it">Delete</button>
-                <button class="btn btn-small" onclick="closeReview()" title="Keep the rest for later">Close</button>
+                <button class="btn btn-small btn-danger" onclick="deleteReviewItem()" title="Permanently remove this card from the queue without adding it">Delete</button>
             </div>
         </div>
+        ${reasonInfo ? `<div class="review-reason ${reasonInfo.cls}">${escapeHtml(reasonInfo.label)}</div>` : ''}
         <div class="review-body">
-            ${item.image_url ? `<img class="review-capture" src="${escapeHtml(item.image_url)}" alt="Capture" onclick="zoomReviewCapture()">`
-                             : '<div class="review-capture empty">No image</div>'}
+            <div class="review-capture-col">
+                ${item.image_url ? `<img id="review-capture-img" class="review-capture" src="${escapeHtml(item.image_url)}" alt="Capture" onclick="zoomReviewCapture()" title="Click to zoom (Z)">
+                    <div class="review-capture-actions">
+                        <button type="button" class="btn btn-small btn-ghost" onclick="toggleReviewRotate()" title="Rotate capture 180° (R)">
+                            <svg class="icon"><use href="#i-rotate"/></svg> Rotate 180°
+                        </button>
+                        <button type="button" class="btn btn-small btn-ghost" onclick="zoomReviewCapture()" title="Open full-size capture (Z)">
+                            <svg class="icon"><use href="#i-search"/></svg> Zoom
+                        </button>
+                    </div>
+                    <div class="review-corner">
+                        <div class="field-label">Collector &amp; foil zoom</div>
+                        <div class="review-corner-box" onclick="zoomReviewCapture()" title="Bottom-left corner zoom - click for full capture">
+                            <img id="review-corner-img" class="review-corner-img" src="${escapeHtml(item.image_url)}" alt="Collector number and foil marker zoom">
+                        </div>
+                    </div>`
+                                 : '<div class="review-capture empty">No image</div>'}
+            </div>
             <div class="review-side">
-                <div class="field-label">AI read</div>
+                <div class="field-label">Detected</div>
                 <div class="review-read">${escapeHtml(read)}</div>
                 ${ai.foil === 'unknown' ? '<div class="hint review-finish-hint">The foil marker was not read - check the finish before adding.</div>' : ''}
                 <div class="hint">${escapeHtml(item.captured_at)}${item.station ? ' · from ' + escapeHtml(item.station) : ''}</div>
                 <div class="review-search">
                     <input type="text" id="review-name" placeholder="Card name" value="${escapeHtml(ai.name || '')}">
-                    <input type="text" id="review-set" placeholder="Set" value="${escapeHtml(ai.set || '')}" maxlength="5">
+                    <input type="text" id="review-set" placeholder="Set" value="${escapeHtml(ai.set || '')}" maxlength="5" autocapitalize="characters">
                     <input type="text" id="review-number" placeholder="Number" value="${escapeHtml(ai.number || '')}">
-                    <button class="btn btn-small" onclick="reviewSearch()">Search</button>
+                    <select id="review-treatment" aria-label="Treatment"${hasTreatments ? '' : ' hidden'}>${reviewTreatmentOptionsHtml()}</select>
+                    <button class="btn btn-small btn-primary review-search-btn" onclick="reviewSearch()">Search</button>
                 </div>
                 ${reviewCandidatesHtml(item)}
             </div>
@@ -768,6 +1136,7 @@ function renderReview(item) {
         input.addEventListener('keydown', e => { if (e.key === 'Enter') reviewSearch(); }));
 
     detectedFoilStatus = ai.foil || 'unknown';
+    renderRecentScans();
     if (item.card) {
         currentCard = item.card;
         displayCard(item.card);
@@ -775,8 +1144,11 @@ function renderReview(item) {
         reviewSearch();  // no match kept: show what a search finds (printings / similar)
     } else {
         currentCard = null;
-        setCardPanel('<div class="empty-state">The AI couldn\'t read this card - search for it above, or Skip.' +
-            '<div class="card-actions"><button class="btn" onclick="dismissCard()">Skip</button></div></div>');
+        setCardPanel(`<div class="empty-state">Couldn't read this card — pick a candidate, search on the left, or remove it.
+            <div class="card-actions">
+                ${item.total > 1 ? '<button class="btn" onclick="stepReview(1)">Next &rsaquo;</button>' : ''}
+                <button class="btn btn-danger" onclick="deleteReviewItem()">Delete</button>
+            </div></div>`);
     }
 }
 
@@ -784,19 +1156,28 @@ function reviewSearch() {
     const name = $('review-name').value.trim();
     const setCode = $('review-set').value.trim().toUpperCase();
     const number = $('review-number').value.trim();
+    const treatment = $('review-treatment') ? $('review-treatment').value : '';
     if (!canSearch(name, setCode, number)) {
         notify('Enter a name, or the set and number', 'info');
         return;
     }
-    socket.emit('search_card', {card_name: name, set_code: setCode || null, collector_number: number || null});
+    socket.emit('search_card', {
+        card_name: name,
+        set_code: setCode || null,
+        collector_number: number || null,
+        treatment: treatment || null
+    });
 }
 
 function deleteReviewItem() {
-    // Drops the item and its capture, then the next one opens (same as Skip)
+    // Drops the item and its capture, then the next one opens
+    reviewSessionResolved++;
+    updateReviewSessionPill();
     socket.emit('review_skip');
 }
 
 function zoomReviewCapture() {
+    if (!reviewItem || !reviewItem.image_url) return;
     // The same large viewer as the other pages' captures (common.js: openCaptureViewer); the
     // item's picture is the capture's large copy when it had one (the route ignores ?size=full)
     openCaptureViewer(reviewItem.image_url, `Capture - ${reviewItem.captured_at}`);
@@ -804,9 +1185,21 @@ function zoomReviewCapture() {
 
 function hideReviewPanel() {
     reviewItem = null;
+    reviewRotated = false;
+    lastPrintings = null;
     const panel = $('review-panel');
     panel.hidden = true;
     panel.innerHTML = '';
+    $('review-box').classList.remove('is-open');
+    if ($('main-content')) $('main-content').classList.remove('is-reviewing');
+    if ($('search-panel')) $('search-panel').hidden = false;
+    if ($('review-live-bar')) $('review-live-bar').hidden = true;
+    if ($('review-shortcuts-bar')) $('review-shortcuts-bar').hidden = true;
+    const strip = $('review-queue-strip');
+    if (strip) { strip.hidden = true; strip.innerHTML = ''; }
+    if ($('card-panel-title')) $('card-panel-title').innerHTML = '<svg class="icon"><use href="#i-card"/></svg> Card';
+    updateVideoFrame();
+    placeAreaLayer();
 }
 
 function closeReview() {
@@ -814,6 +1207,7 @@ function closeReview() {
     hideReviewPanel();
     currentCard = null;
     setCardPanel('<div class="empty-state">Review closed - the rest stays in the queue.</div>');
+    renderRecentScans();
 }
 
 // ============================================================================
@@ -828,6 +1222,8 @@ function loadScanSettings() {
         .then(response => response.json())
         .then(data => {
             fastScanMode = data.auto_add;
+            currentScanLocation = data.scan_location || '';
+            updateScanMeta();
             addLog(timeNow(), 'info', `Debug trace: ${data.debug_trace ? 'on' : 'off'}, debug mode: ${data.debug_mode_running ? 'on' : 'off'}`);
             applyFixedArea({enabled: data.fixed_area_enabled, area: data.fixed_area});
             applySound(data.sound);
@@ -1000,6 +1396,7 @@ function showDataUpdate(message) {
     // Newer card data available (checked at startup and daily): a dot on the Database
     // counter, which then offers the update; one notification per page load
     const box = $('db-stat');
+    if (!box) return;
     box.classList.toggle('has-update', !!message);
     box.classList.toggle('clickable', !!message);
     box.title = message ? `${message} - click to update` : '';
@@ -1268,8 +1665,12 @@ socket.on('game_changed', function(data) {
     hideReviewPanel();
     applyGameFields();
     currentCard = null;
+    lastAddedEntry = null;
+    lastPrintings = null;
+    recentScans = [];
     setCardPanel(`<div class="empty-state">Scanning ${escapeHtml(data.label)}.</div>`);
     loadStats();
+    loadRecentScans();
     loadPrompts();
     notify(data.card_count
         ? `Scanning ${data.label}`
@@ -1289,7 +1690,101 @@ let filteredInventory = [];
 function inventoryChanged() {
     // After an edit or delete (common.js); the promise resolves when the list is loaded again
     loadStats();
+    loadRecentScans();
     return loadInventory();
+}
+
+function loadRecentScans() {
+    if (recentScansRequestOpen) return;
+    recentScansRequestOpen = true;
+    const cameraParam = STATION ? '&camera=' + encodeURIComponent(STATION.id) : '';
+    fetch('/api/inventory?area=scan' + cameraParam + '&limit=8')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) return;
+            recentScans = data.cards || [];
+            if (lastAddedEntry && !reviewItem && !currentCard && !lastPrintings) {
+                renderLastAddedCard(lastAddedEntry);
+            }
+            renderRecentScans();
+        })
+        .catch(() => {})
+        .finally(() => { recentScansRequestOpen = false; });
+}
+
+function sendRecentToReview(cardId) {
+    const card = recentScans.find(entry => entry.id === cardId);
+    if (!card || !card.captures || !card.captures.length) return;
+    sendToReview(card.id, card.name, card.captures[0].url);
+}
+
+function renderRecentScans() {
+    const box = $('recent-scans');
+    if (!box) return;
+    if (reviewItem || currentCard || lastPrintings || !recentScans.length) {
+        box.hidden = true;
+        box.innerHTML = '';
+        return;
+    }
+    // If card-display only has the initial placeholder and we already have scans, collapse the placeholder padding
+    const cardDisplay = $('card-display');
+    if (cardDisplay && !lastAddedEntry && cardDisplay.querySelector('.empty-state') && !cardDisplay.querySelector('.is-success, .is-error')) {
+        cardDisplay.innerHTML = '';
+    }
+    const rows = recentScans.map(card => {
+        const thumbUrl = (card.captures && card.captures.length ? card.captures[0].url : '') || (card.details && card.details.image_uri) || '';
+        const hasCapture = Boolean(card.captures && card.captures.length);
+        const special = gameInfo && card.finish !== defaultFinish();
+        const price = Number(card.price || 0) * (card.quantity || 1);
+        return `
+            <div class="recent-scan-row">
+                ${hasCapture
+                    ? `<button type="button" class="recent-scan-thumb" data-recent-thumb="${card.id}" title="View capture">
+                           <img src="${escapeHtml(card.captures[0].url)}" alt="" loading="lazy"></button>`
+                    : thumbUrl
+                        ? `<div class="recent-scan-thumb"><img src="${escapeHtml(thumbUrl)}" alt="" loading="lazy"></div>`
+                        : '<div class="recent-scan-thumb empty"></div>'}
+                <div class="recent-scan-info">
+                    <div class="recent-scan-name">${card.quantity > 1 ? `<span class="inventory-qty">${card.quantity}×</span> ` : ''}${escapeHtml(card.name)}</div>
+                    <div class="recent-scan-meta">
+                        <span>${escapeHtml(card.set_code ? card.set_code.toUpperCase() : card.set_name)}${card.number ? ' #' + escapeHtml(card.number) : ''}</span>
+                        ${special ? `<span class="inventory-badge ${escapeHtml(card.finish)}">${escapeHtml(finishLabel(card.finish))}</span>` : ''}
+                    </div>
+                </div>
+                <div class="recent-scan-price">${price > 0 ? formatPrice(price) : ''}</div>
+                <div class="recent-scan-actions">
+                    ${hasCapture && !card.shared ? `<button type="button" class="btn-review" data-recent-review="${card.id}" title="Wrong card? Send to review"><svg class="icon"><use href="#i-refresh"/></svg></button>` : ''}
+                    ${!card.shared ? `<button type="button" class="btn-edit" data-recent-edit="${card.id}" title="Edit"><svg class="icon"><use href="#i-edit"/></svg></button>` : ''}
+                </div>
+            </div>`;
+    }).join('');
+    box.innerHTML = `
+        <div class="recent-scans-header">
+            <span class="recent-scans-title">Recent scans</span>
+            <button type="button" class="btn-link-inline" onclick="showInventory()">View all</button>
+        </div>
+        <div class="recent-scans-list">${rows}</div>`;
+    box.hidden = false;
+}
+
+function setupRecentScans() {
+    const box = $('recent-scans');
+    if (!box) return;
+    box.addEventListener('click', event => {
+        const thumb = event.target.closest('[data-recent-thumb]');
+        if (thumb) {
+            const card = recentScans.find(e => e.id === parseInt(thumb.dataset.recentThumb));
+            if (card) openCaptures(card);
+            return;
+        }
+        const rev = event.target.closest('[data-recent-review]');
+        if (rev) return sendRecentToReview(parseInt(rev.dataset.recentReview));
+        const edit = event.target.closest('[data-recent-edit]');
+        if (edit) {
+            const card = recentScans.find(e => e.id === parseInt(edit.dataset.recentEdit));
+            if (card) editCard(card, [], () => recentScans);
+        }
+    });
 }
 
 function showInventory() {
@@ -1559,11 +2054,19 @@ async function clearInventory() {
 
 // Old links to the settings drawer (/scan/<id>#settings) go to the settings page
 if (window.location.hash === '#settings') window.location.replace('/settings#cameras');
-// The settings page's "Edit prompts" opens the editor (/scan/<id>#prompts)
+// The settings page's "Edit prompts" opens the editor (/scan/<id>#prompts),
+// and the Cameras table's "Review (N)" opens the review queue (/scan/<id>#review)
 document.addEventListener('DOMContentLoaded', () => {
     if (window.location.hash === '#prompts') {
         history.replaceState(null, '', window.location.pathname + window.location.search);
         openPromptEditor();
+    } else if (window.location.hash === '#review') {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        openReviewOnConnect = true;
+        if (socket.connected) {
+            openReviewOnConnect = false;
+            openReview();
+        }
     }
 });
 
@@ -1579,13 +2082,62 @@ const OVERLAYS = [
 ];
 
 document.addEventListener('keydown', function(event) {
-    if (event.key !== 'Escape') return;
-    if (isDrawingArea()) {
-        cancelDrawArea();
+    if (event.key === 'Escape') {
+        if (isDrawingArea()) {
+            cancelDrawArea();
+            return;
+        }
+        const overlay = OVERLAYS.find(([id]) => isOpen(id));
+        if (overlay) overlay[1]();
         return;
     }
-    const overlay = OVERLAYS.find(([id]) => isOpen(id));
-    if (overlay) overlay[1]();
+    if (reviewItem && (event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') {
+        if (!OVERLAYS.some(([id]) => isOpen(id)) && currentCard) {
+            event.preventDefault();
+            addToInventoryBoth();
+        }
+        return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    // Allow Z to toggle the full capture zoom viewer cleanly while reviewing
+    if (reviewItem && (event.key === 'z' || event.key === 'Z') && isOpen('capture-viewer')) {
+        event.preventDefault();
+        closeCaptureViewer();
+        return;
+    }
+    if (OVERLAYS.some(([id]) => isOpen(id))) return;
+    const tag = document.activeElement ? document.activeElement.tagName : '';
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return;
+
+    if (reviewItem) {
+        if (event.key === 'ArrowLeft' && reviewItem.total > 1) {
+            event.preventDefault();
+            stepReview(-1);
+        } else if (event.key === 'ArrowRight' && reviewItem.total > 1) {
+            event.preventDefault();
+            stepReview(1);
+        } else if (event.key === 'r' || event.key === 'R') {
+            event.preventDefault();
+            toggleReviewRotate();
+        } else if ((event.key === 'z' || event.key === 'Z') && reviewItem.image_url) {
+            event.preventDefault();
+            zoomReviewCapture();
+        } else if ((event.key === 'f' || event.key === 'F') && currentCard) {
+            const finishes = cardFinishes(currentCard).map(([key]) => key);
+            if (finishes.length > 1) {
+                event.preventDefault();
+                const active = finishes.findIndex(key => (parseInt($(`qty-${key}`)?.value) || 0) > 0);
+                pickSingleFinish(finishes[(active + 1) % finishes.length]);
+            }
+        } else if (/^[1-5]$/.test(event.key)) {
+            const tiles = document.querySelectorAll('.review-candidates .review-candidate');
+            const target = tiles[parseInt(event.key) - 1];
+            if (target) {
+                event.preventDefault();
+                selectPrinting(target.dataset.printing);
+            }
+        }
+    }
 });
 
 window.addEventListener('click', function(event) {
@@ -1630,6 +2182,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setupAIControls();
     setupAreaDrawing();
     setupInventoryList();
+    setupRecentScans();
+    try { applyActivityLogCollapsed(localStorage.getItem(LOG_COLLAPSED_KEY) === '1'); } catch (e) { /* storage blocked */ }
 
     loadGames();
 

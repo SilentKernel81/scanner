@@ -997,9 +997,10 @@ class TheReviewIsDone(unittest.TestCase):
         game.inventory_fields.return_value = {}
         patches = [mock.patch.object(self.scan_events, name, value) for name, value in (
             ('desk', lambda: desk), ('scan_inventory', inventory), ('scanner', mock.Mock()), ('review_done', mock.Mock()),
-            ('scan_stats', mock.Mock(return_value={})), ('added_payload', mock.Mock(return_value={})),
+            ('scan_stats', mock.Mock(return_value={})), ('added_card_event', mock.Mock(return_value={})),
             ('start_price_update', mock.Mock()), ('scan_location', mock.Mock(return_value='')), ('set_pending_capture', mock.Mock()),
-            ('review', mock.Mock(get=mock.Mock(return_value={'file': 'x.jpg', 'station': 's'}), count=mock.Mock(return_value=0))),
+            ('review', mock.Mock(get=mock.Mock(return_value={'file': 'x.jpg', 'station': 's'}),
+                                 count=mock.Mock(return_value=0), next_after=mock.Mock(return_value=None))),
             ('handle_review_open', mock.Mock()), ('identification', None), ('log_to_client', mock.Mock()), ('emit_desk', mock.Mock()))]
         patches.append(mock.patch.object(self.scan_events.games, 'active', lambda: game))
         for patch in patches:
@@ -1022,17 +1023,17 @@ class TheReviewIsDone(unittest.TestCase):
                          pending_capture=pending, review_filter=None, review_candidates=[])
 
     def test_add_settles_the_shown_cards_own_capture(self):
-        self.assertEqual(self.add(self.a_desk(), mock.Mock()), '/cards/A.jpg')
+        self.assertEqual(self.add(self.a_desk(), mock.Mock(last_added={})), '/cards/A.jpg')
 
     def test_add_of_another_printing_picked_for_it_settles_the_same_capture(self):
         # Another printing picked on the page: the card has no picture of its own, the capture shown is still the camera's pending one
-        self.assertEqual(self.add(self.a_desk(capture=None, pending='/cards/A.jpg'), mock.Mock()), '/cards/A.jpg')
+        self.assertEqual(self.add(self.a_desk(capture=None, pending='/cards/A.jpg'), mock.Mock(last_added={})), '/cards/A.jpg')
 
     def test_add_of_an_item_of_the_review_queue_settles_nothing(self):
-        self.assertIsNone(self.add(self.a_desk(review_id=42), mock.Mock()))
+        self.assertIsNone(self.add(self.a_desk(review_id=42), mock.Mock(last_added={})))
 
     def test_an_add_that_failed_settles_nothing(self):
-        broken = mock.Mock()
+        broken = mock.Mock(last_added={})
         broken.add_card.side_effect = OSError('database is locked')
         self.assertIsNone(self.add(self.a_desk(), broken))
 
@@ -1056,7 +1057,7 @@ class TheReviewIsDone(unittest.TestCase):
 
     def test_a_not_found_card_found_by_search_and_added_settles_its_capture(self):
         # After "not found" the picture stays the pending capture; the card found by a manual search has none of its own
-        self.assertEqual(self.add(self.a_desk(capture=None, pending='/cards/A.jpg'), mock.Mock()), '/cards/A.jpg')
+        self.assertEqual(self.add(self.a_desk(capture=None, pending='/cards/A.jpg'), mock.Mock(last_added={})), '/cards/A.jpg')
 
 
 if __name__ == '__main__':

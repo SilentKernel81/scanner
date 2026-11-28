@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark light">
     <title>Cameras - Card Scanner</title>
     {% include '_favicon.html' %}
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=65">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=69">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -55,7 +55,7 @@
                     </td>
                     <td><span class="status ${station.connected && !station.camera_error ? 'is-on' : ''}">${escapeHtml(state)}</span></td>
                     <td class="col-wide">${station.scanned}</td>
-                    <td class="row-actions"><a class="btn btn-small" href="${page}">Open</a></td>
+                    <td class="row-actions">${station.review ? `<a class="btn btn-small btn-review-link" href="${page}#review">Review (${station.review})</a> ` : ''}<a class="btn btn-small" href="${page}">Open</a></td>
                 </tr>`;
             }).join('') || '<tr><td colspan="4"><div class="empty-state">No camera yet.</div></td></tr>';
             document.getElementById('stations-hint').textContent = `A camera connects with: station_client.py --server ${window.location.origin}`

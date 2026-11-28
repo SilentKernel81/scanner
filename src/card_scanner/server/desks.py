@@ -49,6 +49,8 @@ class Desk:
         # The printings the review screen showed for the open item (printing_check.candidates' ids, nearest first): the reading log notes which of them the
         # person picked (scan_events.add_selected_card) - the label that judges the picture's guards
         self.review_candidates = []
+        # Most recent review resolution on this desk ({'reviewed', 'entries', 'name'}) so Undo restores the original item with its capture_key
+        self.last_review_add = None
 
     @property
     def room(self):

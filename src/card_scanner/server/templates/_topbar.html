@@ -38,12 +38,16 @@
             </nav>
             {% if page == 'scanner' %}
             <div class="stats topbar-page">
-                <!-- The one that opens something: an outline button -->
+                <!-- Action chips: Scanned list and Review queue -->
                 <button type="button" class="stat-box stat-button" onclick="showInventory()" title="Cards scanned and not yet added to the collection - click to see them">
                     <span class="stat-label">Scanned</span>
                     <span class="stat-value" id="inv-cards">0</span>
                 </button>
-                <!-- Counters to read: small tags -->
+                <button type="button" class="stat-box stat-review clickable" id="review-box" onclick="toggleReview()" title="Cards that weren't added automatically - click to review">
+                    <span class="stat-label">Review</span>
+                    <span class="stat-value" id="review-count">0</span>
+                </button>
+                <!-- Passive live counters -->
                 <div class="stat-group">
                 <button type="button" class="stat-box" id="db-stat" onclick="offerDataUpdate()">
                     <span class="stat-label">Database</span>
@@ -57,10 +61,6 @@
                     <span class="stat-label">Processing</span>
                     <span class="stat-value" id="processing-queue">0</span>
                 </div>
-                <button type="button" class="stat-box clickable" id="review-box" onclick="openReview()" title="Cards that weren't added automatically - click to review">
-                    <span class="stat-label">Review</span>
-                    <span class="stat-value" id="review-count">0</span>
-                </button>
                 </div>
             </div>
             {% elif page in ('stations', 'settings') %}

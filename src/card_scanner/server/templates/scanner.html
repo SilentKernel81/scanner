@@ -9,7 +9,7 @@
     {# Socket.IO's client, served from here and not from its CDN: the pages work on a network
        without the internet. The version is in the file's name, so a new one needs no ?v= #}
     <script src="{{ url_for('static', filename='js/vendor/socket.io-4.5.4.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=66">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=69">
 </head>
 <body>
     {% include '_icons.html' %}
@@ -20,7 +20,7 @@
     <script>window.STATION = {{ ({'id': station.id, 'name': station.name, 'camera': station.camera|default(false)} if station else none)|tojson }};</script>
 
     <main class="container">
-        <div class="main-content">
+        <div class="main-content" id="main-content">
             <div class="column">
                     {% if station and not station.camera %}
                 <!-- A station that only sends captured cards (a phone): no live view - the card it sent last instead -->
@@ -79,18 +79,24 @@
                     </div>
 
                     <div class="controls">
-                        <button class="btn btn-primary" onclick="captureCard()" id="capture-btn">
-                            <svg class="icon"><use href="#i-camera"/></svg> Capture card
-                        </button>
-                        <button class="btn btn-autoscan" id="toggle-auto-scanning-btn" onclick="toggleAutoScanning()">
+                        <button class="btn btn-primary btn-autoscan" id="toggle-auto-scanning-btn" onclick="toggleAutoScanning()">
                             <svg class="icon"><use href="#i-play"/></svg> Start auto scanning
                         </button>
+                        <button class="btn" onclick="captureCard()" id="capture-btn">
+                            <svg class="icon"><use href="#i-camera"/></svg> Capture card
+                        </button>
                     </div>
-                    <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
+                    <div class="camera-footer">
+                        <div class="hint" id="auto-scan-hint">Click to start automatic card scanning</div>
+                        <div class="camera-meta" id="camera-meta">
+                            <a class="meta-pill" id="scan-mode-pill" href="/settings#cameras" title="Change auto-add behavior in Settings">Auto-add</a>
+                            <a class="meta-pill" id="scan-location-pill" href="/settings#cameras" title="Where scanned cards are filed - change in Settings" hidden></a>
+                        </div>
+                    </div>
                 </section>
 
-            <!-- Below the camera: first the scan, second the search -->
-            <section class="panel search-panel">
+            <!-- Below the camera: first the scan, second the search (hidden while reviewing to avoid duplicate search bars) -->
+            <section class="panel search-panel" id="search-panel">
                     <div class="search-row">
                         <div class="input-group search-name">
                             <label for="card-name">Card name</label>
@@ -127,24 +133,54 @@
 
             <section class="panel card-info">
                 <div class="panel-header">
-                    <h2 class="section-title"><svg class="icon"><use href="#i-card"/></svg> Card</h2>
-                </div>
-                <!-- Review queue item: the capture, what the AI read, a manual search (renderReview) -->
-                <div id="review-panel" class="review-panel" hidden></div>
-                <div id="card-display">
-                    <div class="empty-state">
-                        <svg class="icon"><use href="#i-card"/></svg>
-                        No card scanned yet.<br>
-                        Capture or search for a card to begin.
+                    <h2 class="section-title" id="card-panel-title"><svg class="icon"><use href="#i-card"/></svg> Card</h2>
+                    <div class="review-live-bar" id="review-live-bar" hidden>
+                        <span class="review-cam-status" id="review-cam-status" hidden>
+                            <span class="review-cam-dot"></span>
+                            <span id="review-cam-status-text"></span>
+                        </span>
+                        <button type="button" class="btn btn-small btn-autoscan" id="review-autoscan-btn" onclick="toggleAutoScanning()" hidden>
+                            <svg class="icon"><use href="#i-play"/></svg> Start auto scanning
+                        </button>
+                        <span class="review-session-pill" id="review-session-pill" hidden></span>
+                        <button type="button" class="btn btn-small" onclick="closeReview()">
+                            <svg class="icon"><use href="#i-back"/></svg> Back to camera
+                        </button>
                     </div>
                 </div>
+                <!-- Clickable thumbnail strip of queued review items (full-width review workspace) -->
+                <div id="review-queue-strip" class="review-queue-strip" hidden></div>
+                <div class="review-layout" id="review-layout">
+                    <!-- Review queue item: the capture, collector zoom, search and visual candidates (renderReview) -->
+                    <div id="review-panel" class="review-panel" hidden></div>
+                    <div id="card-display">
+                        <div class="empty-state">
+                            <svg class="icon"><use href="#i-card"/></svg>
+                            No card scanned yet.<br>
+                            Capture or search for a card to begin.
+                        </div>
+                    </div>
+                </div>
+                <div class="review-shortcuts-bar" id="review-shortcuts-bar" hidden>
+                    <span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> Navigate</span>
+                    <span><kbd>1</kbd>&ndash;<kbd>5</kbd> Pick candidate</span>
+                    <span><kbd>F</kbd> Finish</span>
+                    <span><kbd>R</kbd> Rotate</span>
+                    <span><kbd>Z</kbd> Zoom</span>
+                    <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Add</span>
+                </div>
+                <div id="recent-scans" class="recent-scans" hidden></div>
             </section>
         </div>
 
-        <section class="panel log-section-bottom">
+        <section class="panel log-section-bottom" id="log-section">
             <div class="panel-header">
                 <h2 class="section-title"><svg class="icon"><use href="#i-list"/></svg> Activity</h2>
-                <button class="btn btn-small btn-ghost" onclick="document.getElementById('log-container').innerHTML = ''">Clear</button>
+                <span class="log-preview" id="log-preview" hidden></span>
+                <div class="panel-actions">
+                    <button class="btn btn-small btn-ghost" id="log-toggle-btn" onclick="toggleActivityLog()">Hide</button>
+                    <button class="btn btn-small btn-ghost" onclick="clearActivityLog()">Clear</button>
+                </div>
             </div>
             <div class="log-container" id="log-container"></div>
         </section>
@@ -225,6 +261,6 @@
 
     <script src="{{ url_for('static', filename='js/audio.js') }}?v=30"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}?v=32"></script>
-    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=84"></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}?v=87"></script>
 </body>
 </html>
