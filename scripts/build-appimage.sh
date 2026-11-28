@@ -84,6 +84,7 @@ step "AppImage"
 cp "$ROOT/packaging/AppRun" "$ROOT/packaging/mtg-scanner.desktop" "$ROOT/packaging/mtg-scanner.svg" "$APPDIR/"
 chmod +x "$APPDIR/AppRun"
 ln -sf mtg-scanner.svg "$APPDIR/.DirIcon"
+[ -x "$ROOT/packaging/tray/bundle.sh" ] && "$ROOT/packaging/tray/bundle.sh" "$APPDIR"
 if command -v appimagetool > /dev/null; then
     TOOL=(appimagetool)
 else
